@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="068" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Deploy Phase 6 - Events Custom Page</title>
+    <phase>6</phase>
+    <tags>custom-page, deploy</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>067</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Build and deploy Events Custom Page to dev environment.</goal>
+
+    <context>
+      Deploy Custom Page and sitemap changes.
+      Test full integration: Calendar, Grid, Side Pane, Filters.
+      Verify dark mode support.
+    </context>
+
+    <constraints>
+      - Use Deploy-CustomPage.ps1 script
+      - Test in dev environment
+      - Verify all components integrate
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="scripts/Deploy-CustomPage.ps1" reason="Deployment script" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build production Custom Page bundle</step>
+    <step order="2">Package as solution component</step>
+    <step order="3">Import solution to dev</step>
+    <step order="4">Publish sitemap changes</step>
+    <step order="5">Test navigation from left pane</step>
+    <step order="6">Test calendar filtering</step>
+    <step order="7">Test grid display</step>
+    <step order="8">Test Side Pane open/save</step>
+    <step order="9">Test column filters</step>
+    <step order="10">Test dark mode</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventsPage/dist/</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Custom Page deployed successfully</criterion>
+    <criterion>Navigation works from sitemap</criterion>
+    <criterion>Calendar-Grid-SidePane integration works</criterion>
+    <criterion>Dark mode functional</criterion>
+  </acceptance-criteria>
+</task>

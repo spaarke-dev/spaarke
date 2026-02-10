@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>089</id>
+    <title>Refactor EventsPage to use shared grid components</title>
+    <phase>8</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <tags>eventspage, refactor, integration</tags>
+    <created>2026-02-05</created>
+    <dependencies>084, 085, 086</dependencies>
+    <parallel-group>H</parallel-group>
+  </metadata>
+
+  <description>
+    Refactor EventsPage to use the new shared components (CommandBar, ViewToolbar,
+    ViewSelector). Replace hardcoded grid with view-driven approach.
+    Achieve visual parity with OOB Power Apps entity homepage.
+  </description>
+
+  <context>
+    <architecture-doc>docs/architecture/universal-dataset-grid-architecture.md</architecture-doc>
+    <target-location>src/solutions/EventsPage/src/components/</target-location>
+    <current-implementation>GridSection.tsx (800+ lines)</current-implementation>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>EventsPage imports CommandBar, ViewToolbar, ViewSelector from shared library</criterion>
+    <criterion>Page layout matches OOB: CommandBar → ViewToolbar → Grid</criterion>
+    <criterion>ViewSelector loads sprk_event views and custom configurations</criterion>
+    <criterion>Grid columns driven by selected view's layoutxml</criterion>
+    <criterion>Calendar and filters still work (merged into FetchXML)</criterion>
+    <criterion>Side pane integration maintained</criterion>
+    <criterion>Visual parity with OOB Power Apps confirmed</criterion>
+    <criterion>Dark mode works correctly</criterion>
+    <criterion>Existing functionality not regressed</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Import new shared components in EventsPage</step>
+    <step order="2">Add CommandBar above existing content</step>
+    <step order="3">Add ViewToolbar with ViewSelector below CommandBar</step>
+    <step order="4">Create EventsDataGrid adapter component</step>
+    <step order="5">Connect ViewSelector to grid data loading</step>
+    <step order="6">Integrate calendar filter with FetchXML merge</step>
+    <step order="7">Test view switching functionality</step>
+    <step order="8">Verify side pane still opens on row click</step>
+    <step order="9">Test dark mode rendering</step>
+    <step order="10">Side-by-side visual comparison with OOB</step>
+  </steps>
+
+  <estimated-effort>large</estimated-effort>
+</task>

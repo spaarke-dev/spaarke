@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Implement Card Click Navigation</title>
+    <phase>5</phase>
+    <tags>pcf, navigation, side-pane, duedates-widget</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>053</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Click card navigates to Events tab and opens Side Pane.</goal>
+
+    <context>
+      User clicks event card:
+      1. Navigate to Events tab on current record
+      2. Open Side Pane with that event loaded
+      Uses Xrm.Navigation.navigateTo and sidePanes API.
+    </context>
+
+    <constraints>
+      - Handle cross-tab navigation gracefully
+      - Pass event ID to Side Pane
+      - Keyboard accessible (Enter key)
+      - Handle navigation errors
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/xrm-navigation.md" reason="Navigation patterns" />
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Navigation requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create navigation service/utility</step>
+    <step order="2">Implement tab navigation (Xrm.Navigation)</step>
+    <step order="3">Implement Side Pane opening with event ID</step>
+    <step order="4">Add click handler to EventCard</step>
+    <step order="5">Add keyboard navigation (Enter/Space)</step>
+    <step order="6">Handle errors and fallback</step>
+    <step order="7">Add loading state during navigation</step>
+    <step order="8">Test navigation flow</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/DueDatesWidget/services/navigationService.ts</artifact>
+    <artifact type="file">src/client/pcf/DueDatesWidget/components/EventCard.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Card click navigates to Events tab</criterion>
+    <criterion>Side Pane opens with correct event</criterion>
+    <criterion>Keyboard navigation works</criterion>
+    <criterion>Errors handled gracefully</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-02-04">
+      Implemented card click navigation for DueDatesWidget:
+
+      **New File Created:**
+      - `src/client/pcf/DueDatesWidget/control/services/navigationService.ts`
+
+      **Files Updated:**
+      - `src/client/pcf/DueDatesWidget/control/components/EventListItem.tsx` - Added loading state support
+      - `src/client/pcf/DueDatesWidget/control/components/DueDatesWidgetRoot.tsx` - Integrated navigation service
+
+      **Implementation Details:**
+
+      1. **Navigation Service** (`navigationService.ts`):
+         - `navigateToEvent()` - Main function to navigate to Events tab + open side pane
+         - `navigateToEventsPage()` - For "All Events" link (Task 055)
+         - `navigateToEventsTab()` - Internal helper for tab navigation
+         - `closeEventDetailPane()`, `isEventDetailPaneOpen()` - Pane utilities
+         - Uses same side pane ID and Custom Page name as Task 031 (sidePaneUtils.ts)
+         - Graceful fallback when APIs not available (test harness compatibility)
+
+      2. **Tab Navigation Logic**:
+         - Searches for Events tab by common names: events, Events, eventsTab, tab_events, sprk_events
+         - Falls back to iterating tabs looking for "event" in name
+         - Makes hidden tabs visible before focusing
+
+      3. **Side Pane Opening**:
+         - Reuses existing pane if open (per Task 031 pattern)
+         - Creates new pane if not open (400px width, closeable)
+         - Passes eventId and eventType via URL query parameters
+
+      4. **Loading State**:
+         - `isNavigating` prop added to EventListItem
+         - Shows spinner next to days-until-due badge while loading
+         - Reduces opacity and disables interaction during navigation
+         - Prevents double-click issues
+
+      5. **Keyboard Navigation**:
+         - Already implemented in EventListItem (Enter/Space keys)
+         - Added aria-busy and aria-disabled for accessibility
+         - tabIndex set to -1 while navigating
+
+      6. **Error Handling**:
+         - Partial success support (tab navigation only if side pane fails)
+         - User-friendly error messages
+         - Navigation errors shown in state (navigationError)
+
+      **Build Status:** Successfully compiles with `npm run build`
+    </note>
+  </notes>
+</task>

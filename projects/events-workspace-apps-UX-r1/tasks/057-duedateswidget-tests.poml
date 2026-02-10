@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="057" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>DueDatesWidget Unit Tests</title>
+    <phase>5</phase>
+    <tags>pcf, testing, duedates-widget</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>056</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create comprehensive unit tests for DueDatesWidget.</goal>
+
+    <context>
+      Test filter logic, card rendering, urgency calculations,
+      and navigation behavior with mocked dependencies.
+    </context>
+
+    <constraints>
+      - Jest + React Testing Library
+      - Mock WebAPI calls
+      - Mock Xrm.Navigation
+      - Coverage > 80%
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/testing.md" reason="Testing standards" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Setup test configuration</step>
+    <step order="2">Create WebAPI mock utilities</step>
+    <step order="3">Test useUpcomingEvents hook</step>
+    <step order="4">Test urgency calculation utilities</step>
+    <step order="5">Test EventCard rendering</step>
+    <step order="6">Test CountdownBadge variations</step>
+    <step order="7">Test navigation handlers</step>
+    <step order="8">Verify coverage threshold</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/DueDatesWidget/__tests__/</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All hooks tested</criterion>
+    <criterion>All utility functions tested</criterion>
+    <criterion>Component rendering tested</criterion>
+    <criterion>Coverage > 80%</criterion>
+  </acceptance-criteria>
+</task>

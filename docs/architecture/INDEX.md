@@ -28,6 +28,10 @@ This directory contains comprehensive architecture documentation covering system
 - [sdap-pcf-patterns.md](sdap-pcf-patterns.md)
 - [sdap-troubleshooting.md](sdap-troubleshooting.md)
 
+### UI Components
+
+- [universal-dataset-grid-architecture.md](universal-dataset-grid-architecture.md) - Universal DataGrid for PCF and Custom Pages with OOB parity
+
 ### Platform Components
 
 - [SPAARKE-AI-STRATEGY.md](SPAARKE-AI-STRATEGY.md)

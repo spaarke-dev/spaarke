@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Range Selection (Shift+Click)</title>
+    <phase>1</phase>
+    <tags>pcf, calendar, interaction</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>003</dependencies>
+    <parallel-group>A</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement date range selection via Shift+click for filtering events in a date range.</goal>
+
+    <context>
+      Users should be able to select a date range to filter the grid to events within that range.
+      Shift+click on second date creates range from first selected date.
+    </context>
+
+    <constraints>
+      - Shift+click extends selection to range
+      - Range highlight spans all dates between start and end
+      - Clear button or click outside clears range
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Range selection requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add rangeStart/rangeEnd state</step>
+    <step order="2">Detect Shift key on click</step>
+    <step order="3">Calculate and highlight date range</step>
+    <step order="4">Add Clear Range button</step>
+    <step order="5">Update selection callback to emit range</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/control/components/Calendar.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Shift+click creates date range</criterion>
+    <criterion>Range visually highlighted</criterion>
+    <criterion>Clear button works</criterion>
+    <criterion>Range emitted via callback</criterion>
+  </acceptance-criteria>
+</task>

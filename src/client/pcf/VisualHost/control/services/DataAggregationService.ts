@@ -13,6 +13,8 @@ import type {
 } from "../types";
 import { AggregationType } from "../types";
 import { logger } from "../utils/logger";
+import { getViewFetchXml, injectContextFilter, injectRequiredAttributes } from "./ViewDataService";
+import type { IConfigWebApi } from "./ConfigurationLoader";
 
 /**
  * WebAPI interface for data aggregation
@@ -85,14 +87,10 @@ interface ICacheEntry {
 const CACHE_TTL_MS = 2 * 60 * 1000;
 
 /**
- * Default page size for fetching records
+ * Maximum records to fetch by default.
+ * Dataverse FetchXML 'top' attribute limit: 0–12000 inclusive.
  */
-const DEFAULT_PAGE_SIZE = 5000;
-
-/**
- * Maximum records to fetch by default
- */
-const DEFAULT_MAX_RECORDS = 50000;
+const DEFAULT_MAX_RECORDS = 5000;
 
 /**
  * In-memory cache for aggregated data
@@ -124,31 +122,6 @@ function getCacheKey(
 }
 
 /**
- * Build OData filter expression for context filtering (v1.1.0)
- * Filters data to show only records related to the current record
- *
- * @param contextFilter - Context filter configuration
- * @returns OData filter expression or undefined if no context filter
- */
-export function buildContextFilter(contextFilter?: IContextFilter): string | undefined {
-  if (!contextFilter?.fieldName || !contextFilter?.recordId) {
-    return undefined;
-  }
-
-  // Dataverse lookup field values use the format: _fieldname_value
-  // The filter should use eq operator with the GUID
-  const filterExpression = `${contextFilter.fieldName} eq '${contextFilter.recordId}'`;
-
-  logger.debug("DataAggregationService", "Built context filter", {
-    fieldName: contextFilter.fieldName,
-    recordId: contextFilter.recordId,
-    filter: filterExpression,
-  });
-
-  return filterExpression;
-}
-
-/**
  * Clear cache entries
  */
 export function clearAggregationCache(cacheKey?: string): void {
@@ -162,7 +135,23 @@ export function clearAggregationCache(cacheKey?: string): void {
 }
 
 /**
- * Fetch all records from a Dataverse entity/view with pagination
+ * Extract a readable error message from Dataverse WebAPI error objects.
+ * PCF WebAPI errors are plain objects with { errorCode, message }, not Error instances.
+ */
+function extractErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const obj = error as Record<string, unknown>;
+    if (typeof obj.message === "string") return obj.message;
+    try { return JSON.stringify(error); } catch { /* ignore */ }
+  }
+  return String(error);
+}
+
+/**
+ * Fetch all records from a Dataverse entity/view using FetchXML.
+ * When a viewId is provided, fetches the view's FetchXML and executes it
+ * (with optional context filter injection). Falls back to basic FetchXML when no view.
  */
 export async function fetchRecords(
   context: IAggregationContext,
@@ -170,72 +159,154 @@ export async function fetchRecords(
   options?: {
     viewId?: string;
     selectColumns?: string[];
-    filter?: string;
+    contextFilter?: { fieldName: string; recordId: string };
     maxRecords?: number;
-    pageSize?: number;
   }
 ): Promise<Array<Record<string, unknown>>> {
   const maxRecords = options?.maxRecords ?? DEFAULT_MAX_RECORDS;
-  const pageSize = options?.pageSize ?? DEFAULT_PAGE_SIZE;
-  const allRecords: Array<Record<string, unknown>> = [];
 
-  // Build query options
-  let queryOptions = "";
-
-  if (options?.selectColumns && options.selectColumns.length > 0) {
-    queryOptions += `?$select=${options.selectColumns.join(",")}`;
+  // When a saved view is provided, use its FetchXML (applies view filters)
+  if (options?.viewId) {
+    logger.info("DataAggregationService", `Fetch path: VIEW (${options.viewId})`);
+    return fetchRecordsFromView(context, entityName, options.viewId, {
+      contextFilter: options.contextFilter,
+      maxRecords,
+      requiredColumns: options.selectColumns,
+    });
   }
 
-  if (options?.filter) {
-    queryOptions += queryOptions ? "&" : "?";
-    queryOptions += `$filter=${encodeURIComponent(options.filter)}`;
-  }
-
-  // Add page size
-  queryOptions += queryOptions ? "&" : "?";
-  queryOptions += `$top=${Math.min(pageSize, maxRecords)}`;
-
-  logger.debug("DataAggregationService", `Fetching records from ${entityName}`, {
-    queryOptions,
+  // Fallback: basic FetchXML query (no view filters)
+  logger.info("DataAggregationService", `Fetch path: BASIC (${entityName}, no view)`);
+  return fetchRecordsBasic(context, entityName, {
+    selectColumns: options?.selectColumns,
+    contextFilter: options?.contextFilter,
     maxRecords,
   });
+}
+
+/**
+ * Fetch records using a basic FetchXML query (no saved view).
+ * Builds FetchXML from entity name, optional column selection, and context filter.
+ */
+async function fetchRecordsBasic(
+  context: IAggregationContext,
+  entityName: string,
+  options?: {
+    selectColumns?: string[];
+    contextFilter?: { fieldName: string; recordId: string };
+    maxRecords?: number;
+  }
+): Promise<Array<Record<string, unknown>>> {
+  const maxRecords = options?.maxRecords ?? DEFAULT_MAX_RECORDS;
+
+  // Build attribute elements
+  let attributesXml: string;
+  if (options?.selectColumns && options.selectColumns.length > 0) {
+    attributesXml = options.selectColumns
+      .map((col) => `<attribute name="${col}" />`)
+      .join("");
+  } else {
+    attributesXml = "<all-attributes />";
+  }
+
+  // Build context filter (transform _field_value → field for FetchXML)
+  let filterXml = "";
+  if (options?.contextFilter) {
+    const filterField = options.contextFilter.fieldName
+      .replace(/^_/, "")
+      .replace(/_value$/, "");
+    const cleanId = options.contextFilter.recordId.replace(/[{}]/g, "");
+    filterXml = `<filter type="and"><condition attribute="${filterField}" operator="eq" value="${cleanId}" /></filter>`;
+    logger.info("DataAggregationService", `Context filter: ${options.contextFilter.fieldName} → ${filterField} = ${cleanId}`);
+  }
+
+  const fetchXml = `<fetch top="${maxRecords}"><entity name="${entityName}">${attributesXml}${filterXml}</entity></fetch>`;
+
+  logger.debug("DataAggregationService", `FetchXML (basic): ${fetchXml.substring(0, 500)}`);
 
   try {
-    let result = await context.webAPI.retrieveMultipleRecords(
+    const encodedFetchXml = encodeURIComponent(fetchXml);
+    const result = await context.webAPI.retrieveMultipleRecords(
       entityName,
-      queryOptions,
-      pageSize
+      `?fetchXml=${encodedFetchXml}`
     );
-
-    allRecords.push(...result.entities);
-
-    // Fetch additional pages if needed
-    while (result.nextLink && allRecords.length < maxRecords) {
-      const remainingRecords = maxRecords - allRecords.length;
-      const nextPageOptions = `${queryOptions}&$top=${Math.min(pageSize, remainingRecords)}`;
-
-      result = await context.webAPI.retrieveMultipleRecords(
-        entityName,
-        nextPageOptions,
-        pageSize
-      );
-
-      allRecords.push(...result.entities);
-      logger.debug(
-        "DataAggregationService",
-        `Fetched page, total records: ${allRecords.length}`
-      );
-    }
 
     logger.info(
       "DataAggregationService",
-      `Fetched ${allRecords.length} records from ${entityName}`
+      `Fetched ${result.entities.length} records from ${entityName}`
     );
-    return allRecords;
+    return result.entities;
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error("DataAggregationService", `Failed to fetch records: ${errorMessage}`, error);
+    const errorMessage = extractErrorMessage(error);
+    logger.error("DataAggregationService", `Failed to fetch records (basic): ${errorMessage}`, error);
     throw new AggregationError(`Failed to fetch records: ${errorMessage}`, error);
+  }
+}
+
+/**
+ * Fetch records using a saved view's FetchXML with optional context filter injection.
+ * Retrieves the view definition, injects context filter if needed, and executes.
+ */
+async function fetchRecordsFromView(
+  context: IAggregationContext,
+  entityName: string,
+  viewId: string,
+  options?: {
+    contextFilter?: { fieldName: string; recordId: string };
+    maxRecords?: number;
+    /** WebAPI property names required for chart aggregation (groupByField, aggregationField) */
+    requiredColumns?: string[];
+  }
+): Promise<Array<Record<string, unknown>>> {
+  const webApi = context.webAPI as IConfigWebApi;
+
+  try {
+    // Retrieve the saved view's FetchXML
+    const { fetchXml: viewFetchXml, entityName: viewEntity } =
+      await getViewFetchXml(webApi, viewId);
+
+    const resolvedEntity = viewEntity || entityName;
+    let fetchXml = viewFetchXml;
+
+    // DIAGNOSTIC: Log the raw view FetchXML BEFORE any injection
+    logger.info("DataAggregationService", `[DIAG] Raw view FetchXML (before injection):\n${viewFetchXml}`);
+
+    // Inject required attributes for chart aggregation (groupByField, aggregationField)
+    // This ensures the view returns these columns even if they're not in the view's column set
+    if (options?.requiredColumns && options.requiredColumns.length > 0) {
+      fetchXml = injectRequiredAttributes(fetchXml, options.requiredColumns);
+    }
+
+    // Inject context filter if provided
+    if (options?.contextFilter) {
+      const filterField = options.contextFilter.fieldName
+        .replace(/^_/, "")
+        .replace(/_value$/, "");
+      logger.info("DataAggregationService", `[DIAG] Context filter: fieldName="${options.contextFilter.fieldName}" → filterField="${filterField}", recordId="${options.contextFilter.recordId}"`);
+      fetchXml = injectContextFilter(fetchXml, filterField, options.contextFilter.recordId);
+    } else {
+      logger.info("DataAggregationService", `[DIAG] No context filter provided`);
+    }
+
+    // DIAGNOSTIC: Log the FINAL FetchXML that will be executed
+    logger.info("DataAggregationService", `[DIAG] Final FetchXML (after injection):\n${fetchXml}`);
+
+    const encodedFetchXml = encodeURIComponent(fetchXml);
+    const result = await context.webAPI.retrieveMultipleRecords(
+      resolvedEntity,
+      `?fetchXml=${encodedFetchXml}`
+    );
+
+    logger.info(
+      "DataAggregationService",
+      `Fetched ${result.entities.length} records from view ${viewId}`
+    );
+
+    return result.entities;
+  } catch (error: unknown) {
+    const errorMessage = extractErrorMessage(error);
+    logger.error("DataAggregationService", `Failed to fetch from view: ${errorMessage}`, error);
+    throw new AggregationError(`Failed to fetch from view: ${errorMessage}`, error);
   }
 }
 
@@ -261,11 +332,23 @@ export function aggregateRecords(
   }
 
   // Group records by the groupByField
+  // For lookup/optionset fields, prefer the @OData.Community.Display.V1.FormattedValue
+  // annotation which provides human-readable labels (e.g., "Task" instead of a GUID)
+  const formattedValueKey = `${groupByField}@OData.Community.Display.V1.FormattedValue`;
   const groups = new Map<string, Array<Record<string, unknown>>>();
 
+  // DIAGNOSTIC: Log first record's groupByField values
+  if (records.length > 0) {
+    const first = records[0];
+    const rawVal = first[groupByField];
+    const fmtVal = first[formattedValueKey];
+    logger.info("DataAggregationService", `[DIAG] groupByField="${groupByField}" → raw=${rawVal === undefined ? "(undefined)" : JSON.stringify(rawVal)}, formatted=${fmtVal === undefined ? "(undefined)" : JSON.stringify(fmtVal)}`);
+  }
+
   for (const record of records) {
-    const groupValue = record[groupByField];
-    const groupKey = formatGroupKey(groupValue);
+    const formattedValue = record[formattedValueKey] as string | undefined;
+    const rawValue = record[groupByField];
+    const groupKey = formattedValue || formatGroupKey(rawValue);
 
     if (!groups.has(groupKey)) {
       groups.set(groupKey, []);
@@ -288,8 +371,8 @@ export function aggregateRecords(
     });
   }
 
-  // Sort by value descending (most common pattern for charts)
-  dataPoints.sort((a, b) => b.value - a.value);
+  // Sort alphabetically by label (A→Z, left-to-right on bar charts)
+  dataPoints.sort((a, b) => a.label.localeCompare(b.label));
 
   logger.debug(
     "DataAggregationService",
@@ -457,9 +540,6 @@ export async function fetchAndAggregate(
     throw new AggregationError("Entity name is required for data aggregation");
   }
 
-  // v1.1.0: Build context filter if configured
-  const contextFilterExpr = buildContextFilter(options?.contextFilter);
-
   // Check cache
   const cacheKey = getCacheKey(
     entityName,
@@ -480,6 +560,7 @@ export async function fetchAndAggregate(
 
   logger.info("DataAggregationService", `Aggregating data for ${definition.sprk_name}`, {
     entityName,
+    viewId: viewId || "(none)",
     aggregationType,
     aggregationField,
     groupByField,
@@ -495,13 +576,12 @@ export async function fetchAndAggregate(
     selectColumns.push(aggregationField);
   }
 
-  // Fetch records with optional context filter (v1.1.0)
+  // Fetch records: use view FetchXML when viewId available, basic FetchXML otherwise
   const records = await fetchRecords(context, entityName, {
     viewId,
     selectColumns: selectColumns.length > 0 ? selectColumns : undefined,
-    filter: contextFilterExpr,
+    contextFilter: options?.contextFilter,
     maxRecords: options?.maxRecords,
-    pageSize: options?.pageSize,
   });
 
   // Perform aggregation

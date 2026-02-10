@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Events Custom Page Scaffolding</title>
+    <phase>6</phase>
+    <tags>custom-page, react, fluent-ui</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>044, 058</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create Custom Page scaffolding for system-level Events page.</goal>
+
+    <context>
+      Events Custom Page replaces OOB Events entity main view.
+      Integrates Calendar, Grid, and Side Pane components.
+      Serves as the central Events management interface.
+    </context>
+
+    <constraints>
+      - Custom Page (not PCF)
+      - React 16.14.0 with Fluent UI v9
+      - No hard-coded colors
+      - Must work with sitemap navigation
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="docs/ai-knowledge/guides/custom-pages.md" reason="Custom Page patterns" />
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="Fluent UI requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create EventsPage folder in src/solutions/</step>
+    <step order="2">Initialize Custom Page project structure</step>
+    <step order="3">Create App.tsx main component</step>
+    <step order="4">Setup layout with header area</step>
+    <step order="5">Configure page dimensions for full-width</step>
+    <step order="6">Add placeholder sections for Calendar/Grid/SidePane</step>
+    <step order="7">Configure build pipeline</step>
+    <step order="8">Verify local dev server</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventsPage/src/App.tsx</artifact>
+    <artifact type="file">src/solutions/EventsPage/src/index.tsx</artifact>
+    <artifact type="file">src/solutions/EventsPage/package.json</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Custom Page scaffolding created</criterion>
+    <criterion>React 16 initialization</criterion>
+    <criterion>Build succeeds</criterion>
+    <criterion>Local dev server works</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion-date>2026-02-04</completion-date>
+    <summary>
+      Created Events Custom Page scaffolding with full project structure.
+      - React 16 initialization with ReactDOM.render() (ADR-022)
+      - Fluent UI v9 with FluentProvider and tokens (ADR-021)
+      - ThemeProvider with dark mode support
+      - Layout with header, left calendar panel, main grid area, footer
+      - Placeholder sections for Task 061 integration
+      - Build verified: npm run build succeeds
+
+      Entry point is main.tsx (not index.tsx as originally specified -
+      following Vite convention used by EventDetailSidePane reference).
+    </summary>
+  </notes>
+</task>

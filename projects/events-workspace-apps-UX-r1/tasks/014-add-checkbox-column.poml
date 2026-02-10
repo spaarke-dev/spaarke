@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Checkbox Column for Bulk Actions</title>
+    <phase>2</phase>
+    <tags>pcf, grid, selection</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>010</dependencies>
+    <parallel-group>B</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add checkbox column for multi-select and bulk actions (complete, delete, reassign).</goal>
+
+    <context>
+      Users need to select multiple events for bulk operations.
+      Checkbox in first column, header checkbox for select all.
+    </context>
+
+    <constraints>
+      - Checkbox column as first column
+      - Header checkbox for select/deselect all
+      - Selected rows tracked in state
+      - Checkbox click doesn't trigger row click handlers
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Bulk action requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add enableCheckboxSelection config option</step>
+    <step order="2">Add Checkbox column to grid</step>
+    <step order="3">Implement select all in header</step>
+    <step order="4">Track selected row IDs in state</step>
+    <step order="5">Expose selectedIds via output property or callback</step>
+    <step order="6">Ensure checkbox click doesn't bubble to row</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/components/CheckboxColumn.tsx</artifact>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/components/DatasetGrid.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Checkbox column appears</criterion>
+    <criterion>Multi-select works</criterion>
+    <criterion>Select all works</criterion>
+    <criterion>Selected IDs accessible</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion-date>2026-02-04</completion-date>
+    <implementation-summary>
+      Used Fluent UI v9 DataGridSelectionCell component for checkbox column.
+      - Added enableCheckboxSelection config option to GridConfiguration (default: true)
+      - DataGridSelectionCell in header provides select all functionality
+      - DataGridSelectionCell in each row provides row selection checkbox
+      - Selection state tracked via existing selectedRecordIds prop
+      - Checkbox clicks handled internally by Fluent UI (no bubbling to row handlers)
+    </implementation-summary>
+    <files-modified>
+      - src/client/pcf/UniversalDatasetGrid/control/types/index.ts (added enableCheckboxSelection)
+      - src/client/pcf/UniversalDatasetGrid/control/components/DatasetGrid.tsx (added DataGridSelectionCell)
+      - src/client/pcf/UniversalDatasetGrid/control/components/UniversalDatasetGridRoot.tsx (pass config)
+    </files-modified>
+    <decision>Used built-in DataGridSelectionCell instead of creating separate CheckboxColumn.tsx - cleaner integration with Fluent UI v9 DataGrid selection system.</decision>
+  </notes>
+</task>

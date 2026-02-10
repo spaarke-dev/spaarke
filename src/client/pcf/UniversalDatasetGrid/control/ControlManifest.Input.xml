@@ -2,7 +2,7 @@
 <manifest>
   <control namespace="Spaarke.UI.Components"
            constructor="UniversalDatasetGrid"
-           version="2.1.4"
+           version="2.2.0"
            display-name-key="Universal Dataset Grid"
            description-key="Document management grid with MSAL authentication, SDAP integration and Fluent UI v9"
            control-type="standard">
@@ -19,6 +19,21 @@
               of-type="Multiple"
               usage="input"
               required="false" />
+
+    <!-- Calendar Filter JSON (Task 010) -->
+    <property name="calendarFilter"
+              display-name-key="Calendar Filter"
+              description-key="JSON filter from EventCalendarFilter with type (single, range, or clear), date, start, and end properties"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
+    <!-- Selected Event Date (Task 012 - Bi-directional sync) -->
+    <property name="selectedEventDate"
+              display-name-key="Selected Event Date"
+              description-key="ISO date string of the selected row due date. Emitted on row click. Used for calendar highlighting."
+              of-type="SingleLine.Text"
+              usage="output" />
 
     <resources>
       <code path="index.ts" order="1" />

@@ -1,0 +1,82 @@
+<task id="040" project="visualization-module-r2">
+  <metadata>
+    <title>Create ViewDataService for View-Driven Fetching</title>
+    <phase>5</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>pcf, typescript, service, fetchxml</tags>
+    <dependencies>033</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create ViewDataService to fetch data using Dataverse views with context filtering</goal>
+    <context>
+      This service retrieves the FetchXML from a Dataverse view, injects context filters
+      (e.g., filter by current Matter ID), executes the query, and returns mapped results.
+    </context>
+    <constraints>
+      - Use WebAPI to retrieve view definition
+      - Inject context filters without modifying saved view
+      - Handle FetchXML parsing safely
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/visualization-module-r2/spec.md</file>
+      <file>projects/visualization-module-r2/design.md</file>
+      <file>src/client/pcf/VisualHost/control/services/ConfigurationLoader.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Create src/client/pcf/VisualHost/control/services/ViewDataService.ts</step>
+    <step id="2">Create IViewDataContext interface:
+      - viewId: string
+      - contextFilter?: { fieldName: string; recordId: string }
+      - maxItems?: number
+    </step>
+    <step id="3">Implement getViewFetchXml function:
+      - Retrieve savedquery record by ID
+      - Extract fetchxml field
+      - Parse and validate structure
+    </step>
+    <step id="4">Implement injectContextFilter function:
+      - Parse FetchXML string to DOM
+      - Find or create filter element
+      - Add condition for context field = context record ID
+      - Serialize back to string
+    </step>
+    <step id="5">Implement executeViewQuery function:
+      - Apply context filter
+      - Execute via WebAPI retrieveMultipleRecords
+      - Map results to typed array
+    </step>
+    <step id="6">Implement fetchEventsFromView:
+      - Combines above functions
+      - Maps to IEventDueDateCardProps array
+      - Calculates daysUntilDue, isOverdue
+    </step>
+    <step id="7">Add unit tests for FetchXML manipulation</step>
+    <step id="8">Export from services/index.ts</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>ViewDataService.ts</output>
+    <output>ViewDataService.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Retrieves view FetchXML from savedquery</criterion>
+    <criterion>Injects context filter without breaking FetchXML</criterion>
+    <criterion>Executes query and returns mapped results</criterion>
+    <criterion>Respects maxItems limit</criterion>
+    <criterion>Unit tests pass for FetchXML manipulation</criterion>
+  </acceptance-criteria>
+</task>

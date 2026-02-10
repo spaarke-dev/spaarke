@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Controls"
+           constructor="DueDatesWidget"
+           version="1.0.3"
+           display-name-key="Due Dates Widget"
+           description-key="Displays upcoming and overdue events in card format for Matter/Project Overview tabs. Shows actionable items with event type badges and days-until-due indicators."
+           control-type="standard">
+
+    <external-service-usage enabled="false" />
+
+    <!-- Parent Record ID - for filtering events related to this Matter/Project -->
+    <property name="parentRecordId"
+              display-name-key="Parent Record ID"
+              description-key="The ID of the parent record (Matter or Project) to filter events"
+              of-type="SingleLine.Text"
+              usage="bound"
+              required="false" />
+
+    <!-- Parent Entity Name - sprk_matter or sprk_project -->
+    <property name="parentEntityName"
+              display-name-key="Parent Entity Name"
+              description-key="The logical name of the parent entity (sprk_matter or sprk_project)"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
+    <!-- Max Items - maximum number of events to display -->
+    <property name="maxItems"
+              display-name-key="Max Items"
+              description-key="Maximum number of events to display in the widget"
+              of-type="Whole.None"
+              usage="input"
+              required="false"
+              default-value="5" />
+
+    <!-- Days Ahead - number of days to look ahead for upcoming events -->
+    <property name="daysAhead"
+              display-name-key="Days Ahead"
+              description-key="Number of days to look ahead for upcoming events (default: 30)"
+              of-type="Whole.None"
+              usage="input"
+              required="false"
+              default-value="30" />
+
+    <!-- Selected Event Output - for side pane integration -->
+    <property name="selectedEventOutput"
+              display-name-key="Selected Event Output"
+              description-key="JSON output when an event card is clicked (eventId, eventType)"
+              of-type="SingleLine.Text"
+              usage="bound"
+              required="false" />
+
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="2" />
+      <!-- Platform-provided libraries - DO NOT bundle (ADR-022) -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+
+  </control>
+</manifest>

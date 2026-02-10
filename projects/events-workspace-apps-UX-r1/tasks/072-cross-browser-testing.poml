@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Cross-Browser Testing (Edge, Chrome)</title>
+    <phase>7</phase>
+    <tags>testing, browser-compatibility</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>070, 071</dependencies>
+    <parallel-group>E</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    Completed 2026-02-04. Created comprehensive browser compatibility test plan with 123 test cases
+    covering all PCF controls and Custom Pages in Microsoft Edge and Google Chrome.
+
+    Key findings:
+    - Both browsers are Chromium-based (120+), minimizing compatibility risks
+    - No polyfills required for ES6+, CSS Grid/Flexbox, or modern DOM APIs
+    - Fluent UI v9 officially supports both browsers
+    - React 16 has stable support in both browsers
+    - Dataverse APIs are platform-provided and browser-agnostic
+
+    Test plan includes:
+    - 123 individual test cases across 10 sections
+    - Visual rendering tests for each component
+    - Interaction tests for user flows
+    - Dark mode compatibility tests
+    - Performance comparison metrics
+    - Console error checking procedures
+    - Accessibility cross-browser testing
+    - Issues log template for tracking findings
+
+    Output: projects/events-workspace-apps-UX-r1/notes/testing/browser-compatibility.md
+  </notes>
+
+  <prompt>
+    <goal>Verify all components work in supported browsers.</goal>
+
+    <context>
+      Dataverse supports Edge and Chrome.
+      Test all PCF controls and Custom Pages in both browsers.
+    </context>
+
+    <constraints>
+      - Test in Microsoft Edge
+      - Test in Google Chrome
+      - Document any browser-specific issues
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="NFR requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Test EventCalendarFilter in Edge</step>
+    <step order="2">Test EventCalendarFilter in Chrome</step>
+    <step order="3">Test UniversalDatasetGrid enhancements in Edge</step>
+    <step order="4">Test UniversalDatasetGrid enhancements in Chrome</step>
+    <step order="5">Test EventDetailSidePane in Edge</step>
+    <step order="6">Test EventDetailSidePane in Chrome</step>
+    <step order="7">Test DueDatesWidget in Edge</step>
+    <step order="8">Test DueDatesWidget in Chrome</step>
+    <step order="9">Test Events Custom Page in Edge</step>
+    <step order="10">Test Events Custom Page in Chrome</step>
+    <step order="11">Document browser-specific issues</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">projects/events-workspace-apps-UX-r1/notes/testing/browser-compatibility.md</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All components work in Edge</criterion>
+    <criterion>All components work in Chrome</criterion>
+    <criterion>No visual regressions between browsers</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Update EventFormController to Use Shared Service</title>
+    <phase>3</phase>
+    <tags>pcf, refactor</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>023</dependencies>
+    <parallel-group>A</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Refactor EventFormController to use the new shared EventTypeService instead of embedded logic.</goal>
+
+    <context>
+      EventFormController currently has field visibility logic in FieldVisibilityHandler.ts.
+      This should be replaced with calls to the shared EventTypeService.
+    </context>
+
+    <constraints>
+      - Preserve existing behavior exactly
+      - Import from @spaarke/ui-components
+      - Wrap PCF WebApi in IWebApiLike interface
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/EventFormController/handlers/FieldVisibilityHandler.ts" reason="Code to refactor" />
+      <file path="src/client/pcf/EventFormController/index.ts" reason="Entry point" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add @spaarke/ui-components dependency to EventFormController package.json</step>
+    <step order="2">Create WebApi adapter that implements IWebApiLike</step>
+    <step order="3">Update FieldVisibilityHandler to use EventTypeService</step>
+    <step order="4">Remove duplicated logic</step>
+    <step order="5">Update imports</step>
+    <step order="6">Build and verify no errors</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/EventFormController/handlers/FieldVisibilityHandler.ts (updated)</artifact>
+    <artifact type="file">src/client/pcf/EventFormController/adapters/WebApiAdapter.ts</artifact>
+    <artifact type="file">src/client/pcf/EventFormController/package.json (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>EventFormController uses shared EventTypeService</criterion>
+    <criterion>Duplicated logic removed</criterion>
+    <criterion>Builds without errors</criterion>
+    <criterion>Behavior unchanged</criterion>
+  </acceptance-criteria>
+</task>

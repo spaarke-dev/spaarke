@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>DueDatesWidget PCF Scaffolding</title>
+    <phase>5</phase>
+    <tags>pcf, fluent-ui, react, duedates-widget</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>044</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create PCF control scaffolding for DueDatesWidget.</goal>
+
+    <context>
+      DueDatesWidget displays upcoming and overdue events in card format.
+      Used on Overview tabs to highlight actionable items.
+      Must follow React 16 APIs per ADR-022.
+    </context>
+
+    <constraints>
+      - Use pac pcf init for scaffolding
+      - Platform libraries: React 16.14.0, Fluent 9.46.2
+      - ReactDOM.render() not createRoot
+      - No hard-coded colors (ADR-021)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="docs/ai-knowledge/guides/PCF-V9-PACKAGING.md" reason="PCF packaging guide" />
+      <file path="src/client/pcf/CLAUDE.md" reason="PCF conventions" />
+      <file path=".claude/adr/ADR-022-pcf-platform-libraries.md" reason="React 16 requirement" />
+      <file path=".claude/patterns/pcf/control-initialization.md" reason="React 16 lifecycle" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create DueDatesWidget folder in src/client/pcf/</step>
+    <step order="2">Run pac pcf init --namespace Spaarke --name DueDatesWidget</step>
+    <step order="3">Configure ControlManifest.Input.xml with dataset binding</step>
+    <step order="4">Add platform libraries feature-usage</step>
+    <step order="5">Create index.ts with React 16 lifecycle</step>
+    <step order="6">Create DueDatesWidget.tsx component shell</step>
+    <step order="7">Configure package.json dependencies</step>
+    <step order="8">Verify npm install and build</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/DueDatesWidget/ControlManifest.Input.xml</artifact>
+    <artifact type="file">src/client/pcf/DueDatesWidget/index.ts</artifact>
+    <artifact type="file">src/client/pcf/DueDatesWidget/DueDatesWidget.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PCF scaffolding created with correct namespace</criterion>
+    <criterion>Platform libraries declared in manifest</criterion>
+    <criterion>React 16 lifecycle (ReactDOM.render)</criterion>
+    <criterion>Build succeeds without errors</criterion>
+  </acceptance-criteria>
+</task>

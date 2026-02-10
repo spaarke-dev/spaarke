@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="056" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>DueDatesWidget Dark Mode Support</title>
+    <phase>5</phase>
+    <tags>pcf, fluent-ui, dark-mode, duedates-widget</tags>
+    <estimate>1.5 hours</estimate>
+    <dependencies>055</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <note date="2026-02-04">Task completed - audit verified all 10 files already use Fluent UI v9 semantic tokens exclusively. No code changes required. Build verified successful.</note>
+  </notes>
+
+  <prompt>
+    <goal>Ensure all widget components support dark mode.</goal>
+
+    <context>
+      Verify all components use Fluent tokens that adapt to theme.
+      Test rendering in both light and dark mode.
+      Fix any hard-coded colors.
+    </context>
+
+    <constraints>
+      - All colors via Fluent tokens
+      - Test with Dataverse dark mode toggle
+      - No visual regressions in light mode
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="Dark mode requirements" />
+      <file path=".claude/patterns/pcf/theme-management.md" reason="Theme detection" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Audit all components for hard-coded colors</step>
+    <step order="2">Replace any non-token colors</step>
+    <step order="3">Test in Dataverse light mode</step>
+    <step order="4">Test in Dataverse dark mode</step>
+    <step order="5">Fix any contrast issues</step>
+    <step order="6">Verify urgency colors in both modes</step>
+    <step order="7">Screenshot verification</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/DueDatesWidget/components/*.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No hard-coded colors in any component</criterion>
+    <criterion>Light mode renders correctly</criterion>
+    <criterion>Dark mode renders correctly</criterion>
+    <criterion>Urgency colors adapt appropriately</criterion>
+  </acceptance-criteria>
+</task>

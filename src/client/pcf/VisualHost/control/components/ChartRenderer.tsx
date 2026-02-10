@@ -15,12 +15,16 @@ import type {
 } from "../types";
 import { VisualType as VT } from "../types";
 import { MetricCard } from "./MetricCard";
+import { MetricCardMatrix, type MatrixJustification } from "./MetricCardMatrix";
 import { BarChart } from "./BarChart";
 import { LineChart } from "./LineChart";
 import { DonutChart } from "./DonutChart";
 import { StatusDistributionBar } from "./StatusDistributionBar";
 import { CalendarVisual, type ICalendarEvent } from "./CalendarVisual";
 import { MiniTable, type IMiniTableItem, type IMiniTableColumn } from "./MiniTable";
+import { DueDateCardVisual } from "./DueDateCard";
+import { DueDateCardListVisual } from "./DueDateCardList";
+import type { IConfigWebApi } from "../services/ConfigurationLoader";
 
 export interface IChartRendererProps {
   /** Chart definition from Dataverse */
@@ -31,6 +35,22 @@ export interface IChartRendererProps {
   onDrillInteraction?: (interaction: DrillInteraction) => void;
   /** Height override for the chart */
   height?: number;
+  /** WebAPI for data fetching (needed by DueDateCard visuals) */
+  webApi?: IConfigWebApi;
+  /** Current record ID for context filtering */
+  contextRecordId?: string;
+  /** Callback for configured click actions */
+  onClickAction?: (recordId: string, entityName?: string, recordData?: Record<string, unknown>) => void;
+  /** Callback for "View List" navigation */
+  onViewListClick?: () => void;
+  /** FetchXML override from PCF property (highest query priority) */
+  fetchXmlOverride?: string;
+  /** Width of the container in pixels (for MetricCard matrix sizing) */
+  width?: number;
+  /** Content justification: left, center, right */
+  justification?: MatrixJustification;
+  /** Number of cards per row in MetricCard matrix layout */
+  columns?: number;
 }
 
 const useStyles = makeStyles({
@@ -97,6 +117,10 @@ const getVisualTypeName = (visualType: VisualType): string => {
       return "Calendar";
     case VT.MiniTable:
       return "Mini Table";
+    case VT.DueDateCard:
+      return "Due Date Card";
+    case VT.DueDateCardList:
+      return "Due Date Card List";
     default:
       return `Unknown (${visualType})`;
   }
@@ -110,6 +134,14 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
   chartData,
   onDrillInteraction,
   height = 300,
+  webApi,
+  contextRecordId,
+  onClickAction,
+  onViewListClick,
+  fetchXmlOverride,
+  width,
+  justification,
+  columns,
 }) => {
   const styles = useStyles();
   const { sprk_visualtype, sprk_name, sprk_configurationjson, sprk_groupbyfield } =
@@ -120,14 +152,13 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
 
   // No data available
   if (!chartData || !chartData.dataPoints || chartData.dataPoints.length === 0) {
-    // Some chart types don't need data (e.g., MetricCard can show "0")
-    if (sprk_visualtype !== VT.MetricCard) {
+    // Some chart types don't need data (MetricCard, DueDateCard types fetch their own)
+    if (sprk_visualtype !== VT.MetricCard
+      && sprk_visualtype !== VT.DueDateCard
+      && sprk_visualtype !== VT.DueDateCardList) {
       return (
         <div className={styles.placeholder}>
           <Text size={400}>No data available</Text>
-          <Text size={200}>
-            {getVisualTypeName(sprk_visualtype)} requires data to display
-          </Text>
         </div>
       );
     }
@@ -138,7 +169,23 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
 
   switch (sprk_visualtype) {
     case VT.MetricCard: {
-      // MetricCard shows a single value (first data point or total)
+      // Matrix mode: when groupByField produces multiple data points, render as a card grid
+      if (dataPoints.length > 1 && sprk_groupbyfield) {
+        return (
+          <MetricCardMatrix
+            title={config.showTitle !== false ? sprk_name : undefined}
+            dataPoints={dataPoints}
+            columns={columns}
+            width={width}
+            height={height}
+            justification={justification}
+            onDrillInteraction={onDrillInteraction}
+            drillField={drillField}
+          />
+        );
+      }
+
+      // Single card mode: show first data point or total
       const metricValue =
         dataPoints.length > 0
           ? dataPoints[0].value
@@ -146,20 +193,22 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
       const metricLabel = dataPoints.length > 0 ? dataPoints[0].label : sprk_name;
 
       return (
-        <div className={styles.container}>
-          <MetricCard
-            value={metricValue}
-            label={metricLabel}
-            description={chartDefinition.sprk_description}
-            trend={config.trend as "up" | "down" | "neutral" | undefined}
-            trendValue={config.trendValue as number | undefined}
-            onDrillInteraction={onDrillInteraction}
-            drillField={drillField}
-            drillValue={dataPoints.length > 0 ? dataPoints[0].fieldValue : null}
-            interactive={!!onDrillInteraction}
-            compact={config.compact as boolean | undefined}
-          />
-        </div>
+        <MetricCard
+          value={metricValue}
+          label={metricLabel}
+          description={chartDefinition.sprk_description}
+          trend={config.trend as "up" | "down" | "neutral" | undefined}
+          trendValue={config.trendValue as number | undefined}
+          onDrillInteraction={onDrillInteraction}
+          drillField={drillField}
+          drillValue={dataPoints.length > 0 ? dataPoints[0].fieldValue : null}
+          interactive={!!onDrillInteraction}
+          compact={config.compact as boolean | undefined}
+          fillContainer
+          justification={justification}
+          explicitWidth={width}
+          explicitHeight={height}
+        />
       );
     }
 
@@ -291,18 +340,52 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
       );
     }
 
+    case VT.DueDateCard: {
+      if (!webApi) {
+        return (
+          <div className={styles.placeholder}>
+            <Text size={200}>DueDateCard requires WebAPI context</Text>
+          </div>
+        );
+      }
+      return (
+        <DueDateCardVisual
+          chartDefinition={chartDefinition}
+          webApi={webApi}
+          contextRecordId={contextRecordId}
+          onClickAction={onClickAction}
+        />
+      );
+    }
+
+    case VT.DueDateCardList: {
+      if (!webApi) {
+        return (
+          <div className={styles.placeholder}>
+            <Text size={200}>DueDateCardList requires WebAPI context</Text>
+          </div>
+        );
+      }
+      return (
+        <DueDateCardListVisual
+          chartDefinition={chartDefinition}
+          webApi={webApi}
+          contextRecordId={contextRecordId}
+          onClickAction={onClickAction}
+          onViewListClick={onViewListClick}
+          fetchXmlOverride={fetchXmlOverride}
+        />
+      );
+    }
+
     default: {
       return (
         <div className={styles.unknownType}>
           <Text size={400} weight="semibold">
-            Unsupported Visual Type
+            Configuration Error
           </Text>
           <Text size={200}>
-            Visual type {sprk_visualtype} is not yet supported.
-          </Text>
-          <Text size={200}>
-            Supported types: MetricCard, BarChart, LineChart, AreaChart,
-            DonutChart, StatusBar, Calendar, MiniTable
+            The configured visual type is not recognized. Please check the chart definition.
           </Text>
         </div>
       );

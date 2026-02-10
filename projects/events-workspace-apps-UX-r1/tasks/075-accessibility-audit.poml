@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="075" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Accessibility Audit (WCAG 2.1 AA)</title>
+    <phase>7</phase>
+    <tags>testing, accessibility, nfr</tags>
+    <estimate>2.5 hours</estimate>
+    <dependencies>073</dependencies>
+    <parallel-group>E</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Verify WCAG 2.1 AA compliance across all components.</goal>
+
+    <context>
+      NFR requires WCAG 2.1 AA accessibility.
+      Test keyboard navigation, screen reader, contrast.
+    </context>
+
+    <constraints>
+      - Keyboard navigation complete
+      - Screen reader announces correctly
+      - Color contrast meets AA standards
+      - Focus indicators visible
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Accessibility requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Test keyboard navigation on calendar</step>
+    <step order="2">Test keyboard navigation on grid</step>
+    <step order="3">Test keyboard navigation on Side Pane</step>
+    <step order="4">Test keyboard navigation on DueDatesWidget</step>
+    <step order="5">Run automated accessibility scanner (axe)</step>
+    <step order="6">Test with screen reader (NVDA/JAWS)</step>
+    <step order="7">Verify ARIA labels present</step>
+    <step order="8">Check focus management</step>
+    <step order="9">Document violations and fixes</step>
+    <step order="10">Retest after fixes</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">projects/events-workspace-apps-UX-r1/notes/testing/accessibility-audit.md</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All components keyboard accessible</criterion>
+    <criterion>No critical/serious axe violations</criterion>
+    <criterion>Screen reader announces correctly</criterion>
+    <criterion>Focus indicators visible</criterion>
+  </acceptance-criteria>
+</task>

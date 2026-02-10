@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>086</id>
+    <title>Create ViewToolbar component matching OOB view row</title>
+    <phase>8</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <tags>shared-library, component, view-toolbar, oob-parity</tags>
+    <created>2026-02-05</created>
+    <dependencies>084</dependencies>
+    <parallel-group>G</parallel-group>
+  </metadata>
+
+  <description>
+    Create ViewToolbar component that displays the view selector row below the command bar.
+    Contains ViewSelector dropdown plus optional "Edit filters" and "Edit columns" buttons.
+    Matches OOB Power Apps view toolbar styling exactly.
+  </description>
+
+  <context>
+    <architecture-doc>docs/architecture/universal-dataset-grid-architecture.md</architecture-doc>
+    <target-location>src/client/shared/Spaarke.UI.Components/src/components/PageChrome/ViewToolbar.tsx</target-location>
+    <visual-reference>OOB Power Apps entity homepage - row below command bar</visual-reference>
+    <related-adr>ADR-021</related-adr>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>ViewToolbar renders horizontal bar with left-aligned view selector</criterion>
+    <criterion>Props: children (for ViewSelector), showEditFilters, showEditColumns, onEditFilters, onEditColumns</criterion>
+    <criterion>Optional "Edit filters" button on right</criterion>
+    <criterion>Optional "Edit columns" button on right</criterion>
+    <criterion>Exact visual match to OOB Power Apps view row</criterion>
+    <criterion>Proper spacing and dividers between elements</criterion>
+    <criterion>Dark mode support via Fluent tokens</criterion>
+    <criterion>Unit tests</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Create ViewToolbar.tsx in components/PageChrome/</step>
+    <step order="2">Define ViewToolbarProps interface</step>
+    <step order="3">Implement layout with children slot for ViewSelector</step>
+    <step order="4">Add optional Edit filters button</step>
+    <step order="5">Add optional Edit columns button</step>
+    <step order="6">Style to match OOB Power Apps exactly</step>
+    <step order="7">Create unit tests</step>
+    <step order="8">Export from components/index.ts</step>
+  </steps>
+
+  <estimated-effort>small</estimated-effort>
+</task>

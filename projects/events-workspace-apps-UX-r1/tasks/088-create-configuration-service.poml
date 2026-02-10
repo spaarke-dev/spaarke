@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>088</id>
+    <title>Create ConfigurationService for grid configuration</title>
+    <phase>8</phase>
+    <status>completed</status>
+    <priority>medium</priority>
+    <tags>shared-library, service, configuration</tags>
+    <created>2026-02-05</created>
+    <dependencies>087</dependencies>
+    <parallel-group>G</parallel-group>
+  </metadata>
+
+  <description>
+    Create ConfigurationService in the shared library to read grid configurations
+    from the sprk_gridconfiguration Dataverse table. Integrates with ViewService
+    to merge custom views with savedquery views.
+  </description>
+
+  <context>
+    <architecture-doc>docs/architecture/universal-dataset-grid-architecture.md</architecture-doc>
+    <target-location>src/client/shared/Spaarke.UI.Components/src/services/ConfigurationService.ts</target-location>
+    <related-entity>sprk_gridconfiguration</related-entity>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>ConfigurationService class with XrmContext constructor</criterion>
+    <criterion>getConfigurations(entityLogicalName) returns IGridConfiguration[]</criterion>
+    <criterion>getDefaultConfiguration(entityLogicalName) returns default config</criterion>
+    <criterion>Caches configurations to avoid repeated queries</criterion>
+    <criterion>Converts sprk_gridconfiguration records to IViewDefinition format</criterion>
+    <criterion>Handles missing entity gracefully (returns empty array)</criterion>
+    <criterion>Unit tests with mocked data</criterion>
+    <criterion>Exported from shared library</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Create IGridConfiguration interface in types/</step>
+    <step order="2">Create ConfigurationService.ts with constructor</step>
+    <step order="3">Implement getConfigurations method querying sprk_gridconfiguration</step>
+    <step order="4">Implement getDefaultConfiguration method</step>
+    <step order="5">Add in-memory cache with TTL</step>
+    <step order="6">Add conversion method to IViewDefinition format</step>
+    <step order="7">Create unit tests</step>
+    <step order="8">Update ViewService to use ConfigurationService when includeCustom=true</step>
+    <step order="9">Export from services/index.ts</step>
+  </steps>
+
+  <estimated-effort>medium</estimated-effort>
+</task>

@@ -1,0 +1,74 @@
+<task id="030" project="visualization-module-r2">
+  <metadata>
+    <title>Create DueDateCard Visual Component for VisualHost</title>
+    <phase>4</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>pcf, react, visual</tags>
+    <dependencies>013, 023</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create DueDateCard visual component that renders a single event due date card bound to a lookup field</goal>
+    <context>
+      This visual type displays a single EventDueDateCard for an event bound via lookup.
+      It fetches the related event record and passes data to the shared component.
+    </context>
+    <constraints>
+      - Use React 16 APIs (ADR-022)
+      - Import EventDueDateCard from @spaarke/ui-components
+      - Handle lookup field binding
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/visualization-module-r2/spec.md</file>
+      <file>src/client/pcf/VisualHost/control/components/ChartRenderer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EventDueDateCard/EventDueDateCard.tsx</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Create src/client/pcf/VisualHost/control/components/DueDateCard.tsx</step>
+    <step id="2">Create IDueDateCardProps interface:
+      - chartDefinition: IChartDefinition
+      - context: ComponentFramework.Context&lt;IInputs&gt;
+      - onClickAction?: (recordId: string) => void
+    </step>
+    <step id="3">Implement data fetching from lookup field:
+      - Get event ID from lookup binding
+      - Fetch event record with WebAPI
+      - Expand event type lookup for color
+    </step>
+    <step id="4">Map event data to EventDueDateCard props:
+      - eventId, eventName, eventTypeName
+      - dueDate, daysUntilDue, isOverdue
+      - eventTypeColor, description, assignedTo
+    </step>
+    <step id="5">Render EventDueDateCard with click handler</step>
+    <step id="6">Handle loading and error states</step>
+    <step id="7">Add component to ChartRenderer visual type switch</step>
+    <step id="8">Test in local harness</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>DueDateCard.tsx visual component</output>
+    <output>Updated ChartRenderer.tsx with new case</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Fetches event data from lookup field</criterion>
+    <criterion>Renders EventDueDateCard with correct props</criterion>
+    <criterion>Click action triggers configured handler</criterion>
+    <criterion>Loading spinner shown during fetch</criterion>
+    <criterion>Error message shown on fetch failure</criterion>
+  </acceptance-criteria>
+</task>

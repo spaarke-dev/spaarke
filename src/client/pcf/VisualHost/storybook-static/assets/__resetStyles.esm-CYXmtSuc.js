@@ -1,0 +1,1 @@
+import{i as y}from"./Text-C0fEdKO1.js";import{i as f,u as m,a as d}from"./jsx-runtime-D93ddY-N.js";function _(e,t,r,n=f){const i=n();function s(o){const{dir:a,renderer:c}=o,u=a==="ltr"?e:t||e;return i(c,Array.isArray(r)?{r}:r),u}return s}function S(e,t,r){const n=_(e,t,r,y);return function(){const s=m(),o=d();return n({dir:s,renderer:o})}}export{S as _};

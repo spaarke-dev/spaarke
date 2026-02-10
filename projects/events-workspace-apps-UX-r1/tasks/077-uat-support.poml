@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="077" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>User Acceptance Testing Support</title>
+    <phase>7</phase>
+    <tags>testing, uat, documentation</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>076</dependencies>
+    <parallel-group>E</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Support UAT and verify no placeholder code remains.</goal>
+
+    <context>
+      Support user acceptance testing.
+      Ensure PLACEHOLDER-TRACKER.md has zero open items.
+      All components must be fully built.
+    </context>
+
+    <constraints>
+      - PLACEHOLDER-TRACKER.md must have zero open items
+      - No stub or placeholder code in production
+      - UAT test plan documented
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/tasks/PLACEHOLDER-TRACKER.md" reason="Placeholder tracking" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review PLACEHOLDER-TRACKER.md</step>
+    <step order="2">Verify all items resolved</step>
+    <step order="3">Search codebase for TODO/FIXME comments</step>
+    <step order="4">Search for placeholder/stub patterns</step>
+    <step order="5">Create UAT test plan</step>
+    <step order="6">Document UAT scenarios</step>
+    <step order="7">Prepare UAT environment</step>
+    <step order="8">Support UAT sessions</step>
+    <step order="9">Document UAT feedback</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">projects/events-workspace-apps-UX-r1/notes/testing/uat-plan.md</artifact>
+    <artifact type="file">projects/events-workspace-apps-UX-r1/notes/testing/uat-feedback.md</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PLACEHOLDER-TRACKER.md shows zero open items</criterion>
+    <criterion>No stub/placeholder code in production</criterion>
+    <criterion>UAT plan documented</criterion>
+    <criterion>UAT feedback captured</criterion>
+  </acceptance-criteria>
+</task>

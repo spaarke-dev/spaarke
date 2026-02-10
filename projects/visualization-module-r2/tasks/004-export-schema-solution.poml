@@ -1,0 +1,73 @@
+<task id="004" project="visualization-module-r2">
+  <metadata>
+    <title>Export and Commit Solution with Schema Changes</title>
+    <phase>1</phase>
+    <estimate>1 hour</estimate>
+    <tags>dataverse, solution, deploy</tags>
+    <dependencies>001, 002, 003</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Export Dataverse solution with schema changes and commit to source control</goal>
+    <context>
+      After making schema changes in Dataverse, we need to export the solution
+      to capture changes in source control. This ensures schema changes are
+      tracked and can be deployed to other environments.
+    </context>
+    <constraints>
+      - Export as unmanaged solution per ADR-022
+      - Include only sprk_chartdefinition entity changes
+      - Follow conventional commit format
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/visualization-module-r2/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Connect to Dataverse using PAC CLI:
+      pac auth create --environment https://spaarkedev1.crm.dynamics.com
+    </step>
+    <step id="2">Export SpaarkeCore solution (unmanaged):
+      pac solution export --path ./exports --name SpaarkeCore --managed false
+    </step>
+    <step id="3">Unpack solution to source control format:
+      pac solution unpack --zipfile ./exports/SpaarkeCore.zip --folder ./src/solutions/SpaarkeCore --processCanvasApps
+    </step>
+    <step id="4">Review changes to sprk_chartdefinition entity files</step>
+    <step id="5">Commit schema changes with message:
+      "feat(visualhost): add click action and card list schema fields
+
+      - Add sprk_onclickaction, sprk_onclicktarget, sprk_onclickrecordfield
+      - Add sprk_contextfieldname, sprk_viewlisttabname, sprk_maxdisplayitems
+      - Add DueDateCard (100000008) and DueDateCardList (100000009) visual types
+
+      Part of visualization-module-r2 Phase 1"
+    </step>
+    <step id="6">Push to feature branch</step>
+  </steps>
+
+  <tools>
+    <tool>Bash</tool>
+    <tool>PAC CLI</tool>
+    <tool>Git</tool>
+  </tools>
+
+  <outputs>
+    <output>Exported and unpacked solution files</output>
+    <output>Git commit with schema changes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Solution exported successfully</criterion>
+    <criterion>Schema changes visible in solution XML files</criterion>
+    <criterion>Commit includes all 6 new fields + 2 option set values</criterion>
+    <criterion>Feature branch pushed to origin</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Create Collapsible Dates Section</title>
+    <phase>4</phase>
+    <tags>custom-page, sidepane, ui</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>031</dependencies>
+    <parallel-group>C</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <note timestamp="2026-02-04">
+      Completed all 5 steps:
+      1. Created CollapsibleSection.tsx - Reusable expand/collapse wrapper with accessibility support
+      2. Created DatesSection.tsx - Complete dates section implementation
+      3. Added Base Date field with DatePicker
+      4. Added Final Due Date field with DatePicker
+      5. Added Remind At field with date picker + time input for datetime selection
+
+      Both components use Fluent UI v9 tokens for ADR-021 compliance.
+      Build verification passed.
+    </note>
+  </notes>
+
+  <prompt>
+    <goal>Create collapsible Dates section with Base Date, Final Date, Remind At fields.</goal>
+
+    <context>
+      Dates section is conditionally visible based on Event Type.
+      Collapsible to save space when not needed.
+    </context>
+
+    <constraints>
+      - Accordion/collapsible pattern
+      - DatePicker for date fields
+      - DateTimePicker for Remind At
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/design.md" reason="Dates section layout" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create CollapsibleSection wrapper component</step>
+    <step order="2">Create DatesSection component</step>
+    <step order="3">Add Base Date field</step>
+    <step order="4">Add Final Due Date field</step>
+    <step order="5">Add Remind At datetime field</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/components/CollapsibleSection.tsx</artifact>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/components/DatesSection.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Section collapses/expands</criterion>
+    <criterion>All date fields functional</criterion>
+    <criterion>DateTime picker for Remind At</criterion>
+  </acceptance-criteria>
+</task>

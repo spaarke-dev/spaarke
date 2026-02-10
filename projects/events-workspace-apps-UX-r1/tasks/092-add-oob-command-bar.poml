@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>092</id>
+    <title>Add OOB-style Command Bar with Ribbon Buttons</title>
+    <phase>9</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <tags>eventspage, commandbar, ribbon, oob-parity</tags>
+    <created>2026-02-05</created>
+    <dependencies>091</dependencies>
+    <parallel-group>I</parallel-group>
+  </metadata>
+
+  <description>
+    Add an OOB-style command bar at the top of the EventsPage with ribbon-style
+    buttons matching Power Apps: New, Delete, Refresh, and a Show Chart toggle.
+    This replaces or augments the existing toolbar filters.
+  </description>
+
+  <context>
+    <target-location>src/solutions/EventsPage/src/components/</target-location>
+    <current-implementation>StatusFilter.tsx is a dropdown toolbar, not ribbon buttons</current-implementation>
+    <oob-reference>Power Apps shows: + New | Delete | Refresh | Show Chart | ...</oob-reference>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>Command bar appears at top of page above view toolbar</criterion>
+    <criterion>New button opens Event quick create or form</criterion>
+    <criterion>Delete button is disabled when no rows selected</criterion>
+    <criterion>Refresh button reloads grid data</criterion>
+    <criterion>Show Chart button toggles chart panel visibility</criterion>
+    <criterion>Buttons use Fluent UI v9 CommandBar or Toolbar</criterion>
+    <criterion>Icons match OOB Power Apps style</criterion>
+    <criterion>Dark mode supported</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Create EventsCommandBar component with Fluent UI Toolbar</step>
+    <step order="2">Add New button with Add icon, wired to Xrm.Navigation.openForm</step>
+    <step order="3">Add Delete button (disabled state when no selection)</step>
+    <step order="4">Add Refresh button that triggers grid reload</step>
+    <step order="5">Add Show Chart toggle button</step>
+    <step order="6">Add Calendar button to open calendar side pane (from task 091)</step>
+    <step order="7">Position CommandBar above ViewToolbar in layout</step>
+    <step order="8">Test all button actions</step>
+    <step order="9">Verify dark mode styling</step>
+  </steps>
+
+  <estimated-effort>medium</estimated-effort>
+</task>

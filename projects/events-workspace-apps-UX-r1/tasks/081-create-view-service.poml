@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>081</id>
+    <title>Create ViewService for savedquery fetching</title>
+    <phase>8</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <tags>shared-library, service, views</tags>
+    <created>2026-02-05</created>
+    <dependencies>080</dependencies>
+    <parallel-group>F</parallel-group>
+  </metadata>
+
+  <description>
+    Create ViewService in the shared library to fetch saved views from Dataverse.
+    Queries the savedquery entity for system/public views and merges with
+    sprk_gridconfiguration custom views. Framework-agnostic design.
+  </description>
+
+  <context>
+    <architecture-doc>docs/architecture/universal-dataset-grid-architecture.md</architecture-doc>
+    <target-location>src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts</target-location>
+    <related-adr>ADR-012</related-adr>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>ViewService class created with XrmContext constructor parameter</criterion>
+    <criterion>getViews method returns IViewDefinition[] for an entity</criterion>
+    <criterion>getDefaultView method returns the default view for an entity</criterion>
+    <criterion>getViewById method returns a specific view</criterion>
+    <criterion>Supports includeCustom option to merge sprk_gridconfiguration views</criterion>
+    <criterion>Views sorted by sortOrder property</criterion>
+    <criterion>Unit tests with mocked Xrm.WebApi calls</criterion>
+    <criterion>Exported from shared library index.ts</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Create IViewDefinition interface in types/ViewTypes.ts</step>
+    <step order="2">Create ViewService.ts with constructor accepting XrmContext</step>
+    <step order="3">Implement getViews method querying savedquery entity</step>
+    <step order="4">Implement getDefaultView method filtering for isdefault=true</step>
+    <step order="5">Implement getViewById method for specific view retrieval</step>
+    <step order="6">Add support for sprk_gridconfiguration merge (if includeCustom=true)</step>
+    <step order="7">Create unit tests in services/__tests__/ViewService.test.ts</step>
+    <step order="8">Export from services/index.ts and main index.ts</step>
+  </steps>
+
+  <estimated-effort>medium</estimated-effort>
+</task>

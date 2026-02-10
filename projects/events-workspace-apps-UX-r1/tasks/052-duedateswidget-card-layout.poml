@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Implement DueDatesWidget List Layout</title>
+    <phase>5</phase>
+    <tags>pcf, fluent-ui, ui-components, duedates-widget</tags>
+    <estimate>2.5 hours</estimate>
+    <dependencies>050</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create list layout showing date column, event type badge, name, description, and days-until-due indicator.</goal>
+
+    <context>
+      Per mockup, each event row displays:
+      - Date column: Day number (6, 10, 13) + day abbreviation (FRI, TUE)
+      - Event type badge: Colored square badge (yellow=Hearing, green=Filing, purple=Regulatory)
+      - Event name
+      - Description snippet (from sprk_description field)
+      - Days-until-due indicator: Small red circular badge on right showing number
+    </context>
+
+    <constraints>
+      - List layout (NOT cards) per mockup
+      - Fluent UI v9 components only
+      - Semantic color tokens for event type badges
+      - Dark mode compatible
+      - Description truncated if too long
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="Fluent UI patterns" />
+      <file path=".claude/patterns/pcf/theme-management.md" reason="Theme tokens" />
+      <file path="projects/events-workspace-apps-UX-r1/notes/mockups/record-overview-tab-upcoming-events-section.png" reason="Visual mockup reference" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create EventListItem component with flex row layout</step>
+    <step order="2">Add DateColumn component:
+      - Large day number (6, 10, 13)
+      - Day abbreviation below (FRI, TUE, etc.)
+    </step>
+    <step order="3">Add EventTypeBadge component:
+      - Colored square/rounded badge
+      - Event type name text
+    </step>
+    <step order="4">Add event name with proper font styling</step>
+    <step order="5">Add description from sprk_description field with truncation</step>
+    <step order="6">Add DaysUntilDueBadge component:
+      - Small red circular badge
+      - Shows number of days until due
+      - Position on right side of row
+    </step>
+    <step order="7">Style with Fluent tokens</step>
+    <step order="8">Add hover and focus states for clickability</step>
+    <step order="9">Test in light and dark mode</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/DueDatesWidget/components/EventListItem.tsx</artifact>
+    <artifact type="file">src/client/pcf/DueDatesWidget/components/DateColumn.tsx</artifact>
+    <artifact type="file">src/client/pcf/DueDatesWidget/components/EventTypeBadge.tsx</artifact>
+    <artifact type="file">src/client/pcf/DueDatesWidget/components/DaysUntilDueBadge.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>List layout matches mockup structure</criterion>
+    <criterion>Date column shows day number + abbreviation</criterion>
+    <criterion>Event type badge shows colored indicator + type name</criterion>
+    <criterion>Description displays from sprk_description field</criterion>
+    <criterion>Days-until-due badge shows on right side</criterion>
+    <criterion>No hard-coded colors</criterion>
+    <criterion>Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note>
+      Completed: 2026-02-04
+
+      Implementation Summary:
+      - Created DateColumn.tsx: Displays large day number with day abbreviation below (SUN-SAT)
+      - Created EventTypeBadge.tsx: Colored square badge with type name, auto-colors based on event type
+      - Created DaysUntilDueBadge.tsx: Red circular badge showing days until due
+      - Created EventListItem.tsx: Main row component composing all sub-components with flex layout
+      - Updated DueDatesWidgetRoot.tsx: Header changed to "Upcoming Events" with "All Events" link per mockup
+      - Updated IEventItem interface to include description field
+
+      All components use Fluent UI v9 design tokens for colors (ADR-021 compliant).
+      Hover and focus states implemented for keyboard navigation (WCAG 2.1 AA).
+      Build verified successful (bundle size: 2.87 MiB, under 5MB limit).
+    </note>
+  </notes>
+</task>

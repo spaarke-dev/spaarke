@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Implement Multi-Month Vertical Stack Calendar</title>
+    <phase>1</phase>
+    <tags>pcf, calendar, fluent-ui, react</tags>
+    <estimate>4-5 hours</estimate>
+    <dependencies>001</dependencies>
+    <parallel-group>A</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <completed-date>2026-02-04</completed-date>
+    <summary>Implemented multi-month vertical stack calendar with CalendarMonth.tsx and CalendarStack.tsx components.
+    All styling uses Fluent design tokens (no hard-coded colors). Build verified successful (787KB bundle).
+    Replaced P001 placeholder in EventCalendarFilterRoot.tsx.</summary>
+    <files-created>
+      - src/client/pcf/EventCalendarFilter/control/components/CalendarMonth.tsx
+      - src/client/pcf/EventCalendarFilter/control/components/CalendarStack.tsx
+    </files-created>
+    <files-modified>
+      - src/client/pcf/EventCalendarFilter/control/components/EventCalendarFilterRoot.tsx (replaced placeholder)
+    </files-modified>
+  </notes>
+
+  <prompt>
+    <goal>Implement multi-month vertical stack calendar showing 3 months with scroll navigation.</goal>
+
+    <context>
+      Per mockup, the EventCalendarFilter displays 3 months stacked vertically (e.g., Feb, Mar, Apr).
+      User can scroll up/down to navigate to previous/next months.
+      Selected date ranges can span across month boundaries.
+
+      Reference VisualHost CalendarVisual.tsx for design patterns (but NOT code - it's React 18).
+    </context>
+
+    <constraints>
+      - MUST show 3 months simultaneously in vertical stack
+      - MUST support scroll up/down to navigate months
+      - MUST use @fluentui/react-components or build with Fluent primitives
+      - MUST NOT use third-party calendar libraries
+      - MUST use Fluent design tokens for all colors/spacing
+      - Selected dates highlighted in blue (per mockup)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="Fluent UI v9 requirements" />
+      <file path=".claude/patterns/pcf/theme-management.md" reason="Theme token usage" />
+      <file path="src/client/pcf/VisualHost/control/components/CalendarVisual.tsx" reason="Design reference (React 18 - patterns only)" />
+      <file path="projects/events-workspace-apps-UX-r1/notes/mockups/record-events-tab-calendar-and-dataset.png" reason="Visual mockup reference" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read VisualHost CalendarVisual.tsx for design patterns (grid layout, styling approach)</step>
+    <step order="2">Create CalendarMonth.tsx component with:
+      - Month/year label header
+      - Weekday headers (S M T W T F S)
+      - Date grid (6 rows x 7 columns)
+      - Dates with/without events differentiated
+    </step>
+    <step order="3">Create CalendarStack.tsx wrapper that:
+      - Renders 3 CalendarMonth components vertically
+      - Manages scroll state for month navigation
+      - Handles infinite scroll up/down behavior
+    </step>
+    <step order="4">Use makeStyles with Fluent tokens for all styling:
+      - Blue background for selected dates
+      - Blue highlight for dates with events
+      - Standard text colors for dates
+    </step>
+    <step order="5">Implement scroll-based month navigation:
+      - Scroll up = show earlier months
+      - Scroll down = show later months
+      - Smooth scroll behavior
+    </step>
+    <step order="6">Integrate into EventCalendarFilterRoot.tsx</step>
+    <step order="7">Test dark mode rendering</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/control/components/CalendarMonth.tsx</artifact>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/control/components/CalendarStack.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Shows 3 months stacked vertically</criterion>
+    <criterion>Scroll up/down navigates months</criterion>
+    <criterion>Selected dates highlighted in blue per mockup</criterion>
+    <criterion>Uses only Fluent UI v9 components and tokens</criterion>
+    <criterion>Renders correctly in light and dark mode</criterion>
+    <criterion>No hard-coded colors</criterion>
+  </acceptance-criteria>
+</task>

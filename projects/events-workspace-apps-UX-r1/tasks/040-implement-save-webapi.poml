@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Implement Save via WebAPI</title>
+    <phase>4</phase>
+    <tags>custom-page, sidepane, webapi</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>034</dependencies>
+    <parallel-group>C</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <completed>2026-02-04</completed>
+    <summary>
+      Implemented comprehensive save functionality for EventDetailSidePane:
+      - Added DirtyFields type and getDirtyFields() function to compare original vs current values
+      - Added hasDirtyFields() utility to check if there are unsaved changes
+      - Added saveEvent() function that sends only changed fields via PATCH request
+      - Added parseWebApiError() for user-friendly error messages
+      - Created Footer.tsx component with Save button, dirty indicator, and success/error messages
+      - Integrated save functionality into App.tsx with state management for dirty tracking
+      - Success messages auto-dismiss after 3 seconds
+      - Build verified: npm run build passes successfully
+    </summary>
+    <files-modified>
+      - src/solutions/EventDetailSidePane/src/services/eventService.ts (added save functions)
+      - src/solutions/EventDetailSidePane/src/components/Footer.tsx (new)
+      - src/solutions/EventDetailSidePane/src/components/index.ts (export Footer)
+      - src/solutions/EventDetailSidePane/src/App.tsx (integrated save functionality)
+    </files-modified>
+  </notes>
+
+  <prompt>
+    <goal>Implement save functionality using Dataverse WebAPI.</goal>
+
+    <context>
+      Save button updates the Event record with all changed fields.
+      Use PATCH for partial update.
+    </context>
+
+    <constraints>
+      - Only send changed fields
+      - Handle errors gracefully
+      - Show success/error feedback
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/web-api-client.md" reason="WebAPI patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Track dirty fields in state</step>
+    <step order="2">Create saveEvent function</step>
+    <step order="3">Build PATCH request with only changed fields</step>
+    <step order="4">Call WebAPI update</step>
+    <step order="5">Handle success (clear dirty, show message)</step>
+    <step order="6">Handle error (show error, keep dirty)</step>
+    <step order="7">Add Save button to footer</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/services/eventService.ts</artifact>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/components/Footer.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Save updates record</criterion>
+    <criterion>Only changed fields sent</criterion>
+    <criterion>Success feedback shown</criterion>
+    <criterion>Error feedback shown</criterion>
+  </acceptance-criteria>
+</task>

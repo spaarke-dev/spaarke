@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="067" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Configure Sitemap Navigation</title>
+    <phase>6</phase>
+    <tags>custom-page, sitemap, navigation</tags>
+    <estimate>1.5 hours</estimate>
+    <dependencies>066</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Configure sitemap to use Events Custom Page instead of OOB view.</goal>
+
+    <context>
+      Per owner clarification: replace OOB Events entity main view with custom page.
+      Use existing "Events" left pane navigation entry.
+      Not branded as "My Events" - just "Events".
+    </context>
+
+    <constraints>
+      - Modify existing sitemap entry
+      - Point to Custom Page URL
+      - Preserve navigation group/area
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/sitemap-configuration.md" reason="Sitemap patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Identify current Events sitemap entry</step>
+    <step order="2">Document original configuration</step>
+    <step order="3">Update URL to Custom Page</step>
+    <step order="4">Update SubArea type if needed</step>
+    <step order="5">Preserve icon and title ("Events")</step>
+    <step order="6">Publish sitemap changes</step>
+    <step order="7">Test navigation from left pane</step>
+    <step order="8">Verify page loads correctly</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/SpaarkeSolution/sitemap.xml (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Events navigation opens Custom Page</criterion>
+    <criterion>Navigation label is "Events" (not "My Events")</criterion>
+    <criterion>Icon preserved</criterion>
+    <criterion>Previous OOB view not accessible via sitemap</criterion>
+  </acceptance-criteria>
+</task>

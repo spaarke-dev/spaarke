@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>080</id>
+    <title>Create FetchXmlService in shared library</title>
+    <phase>8</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <tags>shared-library, service, fetchxml</tags>
+    <created>2026-02-05</created>
+    <dependencies>none</dependencies>
+    <parallel-group>F</parallel-group>
+  </metadata>
+
+  <description>
+    Create the FetchXmlService in the shared UI components library. This service
+    executes FetchXML queries via Xrm.WebApi and parses layoutxml to column definitions.
+    Must be framework-agnostic (receives Xrm as constructor argument).
+  </description>
+
+  <context>
+    <architecture-doc>docs/architecture/universal-dataset-grid-architecture.md</architecture-doc>
+    <target-location>src/client/shared/Spaarke.UI.Components/src/services/FetchXmlService.ts</target-location>
+    <related-adr>ADR-012, ADR-021, ADR-022</related-adr>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>FetchXmlService class created with XrmContext constructor parameter</criterion>
+    <criterion>executeFetchXml&lt;T&gt; method executes FetchXML and returns typed results</criterion>
+    <criterion>parseLayoutXml method converts layoutxml to IColumnDefinition[]</criterion>
+    <criterion>mergeFetchXmlFilter method merges additional filter into FetchXML</criterion>
+    <criterion>Supports pagination (pageSize, pagingCookie)</criterion>
+    <criterion>Unit tests with 80%+ coverage</criterion>
+    <criterion>Exported from shared library index.ts</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Create IFetchXmlResult&lt;T&gt; interface in types/FetchXmlTypes.ts</step>
+    <step order="2">Create FetchXmlService.ts with constructor accepting XrmContext</step>
+    <step order="3">Implement executeFetchXml method using Xrm.WebApi.retrieveMultipleRecords</step>
+    <step order="4">Implement parseLayoutXml using DOMParser to extract column definitions</step>
+    <step order="5">Implement mergeFetchXmlFilter to inject additional filter conditions</step>
+    <step order="6">Create unit tests in services/__tests__/FetchXmlService.test.ts</step>
+    <step order="7">Export from services/index.ts and main index.ts</step>
+    <step order="8">Verify build succeeds with npm run build</step>
+  </steps>
+
+  <estimated-effort>medium</estimated-effort>
+</task>

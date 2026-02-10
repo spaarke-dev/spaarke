@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Security Role Awareness (Read-Only Mode)</title>
+    <phase>4</phase>
+    <tags>custom-page, sidepane, security</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>041</dependencies>
+    <parallel-group>C</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Detect if user lacks edit permission and render Side Pane in read-only mode.</goal>
+
+    <context>
+      Per owner clarification, Side Pane should open even for users without edit access,
+      but display in read-only mode (all fields disabled, no Save button).
+    </context>
+
+    <constraints>
+      - Check user privileges on record
+      - Disable all inputs if no edit access
+      - Hide Save button
+      - Show "Read-only" indicator
+    </constraints>
+  </prompt>
+
+  <steps>
+    <step order="1">Query record with user privileges</step>
+    <step order="2">Determine if user has update privilege</step>
+    <step order="3">Pass readOnly prop to all sections</step>
+    <step order="4">Disable all inputs when readOnly</step>
+    <step order="5">Hide Save button when readOnly</step>
+    <step order="6">Add visual indicator for read-only mode</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/hooks/useRecordAccess.ts</artifact>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/App.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Read-only users see disabled fields</criterion>
+    <criterion>No Save button for read-only users</criterion>
+    <criterion>Visual indicator shows read-only state</criterion>
+    <criterion>Edit users have normal functionality</criterion>
+  </acceptance-criteria>
+</task>

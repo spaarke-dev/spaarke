@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>085</id>
+    <title>Create CommandBar component matching OOB ribbon</title>
+    <phase>8</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <tags>shared-library, component, command-bar, oob-parity</tags>
+    <created>2026-02-05</created>
+    <dependencies>082</dependencies>
+    <parallel-group>G</parallel-group>
+  </metadata>
+
+  <description>
+    Create CommandBar component that visually matches the OOB Power Apps ribbon/command bar.
+    Provides standard actions (New, Delete, Refresh) plus custom commands.
+    For Custom Pages that need to replicate OOB page chrome.
+  </description>
+
+  <context>
+    <architecture-doc>docs/architecture/universal-dataset-grid-architecture.md</architecture-doc>
+    <target-location>src/client/shared/Spaarke.UI.Components/src/components/PageChrome/CommandBar.tsx</target-location>
+    <visual-reference>OOB Power Apps entity homepage command bar</visual-reference>
+    <existing-component>src/client/shared/Spaarke.UI.Components/src/components/Toolbar/CommandToolbar.tsx</existing-component>
+    <related-adr>ADR-021</related-adr>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>CommandBar component renders Fluent Toolbar with OOB styling</criterion>
+    <criterion>Props: entityLogicalName, selectedIds, commands, onRefresh, onNew, onDelete</criterion>
+    <criterion>Standard buttons: New, Delete (with selection count), Refresh</criterion>
+    <criterion>Custom commands rendered via commands prop</criterion>
+    <criterion>Delete button disabled when no selection</criterion>
+    <criterion>Search box on right side (optional)</criterion>
+    <criterion>Exact visual match to OOB Power Apps command bar</criterion>
+    <criterion>Dark mode support via Fluent tokens</criterion>
+    <criterion>Keyboard shortcuts (Ctrl+N for New, Delete key, F5 for refresh)</criterion>
+    <criterion>Unit tests</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Create PageChrome/ folder in components/</step>
+    <step order="2">Create CommandBar.tsx with props interface</step>
+    <step order="3">Implement using Fluent Toolbar component</step>
+    <step order="4">Add standard buttons (New, Delete, Refresh)</step>
+    <step order="5">Add support for custom commands via props</step>
+    <step order="6">Style to exactly match OOB Power Apps ribbon</step>
+    <step order="7">Add keyboard shortcuts via useKeyboardShortcuts hook</step>
+    <step order="8">Add optional search box</step>
+    <step order="9">Create unit tests</step>
+    <step order="10">Export from components/index.ts</step>
+  </steps>
+
+  <estimated-effort>medium</estimated-effort>
+</task>

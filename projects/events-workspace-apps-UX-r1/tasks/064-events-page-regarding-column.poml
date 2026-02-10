@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Record Type Filter</title>
+    <phase>6</phase>
+    <tags>custom-page, grid, filtering</tags>
+    <estimate>1.5 hours</estimate>
+    <dependencies>061</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <note date="2026-02-04">
+      Implemented Record Type (Event Type) filter for Events Custom Page.
+
+      Implementation:
+      1. Created RecordTypeFilter.tsx component (multi-select Combobox)
+      2. Fetches event types from sprk_eventtype entity via WebAPI
+      3. Added eventTypeFilter state and handler in App.tsx
+      4. Integrated filter in header toolbar between Assigned To and Status
+      5. Updated GridSection with eventTypeFilter prop and buildEventTypeFilter()
+      6. Applied event type filter to WebAPI query
+      7. Updated mock data to support event type filtering
+      8. Bumped versions to 1.4.0
+
+      Note: "Record Type" in UI refers to Event Type (sprk_eventtypeid lookup).
+      Filter shows categories like Hearing, Filing, Regulatory, etc.
+    </note>
+  </notes>
+
+  <prompt>
+    <goal>Add "Record Type" filter to Events Custom Page to filter by Event Type.</goal>
+
+    <context>
+      System-level Events page shows events from all types.
+      "Record Type" filter allows filtering by Event Type (sprk_eventtypeid lookup).
+      Shows available event types like Hearing, Filing, Regulatory, etc.
+      Uses multi-select Combobox similar to AssignedToFilter.
+    </context>
+
+    <constraints>
+      - Fetch event types from sprk_eventtype entity
+      - Multi-select dropdown (Fluent UI v9 Combobox)
+      - Apply filter to grid WebAPI query
+      - Dark mode support via design tokens
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="UI patterns" />
+      <file path="src/solutions/EventsPage/src/components/AssignedToFilter.tsx" reason="Similar filter pattern" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" status="completed">Create RecordTypeFilter component</step>
+    <step order="2" status="completed">Fetch event types from Dataverse</step>
+    <step order="3" status="completed">Add filter state to App.tsx</step>
+    <step order="4" status="completed">Integrate filter in toolbar</step>
+    <step order="5" status="completed">Wire filter to GridSection</step>
+    <step order="6" status="completed">Build OData filter for event type</step>
+    <step order="7" status="completed">Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventsPage/src/components/RecordTypeFilter.tsx</artifact>
+    <artifact type="file">src/solutions/EventsPage/src/components/index.ts (updated)</artifact>
+    <artifact type="file">src/solutions/EventsPage/src/App.tsx (updated)</artifact>
+    <artifact type="file">src/solutions/EventsPage/src/components/GridSection.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion status="pass">Filter UI renders in toolbar</criterion>
+    <criterion status="pass">Multi-select works for event types</criterion>
+    <criterion status="pass">Grid filters by selected event type(s)</criterion>
+    <criterion status="pass">Clear filters resets event type selection</criterion>
+    <criterion status="pass">Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="039" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Integrate EventTypeService for Field Visibility</title>
+    <phase>4</phase>
+    <tags>custom-page, sidepane, service</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>032, 033, 034, 035, 036, 037, 038, 025</dependencies>
+    <parallel-group>C</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Integrate EventTypeService to control which sections are visible based on Event Type.</goal>
+
+    <context>
+      Each Event Type can configure which fields/sections are visible.
+      The Side Pane should query EventTypeService and show/hide sections accordingly.
+    </context>
+
+    <constraints>
+      - Import from @spaarke/ui-components
+      - Apply visibility config to all sections
+      - Respect section expand/collapse defaults
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/tasks/020-create-eventtypeservice.poml" reason="EventTypeService interface" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Import EventTypeService from shared library</step>
+    <step order="2">Query field config on component mount</step>
+    <step order="3">Apply visibility to each section</step>
+    <step order="4">Apply expand/collapse defaults</step>
+    <step order="5">Handle Event Type not configured (show all)</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/App.tsx (updated)</artifact>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/hooks/useEventTypeConfig.ts</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Sections show/hide based on Event Type</criterion>
+    <criterion>Default expand/collapse applied</criterion>
+    <criterion>Works when config not defined</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>097</id>
+    <title>Column Header Menu OOB Parity</title>
+    <phase>10</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <tags>eventspage, grid, columnheader, menu, oob-parity</tags>
+    <created>2026-02-05</created>
+    <dependencies>095</dependencies>
+    <parallel-group>K</parallel-group>
+  </metadata>
+
+  <description>
+    Rewrite column headers to match OOB Power Apps grid behavior exactly.
+    Column headers should be clickable and show a dropdown menu with:
+    - A to Z (sort ascending)
+    - Z to A (sort descending)
+    - Filter by (opens filter panel)
+    - Column width
+    - Move left / Move right
+
+    Replace current ColumnFilterHeader implementation with OOB-style menu.
+  </description>
+
+  <context>
+    <target-location>src/solutions/EventsPage/src/components/</target-location>
+    <current-implementation>ColumnFilterHeader.tsx with separate filter icon</current-implementation>
+    <oob-reference>Power Apps grid column header dropdown menu</oob-reference>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>Column header text is clickable (entire header, not separate icon)</criterion>
+    <criterion>Click opens dropdown menu with OOB options</criterion>
+    <criterion>Menu shows: A to Z, Z to A, Filter by, Column width, Move left, Move right</criterion>
+    <criterion>Sort indicator (▼) appears next to sorted column name</criterion>
+    <criterion>Filter by opens appropriate filter panel (text/choice/date)</criterion>
+    <criterion>Active filter indicator shows on column header</criterion>
+    <criterion>Font matches OOB Dynamics font (Segoe UI)</criterion>
+    <criterion>Menu styling matches OOB (colors, spacing, icons)</criterion>
+    <criterion>Dark mode supported</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Analyze OOB column header menu structure and styling</step>
+    <step order="2">Create ColumnHeaderMenu component with Fluent UI Menu</step>
+    <step order="3">Add A to Z / Z to A sort options with icons</step>
+    <step order="4">Add Filter by option that opens filter submenu/panel</step>
+    <step order="5">Add Column width option (placeholder or functional)</step>
+    <step order="6">Add Move left / Move right options (placeholder or functional)</step>
+    <step order="7">Add sort indicator (▼/▲) to sorted column</step>
+    <step order="8">Add active filter indicator to filtered columns</step>
+    <step order="9">Style menu to match OOB (font, colors, spacing)</step>
+    <step order="10">Replace ColumnFilterHeader with ColumnHeaderMenu in GridSection</step>
+    <step order="11">Add sorting state management</step>
+    <step order="12">Implement client-side sorting</step>
+    <step order="13">Test all menu options</step>
+    <step order="14">Verify dark mode styling</step>
+  </steps>
+
+  <estimated-effort>large</estimated-effort>
+</task>

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Implement getEventTypeFieldConfig Interface</title>
+    <phase>3</phase>
+    <tags>shared-library, service, webapi</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>020</dependencies>
+    <parallel-group>A</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement the getEventTypeFieldConfig function that queries Event Type record and returns field configuration.</goal>
+
+    <context>
+      The service needs to accept a WebApi-like interface (not PCF-specific) and an Event Type ID,
+      then return the field configuration for that Event Type.
+    </context>
+
+    <constraints>
+      - Accept generic WebApi interface (not ComponentFramework.WebApi directly)
+      - Return Promise&lt;EventTypeFieldConfig&gt;
+      - Handle missing Event Type gracefully
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/web-api-client.md" reason="WebAPI patterns" />
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Event Type field names" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define IWebApiLike interface for dependency injection</step>
+    <step order="2">Implement getEventTypeFieldConfig function</step>
+    <step order="3">Query sprk_eventtype entity for field requirements</step>
+    <step order="4">Map response to EventTypeFieldConfig</step>
+    <step order="5">Add error handling for missing records</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/shared/Spaarke.UI.Components/src/services/EventTypeService.ts (updated)</artifact>
+    <artifact type="file">src/client/shared/Spaarke.UI.Components/src/types/WebApiLike.ts</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Function accepts generic WebApi interface</criterion>
+    <criterion>Returns correct EventTypeFieldConfig</criterion>
+    <criterion>Handles missing Event Type without crashing</criterion>
+  </acceptance-criteria>
+</task>

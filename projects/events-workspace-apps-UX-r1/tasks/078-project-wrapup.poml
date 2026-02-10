@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="078" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Project Wrap-up</title>
+    <phase>7</phase>
+    <tags>documentation, wrap-up</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>077</dependencies>
+    <parallel-group>E</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Complete project documentation and archive artifacts.</goal>
+
+    <context>
+      Final project wrap-up tasks.
+      Update README status, create lessons learned.
+      Archive working files.
+    </context>
+
+    <constraints>
+      - README shows Complete status
+      - All success criteria verified
+      - Lessons learned documented
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/README.md" reason="Project status" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update README.md status to Complete</step>
+    <step order="2">Verify all success criteria met</step>
+    <step order="3">Create lessons-learned.md</step>
+    <step order="4">Archive notes/ folder</step>
+    <step order="5">Update TASK-INDEX.md final status</step>
+    <step order="6">Run /repo-cleanup</step>
+    <step order="7">Create final commit</step>
+    <step order="8">Prepare PR for merge to master</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">projects/events-workspace-apps-UX-r1/lessons-learned.md</artifact>
+    <artifact type="file">projects/events-workspace-apps-UX-r1/README.md (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README status is Complete</criterion>
+    <criterion>All success criteria verified</criterion>
+    <criterion>Lessons learned documented</criterion>
+    <criterion>Project ready for archive</criterion>
+  </acceptance-criteria>
+</task>

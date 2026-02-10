@@ -1,0 +1,62 @@
+<task id="003" project="visualization-module-r2">
+  <metadata>
+    <title>Add DueDateCard and DueDateCardList Option Set Values</title>
+    <phase>1</phase>
+    <estimate>30-60 minutes</estimate>
+    <tags>dataverse, schema, option-set</tags>
+    <dependencies></dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add new visual type options to sprk_visualtype choice field</goal>
+    <context>
+      The sprk_visualtype option set determines which visual component to render.
+      We need to add two new options for the due date card visuals.
+    </context>
+    <constraints>
+      - Use specific option values from spec: DueDateCard=100000008, DueDateCardList=100000009
+      - Do not modify existing option values
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/visualization-module-r2/spec.md</file>
+      <file>src/client/pcf/VisualHost/control/types/index.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Open Dataverse maker portal for spaarkedev1 environment</step>
+    <step id="2">Navigate to Tables > sprk_chartdefinition > Columns</step>
+    <step id="3">Find sprk_visualtype choice column and edit it</step>
+    <step id="4">Add new option: "Due Date Card"
+      - Label: Due Date Card
+      - Value: 100000008
+    </step>
+    <step id="5">Add new option: "Due Date Card List"
+      - Label: Due Date Card List
+      - Value: 100000009
+    </step>
+    <step id="6">Save the choice column changes</step>
+    <step id="7">Publish table customizations</step>
+    <step id="8">Verify new options appear in existing chart definition records</step>
+  </steps>
+
+  <tools>
+    <tool>Dataverse Maker Portal</tool>
+    <tool>Web Browser</tool>
+  </tools>
+
+  <outputs>
+    <output>2 new options in sprk_visualtype choice field</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>DueDateCard option exists with value 100000008</criterion>
+    <criterion>DueDateCardList option exists with value 100000009</criterion>
+    <criterion>Existing option values unchanged</criterion>
+    <criterion>New options visible when editing chart definition records</criterion>
+  </acceptance-criteria>
+</task>

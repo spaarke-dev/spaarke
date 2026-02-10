@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Complete Event</title>
+    <style>
+        :root {
+            --primary: #0078d4;
+            --primary-hover: #106ebe;
+            --text-primary: #323130;
+            --text-secondary: #605e5c;
+            --border: #8a8886;
+            --background: #ffffff;
+            --input-border: #8a8886;
+            --input-border-focus: #0078d4;
+            --success: #107c10;
+            --danger: #a4262c;
+        }
+
+        /* Dark mode support */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --text-primary: #f3f2f1;
+                --text-secondary: #a19f9d;
+                --background: #1b1a19;
+                --border: #484644;
+                --input-border: #605e5c;
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+            font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        body {
+            margin: 0;
+            padding: 20px;
+            background: var(--background);
+            color: var(--text-primary);
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .dialog-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .dialog-header svg {
+            width: 24px;
+            height: 24px;
+            color: var(--success);
+        }
+
+        .dialog-header h2 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .event-info {
+            background: rgba(0, 120, 212, 0.05);
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 20px;
+        }
+
+        .event-info label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .event-info .value {
+            font-weight: 600;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 6px;
+        }
+
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 8px 12px;
+            font-size: 14px;
+            border: 1px solid var(--input-border);
+            border-radius: 4px;
+            background: var(--background);
+            color: var(--text-primary);
+            transition: border-color 0.15s;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--input-border-focus);
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .form-group .hint {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .button-group {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        button {
+            padding: 8px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            border: 1px solid var(--primary);
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+            border-color: var(--primary-hover);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(0, 0, 0, 0.05);
+        }
+    </style>
+</head>
+<body>
+    <div class="dialog-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+        <h2>Complete Event</h2>
+    </div>
+
+    <div class="event-info">
+        <label>Event</label>
+        <div class="value" id="eventName">Loading...</div>
+    </div>
+
+    <div class="form-group">
+        <label for="completedDate">Completion Date</label>
+        <input type="date" id="completedDate" required>
+        <div class="hint">Date the event was completed</div>
+    </div>
+
+    <div class="form-group">
+        <label for="completionNotes">Completion Notes (Optional)</label>
+        <textarea id="completionNotes" placeholder="Add any notes about the completion..."></textarea>
+    </div>
+
+    <div class="button-group">
+        <button type="button" class="btn-secondary" id="cancelBtn">Cancel</button>
+        <button type="button" class="btn-primary" id="completeBtn">Complete Event</button>
+    </div>
+
+    <script>
+        (function() {
+            // Get data passed from parent
+            var data = {};
+            try {
+                var urlParams = new URLSearchParams(window.location.search);
+                data = {
+                    eventId: urlParams.get('eventId'),
+                    eventName: urlParams.get('eventName'),
+                    dueDate: urlParams.get('dueDate')
+                };
+            } catch (e) {
+                console.error('Error parsing URL params:', e);
+            }
+
+            // Populate UI
+            document.getElementById('eventName').textContent = data.eventName || 'Unknown Event';
+
+            // Set default completion date to today
+            var today = new Date().toISOString().split('T')[0];
+            document.getElementById('completedDate').value = today;
+
+            // Cancel button
+            document.getElementById('cancelBtn').addEventListener('click', function() {
+                sendResult({ confirmed: false });
+            });
+
+            // Complete button
+            document.getElementById('completeBtn').addEventListener('click', function() {
+                var completedDate = document.getElementById('completedDate').value;
+                var notes = document.getElementById('completionNotes').value.trim();
+
+                if (!completedDate) {
+                    alert('Please select a completion date.');
+                    return;
+                }
+
+                sendResult({
+                    confirmed: true,
+                    completedDate: completedDate,
+                    notes: notes || null
+                });
+            });
+
+            // Send result back to parent
+            function sendResult(result) {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'EVENT_COMPLETE_DIALOG_RESULT',
+                        data: result
+                    }, '*');
+                }
+                // Also try Xrm.Navigation.closeForm approach
+                try {
+                    if (window.Xrm || window.parent.Xrm) {
+                        var xrm = window.Xrm || window.parent.Xrm;
+                        xrm.Navigation.closeForm();
+                    }
+                } catch (e) {
+                    // Ignore
+                }
+            }
+
+            // Handle ESC key
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    sendResult({ confirmed: false });
+                }
+            });
+        })();
+    </script>
+</body>
+</html>

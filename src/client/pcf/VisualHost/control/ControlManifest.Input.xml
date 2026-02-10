@@ -2,7 +2,7 @@
 <manifest>
   <control namespace="Spaarke.Visuals"
            constructor="VisualHost"
-           version="1.1.17"
+           version="1.2.29"
            display-name-key="Visual Host"
            description-key="Configuration-driven visualization control for charts, cards, and calendars"
            control-type="standard">
@@ -28,7 +28,15 @@
     <!-- Context Field Name - for related record filtering (v1.1.0) -->
     <property name="contextFieldName"
               display-name-key="Context Field Name"
-              description-key="Lookup field name to filter data by current record (e.g., _sprk_matterid_value). Shows only related records."
+              description-key="Field name to filter data by current record (e.g., sprk_regardingrecordid or _sprk_matterid_value). Shows only related records."
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
+    <!-- FetchXML Override - per-deployment query override (v1.2.0) -->
+    <property name="fetchXmlOverride"
+              display-name-key="FetchXML Override"
+              description-key="Per-deployment FetchXML query override. Takes highest priority over chart definition FetchXML and saved views."
               of-type="SingleLine.Text"
               usage="input"
               required="false" />
@@ -37,6 +45,30 @@
     <property name="height"
               display-name-key="Height"
               description-key="Optional height in pixels (default: auto)"
+              of-type="Whole.None"
+              usage="input"
+              required="false" />
+
+    <!-- Optional: Width override (v1.2.16) -->
+    <property name="width"
+              display-name-key="Width"
+              description-key="Optional width in pixels. Used for MetricCard matrix card sizing (3:5 ratio). Default: auto-fill container."
+              of-type="Whole.None"
+              usage="input"
+              required="false" />
+
+    <!-- Optional: Content justification (v1.2.16) -->
+    <property name="justification"
+              display-name-key="Justification"
+              description-key="Content alignment within section: left (default), center, right"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
+    <!-- Optional: Cards per row for MetricCard matrix layout (v1.2.17) -->
+    <property name="columns"
+              display-name-key="Columns"
+              description-key="Number of cards per row in MetricCard matrix layout. Card width = (container width - gaps) / columns. Default: auto based on data count."
               of-type="Whole.None"
               usage="input"
               required="false" />

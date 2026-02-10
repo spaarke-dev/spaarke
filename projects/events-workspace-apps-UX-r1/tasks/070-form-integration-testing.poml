@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Form Integration Testing (Matter/Project)</title>
+    <phase>7</phase>
+    <tags>testing, integration, forms</tags>
+    <estimate>3 hours</estimate>
+    <dependencies>058, 068</dependencies>
+    <parallel-group>E</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Test all components on Matter and Project forms.</goal>
+
+    <context>
+      Verify EventCalendarFilter, UniversalDatasetGrid enhancements,
+      and DueDatesWidget work correctly on entity forms.
+      Test bi-directional calendar-grid sync.
+    </context>
+
+    <constraints>
+      - Test on Matter main form
+      - Test on Project main form
+      - Verify all Event Types configured
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Acceptance criteria" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open Matter form with existing events</step>
+    <step order="2">Test calendar date selection → grid filter</step>
+    <step order="3">Test grid row click → Side Pane open</step>
+    <step order="4">Test Side Pane save → grid row update</step>
+    <step order="5">Test DueDatesWidget on Overview tab</step>
+    <step order="6">Test widget card click → navigation</step>
+    <step order="7">Repeat all tests on Project form</step>
+    <step order="8">Document any issues found</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">projects/events-workspace-apps-UX-r1/notes/testing/form-integration-results.md</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Calendar-Grid sync works on both forms</criterion>
+    <criterion>Side Pane opens from grid on both forms</criterion>
+    <criterion>DueDatesWidget functional on Overview tabs</criterion>
+    <criterion>All issues documented</criterion>
+  </acceptance-criteria>
+</task>

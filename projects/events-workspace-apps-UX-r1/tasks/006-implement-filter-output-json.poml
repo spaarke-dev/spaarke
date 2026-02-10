@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Implement Filter Output JSON Format</title>
+    <phase>1</phase>
+    <tags>pcf, calendar, api</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>003, 004</dependencies>
+    <parallel-group>A</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement the filter output JSON format that will be consumed by the grid.</goal>
+
+    <context>
+      The calendar writes filter state to a bound property (form) or callback (Custom Page).
+
+      JSON formats:
+      - Single: {"type":"single","date":"2026-02-10"}
+      - Range: {"type":"range","start":"2026-02-01","end":"2026-02-07"}
+      - Clear: {"type":"clear"}
+    </context>
+
+    <constraints>
+      - ISO 8601 date format (YYYY-MM-DD)
+      - Emit on every selection change
+      - Use notifyOutputChanged for PCF property binding
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Filter format specification" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define CalendarFilter TypeScript interface</step>
+    <step order="2">Create formatFilterOutput utility function</step>
+    <step order="3">Wire selection changes to notifyOutputChanged</step>
+    <step order="4">Update getOutputs() to return filter JSON</step>
+    <step order="5">Add unit tests for format functions</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/control/types/CalendarFilter.ts</artifact>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/control/utils/formatFilter.ts</artifact>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/control/index.ts (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Single date outputs correct JSON</criterion>
+    <criterion>Range outputs correct JSON</criterion>
+    <criterion>Clear outputs {"type":"clear"}</criterion>
+    <criterion>notifyOutputChanged called on change</criterion>
+  </acceptance-criteria>
+</task>

@@ -19,6 +19,7 @@ import { OpenRegular } from "@fluentui/react-icons";
 import { IInputs } from "../generated/ManifestTypes";
 import { IChartDefinition, IChartData, DrillInteraction } from "../types";
 import { ChartRenderer } from "./ChartRenderer";
+import type { MatrixJustification } from "./MetricCardMatrix";
 import { logger } from "../utils/logger";
 import {
   loadChartDefinition as loadChartDefinitionFromDataverse,
@@ -29,11 +30,16 @@ import {
   fetchAndAggregate,
   AggregationError,
 } from "../services/DataAggregationService";
+import {
+  executeClickAction,
+  hasClickAction,
+} from "../services/ClickActionHandler";
 
 const useStyles = makeStyles({
   container: {
     display: "flex",
     flexDirection: "column",
+    width: "100%",
     height: "100%",
     minHeight: "200px",
     padding: tokens.spacingVerticalM,
@@ -108,9 +114,16 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const contextRecordId = (context.mode as any).contextInfo?.entityId || null;
 
+  // v1.2.0: FetchXML override from PCF property (highest query priority)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fetchXmlOverride = (context.parameters as any).fetchXmlOverride?.raw?.trim() || null;
+
   const showToolbar = context.parameters.showToolbar?.raw !== false;
   const enableDrillThrough = context.parameters.enableDrillThrough?.raw !== false;
   const height = context.parameters.height?.raw;
+  const width = context.parameters.width?.raw;
+  const justification = (context.parameters.justification?.raw?.trim() as MatrixJustification) || null;
+  const columns = context.parameters.columns?.raw;
 
   useEffect(() => {
     if (!chartDefinitionId) {
@@ -151,17 +164,27 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         entity: definition.sprk_entitylogicalname,
       });
 
+      // DueDateCard and DueDateCardList fetch their own data — skip aggregation
+      const skipAggregation =
+        definition.sprk_visualtype === 100000008 || // DueDateCard
+        definition.sprk_visualtype === 100000009;   // DueDateCardList
+
       // Fetch and aggregate data using DataAggregationService
-      if (definition.sprk_entitylogicalname) {
+      if (definition.sprk_entitylogicalname && !skipAggregation) {
         try {
+          // DIAGNOSTIC: Log the exact context filter being passed
+          const ctxFilter = contextFieldName && contextRecordId
+            ? { fieldName: contextFieldName, recordId: contextRecordId }
+            : undefined;
+          logger.info("VisualHostRoot", `[DIAG] Context filter for aggregation: ${ctxFilter ? `fieldName="${ctxFilter.fieldName}", recordId="${ctxFilter.recordId}"` : "(none - no context)"}`);
+          logger.info("VisualHostRoot", `[DIAG] PCF contextFieldName="${contextFieldName || "(empty)"}", contextRecordId="${contextRecordId || "(empty)"}"`);
+
           const data = await fetchAndAggregate(
             { webAPI: context.webAPI },
             definition,
             {
               // v1.1.0: Add context filter if configured
-              contextFilter: contextFieldName && contextRecordId
-                ? { fieldName: contextFieldName, recordId: contextRecordId }
-                : undefined,
+              contextFilter: ctxFilter,
             }
           );
           setChartData(data);
@@ -218,130 +241,172 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
   );
 
   /**
-   * Map entity logical name to Custom Page name
-   * Each entity has its own drill-through page configured in Power Apps
-   *
-   * Custom Page Names:
-   * - sprk_visualizationdrillthroughworkspace_e48a5: "Visualization Drill Through Documents"
-   */
-  const getCustomPageName = useCallback((entityLogicalName: string | undefined): string => {
-    // Entity-specific Custom Page mapping
-    // Update these as you create Custom Pages for each entity
-    const pageMapping: Record<string, string> = {
-      "sprk_document": "sprk_visualizationdrillthroughworkspace_e48a5", // Visualization Drill Through Documents
-      // Future pages (create and add mappings):
-      // "sprk_matter": "sprk_drillthrough_matters",
-      // "sprk_event": "sprk_drillthrough_events",
-      // "sprk_invoice": "sprk_drillthrough_invoices",
-    };
-
-    if (entityLogicalName && pageMapping[entityLogicalName]) {
-      return pageMapping[entityLogicalName];
-    }
-
-    // Fallback: use Documents page as default
-    return "sprk_visualizationdrillthroughworkspace_e48a5";
-  }, []);
-
-  /**
-   * Handle expand button click - opens drill-through workspace Custom Page
-   * Passes filter parameters via URL for the Custom Page to apply
+   * Handle expand button click - drill-through navigation.
+   * v1.2.25: If sprk_drillthroughtarget is configured, opens the Custom Page in a
+   * dialog with context filter params (entity, view, filter field/value, mode=dialog).
+   * Otherwise falls back to navigateTo entitylist dialog (unfiltered).
    */
   const handleExpandClick = useCallback(async () => {
-    logger.info("VisualHostRoot", "Expand clicked", { chartDefinitionId });
+    logger.info("VisualHostRoot", "Expand clicked - navigating to view", { chartDefinitionId });
 
-    if (!chartDefinitionId || !chartDefinition) {
-      logger.warn("VisualHostRoot", "No chart definition to expand");
+    if (!chartDefinition) {
+      logger.warn("VisualHostRoot", "No chart definition for drill-through");
       return;
     }
 
-    try {
-      // Access Xrm from global scope
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (window as any).Xrm;
-
-      if (!xrm?.Navigation?.navigateTo) {
-        logger.warn("VisualHostRoot", "Xrm.Navigation not available");
-        console.log("Expand clicked for chart:", chartDefinitionId);
-        return;
-      }
-
-      // Determine which Custom Page to open based on entity
-      const customPageName = getCustomPageName(chartDefinition.sprk_entitylogicalname);
-
-      // Build URL parameters for the Custom Page
-      // The Custom Page reads these via Param() function in Power Fx
-      const params: Record<string, string> = {
-        chartDefinitionId: chartDefinitionId,
-        chartTitle: chartDefinition.sprk_name || "Drill Through",
-      };
-
-      // If the chart has a groupBy field, pass it as the default filter field
-      if (chartDefinition.sprk_groupbyfield) {
-        params.filterField = chartDefinition.sprk_groupbyfield;
-      }
-
-      logger.info("VisualHostRoot", "Opening Custom Page", {
-        pageName: customPageName,
-        params,
-      });
-
-      // Get app context for URL construction
-      const globalContext = xrm.Utility?.getGlobalContext?.();
-      const appId = globalContext?.getCurrentAppId?.() || "";
-      const baseUrl = globalContext?.getClientUrl?.() || window.location.origin;
-
-      // Build the Custom Page URL with parameters
-      // Custom Pages read params via Param("filterField"), Param("filterValue"), etc.
-      const queryParams = new URLSearchParams({
-        pagetype: "custom",
-        name: customPageName,
-        ...params,
-      });
-
-      if (appId) {
-        queryParams.set("appid", appId);
-      }
-
-      const customPageUrl = `${baseUrl}/main.aspx?${queryParams.toString()}`;
-
-      // Store params in sessionStorage for Custom Page to read
-      // Custom Page can read via: JSON.parse(sessionStorage.getItem("drillThroughParams"))
-      try {
-        sessionStorage.setItem("drillThroughParams", JSON.stringify(params));
-      } catch {
-        // sessionStorage may be unavailable in some contexts
-      }
-
-      // Open Custom Page as modal dialog per spec FR-04
-      // Use the pattern from dialog-patterns.md
-      logger.info("VisualHostRoot", "Opening as modal dialog", {
-        pageName: customPageName,
-        recordId: chartDefinitionId,
-        params
-      });
-
-      await xrm.Navigation.navigateTo(
-        {
-          pageType: "custom",
-          name: customPageName,
-          recordId: chartDefinitionId, // Custom Page reads via Param("recordId")
-        },
-        {
-          target: 2, // Dialog
-          position: 1, // Center
-          width: { value: 90, unit: "%" },
-          height: { value: 85, unit: "%" },
-        }
-      );
-
-      logger.info("VisualHostRoot", "Drill-through modal opened");
-    } catch (err) {
-      logger.error("VisualHostRoot", "Failed to open drill-through workspace", err);
-      // Fallback: log for debugging
-      console.log("Expand clicked for chart:", chartDefinitionId, chartDefinition);
+    const entityName = chartDefinition.sprk_entitylogicalname;
+    if (!entityName) {
+      logger.warn("VisualHostRoot", "No entity name configured for drill-through");
+      return;
     }
-  }, [chartDefinitionId, chartDefinition, getCustomPageName]);
+
+    // Resolve Xrm from multiple scopes — PCF controls run in iframes and
+    // custom page navigation may require the parent frame's Xrm object.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm = (window.parent as any)?.Xrm || (window as any).Xrm;
+
+    if (!xrm?.Navigation?.navigateTo) {
+      logger.warn("VisualHostRoot", "Xrm.Navigation not available");
+      return;
+    }
+
+    logger.info("VisualHostRoot", "Xrm source", {
+      fromParent: !!(window.parent as any)?.Xrm,
+      fromWindow: !!(window as any).Xrm,
+    });
+
+    const viewId = chartDefinition.sprk_baseviewid;
+    const drillThroughTarget = chartDefinition.sprk_drillthroughtarget?.trim();
+
+    // Build context filter params
+    const ctxField = chartDefinition.sprk_contextfieldname || contextFieldName;
+    let filterField: string | null = null;
+    let filterValue: string | null = null;
+    if (ctxField && contextRecordId) {
+      filterField = ctxField.replace(/^_/, "").replace(/_value$/, "");
+      filterValue = contextRecordId.replace(/[{}]/g, "");
+      logger.info("VisualHostRoot", "Context filter for drill-through", {
+        filterField,
+        filterValue,
+      });
+    }
+
+    try {
+      if (drillThroughTarget) {
+        // Drill-through target is a web resource name (e.g. "sprk_eventspage.html").
+        // Use pageType "webresource" to open it in a dialog.
+        logger.info("VisualHostRoot", "Opening web resource drill-through dialog", {
+          webresource: drillThroughTarget,
+          entityName,
+          filterField: filterField || "(none)",
+          filterValue: filterValue || "(none)",
+        });
+
+        // Build query string to pass context to the web resource
+        const params = new URLSearchParams();
+        if (entityName) params.set("entityName", entityName);
+        if (filterField) params.set("filterField", filterField);
+        if (filterValue) params.set("filterValue", filterValue);
+        if (viewId) params.set("viewId", viewId.replace(/[{}]/g, ""));
+        params.set("mode", "dialog");
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const pageInput: any = {
+          pageType: "webresource",
+          webresourceName: drillThroughTarget,
+          data: params.toString(),
+        };
+
+        const navOptions = {
+          target: 2 as const,
+          position: 1 as const,
+          width: { value: 90, unit: "%" as const },
+          height: { value: 85, unit: "%" as const },
+        };
+
+        try {
+          await xrm.Navigation.navigateTo(pageInput, navOptions);
+        } catch {
+          logger.info("VisualHostRoot", "Dialog not supported, navigating inline");
+          await xrm.Navigation.navigateTo(pageInput, { target: 1 });
+        }
+      } else {
+        // Fallback: entitylist dialog (unfiltered — filterXml not supported by navigateTo)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const pageInput: any = { pageType: "entitylist", entityName };
+        if (viewId) pageInput.viewId = viewId;
+
+        logger.info("VisualHostRoot", "Opening entity list dialog (no custom page configured)", {
+          entityName,
+          viewId: viewId || "(default)",
+        });
+
+        try {
+          await xrm.Navigation.navigateTo(pageInput, {
+            target: 2,
+            position: 1,
+            width: { value: 90, unit: "%" },
+            height: { value: 85, unit: "%" },
+          });
+        } catch {
+          logger.info("VisualHostRoot", "Dialog not supported for entity list, navigating full page");
+          await xrm.Navigation.navigateTo(pageInput, { target: 1 });
+        }
+      }
+
+      logger.info("VisualHostRoot", "Drill-through view opened");
+    } catch (err) {
+      logger.error("VisualHostRoot", "Failed to open drill-through view", err);
+    }
+  }, [chartDefinition, contextFieldName, contextRecordId]);
+
+  /**
+   * Handle configured click action from ClickActionHandler
+   */
+  const handleClickAction = useCallback(
+    async (recordId: string, entityName?: string, recordData?: Record<string, unknown>) => {
+      if (!chartDefinition || !hasClickAction(chartDefinition)) return;
+
+      await executeClickAction(
+        {
+          chartDefinition,
+          recordId,
+          entityName,
+          recordData,
+        },
+        handleExpandClick
+      );
+    },
+    [chartDefinition, handleExpandClick]
+  );
+
+  /**
+   * Handle "View List" navigation - switch to configured tab on current form
+   */
+  const handleViewListClick = useCallback(() => {
+    if (!chartDefinition?.sprk_viewlisttabname) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm = (window as any).Xrm;
+    const tabName = chartDefinition.sprk_viewlisttabname;
+
+    logger.info("VisualHostRoot", "View List click - navigating to tab", { tabName });
+
+    try {
+      // Navigate to the configured tab on the current form
+      const formContext = xrm?.Page;
+      if (formContext?.ui?.tabs?.get) {
+        const tab = formContext.ui.tabs.get(tabName);
+        if (tab) {
+          tab.setFocus();
+        } else {
+          logger.warn("VisualHostRoot", `Tab '${tabName}' not found on current form`);
+        }
+      }
+    } catch (err) {
+      logger.error("VisualHostRoot", "Failed to navigate to tab", err);
+    }
+  }, [chartDefinition]);
 
   /**
    * Render the appropriate visual based on chart definition
@@ -364,13 +429,21 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         chartData={chartData || undefined}
         onDrillInteraction={enableDrillThrough ? handleDrillInteraction : undefined}
         height={height || 300}
+        webApi={context.webAPI}
+        contextRecordId={contextRecordId || undefined}
+        onClickAction={hasClickAction(chartDefinition) ? handleClickAction : undefined}
+        onViewListClick={chartDefinition.sprk_viewlisttabname ? handleViewListClick : undefined}
+        fetchXmlOverride={fetchXmlOverride || undefined}
+        width={width || undefined}
+        justification={justification || undefined}
+        columns={columns || undefined}
       />
     );
   };
 
-  // Container style with optional height
+  // Container style with optional height (width always fills parent via CSS)
   const containerStyle: React.CSSProperties = height
-    ? { height: `${height}px` }
+    ? { minHeight: `${height}px` }
     : {};
 
   return (
@@ -390,7 +463,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
       )}
 
       {/* Version badge - lower left, unobtrusive */}
-      <span className={styles.versionBadge}>v1.1.17 • 2026-01-02</span>
+      <span className={styles.versionBadge}>v1.2.29 • 2026-02-09</span>
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>

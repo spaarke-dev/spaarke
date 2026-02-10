@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Implement Date Filtering on Dataset</title>
+    <phase>2</phase>
+    <tags>pcf, grid, filtering</tags>
+    <estimate>3 hours</estimate>
+    <dependencies>010</dependencies>
+    <parallel-group>B</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <completion-date>2026-02-04</completion-date>
+    <summary>
+      Implemented date filtering on UniversalDatasetGrid using PCF dataset.filtering API.
+      Created dateFilter.ts utility with buildDateFilter() and applyDateFilter() functions.
+      Updated UniversalDatasetGridRoot.tsx to apply filter on calendarFilter prop change.
+      Supports single date (On operator), date range (OnOrAfter/OnOrBefore), and clear filter.
+    </summary>
+  </notes>
+
+  <prompt>
+    <goal>Apply calendar date filter to the grid dataset query.</goal>
+
+    <context>
+      When calendar filter changes, grid should filter to show only events matching the date criteria.
+      Filter types: single date, date range, or clear (show all).
+    </context>
+
+    <constraints>
+      - Apply filter to sprk_duedate field
+      - Support both single date and range
+      - Clear filter shows all records
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/pcf/dataverse-queries.md" reason="Dataset filtering patterns" />
+      <file path="src/client/pcf/UniversalDatasetGrid/control/components/DatasetGrid.tsx" reason="Current grid component" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create buildDateFilter utility function</step>
+    <step order="2">Apply filter to dataset.filtering.setFilter()</step>
+    <step order="3">Handle single date: sprk_duedate eq {date}</step>
+    <step order="4">Handle range: sprk_duedate ge {start} and sprk_duedate le {end}</step>
+    <step order="5">Handle clear: remove date filter</step>
+    <step order="6">Refresh dataset after filter change</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/utils/dateFilter.ts</artifact>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/components/DatasetGrid.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Single date filter works</criterion>
+    <criterion>Range filter works</criterion>
+    <criterion>Clear shows all records</criterion>
+    <criterion>Grid refreshes on filter change</criterion>
+  </acceptance-criteria>
+</task>

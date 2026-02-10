@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Create EventTypeService in Shared Library</title>
+    <phase>3</phase>
+    <tags>shared-library, service, typescript</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>none</dependencies>
+    <parallel-group>A</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create EventTypeService in the shared component library for querying Event Type field configuration.</goal>
+
+    <context>
+      EventFormController currently has field visibility logic embedded. We need to extract this to a shared service
+      so both EventFormController and the new EventDetailSidePane can use it.
+
+      Location: src/client/shared/Spaarke.UI.Components/src/services/EventTypeService.ts
+    </context>
+
+    <constraints>
+      - MUST follow ADR-012: Shared component library patterns
+      - MUST NOT reference PCF-specific APIs
+      - MUST export TypeScript types alongside service
+      - MUST be importable via @spaarke/ui-components
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-012-shared-components.md" reason="Shared library requirements" />
+      <file path="src/client/pcf/EventFormController/handlers/FieldVisibilityHandler.ts" reason="Existing logic to extract" />
+      <file path="src/client/shared/Spaarke.UI.Components/src/services/" reason="Service location pattern" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EventFormController/handlers/FieldVisibilityHandler.ts to understand existing logic</step>
+    <step order="2">Create EventTypeService.ts in shared library services folder</step>
+    <step order="3">Define EventTypeFieldConfig interface</step>
+    <step order="4">Create service class/functions (no PCF dependencies)</step>
+    <step order="5">Export from shared library index</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/shared/Spaarke.UI.Components/src/services/EventTypeService.ts</artifact>
+    <artifact type="file">src/client/shared/Spaarke.UI.Components/src/types/EventTypeConfig.ts</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Service created in shared library</criterion>
+    <criterion>No PCF-specific imports</criterion>
+    <criterion>Types exported</criterion>
+    <criterion>Importable via @spaarke/ui-components</criterion>
+  </acceptance-criteria>
+</task>

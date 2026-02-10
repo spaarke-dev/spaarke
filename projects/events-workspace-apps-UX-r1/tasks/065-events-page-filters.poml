@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="065" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Implement Column/Field Filters</title>
+    <phase>6</phase>
+    <tags>custom-page, grid, filtering</tags>
+    <estimate>2.5 hours</estimate>
+    <dependencies>063</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add column filters: Assigned To, Record Type, Status, Date Range.</goal>
+
+    <context>
+      Per owner clarification, use column/field filters instead of view selector.
+      Standard grid filtering experience.
+      Filters: Assigned To, Record Type, Status, Date Range.
+    </context>
+
+    <constraints>
+      - Fluent UI filter components
+      - Combine with calendar date filter
+      - Persist filter state during session
+      - Clear filters option
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="UI patterns" />
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Filter requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create FilterBar component</step>
+    <step order="2">Add Assigned To dropdown (user lookup)</step>
+    <step order="3">Add Record Type dropdown (entity type)</step>
+    <step order="4">Add Status dropdown (status reason)</step>
+    <step order="5">Add Date Range filter (complements calendar)</step>
+    <step order="6">Wire filters to grid query</step>
+    <step order="7">Add "Clear Filters" button</step>
+    <step order="8">Test filter combinations</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventsPage/src/components/FilterBar.tsx</artifact>
+    <artifact type="file">src/solutions/EventsPage/src/hooks/useEventFilters.ts</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All specified filters present</criterion>
+    <criterion>Filters apply to grid correctly</criterion>
+    <criterion>Filters combine logically (AND)</criterion>
+    <criterion>Clear filters resets all</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note type="completion" date="2026-02-04">
+      Task 065 focused on adding Status filter to Events Custom Page.
+      Note: Task was split across parallel execution - Tasks 063, 064, 065, 066 were executed
+      in parallel, each handling a specific filter.
+
+      Task 065 Implementation (Status Filter):
+      - Created StatusFilter.tsx with multi-select Combobox for status filtering
+      - Status options: Draft(1), Planned(2), Open(3), On Hold(4), Completed(5), Cancelled(6)
+      - Default: Actionable statuses (1,2,3,4) - excludes Completed/Cancelled
+      - Color-coded badges in dropdown matching grid status display
+      - Integrated StatusFilter in App.tsx toolbar
+      - Added statusFilter prop to GridSection
+      - Added buildStatusFilter() function for OData query generation
+      - Updated mock data with events in various statuses for testing
+      - All filters combine with AND logic
+      - Clear filters resets status to actionable statuses
+
+      Build: Success (vite build, 525.67 kB bundle)
+    </note>
+  </notes>
+</task>

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Verify EventFormController Still Works</title>
+    <phase>3</phase>
+    <tags>pcf, testing, deploy</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>024</dependencies>
+    <parallel-group>A</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Deploy updated EventFormController and verify field visibility behavior is unchanged.</goal>
+
+    <context>
+      After refactoring to use shared service, we need to verify the control still works correctly
+      in the Dataverse environment.
+    </context>
+
+    <constraints>
+      - Test with multiple Event Types
+      - Verify field show/hide behavior matches previous
+      - No regressions
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="docs/guides/PCF-DEPLOYMENT-GUIDE.md" reason="Deployment workflow" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build EventFormController: npm run build:prod</step>
+    <step order="2">Update version (bump patch)</step>
+    <step order="3">Deploy to dev environment</step>
+    <step order="4">Test with Event Type that requires Base Date</step>
+    <step order="5">Test with Event Type that hides Base Date</step>
+    <step order="6">Verify field requirements enforced on save</step>
+    <step order="7">Document any issues found</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/EventFormController/Solution/bin/SpaarkeEventFormController_vX.Y.Z.zip</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Control deploys without errors</criterion>
+    <criterion>Field visibility works for all Event Types tested</criterion>
+    <criterion>No regressions in behavior</criterion>
+    <criterion>Version footer updated</criterion>
+  </acceptance-criteria>
+</task>

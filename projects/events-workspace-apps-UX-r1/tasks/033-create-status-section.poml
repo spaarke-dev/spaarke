@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Create Status Section with Segmented Buttons</title>
+    <phase>4</phase>
+    <tags>custom-page, sidepane, ui</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>031</dependencies>
+    <parallel-group>C</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create status section with radio/segmented button control for status reason.</goal>
+
+    <context>
+      Status reasons: Draft, Planned, Open, On Hold, Completed, Cancelled
+      Visual radio button or segmented control for quick status change.
+    </context>
+
+    <constraints>
+      - Use Fluent RadioGroup or ToggleButton group
+      - Status change updates local state (save handled separately)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Status values" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create StatusSection component</step>
+    <step order="2">Map status reason values to options</step>
+    <step order="3">Implement RadioGroup with status options</step>
+    <step order="4">Handle status change in state</step>
+    <step order="5">Style to match design spec</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/components/StatusSection.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All status options displayed</criterion>
+    <criterion>Current status selected</criterion>
+    <criterion>Selection updates state</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>084</id>
+    <title>Create ViewSelector component</title>
+    <phase>8</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <tags>shared-library, component, view-selector</tags>
+    <created>2026-02-05</created>
+    <dependencies>081</dependencies>
+    <parallel-group>G</parallel-group>
+  </metadata>
+
+  <description>
+    Create the ViewSelector component - a Fluent UI v9 dropdown that displays
+    available views for an entity. Uses ViewService to fetch views from
+    savedquery and sprk_gridconfiguration. Styled to match OOB Power Apps.
+  </description>
+
+  <context>
+    <architecture-doc>docs/architecture/universal-dataset-grid-architecture.md</architecture-doc>
+    <target-location>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/ViewSelector.tsx</target-location>
+    <visual-reference>OOB Power Apps view dropdown (entity homepage)</visual-reference>
+    <related-adr>ADR-021</related-adr>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>ViewSelector component renders Fluent Dropdown</criterion>
+    <criterion>Loads views via ViewService on mount</criterion>
+    <criterion>Props: entityLogicalName, selectedViewId, defaultViewName, onViewChange</criterion>
+    <criterion>Shows loading spinner while fetching views</criterion>
+    <criterion>Groups views by type (System, Personal, Custom) if multiple types</criterion>
+    <criterion>Calls onViewChange(IViewDefinition) when selection changes</criterion>
+    <criterion>Styled to match OOB Power Apps dropdown exactly</criterion>
+    <criterion>Dark mode support via Fluent tokens</criterion>
+    <criterion>Unit tests with mocked ViewService</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Create ViewSelector.tsx in components/DatasetGrid/</step>
+    <step order="2">Define ViewSelectorProps interface</step>
+    <step order="3">Implement component using Fluent Dropdown/Combobox</step>
+    <step order="4">Add useEffect to load views on mount via ViewService</step>
+    <step order="5">Add loading state with Spinner</step>
+    <step order="6">Style to match OOB Power Apps (use makeStyles with tokens)</step>
+    <step order="7">Add optional view grouping by type</step>
+    <step order="8">Create unit tests</step>
+    <step order="9">Export from components/index.ts</step>
+  </steps>
+
+  <estimated-effort>medium</estimated-effort>
+</task>

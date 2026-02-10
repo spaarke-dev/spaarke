@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Calendar Filter Input Property to Grid</title>
+    <phase>2</phase>
+    <tags>pcf, grid, enhancement</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>006</dependencies>
+    <parallel-group>B</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <completed-date>2026-02-04</completed-date>
+    <summary>Added calendarFilter property to UniversalDatasetGrid PCF control.
+    Property: SingleLine.Text input, parsed in updateView using parseCalendarFilter().
+    Filter types supported: single, range, clear (matching EventCalendarFilter output).
+    Filter passed to UniversalDatasetGridRoot component for use in Task 011 filtering.
+    Build verified successful (9.76 MB bundle).</summary>
+    <files-modified>
+      - src/client/pcf/UniversalDatasetGrid/control/ControlManifest.Input.xml (added calendarFilter property)
+      - src/client/pcf/UniversalDatasetGrid/control/types/index.ts (added CalendarFilter types and parseCalendarFilter)
+      - src/client/pcf/UniversalDatasetGrid/control/index.ts (parse filter in updateView)
+      - src/client/pcf/UniversalDatasetGrid/control/components/UniversalDatasetGridRoot.tsx (added calendarFilter prop)
+    </files-modified>
+  </notes>
+
+  <prompt>
+    <goal>Add a new input property to UniversalDatasetGrid to receive calendar filter JSON.</goal>
+
+    <context>
+      The grid needs to read filter criteria from the calendar component.
+      On forms: bound to hidden sprk_calendarfilter field
+      On Custom Pages: passed as prop
+    </context>
+
+    <constraints>
+      - Property name: calendarFilter (SingleLine.Text, input)
+      - Parse JSON format from task 006
+      - Handle empty/null gracefully
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/UniversalDatasetGrid/control/ControlManifest.Input.xml" reason="Current manifest" />
+      <file path="projects/events-workspace-apps-UX-r1/tasks/006-implement-filter-output-json.poml" reason="Filter JSON format" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add calendarFilter property to ControlManifest.Input.xml</step>
+    <step order="2">Update IInputs interface in types</step>
+    <step order="3">Parse filter JSON in updateView</step>
+    <step order="4">Store parsed filter in component state</step>
+    <step order="5">Rebuild and verify property appears in test harness</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/ControlManifest.Input.xml (updated)</artifact>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/types/index.ts (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>calendarFilter property in manifest</criterion>
+    <criterion>JSON parsed correctly</criterion>
+    <criterion>Handles null/empty without error</criterion>
+  </acceptance-criteria>
+</task>

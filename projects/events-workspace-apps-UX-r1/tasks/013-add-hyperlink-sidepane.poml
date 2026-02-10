@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Hyperlink Column with Side Pane Action</title>
+    <phase>2</phase>
+    <tags>pcf, grid, sidepane</tags>
+    <estimate>3 hours</estimate>
+    <dependencies>010</dependencies>
+    <parallel-group>B</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Make Event Name column a hyperlink that opens the Side Pane instead of navigating away.</goal>
+
+    <context>
+      Per spec, clicking Event Name should open EventDetailSidePane (when ready).
+      For now, implement the hyperlink behavior with a configurable callback.
+      Side Pane opening will be wired up later.
+    </context>
+
+    <constraints>
+      - Hyperlink on sprk_eventname column
+      - Click opens side pane, NOT navigation
+      - Row click (not on hyperlink) just selects row
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Hyperlink behavior spec" />
+      <file path="projects/events-workspace-apps-UX-r1/design.md" reason="Side pane opening pattern" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add hyperlinkColumn config property</step>
+    <step order="2">Create HyperlinkCell component</step>
+    <step order="3">Render Event Name as hyperlink</step>
+    <step order="4">Add onClick handler with stopPropagation</step>
+    <step order="5">Call Xrm.App.sidePanes.createPane (or callback for Custom Page)</step>
+    <step order="6">Pass eventId and eventType as params</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/components/HyperlinkCell.tsx</artifact>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/components/DatasetGrid.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Event Name renders as hyperlink</criterion>
+    <criterion>Click on hyperlink doesn't navigate away</criterion>
+    <criterion>Click on hyperlink triggers side pane action</criterion>
+    <criterion>Row body click only selects row</criterion>
+  </acceptance-criteria>
+</task>

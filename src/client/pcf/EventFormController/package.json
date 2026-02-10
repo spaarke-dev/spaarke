@@ -13,7 +13,9 @@
     "start:watch": "pcf-scripts start watch",
     "refreshTypes": "pcf-scripts refreshTypes"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components"
+  },
   "devDependencies": {
     "@fluentui/react-components": "^9.46.0",
     "@fluentui/react-icons": "^2.0.0",

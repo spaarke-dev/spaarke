@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="EventCalendarFilter" version="1.0.5" display-name-key="Event Calendar Filter" description-key="Date-based navigation and filtering for Event grids with multi-month calendar display. Supports event indicators with counts." control-type="standard" api-version="1.3.18">
+    <external-service-usage enabled="false"/>
+    <property name="filterOutput" display-name-key="Filter Output" description-key="JSON filter output sent to grid (type, date range)" of-type="SingleLine.Text" usage="bound" required="false"/>
+    <property name="eventDatesJson" display-name-key="Event Dates JSON" description-key="JSON array of dates with events and optional counts" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="displayMode" display-name-key="Display Mode" description-key="Calendar display mode: month (single) or multiMonth (vertical stack)" of-type="Enum" usage="input" required="false" default-value="multiMonth">
+      <value name="month" display-name-key="Single Month">month</value>
+      <value name="multiMonth" display-name-key="Multi-Month Stack">multiMonth</value>
+    </property>
+    <property name="selectedDateOutput" display-name-key="Selected Date Output" description-key="Currently selected date for bi-directional sync" of-type="SingleLine.Text" usage="bound" required="false"/>
+    <resources>
+      <code path="bundle.js" order="1"/>
+      <css path="styles.css" order="2"/>
+      <platform-library name="React" version="16.14.0"/>
+      <platform-library name="Fluent" version="9.46.2"/>
+    </resources>
+    <feature-usage/>
+    <built-by name="pac" version="1.51.1"/>
+  </control>
+</manifest>

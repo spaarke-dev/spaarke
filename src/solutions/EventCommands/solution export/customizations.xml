@@ -1,0 +1,643 @@
+<ImportExportXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" OrganizationVersion="9.2.26014.139" OrganizationSchemaType="Standard" CRMServerServiceabilityVersion="9.2.26014.00142">
+  <Entities>
+    <Entity>
+      <Name LocalizedName="Event" OriginalName="Event">sprk_Event</Name>
+      <EntityInfo>
+        <entity Name="sprk_Event" unmodified="1">
+          <attributes />
+        </entity>
+      </EntityInfo>
+      <RibbonDiffXml>
+        <CustomActions>
+          <CustomAction Id="Spaarke.Event.AddMemo.CustomAction" Location="Mscrm.Form.sprk_event.MainTab.Actions.Controls._children" Sequence="50">
+            <CommandUIDefinition>
+              <Button Id="Spaarke.Event.AddMemo.Button" Command="Spaarke.Event.AddMemo.Command" LabelText="$LocLabels:Spaarke.Event.AddMemo.LabelText" Alt="$LocLabels:Spaarke.Event.AddMemo.Alt" ToolTipTitle="$LocLabels:Spaarke.Event.AddMemo.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Event.AddMemo.ToolTipDescription" TemplateAlias="o1" ModernImage="EditNote" />
+            </CommandUIDefinition>
+          </CustomAction>
+          <CustomAction Id="Spaarke.Event.Cancel.CustomAction" Location="Mscrm.Form.sprk_event.MainTab.Actions.Controls._children" Sequence="20">
+            <CommandUIDefinition>
+              <Button Id="Spaarke.Event.Cancel.Button" Command="Spaarke.Event.Cancel.Command" LabelText="$LocLabels:Spaarke.Event.Cancel.LabelText" Alt="$LocLabels:Spaarke.Event.Cancel.Alt" ToolTipTitle="$LocLabels:Spaarke.Event.Cancel.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Event.Cancel.ToolTipDescription" TemplateAlias="o1" ModernImage="Cancel" />
+            </CommandUIDefinition>
+          </CustomAction>
+          <CustomAction Id="Spaarke.Event.Complete.CustomAction" Location="Mscrm.Form.sprk_event.MainTab.Actions.Controls._children" Sequence="10">
+            <CommandUIDefinition>
+              <Button Id="Spaarke.Event.Complete.Button" Command="Spaarke.Event.Complete.Command" LabelText="$LocLabels:Spaarke.Event.Complete.LabelText" Alt="$LocLabels:Spaarke.Event.Complete.Alt" ToolTipTitle="$LocLabels:Spaarke.Event.Complete.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Event.Complete.ToolTipDescription" TemplateAlias="o1" ModernImage="CheckMark" />
+            </CommandUIDefinition>
+          </CustomAction>
+          <CustomAction Id="Spaarke.Event.CompleteSelected.CustomAction" Location="Mscrm.SubGrid.sprk_event.MainTab.Actions.Controls._children" Sequence="10">
+            <CommandUIDefinition>
+              <Button Id="Spaarke.Event.CompleteSelected.Button" Command="Spaarke.Event.CompleteSelected.Command" LabelText="$LocLabels:Spaarke.Event.CompleteSelected.LabelText" Alt="$LocLabels:Spaarke.Event.CompleteSelected.Alt" ToolTipTitle="$LocLabels:Spaarke.Event.CompleteSelected.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Event.CompleteSelected.ToolTipDescription" TemplateAlias="o1" ModernImage="CheckMark" />
+            </CommandUIDefinition>
+          </CustomAction>
+          <!-- HomepageGrid Buttons for Entity Main View (bulk operations) -->
+          <CustomAction Id="Spaarke.Event.Homepage.Complete.CustomAction" Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children" Sequence="10">
+            <CommandUIDefinition>
+              <Button Id="Spaarke.Event.Homepage.Complete.Button" Command="Spaarke.Event.Homepage.Complete.Command" LabelText="$LocLabels:Spaarke.Event.Homepage.Complete.LabelText" Alt="$LocLabels:Spaarke.Event.Homepage.Complete.Alt" ToolTipTitle="$LocLabels:Spaarke.Event.Homepage.Complete.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Event.Homepage.Complete.ToolTipDescription" TemplateAlias="o1" ModernImage="CheckMark" />
+            </CommandUIDefinition>
+          </CustomAction>
+          <CustomAction Id="Spaarke.Event.Homepage.Close.CustomAction" Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children" Sequence="20">
+            <CommandUIDefinition>
+              <Button Id="Spaarke.Event.Homepage.Close.Button" Command="Spaarke.Event.Homepage.Close.Command" LabelText="$LocLabels:Spaarke.Event.Homepage.Close.LabelText" Alt="$LocLabels:Spaarke.Event.Homepage.Close.Alt" ToolTipTitle="$LocLabels:Spaarke.Event.Homepage.Close.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Event.Homepage.Close.ToolTipDescription" TemplateAlias="o1" ModernImage="StatusCircleBlock" />
+            </CommandUIDefinition>
+          </CustomAction>
+          <CustomAction Id="Spaarke.Event.Homepage.Cancel.CustomAction" Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children" Sequence="30">
+            <CommandUIDefinition>
+              <Button Id="Spaarke.Event.Homepage.Cancel.Button" Command="Spaarke.Event.Homepage.Cancel.Command" LabelText="$LocLabels:Spaarke.Event.Homepage.Cancel.LabelText" Alt="$LocLabels:Spaarke.Event.Homepage.Cancel.Alt" ToolTipTitle="$LocLabels:Spaarke.Event.Homepage.Cancel.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Event.Homepage.Cancel.ToolTipDescription" TemplateAlias="o1" ModernImage="Cancel" />
+            </CommandUIDefinition>
+          </CustomAction>
+          <CustomAction Id="Spaarke.Event.Homepage.OnHold.CustomAction" Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children" Sequence="40">
+            <CommandUIDefinition>
+              <Button Id="Spaarke.Event.Homepage.OnHold.Button" Command="Spaarke.Event.Homepage.OnHold.Command" LabelText="$LocLabels:Spaarke.Event.Homepage.OnHold.LabelText" Alt="$LocLabels:Spaarke.Event.Homepage.OnHold.Alt" ToolTipTitle="$LocLabels:Spaarke.Event.Homepage.OnHold.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Event.Homepage.OnHold.ToolTipDescription" TemplateAlias="o1" ModernImage="Pause" />
+            </CommandUIDefinition>
+          </CustomAction>
+          <CustomAction Id="Spaarke.Event.Homepage.Archive.CustomAction" Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children" Sequence="50">
+            <CommandUIDefinition>
+              <Button Id="Spaarke.Event.Homepage.Archive.Button" Command="Spaarke.Event.Homepage.Archive.Command" LabelText="$LocLabels:Spaarke.Event.Homepage.Archive.LabelText" Alt="$LocLabels:Spaarke.Event.Homepage.Archive.Alt" ToolTipTitle="$LocLabels:Spaarke.Event.Homepage.Archive.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Event.Homepage.Archive.ToolTipDescription" TemplateAlias="o1" ModernImage="Archive" />
+            </CommandUIDefinition>
+          </CustomAction>
+          <CustomAction Id="Spaarke.Event.Reassign.CustomAction" Location="Mscrm.Form.sprk_event.MainTab.Actions.Controls._children" Sequence="40">
+            <CommandUIDefinition>
+              <Button Id="Spaarke.Event.Reassign.Button" Command="Spaarke.Event.Reassign.Command" LabelText="$LocLabels:Spaarke.Event.Reassign.LabelText" Alt="$LocLabels:Spaarke.Event.Reassign.Alt" ToolTipTitle="$LocLabels:Spaarke.Event.Reassign.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Event.Reassign.ToolTipDescription" TemplateAlias="o1" ModernImage="Assign" />
+            </CommandUIDefinition>
+          </CustomAction>
+          <CustomAction Id="Spaarke.Event.Reschedule.CustomAction" Location="Mscrm.Form.sprk_event.MainTab.Actions.Controls._children" Sequence="30">
+            <CommandUIDefinition>
+              <Button Id="Spaarke.Event.Reschedule.Button" Command="Spaarke.Event.Reschedule.Command" LabelText="$LocLabels:Spaarke.Event.Reschedule.LabelText" Alt="$LocLabels:Spaarke.Event.Reschedule.Alt" ToolTipTitle="$LocLabels:Spaarke.Event.Reschedule.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Event.Reschedule.ToolTipDescription" TemplateAlias="o1" ModernImage="DateTimePicker" />
+            </CommandUIDefinition>
+          </CustomAction>
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.Activate.Hide" Location="Mscrm.Form.sprk_event.Activate" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.AddConnection.Hide" Location="Mscrm.Form.sprk_event.AddConnection" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.Convert.Case.Hide" Location="Mscrm.Form.sprk_event.Convert.Case" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.Convert.Opportunity.Hide" Location="Mscrm.Form.sprk_event.Convert.Opportunity" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.Deactivate.Hide" Location="Mscrm.Form.sprk_event.Deactivate" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.Flows.RefreshCommandBar.Flows.Hide" Location="Mscrm.Form.sprk_event.Flows.RefreshCommandBar.Flows" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.Flows.RefreshCommandBar.Hide" Location="Mscrm.Form.sprk_event.Flows.RefreshCommandBar" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.OpenActiveStage.Hide" Location="Mscrm.Form.sprk_event.OpenActiveStage" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.Permissions.Grant.Hide" Location="Mscrm.Form.sprk_event.Permissions.Grant" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.Permissions.GrantNonRefresh.Hide" Location="Mscrm.Form.sprk_event.Permissions.GrantNonRefresh" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.Permissions.GrantUCI.Hide" Location="Mscrm.Form.sprk_event.Permissions.GrantUCI" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.PromoteToResponse.Hide" Location="Mscrm.Form.sprk_event.PromoteToResponse" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.Reports.Hide" Location="Mscrm.Form.sprk_event.Reports" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.RunScript.Hide" Location="Mscrm.Form.sprk_event.RunScript" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.RunWorkflow.Hide" Location="Mscrm.Form.sprk_event.RunWorkflow" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.SaveAsComplete.Hide" Location="Mscrm.Form.sprk_event.SaveAsComplete" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.SuggestProduct.Hide" Location="Mscrm.Form.sprk_event.SuggestProduct" />
+          <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.ViewHierarchy.Hide" Location="Mscrm.Form.sprk_event.ViewHierarchy" />
+          <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_event.Activate.Hide" Location="Mscrm.HomepageGrid.sprk_event.Activate" />
+          <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_event.AddConnection.Hide" Location="Mscrm.HomepageGrid.sprk_event.AddConnection" />
+          <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_event.ChangeDataSetControlButton.Hide" Location="Mscrm.HomepageGrid.sprk_event.ChangeDataSetControlButton" />
+          <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_event.Deactivate.Hide" Location="Mscrm.HomepageGrid.sprk_event.Deactivate" />
+          <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_event.Detect.Hide" Location="Mscrm.HomepageGrid.sprk_event.Detect" />
+          <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_event.Flows.RefreshCommandBar.Flows.Hide" Location="Mscrm.HomepageGrid.sprk_event.Flows.RefreshCommandBar.Flows" />
+          <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_event.Flows.RefreshCommandBar.Hide" Location="Mscrm.HomepageGrid.sprk_event.Flows.RefreshCommandBar" />
+          <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_event.MainTab.QuickPowerBI.Button.Hide" Location="Mscrm.HomepageGrid.sprk_event.MainTab.QuickPowerBI.Button" />
+          <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_event.MBPF.ConvertTo.Hide" Location="Mscrm.HomepageGrid.sprk_event.MBPF.ConvertTo" />
+          <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_event.OpenActiveStage.Hide" Location="Mscrm.HomepageGrid.sprk_event.OpenActiveStage" />
+          <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_event.RunScript.Hide" Location="Mscrm.HomepageGrid.sprk_event.RunScript" />
+          <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_event.RunWorkflow.Hide" Location="Mscrm.HomepageGrid.sprk_event.RunWorkflow" />
+          <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_event.ViewHierarchy.Hide" Location="Mscrm.HomepageGrid.sprk_event.ViewHierarchy" />
+          <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.Activate.Hide" Location="Mscrm.SubGrid.sprk_event.Activate" />
+          <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.AddConnection.Hide" Location="Mscrm.SubGrid.sprk_event.AddConnection" />
+          <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.AddExistingAssoc.Hide" Location="Mscrm.SubGrid.sprk_event.AddExistingAssoc" />
+          <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.AddExistingStandard.Hide" Location="Mscrm.SubGrid.sprk_event.AddExistingStandard" />
+          <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.AdvMergeRecords.Hide" Location="Mscrm.SubGrid.sprk_event.AdvMergeRecords" />
+          <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.AssociateParentChildCase.Hide" Location="Mscrm.SubGrid.sprk_event.AssociateParentChildCase" />
+          <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.ChangeDataSetControlButton.Hide" Location="Mscrm.SubGrid.sprk_event.ChangeDataSetControlButton" />
+          <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.Deactivate.Hide" Location="Mscrm.SubGrid.sprk_event.Deactivate" />
+          <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.Detect.Hide" Location="Mscrm.SubGrid.sprk_event.Detect" />
+          <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.Flows.RefreshCommandBar.Hide" Location="Mscrm.SubGrid.sprk_event.Flows.RefreshCommandBar" />
+          <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.MailMerge.Hide" Location="Mscrm.SubGrid.sprk_event.MailMerge" />
+          <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.OpenAssociatedGridViewStandard.Hide" Location="Mscrm.SubGrid.sprk_event.OpenAssociatedGridViewStandard" />
+          <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.RunReport.Hide" Location="Mscrm.SubGrid.sprk_event.RunReport" />
+          <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.RunScript.Hide" Location="Mscrm.SubGrid.sprk_event.RunScript" />
+          <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.RunWorkflow.Hide" Location="Mscrm.SubGrid.sprk_event.RunWorkflow" />
+          <CustomAction Id="sprk.ThemeMenu.Event.Flyout.CustomAction" Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children" Sequence="900">
+            <CommandUIDefinition>
+              <FlyoutAnchor Alt="$LocLabels:sprk.ThemeMenu.Event.Flyout.Alt" Command="sprk.ThemeMenu.Event.Command" Id="sprk.ThemeMenu.Event.Flyout" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" LabelText="$LocLabels:sprk.ThemeMenu.Event.Flyout.LabelText" Sequence="900" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.ThemeMenu.Event.Flyout.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.ThemeMenu.Event.Flyout.ToolTipDescription" ModernImage="$webresource:sprk_ThemeMenu32.svg">
+                <Menu Id="sprk.ThemeMenu.Event.Flyout.Menu">
+                  <MenuSection Id="sprk.ThemeMenu.Event.Section" Title="$LocLabels:sprk.ThemeMenu.Event.Section.Title" Sequence="10" DisplayMode="Menu16">
+                    <Controls Id="sprk.ThemeMenu.Event.Section.Controls">
+                      <Button Alt="$LocLabels:sprk.ThemeMenu.Event.Auto.Alt" Command="sprk.ThemeMenu.Event.SetAuto" Id="sprk.ThemeMenu.Event.Auto" Image16by16="$webresource:sprk_ThemeAuto16.svg" LabelText="$LocLabels:sprk.ThemeMenu.Event.Auto.LabelText" Sequence="10" ToolTipTitle="$LocLabels:sprk.ThemeMenu.Event.Auto.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.ThemeMenu.Event.Auto.ToolTipDescription" ModernImage="$webresource:sprk_ThemeAuto16.svg" />
+                      <Button Alt="$LocLabels:sprk.ThemeMenu.Event.Light.Alt" Command="sprk.ThemeMenu.Event.SetLight" Id="sprk.ThemeMenu.Event.Light" Image16by16="$webresource:sprk_ThemeLight16.svg" LabelText="$LocLabels:sprk.ThemeMenu.Event.Light.LabelText" Sequence="20" ToolTipTitle="$LocLabels:sprk.ThemeMenu.Event.Light.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.ThemeMenu.Event.Light.ToolTipDescription" ModernImage="$webresource:sprk_ThemeLight16.svg" />
+                      <Button Alt="$LocLabels:sprk.ThemeMenu.Event.Dark.Alt" Command="sprk.ThemeMenu.Event.SetDark" Id="sprk.ThemeMenu.Event.Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" LabelText="$LocLabels:sprk.ThemeMenu.Event.Dark.LabelText" Sequence="30" ToolTipTitle="$LocLabels:sprk.ThemeMenu.Event.Dark.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.ThemeMenu.Event.Dark.ToolTipDescription" ModernImage="$webresource:sprk_ThemeDark16.svg" />
+                    </Controls>
+                  </MenuSection>
+                </Menu>
+              </FlyoutAnchor>
+            </CommandUIDefinition>
+          </CustomAction>
+        </CustomActions>
+        <Templates>
+          <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+        </Templates>
+        <CommandDefinitions>
+          <CommandDefinition Id="Spaarke.Event.AddMemo.Command">
+            <EnableRules />
+            <DisplayRules />
+            <Actions>
+              <JavaScriptFunction FunctionName="Spaarke.Event.AddMemo" Library="$webresource:sprk_event_ribbon_commands.js">
+                <CrmParameter Value="PrimaryControl" />
+              </JavaScriptFunction>
+            </Actions>
+          </CommandDefinition>
+          <CommandDefinition Id="Spaarke.Event.Cancel.Command">
+            <EnableRules>
+              <EnableRule Id="Spaarke.Event.IsActive.EnableRule" />
+            </EnableRules>
+            <DisplayRules />
+            <Actions>
+              <JavaScriptFunction FunctionName="Spaarke.Event.CancelEvent" Library="$webresource:sprk_event_ribbon_commands.js">
+                <CrmParameter Value="PrimaryControl" />
+              </JavaScriptFunction>
+            </Actions>
+          </CommandDefinition>
+          <CommandDefinition Id="Spaarke.Event.Complete.Command">
+            <EnableRules>
+              <EnableRule Id="Spaarke.Event.IsActive.EnableRule" />
+            </EnableRules>
+            <DisplayRules />
+            <Actions>
+              <JavaScriptFunction FunctionName="Spaarke.Event.CompleteEvent" Library="$webresource:sprk_event_ribbon_commands.js">
+                <CrmParameter Value="PrimaryControl" />
+              </JavaScriptFunction>
+            </Actions>
+          </CommandDefinition>
+          <CommandDefinition Id="Spaarke.Event.CompleteSelected.Command">
+            <EnableRules>
+              <EnableRule Id="Mscrm.SelectionCountAtLeastOne" />
+            </EnableRules>
+            <DisplayRules />
+            <Actions>
+              <JavaScriptFunction FunctionName="Spaarke.Event.CompleteSelectedEvents" Library="$webresource:sprk_event_ribbon_commands.js">
+                <CrmParameter Value="SelectedControl" />
+              </JavaScriptFunction>
+            </Actions>
+          </CommandDefinition>
+          <CommandDefinition Id="Spaarke.Event.Reassign.Command">
+            <EnableRules>
+              <EnableRule Id="Spaarke.Event.IsActive.EnableRule" />
+            </EnableRules>
+            <DisplayRules />
+            <Actions>
+              <JavaScriptFunction FunctionName="Spaarke.Event.ReassignEvent" Library="$webresource:sprk_event_ribbon_commands.js">
+                <CrmParameter Value="PrimaryControl" />
+              </JavaScriptFunction>
+            </Actions>
+          </CommandDefinition>
+          <CommandDefinition Id="Spaarke.Event.Reschedule.Command">
+            <EnableRules>
+              <EnableRule Id="Spaarke.Event.CanReschedule.EnableRule" />
+            </EnableRules>
+            <DisplayRules />
+            <Actions>
+              <JavaScriptFunction FunctionName="Spaarke.Event.RescheduleEvent" Library="$webresource:sprk_event_ribbon_commands.js">
+                <CrmParameter Value="PrimaryControl" />
+              </JavaScriptFunction>
+            </Actions>
+          </CommandDefinition>
+          <!-- HomepageGrid Commands (bulk operations) -->
+          <CommandDefinition Id="Spaarke.Event.Homepage.Complete.Command">
+            <EnableRules>
+              <EnableRule Id="Mscrm.SelectionCountAtLeastOne" />
+            </EnableRules>
+            <DisplayRules />
+            <Actions>
+              <JavaScriptFunction FunctionName="Spaarke.Event.Homepage.CompleteSelected" Library="$webresource:sprk_event_ribbon_commands.js">
+                <CrmParameter Value="SelectedControlSelectedItemIds" />
+                <CrmParameter Value="SelectedEntityTypeName" />
+              </JavaScriptFunction>
+            </Actions>
+          </CommandDefinition>
+          <CommandDefinition Id="Spaarke.Event.Homepage.Close.Command">
+            <EnableRules>
+              <EnableRule Id="Mscrm.SelectionCountAtLeastOne" />
+            </EnableRules>
+            <DisplayRules />
+            <Actions>
+              <JavaScriptFunction FunctionName="Spaarke.Event.Homepage.CloseSelected" Library="$webresource:sprk_event_ribbon_commands.js">
+                <CrmParameter Value="SelectedControlSelectedItemIds" />
+                <CrmParameter Value="SelectedEntityTypeName" />
+              </JavaScriptFunction>
+            </Actions>
+          </CommandDefinition>
+          <CommandDefinition Id="Spaarke.Event.Homepage.Cancel.Command">
+            <EnableRules>
+              <EnableRule Id="Mscrm.SelectionCountAtLeastOne" />
+            </EnableRules>
+            <DisplayRules />
+            <Actions>
+              <JavaScriptFunction FunctionName="Spaarke.Event.Homepage.CancelSelected" Library="$webresource:sprk_event_ribbon_commands.js">
+                <CrmParameter Value="SelectedControlSelectedItemIds" />
+                <CrmParameter Value="SelectedEntityTypeName" />
+              </JavaScriptFunction>
+            </Actions>
+          </CommandDefinition>
+          <CommandDefinition Id="Spaarke.Event.Homepage.OnHold.Command">
+            <EnableRules>
+              <EnableRule Id="Mscrm.SelectionCountAtLeastOne" />
+            </EnableRules>
+            <DisplayRules />
+            <Actions>
+              <JavaScriptFunction FunctionName="Spaarke.Event.Homepage.OnHoldSelected" Library="$webresource:sprk_event_ribbon_commands.js">
+                <CrmParameter Value="SelectedControlSelectedItemIds" />
+                <CrmParameter Value="SelectedEntityTypeName" />
+              </JavaScriptFunction>
+            </Actions>
+          </CommandDefinition>
+          <CommandDefinition Id="Spaarke.Event.Homepage.Archive.Command">
+            <EnableRules>
+              <EnableRule Id="Mscrm.SelectionCountAtLeastOne" />
+            </EnableRules>
+            <DisplayRules />
+            <Actions>
+              <JavaScriptFunction FunctionName="Spaarke.Event.Homepage.ArchiveSelected" Library="$webresource:sprk_event_ribbon_commands.js">
+                <CrmParameter Value="SelectedControlSelectedItemIds" />
+                <CrmParameter Value="SelectedEntityTypeName" />
+              </JavaScriptFunction>
+            </Actions>
+          </CommandDefinition>
+          <CommandDefinition Id="sprk.ThemeMenu.Event.Command">
+            <EnableRules>
+              <EnableRule Id="sprk.ThemeMenu.Event.EnableRule" />
+            </EnableRules>
+            <DisplayRules />
+            <Actions />
+          </CommandDefinition>
+          <CommandDefinition Id="sprk.ThemeMenu.Event.SetAuto">
+            <EnableRules />
+            <DisplayRules />
+            <Actions>
+              <JavaScriptFunction FunctionName="Spaarke.Theme.setTheme" Library="$webresource:sprk_ThemeMenu.js">
+                <StringParameter Value="auto" />
+              </JavaScriptFunction>
+            </Actions>
+          </CommandDefinition>
+          <CommandDefinition Id="sprk.ThemeMenu.Event.SetDark">
+            <EnableRules />
+            <DisplayRules />
+            <Actions>
+              <JavaScriptFunction FunctionName="Spaarke.Theme.setTheme" Library="$webresource:sprk_ThemeMenu.js">
+                <StringParameter Value="dark" />
+              </JavaScriptFunction>
+            </Actions>
+          </CommandDefinition>
+          <CommandDefinition Id="sprk.ThemeMenu.Event.SetLight">
+            <EnableRules />
+            <DisplayRules />
+            <Actions>
+              <JavaScriptFunction FunctionName="Spaarke.Theme.setTheme" Library="$webresource:sprk_ThemeMenu.js">
+                <StringParameter Value="light" />
+              </JavaScriptFunction>
+            </Actions>
+          </CommandDefinition>
+        </CommandDefinitions>
+        <RuleDefinitions>
+          <TabDisplayRules />
+          <DisplayRules />
+          <EnableRules>
+            <EnableRule Id="Spaarke.Event.CanReschedule.EnableRule">
+              <CustomRule FunctionName="Spaarke.Event.CanReschedule" Library="$webresource:sprk_event_ribbon_commands.js" Default="false">
+                <CrmParameter Value="PrimaryControl" />
+              </CustomRule>
+            </EnableRule>
+            <EnableRule Id="Spaarke.Event.IsActive.EnableRule">
+              <CustomRule FunctionName="Spaarke.Event.IsEventActive" Library="$webresource:sprk_event_ribbon_commands.js" Default="false">
+                <CrmParameter Value="PrimaryControl" />
+              </CustomRule>
+            </EnableRule>
+            <EnableRule Id="sprk.ThemeMenu.Event.EnableRule">
+              <CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" />
+            </EnableRule>
+          </EnableRules>
+        </RuleDefinitions>
+        <LocLabels>
+          <LocLabel Id="Spaarke.Event.AddMemo.Alt">
+            <Titles>
+              <Title description="Add Memo" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.AddMemo.LabelText">
+            <Titles>
+              <Title description="Add Memo" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.AddMemo.ToolTipDescription">
+            <Titles>
+              <Title description="Add a memo or note to this event" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.AddMemo.ToolTipTitle">
+            <Titles>
+              <Title description="Add Memo" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Cancel.Alt">
+            <Titles>
+              <Title description="Cancel Event" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Cancel.LabelText">
+            <Titles>
+              <Title description="Cancel" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Cancel.ToolTipDescription">
+            <Titles>
+              <Title description="Cancel this event" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Cancel.ToolTipTitle">
+            <Titles>
+              <Title description="Cancel Event" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Complete.Alt">
+            <Titles>
+              <Title description="Complete Event" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Complete.LabelText">
+            <Titles>
+              <Title description="Complete" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Complete.ToolTipDescription">
+            <Titles>
+              <Title description="Mark this event as complete" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Complete.ToolTipTitle">
+            <Titles>
+              <Title description="Complete Event" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.CompleteSelected.Alt">
+            <Titles>
+              <Title description="Complete Selected Events" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.CompleteSelected.LabelText">
+            <Titles>
+              <Title description="Complete Selected" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.CompleteSelected.ToolTipDescription">
+            <Titles>
+              <Title description="Mark selected events as complete" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.CompleteSelected.ToolTipTitle">
+            <Titles>
+              <Title description="Complete Selected Events" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Reassign.Alt">
+            <Titles>
+              <Title description="Reassign Event" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Reassign.LabelText">
+            <Titles>
+              <Title description="Reassign" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Reassign.ToolTipDescription">
+            <Titles>
+              <Title description="Assign this event to another user" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Reassign.ToolTipTitle">
+            <Titles>
+              <Title description="Reassign Event" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Reschedule.Alt">
+            <Titles>
+              <Title description="Reschedule Event" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Reschedule.LabelText">
+            <Titles>
+              <Title description="Reschedule" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Reschedule.ToolTipDescription">
+            <Titles>
+              <Title description="Change the due date of this event" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Reschedule.ToolTipTitle">
+            <Titles>
+              <Title description="Reschedule Event" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Auto.Alt">
+            <Titles>
+              <Title description="Auto" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Auto.LabelText">
+            <Titles>
+              <Title description="Auto (follows system)" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Auto.ToolTipDescription">
+            <Titles>
+              <Title description="Uses your operating system's theme preference" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Auto.ToolTipTitle">
+            <Titles>
+              <Title description="Auto" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Dark.Alt">
+            <Titles>
+              <Title description="Dark" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Dark.LabelText">
+            <Titles>
+              <Title description="Dark" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Dark.ToolTipDescription">
+            <Titles>
+              <Title description="Dark background with light text" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Dark.ToolTipTitle">
+            <Titles>
+              <Title description="Dark" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Flyout.Alt">
+            <Titles>
+              <Title description="Dark Mode" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Flyout.LabelText">
+            <Titles>
+              <Title description="Dark Mode" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Flyout.ToolTipDescription">
+            <Titles>
+              <Title description="Choose your preferred color theme" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Flyout.ToolTipTitle">
+            <Titles>
+              <Title description="Dark Mode" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Light.Alt">
+            <Titles>
+              <Title description="Light" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Light.LabelText">
+            <Titles>
+              <Title description="Light" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Light.ToolTipDescription">
+            <Titles>
+              <Title description="Light background with dark text" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Light.ToolTipTitle">
+            <Titles>
+              <Title description="Light" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.ThemeMenu.Event.Section.Title">
+            <Titles>
+              <Title description="Color Theme" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <!-- HomepageGrid Button Labels -->
+          <LocLabel Id="Spaarke.Event.Homepage.Complete.Alt">
+            <Titles>
+              <Title description="Complete Selected" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.Complete.LabelText">
+            <Titles>
+              <Title description="Complete" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.Complete.ToolTipTitle">
+            <Titles>
+              <Title description="Complete Selected Events" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.Complete.ToolTipDescription">
+            <Titles>
+              <Title description="Mark selected events as complete" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.Close.Alt">
+            <Titles>
+              <Title description="Close Selected" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.Close.LabelText">
+            <Titles>
+              <Title description="Close" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.Close.ToolTipTitle">
+            <Titles>
+              <Title description="Close Selected Events" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.Close.ToolTipDescription">
+            <Titles>
+              <Title description="Close selected events without action" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.Cancel.Alt">
+            <Titles>
+              <Title description="Cancel Selected" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.Cancel.LabelText">
+            <Titles>
+              <Title description="Cancel" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.Cancel.ToolTipTitle">
+            <Titles>
+              <Title description="Cancel Selected Events" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.Cancel.ToolTipDescription">
+            <Titles>
+              <Title description="Cancel selected events" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.OnHold.Alt">
+            <Titles>
+              <Title description="Put On Hold" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.OnHold.LabelText">
+            <Titles>
+              <Title description="On Hold" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.OnHold.ToolTipTitle">
+            <Titles>
+              <Title description="Put Events On Hold" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.OnHold.ToolTipDescription">
+            <Titles>
+              <Title description="Put selected events on hold" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.Archive.Alt">
+            <Titles>
+              <Title description="Archive Selected" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.Archive.LabelText">
+            <Titles>
+              <Title description="Archive" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.Archive.ToolTipTitle">
+            <Titles>
+              <Title description="Archive Selected Events" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="Spaarke.Event.Homepage.Archive.ToolTipDescription">
+            <Titles>
+              <Title description="Archive selected events (hides from active views)" languagecode="1033" />
+            </Titles>
+          </LocLabel>
+        </LocLabels>
+      </RibbonDiffXml>
+      <CustomControlDefaultConfigs>
+        <CustomControlDefaultConfig>
+          <ControlDescriptionXML><controlDescriptions><controlDescription><customControl id="{E7A81278-8635-4d9e-8D4D-59480B391C5B}"><parameters /></customControl><customControl formFactor="0" name="Microsoft.PowerApps.PowerAppsOneGrid"><parameters><data-set name="Items"><columnsDefaultView /></data-set><EnableEditing static="true" type="Enum">yes</EnableEditing><DisableChildItemsEditing static="true" type="Enum">no</DisableChildItemsEditing><EnableFiltering static="true" type="Enum">yes</EnableFiltering><EnableSorting static="true" type="Enum">yes</EnableSorting><EnableGrouping static="true" type="Enum">yes</EnableGrouping><EnableAggregation static="true" type="Enum">no</EnableAggregation><EnableColumnMoving static="true" type="Enum">yes</EnableColumnMoving><EnableMultipleSelection static="true" type="Enum">yes</EnableMultipleSelection><EnableRangeSelection static="true" type="Enum">yes</EnableRangeSelection><EnableJumpBar static="true" type="Enum">no</EnableJumpBar><EnablePagination static="true" type="Enum">no</EnablePagination><EnableDropdownColor static="true" type="Enum">yes</EnableDropdownColor><EnableStatusIcons static="true" type="Enum">yes</EnableStatusIcons><EnableTypeIcons static="true" type="Enum">no</EnableTypeIcons><NavigationTypesAllowed static="true" type="Enum">all</NavigationTypesAllowed><ReflowBehavior static="true" type="Enum">Reflow</ReflowBehavior><ShowAvatar static="true" type="Enum">yes</ShowAvatar><ShowColumnNamesForListView static="true" type="Enum">no</ShowColumnNamesForListView><EnableBandedRowsForListView static="true" type="Enum">no</EnableBandedRowsForListView><NumberOfListColumns static="true" type="Whole.None">3</NumberOfListColumns><ShowFooter static="true" type="Enum">yes</ShowFooter><ShowColumnHeaders static="true" type="Enum">yes</ShowColumnHeaders><ContextualLookupColumnFilters static="true" type="Enum">yes</ContextualLookupColumnFilters><LookupFilterBeginsWith static="true" type="Enum">no</LookupFilterBeginsWith><UseFirstColumnForLookupEdits static="true" type="Enum">no</UseFirstColumnForLookupEdits><DateTimeFormat static="true" type="Enum">none</DateTimeFormat><DateOnlyFormat static="true" type="Enum">none</DateOnlyFormat><EnableStatusColumn static="true" type="Enum">yes</EnableStatusColumn></parameters></customControl><customControl formFactor="1" name="Microsoft.PowerApps.PowerAppsOneGrid"><parameters><data-set name="Items"><columnsDefaultView /></data-set><EnableEditing static="true" type="Enum">yes</EnableEditing><DisableChildItemsEditing static="true" type="Enum">no</DisableChildItemsEditing><EnableFiltering static="true" type="Enum">yes</EnableFiltering><EnableSorting static="true" type="Enum">yes</EnableSorting><EnableGrouping static="true" type="Enum">yes</EnableGrouping><EnableAggregation static="true" type="Enum">no</EnableAggregation><EnableColumnMoving static="true" type="Enum">yes</EnableColumnMoving><EnableMultipleSelection static="true" type="Enum">yes</EnableMultipleSelection><EnableRangeSelection static="true" type="Enum">yes</EnableRangeSelection><EnableJumpBar static="true" type="Enum">no</EnableJumpBar><EnablePagination static="true" type="Enum">no</EnablePagination><EnableDropdownColor static="true" type="Enum">yes</EnableDropdownColor><EnableStatusIcons static="true" type="Enum">yes</EnableStatusIcons><EnableTypeIcons static="true" type="Enum">no</EnableTypeIcons><NavigationTypesAllowed static="true" type="Enum">all</NavigationTypesAllowed><ReflowBehavior static="true" type="Enum">Reflow</ReflowBehavior><ShowAvatar static="true" type="Enum">yes</ShowAvatar><ShowColumnNamesForListView static="true" type="Enum">no</ShowColumnNamesForListView><EnableBandedRowsForListView static="true" type="Enum">no</EnableBandedRowsForListView><NumberOfListColumns static="true" type="Whole.None">3</NumberOfListColumns><ShowFooter static="true" type="Enum">yes</ShowFooter><ShowColumnHeaders static="true" type="Enum">yes</ShowColumnHeaders><ContextualLookupColumnFilters static="true" type="Enum">yes</ContextualLookupColumnFilters><LookupFilterBeginsWith static="true" type="Enum">no</LookupFilterBeginsWith><UseFirstColumnForLookupEdits static="true" type="Enum">no</UseFirstColumnForLookupEdits><DateTimeFormat static="true" type="Enum">none</DateTimeFormat><DateOnlyFormat static="true" type="Enum">none</DateOnlyFormat><EnableStatusColumn static="true" type="Enum">yes</EnableStatusColumn></parameters></customControl><customControl formFactor="2" name="Microsoft.PowerApps.PowerAppsOneGrid"><parameters><data-set name="Items"><columnsDefaultView /></data-set><EnableEditing static="true" type="Enum">yes</EnableEditing><DisableChildItemsEditing static="true" type="Enum">no</DisableChildItemsEditing><EnableFiltering static="true" type="Enum">yes</EnableFiltering><EnableSorting static="true" type="Enum">yes</EnableSorting><EnableGrouping static="true" type="Enum">yes</EnableGrouping><EnableAggregation static="true" type="Enum">no</EnableAggregation><EnableColumnMoving static="true" type="Enum">yes</EnableColumnMoving><EnableMultipleSelection static="true" type="Enum">yes</EnableMultipleSelection><EnableRangeSelection static="true" type="Enum">yes</EnableRangeSelection><EnableJumpBar static="true" type="Enum">no</EnableJumpBar><EnablePagination static="true" type="Enum">no</EnablePagination><EnableDropdownColor static="true" type="Enum">yes</EnableDropdownColor><EnableStatusIcons static="true" type="Enum">yes</EnableStatusIcons><EnableTypeIcons static="true" type="Enum">no</EnableTypeIcons><NavigationTypesAllowed static="true" type="Enum">all</NavigationTypesAllowed><ReflowBehavior static="true" type="Enum">Reflow</ReflowBehavior><ShowAvatar static="true" type="Enum">yes</ShowAvatar><ShowColumnNamesForListView static="true" type="Enum">no</ShowColumnNamesForListView><EnableBandedRowsForListView static="true" type="Enum">no</EnableBandedRowsForListView><NumberOfListColumns static="true" type="Whole.None">3</NumberOfListColumns><ShowFooter static="true" type="Enum">yes</ShowFooter><ShowColumnHeaders static="true" type="Enum">yes</ShowColumnHeaders><ContextualLookupColumnFilters static="true" type="Enum">yes</ContextualLookupColumnFilters><LookupFilterBeginsWith static="true" type="Enum">no</LookupFilterBeginsWith><UseFirstColumnForLookupEdits static="true" type="Enum">no</UseFirstColumnForLookupEdits><DateTimeFormat static="true" type="Enum">none</DateTimeFormat><DateOnlyFormat static="true" type="Enum">none</DateOnlyFormat><EnableStatusColumn static="true" type="Enum">yes</EnableStatusColumn></parameters></customControl></controlDescription></controlDescriptions></ControlDescriptionXML>
+          <IntroducedVersion>1.0</IntroducedVersion>
+        </CustomControlDefaultConfig>
+      </CustomControlDefaultConfigs>
+    </Entity>
+  </Entities>
+  <Roles></Roles>
+  <Workflows></Workflows>
+  <FieldSecurityProfiles></FieldSecurityProfiles>
+  <Templates />
+  <EntityMaps />
+  <EntityRelationships />
+  <OrganizationSettings />
+  <optionsets />
+  <CustomControls />
+  <EntityDataProviders />
+  <Languages>
+    <Language>1033</Language>
+  </Languages>
+</ImportExportXml>

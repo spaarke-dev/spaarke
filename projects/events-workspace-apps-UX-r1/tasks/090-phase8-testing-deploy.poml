@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>090</id>
+    <title>Phase 8 testing and deployment</title>
+    <phase>8</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <tags>testing, deployment, phase-completion</tags>
+    <created>2026-02-05</created>
+    <dependencies>088, 089</dependencies>
+    <parallel-group>H</parallel-group>
+  </metadata>
+
+  <description>
+    Complete testing and deployment for Phase 8 Universal DataGrid Enhancement.
+    Verify OOB visual parity, theme support, and all new functionality.
+  </description>
+
+  <context>
+    <architecture-doc>docs/architecture/universal-dataset-grid-architecture.md</architecture-doc>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>All shared library unit tests pass</criterion>
+    <criterion>EventsPage functions correctly with new components</criterion>
+    <criterion>View switching works (savedquery + custom views)</criterion>
+    <criterion>OOB visual parity verified (side-by-side screenshot)</criterion>
+    <criterion>Dark mode renders correctly</criterion>
+    <criterion>Light mode renders correctly</criterion>
+    <criterion>No regression in existing functionality</criterion>
+    <criterion>Shared library npm package builds successfully</criterion>
+    <criterion>EventsPage deployed to dev environment</criterion>
+    <criterion>Documentation updated</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Run shared library test suite: npm run test</step>
+    <step order="2">Run shared library build: npm run build</step>
+    <step order="3">Build EventsPage: npm run build</step>
+    <step order="4">Deploy EventsPage to dev environment</step>
+    <step order="5">Test view switching in browser</step>
+    <step order="6">Create side-by-side screenshot comparison</step>
+    <step order="7">Test dark mode toggle</step>
+    <step order="8">Verify calendar filter still works</step>
+    <step order="9">Verify side pane opens on row click</step>
+    <step order="10">Document any known issues</step>
+    <step order="11">Update TASK-INDEX.md with completion status</step>
+  </steps>
+
+  <estimated-effort>medium</estimated-effort>
+</task>

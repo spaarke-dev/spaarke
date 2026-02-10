@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>099</id>
+    <title>Final OOB Visual Parity Testing</title>
+    <phase>10</phase>
+    <status>pending</status>
+    <priority>high</priority>
+    <tags>eventspage, testing, oob-parity, deployment</tags>
+    <created>2026-02-05</created>
+    <dependencies>096, 097, 098</dependencies>
+    <parallel-group>L</parallel-group>
+  </metadata>
+
+  <description>
+    Final testing and verification that EventsPage achieves pixel-perfect visual
+    and functional parity with OOB Power Apps entity homepage. Side-by-side
+    comparison and fix any remaining gaps.
+  </description>
+
+  <context>
+    <target-location>src/solutions/EventsPage/</target-location>
+    <target-location>src/solutions/CalendarSidePane/</target-location>
+    <oob-reference>Compare with standard Power Apps Event entity homepage</oob-reference>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>Calendar appears in side pane menu (not command bar)</criterion>
+    <criterion>Calendar opens by default on page load</criterion>
+    <criterion>Column headers have clickable dropdown menu (A to Z, Z to A, Filter by, etc.)</criterion>
+    <criterion>Column filter criteria match OOB options</criterion>
+    <criterion>Font matches OOB Dynamics font (Segoe UI)</criterion>
+    <criterion>CommandBar has distinct bordered/shadowed container</criterion>
+    <criterion>List View has distinct bordered/shadowed container</criterion>
+    <criterion>Filter icons/indicators match OOB placement and style</criterion>
+    <criterion>All visual elements match OOB at pixel level</criterion>
+    <criterion>Dark mode works throughout</criterion>
+    <criterion>No regressions in functionality</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Open OOB Power Apps Event entity view in browser tab</step>
+    <step order="2">Open custom EventsPage in adjacent browser tab</step>
+    <step order="3">Compare Calendar in side pane behavior</step>
+    <step order="4">Compare column header menu behavior</step>
+    <step order="5">Compare filter options and styling</step>
+    <step order="6">Compare CommandBar container styling</step>
+    <step order="7">Compare List View container styling</step>
+    <step order="8">Compare font family and sizes</step>
+    <step order="9">Document any remaining visual gaps</step>
+    <step order="10">Fix identified issues</step>
+    <step order="11">Toggle dark mode and verify all components</step>
+    <step order="12">Rebuild all solutions (npm run build)</step>
+    <step order="13">Deploy updated web resources to Dataverse</step>
+    <step order="14">Verify deployed version matches OOB</step>
+    <step order="15">Update TASK-INDEX.md with completion</step>
+  </steps>
+
+  <estimated-effort>medium</estimated-effort>
+</task>

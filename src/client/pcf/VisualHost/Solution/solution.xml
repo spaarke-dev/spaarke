@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ImportExportXml version="9.2.24014.198" SolutionPackageVersion="9.2" languagecode="1033" generatedBy="CRMPackager" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <SolutionManifest>
+    <UniqueName>VisualHostSolution</UniqueName>
+    <LocalizedNames>
+      <LocalizedName description="Visual Host Solution" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="Configuration-driven visualization PCF control for charts, cards, and calendars" languagecode="1033" />
+    </Descriptions>
+    <Version>1.2.29</Version>
+    <Managed>0</Managed>
+    <Publisher>
+      <UniqueName>Spaarke</UniqueName>
+      <LocalizedNames>
+        <LocalizedName description="Spaarke" languagecode="1033" />
+      </LocalizedNames>
+      <Descriptions>
+        <Description description="Spaarke Solutions Publisher" languagecode="1033" />
+      </Descriptions>
+      <EMailAddress xsi:nil="true" />
+      <SupportingWebsiteUrl xsi:nil="true" />
+      <CustomizationPrefix>sprk</CustomizationPrefix>
+      <CustomizationOptionValuePrefix>65949</CustomizationOptionValuePrefix>
+      <Addresses>
+        <Address>
+          <AddressNumber>1</AddressNumber>
+          <AddressTypeCode>1</AddressTypeCode>
+        </Address>
+        <Address>
+          <AddressNumber>2</AddressNumber>
+          <AddressTypeCode>1</AddressTypeCode>
+        </Address>
+      </Addresses>
+    </Publisher>
+    <RootComponents>
+      <RootComponent type="66" schemaName="sprk_Spaarke.Visuals.VisualHost" behavior="0" />
+    </RootComponents>
+    <MissingDependencies />
+  </SolutionManifest>
+</ImportExportXml>

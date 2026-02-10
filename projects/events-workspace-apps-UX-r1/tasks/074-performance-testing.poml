@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Performance Testing</title>
+    <phase>7</phase>
+    <tags>testing, performance, nfr</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>070, 071</dependencies>
+    <parallel-group>E</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <note date="2026-02-04">
+      Created comprehensive performance requirements document with:
+      - Bundle size analysis for all 6 components (all PCF controls PASS &lt; 1MB)
+      - 40+ performance test cases across 5 categories
+      - Test data requirements
+      - Browser DevTools measurement instructions
+      - Optimization recommendations
+      Output: projects/events-workspace-apps-UX-r1/notes/testing/performance-results.md
+    </note>
+  </notes>
+
+  <prompt>
+    <goal>Verify calendar query executes in less than 500ms.</goal>
+
+    <context>
+      NFR requires calendar query performance under 500ms.
+      Test with realistic data volumes.
+      Measure initial load and subsequent interactions.
+    </context>
+
+    <constraints>
+      - Calendar query < 500ms
+      - Grid initial load < 1s
+      - Side Pane open < 300ms
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="NFR requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Setup test data (100+ events)</step>
+    <step order="2">Open browser DevTools Network tab</step>
+    <step order="3">Measure calendar initial load time</step>
+    <step order="4">Measure calendar month navigation time</step>
+    <step order="5">Measure grid initial load time</step>
+    <step order="6">Measure Side Pane open time</step>
+    <step order="7">Measure Custom Page initial load</step>
+    <step order="8">Document results against thresholds</step>
+    <step order="9">Identify optimization opportunities if needed</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">projects/events-workspace-apps-UX-r1/notes/testing/performance-results.md</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Calendar query < 500ms</criterion>
+    <criterion>Grid load < 1s</criterion>
+    <criterion>Side Pane open < 300ms</criterion>
+    <criterion>Results documented</criterion>
+  </acceptance-criteria>
+</task>

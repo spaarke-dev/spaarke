@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Create Key Fields Section (Due Date, Priority, Owner)</title>
+    <phase>4</phase>
+    <tags>custom-page, sidepane, ui</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>031</dependencies>
+    <parallel-group>C</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create key fields section with Due Date picker, Priority dropdown, and Owner lookup.</goal>
+
+    <context>
+      Key fields are always visible regardless of Event Type.
+      Inline editing with Fluent UI controls.
+    </context>
+
+    <constraints>
+      - Due Date: DatePicker
+      - Priority: Dropdown
+      - Owner: Lookup control
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/design.md" reason="Key fields spec" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create KeyFieldsSection component</step>
+    <step order="2">Implement Due Date with Fluent DatePicker</step>
+    <step order="3">Implement Priority with Dropdown</step>
+    <step order="4">Implement Owner lookup (may need custom component)</step>
+    <step order="5">Handle field changes in state</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/components/KeyFieldsSection.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Due Date picker works</criterion>
+    <criterion>Priority dropdown works</criterion>
+    <criterion>Owner selection works</criterion>
+    <criterion>Changes update state</criterion>
+  </acceptance-criteria>
+</task>

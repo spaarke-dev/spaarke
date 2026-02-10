@@ -2,16 +2,39 @@
  * FieldVisibilityHandler
  *
  * Manages Dataverse form field visibility and requirement levels.
- * Extracted from EventFormControllerApp for cleaner separation of concerns.
+ * Uses the shared EventTypeService for field configuration and default states.
  *
  * STUB: [UI] - S004: Uses legacy Xrm.Page API - acceptable for now, may need
  * update for modern formContext in future Dataverse releases.
  *
- * @version 1.0.0
+ * @version 2.0.0 - Refactored to use shared EventTypeService (ADR-012)
  */
 
+// Import types and default states from shared service
+import {
+    IFieldRule,
+    IFieldDefaultStates,
+    IEventTypeFieldConfig,
+    IApplyRulesResult,
+    IComputedFieldStates,
+    RequiredLevel
+} from "@spaarke/ui-components";
+
+import {
+    EventTypeService,
+    eventTypeService,
+    DEFAULT_EVENT_FIELD_STATES,
+    ALL_EVENT_FIELDS,
+    ALL_SECTION_NAMES,
+    DEFAULT_SECTION_STATES
+} from "@spaarke/ui-components";
+
+// Re-export types for backward compatibility with existing code
+export type { IFieldRule, IApplyRulesResult, RequiredLevel };
+
 /**
- * Configuration for a field's visibility and requirement
+ * Legacy type alias for backward compatibility
+ * @deprecated Use IFieldRule from @spaarke/ui-components
  */
 export interface FieldRule {
     fieldName: string;
@@ -20,17 +43,8 @@ export interface FieldRule {
 }
 
 /**
- * Field rule for save validation - includes display name for user-friendly messages
- */
-export interface IFieldRule {
-    fieldName: string;
-    displayName?: string;
-    isVisible: boolean;
-    isRequired: boolean;
-}
-
-/**
- * Aggregate configuration for all fields based on Event Type
+ * Legacy type alias for backward compatibility
+ * @deprecated Use IEventTypeFieldConfig from @spaarke/ui-components
  */
 export interface EventTypeFieldConfig {
     requiredFields: string[];
@@ -39,17 +53,19 @@ export interface EventTypeFieldConfig {
 }
 
 /**
- * Default field states to restore when Event Type is cleared
+ * Legacy type alias for backward compatibility
+ * @deprecated Use IFieldDefaultStates from @spaarke/ui-components
  */
 export interface FieldDefaultStates {
     [fieldName: string]: {
         visible: boolean;
-        requiredLevel: "required" | "recommended" | "none";
+        requiredLevel: RequiredLevel;
     };
 }
 
 /**
- * Result of applying field rules
+ * Legacy type alias for backward compatibility
+ * @deprecated Use IApplyRulesResult from @spaarke/ui-components
  */
 export interface ApplyRulesResult {
     success: boolean;
@@ -57,6 +73,12 @@ export interface ApplyRulesResult {
     skippedFields: string[];
     errors: string[];
 }
+
+// Re-export default field states from shared service for backward compatibility
+export { DEFAULT_EVENT_FIELD_STATES as DEFAULT_FIELD_STATES, ALL_EVENT_FIELDS };
+
+// Re-export the shared service for direct usage
+export { eventTypeService, EventTypeService };
 
 /**
  * Gets the Xrm form context from the window or parent window
@@ -216,47 +238,177 @@ export function setRecommended(fieldName: string): boolean {
 }
 
 /**
- * Default field states for Event form
- * These are restored when Event Type is cleared
+ * Sets the requirement level for a field
+ *
+ * @param fieldName - The schema name of the field
+ * @param level - The requirement level to set
+ * @returns true if successful, false if field not found
  */
-export const DEFAULT_FIELD_STATES: FieldDefaultStates = {
-    // Primary fields - always visible, subject is required
-    "sprk_eventname": { visible: true, requiredLevel: "required" },
-    "sprk_description": { visible: true, requiredLevel: "none" },
+export function setRequiredLevel(fieldName: string, level: RequiredLevel): boolean {
+    const formContext = getFormContext();
+    if (!formContext) {
+        console.warn("[FieldVisibilityHandler] Xrm.Page not available - setRequiredLevel");
+        return false;
+    }
 
-    // Date fields - visible but not required by default
-    "sprk_basedate": { visible: true, requiredLevel: "none" },
-    "sprk_duedate": { visible: true, requiredLevel: "none" },
-    "sprk_completeddate": { visible: true, requiredLevel: "none" },
-    "scheduledstart": { visible: true, requiredLevel: "none" },
-    "scheduledend": { visible: true, requiredLevel: "none" },
+    const attribute = formContext.getAttribute(fieldName);
+    if (!attribute) {
+        console.warn(`[FieldVisibilityHandler] Attribute not found: ${fieldName}`);
+        return false;
+    }
 
-    // Location - visible but optional
-    "sprk_location": { visible: true, requiredLevel: "none" },
+    try {
+        attribute.setRequiredLevel(level);
+        return true;
+    } catch (err) {
+        console.error(`[FieldVisibilityHandler] Error setting required level ${fieldName}:`, err);
+        return false;
+    }
+}
 
-    // Reminder - visible but optional
-    "sprk_remindat": { visible: true, requiredLevel: "none" },
-
-    // Status fields - visible
-    "statecode": { visible: true, requiredLevel: "none" },
-    "statuscode": { visible: true, requiredLevel: "none" },
-    "sprk_priority": { visible: true, requiredLevel: "none" },
-    "sprk_source": { visible: true, requiredLevel: "none" },
-
-    // Related event fields - visible but optional
-    "sprk_relatedevent": { visible: true, requiredLevel: "none" },
-    "sprk_relatedeventtype": { visible: true, requiredLevel: "none" },
-    "sprk_relatedeventoffsettype": { visible: true, requiredLevel: "none" }
-};
+// =============================================================================
+// Section Visibility Functions
+// =============================================================================
 
 /**
- * List of all controllable fields on the Event form
+ * Shows a section on the form
+ * Sets the section to visible using Dataverse section.setVisible() API
+ *
+ * @param sectionName - The name of the section (e.g., "dates", "relatedEvent")
+ * @returns true if successful, false if section not found
  */
-export const ALL_EVENT_FIELDS = Object.keys(DEFAULT_FIELD_STATES);
+export function showSection(sectionName: string): boolean {
+    const formContext = getFormContext();
+    if (!formContext) {
+        console.warn("[FieldVisibilityHandler] Xrm.Page not available - showSection");
+        return false;
+    }
+
+    // Get all tabs and search for the section
+    const tabs = formContext.ui?.tabs;
+    if (!tabs) {
+        console.warn("[FieldVisibilityHandler] Form tabs not available");
+        return false;
+    }
+
+    try {
+        let found = false;
+        tabs.forEach((tab: any) => {
+            const sections = tab.sections;
+            if (sections) {
+                sections.forEach((section: any) => {
+                    if (section.getName() === sectionName) {
+                        section.setVisible(true);
+                        found = true;
+                    }
+                });
+            }
+        });
+
+        if (!found) {
+            console.warn(`[FieldVisibilityHandler] Section not found on form: ${sectionName}`);
+        }
+        return found;
+    } catch (err) {
+        console.error(`[FieldVisibilityHandler] Error showing section ${sectionName}:`, err);
+        return false;
+    }
+}
+
+/**
+ * Hides a section on the form
+ * Sets the section to not visible using Dataverse section.setVisible() API
+ *
+ * @param sectionName - The name of the section (e.g., "dates", "relatedEvent")
+ * @returns true if successful, false if section not found
+ */
+export function hideSection(sectionName: string): boolean {
+    const formContext = getFormContext();
+    if (!formContext) {
+        console.warn("[FieldVisibilityHandler] Xrm.Page not available - hideSection");
+        return false;
+    }
+
+    // Get all tabs and search for the section
+    const tabs = formContext.ui?.tabs;
+    if (!tabs) {
+        console.warn("[FieldVisibilityHandler] Form tabs not available");
+        return false;
+    }
+
+    try {
+        let found = false;
+        tabs.forEach((tab: any) => {
+            const sections = tab.sections;
+            if (sections) {
+                sections.forEach((section: any) => {
+                    if (section.getName() === sectionName) {
+                        section.setVisible(false);
+                        found = true;
+                    }
+                });
+            }
+        });
+
+        if (!found) {
+            console.warn(`[FieldVisibilityHandler] Section not found on form: ${sectionName}`);
+        }
+        return found;
+    } catch (err) {
+        console.error(`[FieldVisibilityHandler] Error hiding section ${sectionName}:`, err);
+        return false;
+    }
+}
+
+/**
+ * Sets section visibility
+ *
+ * @param sectionName - The name of the section
+ * @param visible - Whether the section should be visible
+ * @returns true if successful, false if section not found
+ */
+export function setSectionVisibility(sectionName: string, visible: boolean): boolean {
+    return visible ? showSection(sectionName) : hideSection(sectionName);
+}
+
+/**
+ * Gets the current visibility state of a section
+ *
+ * @param sectionName - The name of the section
+ * @returns true if visible, false if hidden, undefined if section not found
+ */
+export function isSectionVisible(sectionName: string): boolean | undefined {
+    const formContext = getFormContext();
+    if (!formContext) return undefined;
+
+    const tabs = formContext.ui?.tabs;
+    if (!tabs) return undefined;
+
+    try {
+        let visible: boolean | undefined;
+        tabs.forEach((tab: any) => {
+            const sections = tab.sections;
+            if (sections) {
+                sections.forEach((section: any) => {
+                    if (section.getName() === sectionName) {
+                        visible = section.getVisible();
+                    }
+                });
+            }
+        });
+        return visible;
+    } catch {
+        return undefined;
+    }
+}
+
+// =============================================================================
+// Reset and Apply Functions
+// =============================================================================
 
 /**
  * Resets all fields to their default visibility and requirement states
- * Called when Event Type is cleared
+ * Called when Event Type is cleared. Uses DEFAULT_EVENT_FIELD_STATES from shared service.
  *
  * @returns Result of the reset operation
  */
@@ -275,7 +427,8 @@ export function resetToDefaults(): ApplyRulesResult {
         return result;
     }
 
-    for (const [fieldName, defaults] of Object.entries(DEFAULT_FIELD_STATES)) {
+    // Use default states from shared service
+    for (const [fieldName, defaults] of Object.entries(DEFAULT_EVENT_FIELD_STATES)) {
         try {
             // Reset visibility
             const control = formContext.getControl(fieldName);
@@ -299,16 +452,103 @@ export function resetToDefaults(): ApplyRulesResult {
         }
     }
 
+    // Reset all sections to visible
+    let sectionsReset = 0;
+    for (const sectionName of ALL_SECTION_NAMES) {
+        try {
+            if (showSection(sectionName)) {
+                sectionsReset++;
+            }
+        } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            result.errors.push(`Error resetting section ${sectionName}: ${errorMsg}`);
+        }
+    }
+
     if (result.errors.length > 0) {
         result.success = false;
     }
 
-    console.log(`[FieldVisibilityHandler] Reset complete: ${result.rulesApplied} fields, ${result.skippedFields.length} skipped`);
+    console.log(`[FieldVisibilityHandler] Reset complete: ${result.rulesApplied} fields, ${sectionsReset} sections, ${result.skippedFields.length} skipped`);
     return result;
 }
 
 /**
- * Applies field visibility and requirement rules based on Event Type configuration
+ * Applies computed field states to the form.
+ * This is the new approach using EventTypeService's computed states.
+ *
+ * @param computed - Computed field states from EventTypeService.computeFieldStates()
+ * @returns Result of applying the rules
+ */
+export function applyComputedFieldStates(computed: IComputedFieldStates): ApplyRulesResult {
+    const result: ApplyRulesResult = {
+        success: true,
+        rulesApplied: 0,
+        skippedFields: [],
+        errors: []
+    };
+
+    const formContext = getFormContext();
+    if (!formContext) {
+        result.success = false;
+        result.errors.push("Xrm.Page not available");
+        return result;
+    }
+
+    // Apply each field's computed state
+    for (const [fieldName, state] of computed.fields) {
+        try {
+            // Set visibility
+            const control = formContext.getControl(fieldName);
+            if (control) {
+                control.setVisible(state.isVisible);
+            } else {
+                result.skippedFields.push(fieldName);
+                continue; // Skip to next field
+            }
+
+            // Set requirement level
+            const attribute = formContext.getAttribute(fieldName);
+            if (attribute) {
+                attribute.setRequiredLevel(state.requiredLevel);
+            }
+
+            result.rulesApplied++;
+        } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            result.errors.push(`Error applying state to ${fieldName}: ${errorMsg}`);
+        }
+    }
+
+    // Apply section visibility states
+    let sectionsApplied = 0;
+    const skippedSections: string[] = [];
+
+    for (const [sectionName, state] of computed.sections) {
+        try {
+            const success = setSectionVisibility(sectionName, state.isVisible);
+            if (success) {
+                sectionsApplied++;
+            } else {
+                skippedSections.push(sectionName);
+            }
+        } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            result.errors.push(`Error applying section state to ${sectionName}: ${errorMsg}`);
+        }
+    }
+
+    if (result.errors.length > 0) {
+        result.success = false;
+    }
+
+    console.log(`[FieldVisibilityHandler] Applied computed states: ${result.rulesApplied} fields, ${sectionsApplied} sections, ${result.skippedFields.length} fields skipped, ${skippedSections.length} sections skipped`);
+    return result;
+}
+
+/**
+ * Applies field visibility and requirement rules based on Event Type configuration.
+ * This is the legacy approach - consider using applyComputedFieldStates() with EventTypeService instead.
  *
  * @param config - The Event Type field configuration
  * @returns Result of applying the rules
@@ -401,7 +641,7 @@ export function isFieldVisible(fieldName: string): boolean | undefined {
  * @param fieldName - The schema name of the field
  * @returns "required" | "recommended" | "none" | undefined if field not found
  */
-export function getFieldRequiredLevel(fieldName: string): "required" | "recommended" | "none" | undefined {
+export function getFieldRequiredLevel(fieldName: string): RequiredLevel | undefined {
     const formContext = getFormContext();
     if (!formContext) return undefined;
 

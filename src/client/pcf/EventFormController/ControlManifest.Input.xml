@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="EventFormController" version="1.0.6" display-name-key="Event Form Controller" description-key="Controls Event form field visibility based on Event Type configuration" control-type="standard">
+  <control namespace="Spaarke.Controls" constructor="EventFormController" version="2.0.0" display-name-key="Event Form Controller" description-key="Controls Event form field visibility based on Event Type configuration" control-type="standard">
     <external-service-usage enabled="false">
     </external-service-usage>
     <!-- Bound field - attach control to any text field on the form (e.g., Event Name) -->

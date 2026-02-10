@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Create Collapsible Related Event Section</title>
+    <phase>4</phase>
+    <tags>custom-page, sidepane, ui</tags>
+    <estimate>1-2 hours</estimate>
+    <dependencies>031</dependencies>
+    <parallel-group>C</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create collapsible Related Event section for linking to other events.</goal>
+
+    <context>
+      Related Event is a lookup field to another Event record.
+      Conditionally visible based on Event Type.
+    </context>
+
+    <constraints>
+      - Lookup control for sprk_event
+      - Display selected event name
+      - Clear option
+    </constraints>
+  </prompt>
+
+  <steps>
+    <step order="1">Create RelatedEventSection component</step>
+    <step order="2">Implement lookup control</step>
+    <step order="3">Display linked event name</step>
+    <step order="4">Add clear button</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/components/RelatedEventSection.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Lookup works</criterion>
+    <criterion>Selected event displays</criterion>
+    <criterion>Clear button works</criterion>
+  </acceptance-criteria>
+</task>

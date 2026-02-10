@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add "All Events" Link</title>
+    <phase>5</phase>
+    <tags>pcf, fluent-ui, navigation, duedates-widget</tags>
+    <estimate>1 hour</estimate>
+    <dependencies>054</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add "All Events" link to navigate to Events Custom Page.</goal>
+
+    <context>
+      Widget footer shows "All Events →" link.
+      Clicking navigates to system-level Events page.
+      Link styled as Fluent Link component.
+    </context>
+
+    <constraints>
+      - Fluent UI Link component
+      - Navigate to Events Custom Page URL
+      - Show event count badge if > 10 events
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="Link styling" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create WidgetFooter component</step>
+    <step order="2">Add "All Events" link</step>
+    <step order="3">Configure navigation URL</step>
+    <step order="4">Add event count badge (if > shown limit)</step>
+    <step order="5">Style footer layout</step>
+    <step order="6">Test navigation</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/DueDatesWidget/components/WidgetFooter.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Link visible in widget footer</criterion>
+    <criterion>Click navigates to Events page</criterion>
+    <criterion>Count badge shows when more items exist</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion-date>2026-02-04</completion-date>
+    <summary>
+      Created WidgetFooter component with "All Events" link and event count badge.
+      Implemented navigation to Events tab on current form or Events Custom Page.
+      Updated useUpcomingEvents hook to return totalCount for badge display.
+      Build succeeds.
+    </summary>
+    <files-modified>
+      - src/client/pcf/DueDatesWidget/control/components/WidgetFooter.tsx (NEW)
+      - src/client/pcf/DueDatesWidget/control/components/DueDatesWidgetRoot.tsx
+      - src/client/pcf/DueDatesWidget/control/hooks/useUpcomingEvents.ts
+      - src/client/pcf/DueDatesWidget/control/services/eventFilterService.ts
+      - src/client/pcf/DueDatesWidget/control/services/navigationService.ts
+    </files-modified>
+  </notes>
+</task>

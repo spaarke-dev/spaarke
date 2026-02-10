@@ -7,7 +7,13 @@
 
 import * as React from 'react';
 import { IInputs } from '../generated/ManifestTypes';
-import { GridConfiguration } from '../types';
+import {
+    GridConfiguration,
+    CalendarFilter,
+    OptimisticRowUpdateRequest,
+    OptimisticUpdateResult,
+    SpaarkeGridApi
+} from '../types';
 import { CommandBar } from './CommandBar';
 import { DatasetGrid } from './DatasetGrid';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -16,6 +22,7 @@ import { FileDownloadService } from '../services/FileDownloadService';
 import { FileDeleteService } from '../services/FileDeleteService';
 import { FileReplaceService } from '../services/FileReplaceService';
 import { logger } from '../utils/logger';
+import { applyDateFilter } from '../utils/dateFilter';
 
 /**
  * Debounce utility to limit function call frequency
@@ -45,6 +52,20 @@ interface UniversalDatasetGridRootProps {
 
     /** Grid configuration */
     config: GridConfiguration;
+
+    /**
+     * Calendar filter (Task 010)
+     * Parsed from calendarFilter property JSON string
+     * Used for filtering grid data by date
+     */
+    calendarFilter?: CalendarFilter | null;
+
+    /**
+     * Callback when a row is clicked (Task 012 - bi-directional sync).
+     * Emits the due date for calendar highlighting.
+     * @param date - ISO date string (YYYY-MM-DD) or null if no date
+     */
+    onRowClick?: (date: string | null) => void;
 }
 
 /**
@@ -56,10 +77,40 @@ interface UniversalDatasetGridRootProps {
 export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> = ({
     context,
     notifyOutputChanged,
-    config
+    config,
+    calendarFilter,
+    onRowClick
 }) => {
     // Get dataset from context
     const dataset = context.parameters.dataset;
+
+    // Track previous filter to detect changes (avoid unnecessary re-filtering)
+    const prevFilterRef = React.useRef<string | null>(null);
+
+    // Apply calendar filter to dataset when it changes (Task 011)
+    React.useEffect(() => {
+        // Serialize filter for comparison
+        const currentFilterJson = calendarFilter ? JSON.stringify(calendarFilter) : null;
+        const prevFilterJson = prevFilterRef.current;
+
+        // Skip if filter hasn't changed
+        if (currentFilterJson === prevFilterJson) {
+            return;
+        }
+
+        // Update ref for next comparison
+        prevFilterRef.current = currentFilterJson;
+
+        // Apply or clear the filter
+        if (calendarFilter) {
+            logger.info('UniversalDatasetGridRoot', 'Applying calendar filter:', calendarFilter);
+            const wasApplied = applyDateFilter(dataset, calendarFilter);
+            logger.info('UniversalDatasetGridRoot', `Filter ${wasApplied ? 'applied' : 'cleared'}`);
+        } else {
+            logger.debug('UniversalDatasetGridRoot', 'No calendar filter - clearing any existing filter');
+            applyDateFilter(dataset, null);
+        }
+    }, [calendarFilter, dataset]);
 
     // Track selected record IDs in React state
     const [selectedRecordIds, setSelectedRecordIds] = React.useState<string[]>(
@@ -367,6 +418,67 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
         dataset.refresh();
     }, [dataset]);
 
+    // =========================================================================
+    // Optimistic Row Update (Task 015)
+    // =========================================================================
+
+    /**
+     * Reference to the optimistic update handler from DatasetGrid.
+     * This is set when DatasetGrid registers its handler via callback.
+     */
+    const optimisticUpdateHandlerRef = React.useRef<
+        ((request: OptimisticRowUpdateRequest) => OptimisticUpdateResult) | null
+    >(null);
+
+    /**
+     * Callback for DatasetGrid to register its optimistic update handler.
+     * Called during DatasetGrid initialization.
+     */
+    const handleRegisterOptimisticUpdate = React.useCallback(
+        (updateFn: (request: OptimisticRowUpdateRequest) => OptimisticUpdateResult) => {
+            optimisticUpdateHandlerRef.current = updateFn;
+            logger.info('UniversalDatasetGridRoot', 'Optimistic update handler registered');
+        },
+        []
+    );
+
+    /**
+     * Expose the grid API via window.spaarkeGrid for Side Pane access.
+     * This allows external components to trigger optimistic updates.
+     */
+    React.useEffect(() => {
+        // Create the API object
+        const gridApi: SpaarkeGridApi = {
+            updateRow: (request: OptimisticRowUpdateRequest): OptimisticUpdateResult => {
+                if (!optimisticUpdateHandlerRef.current) {
+                    logger.warn('UniversalDatasetGridRoot', 'Optimistic update called before handler registered');
+                    return {
+                        success: false,
+                        error: 'Grid not ready - optimistic update handler not registered',
+                        rollback: () => {}
+                    };
+                }
+
+                logger.info('UniversalDatasetGridRoot', `window.spaarkeGrid.updateRow called for record ${request.recordId}`);
+                return optimisticUpdateHandlerRef.current(request);
+            },
+            refresh: () => {
+                logger.info('UniversalDatasetGridRoot', 'window.spaarkeGrid.refresh called');
+                dataset.refresh();
+            }
+        };
+
+        // Attach to window
+        window.spaarkeGrid = gridApi;
+        logger.info('UniversalDatasetGridRoot', 'window.spaarkeGrid API exposed');
+
+        // Cleanup on unmount
+        return () => {
+            logger.info('UniversalDatasetGridRoot', 'Cleaning up window.spaarkeGrid API');
+            delete window.spaarkeGrid;
+        };
+    }, [dataset]);
+
     return (
         <div
             style={{
@@ -386,11 +498,14 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
                 onRefresh={handleRefresh}
             />
 
-            {/* Fluent UI DataGrid - Task A.2 */}
+            {/* Fluent UI DataGrid - Task A.2, Task 014 (checkbox column), Task 012 (row click), Task 015 (optimistic update) */}
             <DatasetGrid
                 dataset={dataset}
                 selectedRecordIds={selectedRecordIds}
                 onSelectionChange={handleSelectionChange}
+                enableCheckboxSelection={config.enableCheckboxSelection ?? true}
+                onRowClick={onRowClick}
+                onRegisterOptimisticUpdate={handleRegisterOptimisticUpdate}
             />
 
             {/* Delete Confirmation Dialog - Task 3 */}
@@ -415,7 +530,7 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
                 pointerEvents: 'none',
                 zIndex: 1000
             }}>
-                v2.0.9
+                v2.2.0
             </div>
         </div>
     );
