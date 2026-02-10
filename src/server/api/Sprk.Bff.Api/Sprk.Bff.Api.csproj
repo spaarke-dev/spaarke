@@ -20,7 +20,7 @@
     <PackageReference Include="Azure.AI.DocumentIntelligence" Version="1.0.0" />
     <PackageReference Include="Azure.AI.OpenAI" Version="2.1.0" />
     <PackageReference Include="Azure.Identity" Version="1.17.1" />
-    <PackageReference Include="Azure.Storage.Blobs" Version="12.23.0" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.27.0" />
     <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.18.1" />
     <PackageReference Include="Azure.Search.Documents" Version="11.6.0" />
     <PackageReference Include="Azure.Security.KeyVault.Secrets" Version="4.6.0" />
@@ -33,10 +33,10 @@
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
 
     <!-- Microsoft Graph SDK v5.x (CRITICAL - must be 5.x or higher) -->
-    <PackageReference Include="Microsoft.Graph" Version="5.100.0" />
+    <PackageReference Include="Microsoft.Graph" Version="5.101.0" />
     <!-- Kiota packages - all must be same version to avoid assembly binding conflicts -->
-    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.21.1" />
-    <PackageReference Include="Microsoft.Kiota.Authentication.Azure" Version="1.21.1" />
+    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.21.2" />
+    <PackageReference Include="Microsoft.Kiota.Authentication.Azure" Version="1.21.2" />
     <PackageReference Include="Microsoft.Kiota.Http.HttpClientLibrary" Version="1.21.1" />
     <PackageReference Include="Microsoft.Kiota.Serialization.Form" Version="1.21.1" />
     <PackageReference Include="Microsoft.Kiota.Serialization.Json" Version="1.21.1" />
@@ -52,8 +52,8 @@
     <PackageReference Include="MsgReader" Version="6.0.6" />
 
     <!-- Observability -->
-    <PackageReference Include="OpenTelemetry" Version="1.14.0" />
-    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.14.0" />
+    <PackageReference Include="OpenTelemetry" Version="1.15.0" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.14.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.14.0" />
 
