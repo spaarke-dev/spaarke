@@ -72,6 +72,9 @@ export interface IChartDefinition {
   sprk_contextfieldname?: string;
   sprk_viewlisttabname?: string;
   sprk_maxdisplayitems?: number;
+
+  // Drill-through configuration
+  sprk_drillthroughtarget?: string;
 }
 
 /**

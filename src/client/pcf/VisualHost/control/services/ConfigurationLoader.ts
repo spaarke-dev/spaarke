@@ -75,6 +75,8 @@ const FIELDS = {
   contextFieldName: "sprk_contextfieldname",
   viewListTabName: "sprk_viewlisttabname",
   maxDisplayItems: "sprk_maxdisplayitems",
+  // Drill-through configuration
+  drillThroughTarget: "sprk_drillthroughtarget",
   // FetchXML fields
   fetchXmlQuery: "sprk_fetchxmlquery",
   fetchXmlParams: "sprk_fetchxmlparams",
@@ -99,6 +101,7 @@ const SELECT_COLUMNS = [
   FIELDS.contextFieldName,
   FIELDS.viewListTabName,
   FIELDS.maxDisplayItems,
+  FIELDS.drillThroughTarget,
   FIELDS.fetchXmlQuery,
   FIELDS.fetchXmlParams,
 ].join(",");
@@ -261,6 +264,8 @@ function mapToChartDefinition(
     sprk_contextfieldname: record[FIELDS.contextFieldName] as string | undefined,
     sprk_viewlisttabname: record[FIELDS.viewListTabName] as string | undefined,
     sprk_maxdisplayitems: record[FIELDS.maxDisplayItems] as number | undefined,
+    // Drill-through configuration
+    sprk_drillthroughtarget: record[FIELDS.drillThroughTarget] as string | undefined,
     // FetchXML fields
     sprk_fetchxmlquery: record[FIELDS.fetchXmlQuery] as string | undefined,
     sprk_fetchxmlparams: record[FIELDS.fetchXmlParams] as string | undefined,

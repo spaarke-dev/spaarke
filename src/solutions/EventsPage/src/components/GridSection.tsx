@@ -107,6 +107,17 @@ export interface IEventRecord {
 }
 
 /**
+ * Context filter for drill-through scenarios.
+ * Filters the grid to records matching a specific field value (e.g., regarding record).
+ */
+export interface ContextFilter {
+  /** Dataverse field name to filter on (e.g., "sprk_regardingrecordid") */
+  fieldName: string;
+  /** Value to filter by (e.g., matter record GUID) */
+  value: string;
+}
+
+/**
  * Props for GridSection component
  */
 export interface GridSectionProps {
@@ -120,6 +131,8 @@ export interface GridSectionProps {
   statusFilter?: number[];
   /** Selected view ID for FetchXML query (Task 093) */
   viewId?: string;
+  /** Context filter for drill-through — limits records to a specific parent (v2.16.0) */
+  contextFilter?: ContextFilter;
   /** Callback when a row is clicked (to open side pane) */
   onRowClick?: (eventId: string, eventTypeId?: string) => void;
   /** Callback when row selection changes */
@@ -647,6 +660,7 @@ export const GridSection: React.FC<GridSectionProps> = ({
   eventTypeFilter,
   statusFilter,
   viewId,
+  contextFilter,
   onRowClick,
   onSelectionChange,
   onDataLoaded,
@@ -772,6 +786,20 @@ export const GridSection: React.FC<GridSectionProps> = ({
         } : null;
 
         fetchXml = mergeDateFilterIntoFetchXml(fetchXml, dateFilterInput);
+
+        // v2.16.0: Merge context filter (drill-through) into FetchXML
+        if (contextFilter) {
+          console.log("[GridSection] Applying context filter:", contextFilter);
+          const conditionXml = `<condition attribute="${contextFilter.fieldName}" operator="eq" value="${contextFilter.value}" />`;
+          // Insert into existing <filter> element
+          if (fetchXml.includes("</filter>")) {
+            fetchXml = fetchXml.replace("</filter>", `${conditionXml}</filter>`);
+          } else {
+            // No filter element — add one before </entity>
+            fetchXml = fetchXml.replace("</entity>", `<filter type="and">${conditionXml}</filter></entity>`);
+          }
+        }
+
         console.log("[GridSection] Final FetchXML:", fetchXml);
 
         // Execute FetchXML query
@@ -808,6 +836,11 @@ export const GridSection: React.FC<GridSectionProps> = ({
 
       // Build filters
       const filters: string[] = ["statecode eq 0"];
+
+      // v2.16.0: Context filter for drill-through
+      if (contextFilter) {
+        filters.push(`${contextFilter.fieldName} eq '${contextFilter.value}'`);
+      }
 
       const dateFilter = buildDateFilter(calendarFilter);
       if (dateFilter) {
@@ -848,7 +881,7 @@ export const GridSection: React.FC<GridSectionProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [calendarFilter, assignedToFilter, eventTypeFilter, statusFilter, viewDefinition, onDataLoaded]);
+  }, [calendarFilter, assignedToFilter, eventTypeFilter, statusFilter, viewDefinition, contextFilter, onDataLoaded]);
 
   // Fetch events on mount and when filter changes
   React.useEffect(() => {

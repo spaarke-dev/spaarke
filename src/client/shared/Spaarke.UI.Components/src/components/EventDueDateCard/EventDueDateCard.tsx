@@ -117,11 +117,24 @@ const useStyles = makeStyles({
 
 const MONTH_ABBREVS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-function getDueBadgeAppearance(daysUntilDue: number, isOverdue: boolean): "danger" | "warning" | "important" | "informative" {
-  if (isOverdue) return "danger";
-  if (daysUntilDue === 0) return "warning";
-  if (daysUntilDue <= 3) return "important";
-  return "informative";
+function getDueBadgeAppearance(daysUntilDue: number, isOverdue: boolean): "danger" | "warning" | "success" {
+  if (isOverdue || daysUntilDue < 3) return "danger";     // red: overdue or <3 days
+  if (daysUntilDue <= 5) return "warning";                 // yellow: 3-5 days
+  return "success";                                        // green: 6+ days
+}
+
+/**
+ * Get urgency-based background color for the date column.
+ * Uses CSS custom properties from Fluent v9 theme for dark mode support.
+ */
+function getUrgencyDateStyle(daysUntilDue: number, isOverdue: boolean): React.CSSProperties {
+  if (isOverdue || daysUntilDue < 3) {
+    return { backgroundColor: "var(--colorStatusDangerBackground2, #fde7e9)" };
+  }
+  if (daysUntilDue <= 5) {
+    return { backgroundColor: "var(--colorStatusWarningBackground2, #fff4ce)" };
+  }
+  return { backgroundColor: "var(--colorStatusSuccessBackground2, #dff6dd)" };
 }
 
 function getDueBadgeText(daysUntilDue: number, isOverdue: boolean): string {
@@ -149,9 +162,8 @@ export const EventDueDateCard: React.FC<IEventDueDateCardProps> = (props) => {
     [handleClick]
   );
 
-  const dateColumnStyle: React.CSSProperties = props.eventTypeColor
-    ? { backgroundColor: props.eventTypeColor }
-    : {};
+  // Urgency-based date column coloring: <3d red, 3-5d yellow, 6+d green
+  const dateColumnStyle = getUrgencyDateStyle(props.daysUntilDue, props.isOverdue);
 
   const day = props.dueDate.getDate();
   const month = MONTH_ABBREVS[props.dueDate.getMonth()];

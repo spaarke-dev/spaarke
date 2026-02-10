@@ -99,7 +99,56 @@ declare const Xrm: any;
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const VERSION = "2.15.0"; // Proactive navigation detection for instant side pane cleanup
+const VERSION = "2.16.0"; // Dialog mode: skip calendar pane, apply context filter
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Drill-Through Parameter Parsing
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Parameters passed from VisualHost PCF drill-through navigation.
+ * Encoded as URL-encoded key=value pairs in the ?data= query parameter.
+ */
+interface DrillThroughParams {
+  mode: string | null;
+  entityName: string | null;
+  filterField: string | null;
+  filterValue: string | null;
+  viewId: string | null;
+}
+
+/**
+ * Parse drill-through parameters from the URL.
+ * VisualHost passes context via: ?data=entityName=X&filterField=Y&filterValue=Z&mode=dialog
+ */
+function parseDrillThroughParams(): DrillThroughParams {
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const data = urlParams.get("data");
+    if (!data) {
+      return { mode: null, entityName: null, filterField: null, filterValue: null, viewId: null };
+    }
+    const dataParams = new URLSearchParams(data);
+    const params: DrillThroughParams = {
+      mode: dataParams.get("mode"),
+      entityName: dataParams.get("entityName"),
+      filterField: dataParams.get("filterField"),
+      filterValue: dataParams.get("filterValue"),
+      viewId: dataParams.get("viewId"),
+    };
+    console.log("[EventsPage] Drill-through params:", params);
+    return params;
+  } catch (e) {
+    console.warn("[EventsPage] Failed to parse drill-through params:", e);
+    return { mode: null, entityName: null, filterField: null, filterValue: null, viewId: null };
+  }
+}
+
+/** Parsed once at module load — immutable for the page lifecycle */
+const DRILL_THROUGH_PARAMS = parseDrillThroughParams();
+
+/** True when opened as a drill-through dialog from VisualHost */
+const IS_DIALOG_MODE = DRILL_THROUGH_PARAMS.mode === "dialog";
 
 // Session storage key for calendar filter (must match CalendarSidePane)
 const CALENDAR_FILTER_STATE_KEY = "sprk_calendar_filter_state";
@@ -754,10 +803,15 @@ const EventsPageContent: React.FC = () => {
   // ─────────────────────────────────────────────────────────────────────────
 
   // Register Calendar side pane on page load (default open)
+  // v2.16.0: Skip in dialog mode — calendar is not relevant for drill-through
   React.useEffect(() => {
     // Small delay to ensure Xrm is available
     const timer = setTimeout(() => {
-      registerCalendarPane();
+      if (IS_DIALOG_MODE) {
+        console.log("[EventsPage] Dialog mode — skipping Calendar side pane registration");
+      } else {
+        registerCalendarPane();
+      }
     }, 500);
 
     /**
@@ -1117,6 +1171,11 @@ const EventsPageContent: React.FC = () => {
               viewId={selectedViewId}
               onRowClick={handleRowClick}
               onSelectionChange={handleSelectionChange}
+              contextFilter={
+                DRILL_THROUGH_PARAMS.filterField && DRILL_THROUGH_PARAMS.filterValue
+                  ? { fieldName: DRILL_THROUGH_PARAMS.filterField, value: DRILL_THROUGH_PARAMS.filterValue }
+                  : undefined
+              }
             />
           </section>
         </main>

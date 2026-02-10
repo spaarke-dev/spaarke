@@ -210,16 +210,35 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
   };
 
   const handleCardClick = useCallback(async (eventId: string) => {
-    if (onClickAction && !navigatingId) {
-      setNavigatingId(eventId);
-      try {
+    if (navigatingId) return;
+    setNavigatingId(eventId);
+    try {
+      const entityName = chartDefinition.sprk_entitylogicalname || "sprk_event";
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm = (window as any).Xrm;
+
+      if (xrm?.Navigation?.navigateTo) {
+        // Open event record form as a modal dialog
+        await xrm.Navigation.navigateTo(
+          { pageType: "entityrecord", entityName, entityId: eventId },
+          {
+            target: 2,
+            position: 1,
+            width: { value: 80, unit: "%" },
+            height: { value: 80, unit: "%" },
+          }
+        );
+      } else if (onClickAction) {
+        // Fallback to generic click action if Xrm not available
         const record = cards.find(c => c.eventId === eventId);
-        await onClickAction(eventId, chartDefinition.sprk_entitylogicalname, record as unknown as Record<string, unknown>);
-      } finally {
-        setNavigatingId(null);
+        await onClickAction(eventId, entityName, record as unknown as Record<string, unknown>);
       }
+    } catch (err) {
+      logger.error("DueDateCardListVisual", "Failed to open event form dialog", err);
+    } finally {
+      setNavigatingId(null);
     }
-  }, [onClickAction, navigatingId, cards, chartDefinition]);
+  }, [navigatingId, chartDefinition, onClickAction, cards]);
 
   if (loading) {
     return (
@@ -252,7 +271,7 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
           <EventDueDateCard
             key={card.eventId}
             {...card}
-            onClick={onClickAction ? handleCardClick : undefined}
+            onClick={handleCardClick}
             isNavigating={navigatingId === card.eventId}
           />
         ))}

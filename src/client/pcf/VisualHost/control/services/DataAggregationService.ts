@@ -13,7 +13,7 @@ import type {
 } from "../types";
 import { AggregationType } from "../types";
 import { logger } from "../utils/logger";
-import { getViewFetchXml, injectContextFilter } from "./ViewDataService";
+import { getViewFetchXml, injectContextFilter, injectRequiredAttributes } from "./ViewDataService";
 import type { IConfigWebApi } from "./ConfigurationLoader";
 
 /**
@@ -171,6 +171,7 @@ export async function fetchRecords(
     return fetchRecordsFromView(context, entityName, options.viewId, {
       contextFilter: options.contextFilter,
       maxRecords,
+      requiredColumns: options.selectColumns,
     });
   }
 
@@ -253,6 +254,8 @@ async function fetchRecordsFromView(
   options?: {
     contextFilter?: { fieldName: string; recordId: string };
     maxRecords?: number;
+    /** WebAPI property names required for chart aggregation (groupByField, aggregationField) */
+    requiredColumns?: string[];
   }
 ): Promise<Array<Record<string, unknown>>> {
   const webApi = context.webAPI as IConfigWebApi;
@@ -267,6 +270,12 @@ async function fetchRecordsFromView(
 
     // DIAGNOSTIC: Log the raw view FetchXML BEFORE any injection
     logger.info("DataAggregationService", `[DIAG] Raw view FetchXML (before injection):\n${viewFetchXml}`);
+
+    // Inject required attributes for chart aggregation (groupByField, aggregationField)
+    // This ensures the view returns these columns even if they're not in the view's column set
+    if (options?.requiredColumns && options.requiredColumns.length > 0) {
+      fetchXml = injectRequiredAttributes(fetchXml, options.requiredColumns);
+    }
 
     // Inject context filter if provided
     if (options?.contextFilter) {
@@ -323,11 +332,23 @@ export function aggregateRecords(
   }
 
   // Group records by the groupByField
+  // For lookup/optionset fields, prefer the @OData.Community.Display.V1.FormattedValue
+  // annotation which provides human-readable labels (e.g., "Task" instead of a GUID)
+  const formattedValueKey = `${groupByField}@OData.Community.Display.V1.FormattedValue`;
   const groups = new Map<string, Array<Record<string, unknown>>>();
 
+  // DIAGNOSTIC: Log first record's groupByField values
+  if (records.length > 0) {
+    const first = records[0];
+    const rawVal = first[groupByField];
+    const fmtVal = first[formattedValueKey];
+    logger.info("DataAggregationService", `[DIAG] groupByField="${groupByField}" → raw=${rawVal === undefined ? "(undefined)" : JSON.stringify(rawVal)}, formatted=${fmtVal === undefined ? "(undefined)" : JSON.stringify(fmtVal)}`);
+  }
+
   for (const record of records) {
-    const groupValue = record[groupByField];
-    const groupKey = formatGroupKey(groupValue);
+    const formattedValue = record[formattedValueKey] as string | undefined;
+    const rawValue = record[groupByField];
+    const groupKey = formattedValue || formatGroupKey(rawValue);
 
     if (!groups.has(groupKey)) {
       groups.set(groupKey, []);
@@ -350,8 +371,8 @@ export function aggregateRecords(
     });
   }
 
-  // Sort by value descending (most common pattern for charts)
-  dataPoints.sort((a, b) => b.value - a.value);
+  // Sort alphabetically by label (A→Z, left-to-right on bar charts)
+  dataPoints.sort((a, b) => a.label.localeCompare(b.label));
 
   logger.debug(
     "DataAggregationService",

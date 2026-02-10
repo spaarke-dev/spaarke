@@ -42,6 +42,14 @@ export interface IMetricCardProps {
   interactive?: boolean;
   /** Compact mode for smaller displays */
   compact?: boolean;
+  /** Fill container width with 3:5 H:W ratio (aspect-ratio: 5/3) */
+  fillContainer?: boolean;
+  /** Content alignment: left, center, right */
+  justification?: "left" | "center" | "right";
+  /** Explicit width in pixels (overrides fillContainer when both width and height set) */
+  explicitWidth?: number;
+  /** Explicit height in pixels (overrides fillContainer when both width and height set) */
+  explicitHeight?: number;
 }
 
 const useStyles = makeStyles({
@@ -65,12 +73,25 @@ const useStyles = makeStyles({
     minHeight: "80px",
     minWidth: "150px",
   },
+  cardFillContainer: {
+    width: "100%",
+    minWidth: "unset",
+    minHeight: "unset",
+    // 3:5 height-to-width ratio → CSS aspect-ratio is width/height = 5/3
+    aspectRatio: "5 / 3",
+  },
   content: {
     display: "flex",
     flexDirection: "column",
     alignItems: "flex-start",
     padding: tokens.spacingVerticalM,
     gap: tokens.spacingVerticalXS,
+  },
+  contentCenter: {
+    alignItems: "center",
+  },
+  contentRight: {
+    alignItems: "flex-end",
   },
   contentCompact: {
     padding: tokens.spacingVerticalS,
@@ -153,8 +174,15 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
   drillValue,
   interactive = true,
   compact = false,
+  fillContainer = false,
+  justification = "left",
+  explicitWidth,
+  explicitHeight,
 }) => {
   const styles = useStyles();
+
+  // v1.2.21: If both explicit width and height are set, use those exact dimensions
+  const hasExplicitDimensions = explicitWidth != null && explicitHeight != null;
 
   const handleClick = () => {
     if (interactive && onDrillInteraction && drillField) {
@@ -210,8 +238,15 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
       className={mergeClasses(
         styles.card,
         isInteractive && styles.cardInteractive,
-        compact && styles.cardCompact
+        compact && styles.cardCompact,
+        fillContainer && !hasExplicitDimensions && styles.cardFillContainer
       )}
+      style={hasExplicitDimensions ? {
+        width: `${explicitWidth}px`,
+        height: `${explicitHeight}px`,
+        minWidth: "unset",
+        minHeight: "unset",
+      } : undefined}
       onClick={isInteractive ? handleClick : undefined}
       onKeyDown={isInteractive ? handleKeyDown : undefined}
       tabIndex={isInteractive ? 0 : undefined}
@@ -221,7 +256,9 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
       <div
         className={mergeClasses(
           styles.content,
-          compact && styles.contentCompact
+          compact && styles.contentCompact,
+          justification === "center" && styles.contentCenter,
+          justification === "right" && styles.contentRight
         )}
       >
         <Text

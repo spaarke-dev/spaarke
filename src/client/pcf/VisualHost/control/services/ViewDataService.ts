@@ -273,6 +273,78 @@ function findMatchingClose(xml: string, openPos: number, tagName: string): numbe
 }
 
 /**
+ * Inject required attribute elements into FetchXML to ensure chart-needed
+ * columns are returned even when not included in the saved view's column set.
+ *
+ * Handles WebAPI → FetchXML field name conversion:
+ *   _sprk_eventtype_ref_value → sprk_eventtype_ref (lookup fields)
+ *   sprk_regardingrecordid     → sprk_regardingrecordid (text fields, no-op)
+ *
+ * Skips injection when the view uses <all-attributes />.
+ *
+ * @param fetchXml - The view's FetchXML string
+ * @param requiredColumns - WebAPI property names needed for chart aggregation
+ * @returns FetchXML with missing attributes injected
+ */
+export function injectRequiredAttributes(
+  fetchXml: string,
+  requiredColumns: string[]
+): string {
+  if (!requiredColumns || requiredColumns.length === 0) return fetchXml;
+
+  // <all-attributes /> means every column is returned — nothing to inject
+  if (/<all-attributes\s*\/?>/i.test(fetchXml)) {
+    logger.debug("ViewDataService", "View uses <all-attributes />, skipping attribute injection");
+    return fetchXml;
+  }
+
+  const entityMatch = fetchXml.match(/<entity\s[^>]*>/i);
+  if (!entityMatch) return fetchXml;
+
+  const entityTagEnd =
+    fetchXml.indexOf(">", fetchXml.indexOf(entityMatch[0])) + 1;
+
+  // Collect missing attributes
+  const toInject: string[] = [];
+
+  for (const col of requiredColumns) {
+    // Convert WebAPI property name → FetchXML attribute name
+    // _sprk_eventtype_ref_value → sprk_eventtype_ref
+    const fetchXmlAttr = col
+      .replace(/^_/, "")
+      .replace(/_value$/, "")
+      .toLowerCase();
+
+    // Check if attribute already exists in the view's FetchXML
+    const exists = new RegExp(
+      `<attribute\\s[^>]*name=["']${fetchXmlAttr}["']`,
+      "i"
+    ).test(fetchXml);
+
+    if (!exists) {
+      toInject.push(fetchXmlAttr);
+    }
+  }
+
+  if (toInject.length === 0) return fetchXml;
+
+  const attrXml = toInject
+    .map((a) => `<attribute name="${a}" />`)
+    .join("");
+
+  logger.info(
+    "ViewDataService",
+    `Injecting required attributes into view FetchXML: ${toInject.join(", ")}`
+  );
+
+  return (
+    fetchXml.substring(0, entityTagEnd) +
+    attrXml +
+    fetchXml.substring(entityTagEnd)
+  );
+}
+
+/**
  * Apply max items (top count) to FetchXML
  */
 export function applyMaxItems(fetchXml: string, maxItems: number): string {
