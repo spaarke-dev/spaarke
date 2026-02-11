@@ -75,5 +75,14 @@
     <ProjectReference Include="..\..\shared\Spaarke.Dataverse\Spaarke.Dataverse.csproj" />
   </ItemGroup>
 
+  <!-- Builder scope JSON files for AI Playbook Builder (Phase 4 Dataverse import) -->
+  <ItemGroup>
+    <Content Update="builder-scopes\**\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Exclude template config from publish - all config comes from Azure App Settings -->
+  <ItemGroup>
+    <Content Update="appsettings.template.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
 
 </Project>

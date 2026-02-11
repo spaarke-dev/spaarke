@@ -567,74 +567,245 @@ public class BuilderToolExecutor
         });
     }
 
-    private Task<BuilderToolResult> ExecuteSearchScopesAsync(
+    private async Task<BuilderToolResult> ExecuteSearchScopesAsync(
         BuilderToolCall toolCall,
         CancellationToken cancellationToken)
     {
         var args = toolCall.Arguments.Deserialize<SearchScopesArguments>(JsonOptions)
             ?? new SearchScopesArguments();
 
+        var query = args.Query ?? args.SemanticQuery ?? string.Empty;
         _logger.LogInformation("SearchScopes: query='{Query}', type={Type}",
-            args.Query ?? args.SemanticQuery, args.ScopeType);
+            query, args.ScopeType);
 
-        // TODO: Implement actual scope search using IScopeResolverService
-        // For now, return a placeholder result with common scopes
         var results = new List<ScopeSearchResult>();
+        var scopeType = args.ScopeType?.ToLowerInvariant();
 
-        // Add placeholder results based on query
-        if (args.ScopeType == "action" || args.ScopeType == "all" || args.ScopeType == null)
+        // Try to search Dataverse first, fall back to catalog if empty
+        try
         {
-            results.Add(new ScopeSearchResult
+            var dataverseResults = await SearchDataverseScopesAsync(query, scopeType, args.Limit ?? 10, cancellationToken);
+            if (dataverseResults.Count > 0)
             {
-                ScopeId = "sys-act-001",
-                Name = "SYS-ACT-001",
-                DisplayName = "Entity Extraction",
-                ScopeType = "Action",
-                Description = "Extract named entities (parties, dates, amounts) from document text",
-                OwnerType = "system",
-                Tags = new[] { "extraction", "entities" }
-            });
-            results.Add(new ScopeSearchResult
-            {
-                ScopeId = "sys-act-002",
-                Name = "SYS-ACT-002",
-                DisplayName = "Document Summary",
-                ScopeType = "Action",
-                Description = "Generate TL;DR summary of document content",
-                OwnerType = "system",
-                Tags = new[] { "summary", "tldr" }
-            });
+                results.AddRange(dataverseResults);
+                _logger.LogDebug("SearchScopes: Found {Count} results from Dataverse", results.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SearchScopes: Dataverse search failed, using fallback catalog");
         }
 
-        if (args.ScopeType == "skill" || args.ScopeType == "all" || args.ScopeType == null)
+        // If no Dataverse results, search the fallback catalog
+        if (results.Count == 0)
         {
-            results.Add(new ScopeSearchResult
-            {
-                ScopeId = "sys-skl-001",
-                Name = "SYS-SKL-001",
-                DisplayName = "Real Estate Domain",
-                ScopeType = "Skill",
-                Description = "Domain expertise for real estate documents (leases, deeds, easements)",
-                OwnerType = "system",
-                Tags = new[] { "real-estate", "lease" }
-            });
+            results.AddRange(SearchFallbackCatalog(query, scopeType, args.Limit ?? 10));
+            _logger.LogDebug("SearchScopes: Found {Count} results from fallback catalog", results.Count);
         }
 
         var searchResult = new SearchScopesResult
         {
-            Results = results.Take(args.Limit ?? 10).ToList(),
+            Results = results,
             TotalCount = results.Count,
             Success = true
         };
 
-        return Task.FromResult(new BuilderToolResult
+        return new BuilderToolResult
         {
             ToolCallId = toolCall.Id,
             ToolName = toolCall.ToolName,
             Success = true,
             Result = JsonDocument.Parse(JsonSerializer.Serialize(searchResult, JsonOptions)),
             CanvasOperations = null // Search doesn't modify canvas
-        });
+        };
+    }
+
+    /// <summary>
+    /// Search Dataverse for scopes matching the query.
+    /// </summary>
+    private async Task<List<ScopeSearchResult>> SearchDataverseScopesAsync(
+        string query,
+        string? scopeType,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var results = new List<ScopeSearchResult>();
+
+        var searchQuery = new ScopeSearchQuery
+        {
+            SearchText = query,
+            ScopeTypes = scopeType switch
+            {
+                "action" => [ScopeType.Action],
+                "skill" => [ScopeType.Skill],
+                "knowledge" => [ScopeType.Knowledge],
+                "tool" => [ScopeType.Tool],
+                _ => []
+            },
+            PageSize = limit
+        };
+
+        var dataverseResults = await _scopeResolver.SearchScopesAsync(searchQuery, cancellationToken);
+
+        // Convert actions
+        foreach (var action in dataverseResults.Actions)
+        {
+            results.Add(new ScopeSearchResult
+            {
+                ScopeId = action.Id.ToString(),
+                Name = action.Name,
+                DisplayName = action.Name,
+                ScopeType = "Action",
+                Description = action.Description,
+                OwnerType = action.OwnerType == ScopeOwnerType.System ? "system" : "customer"
+            });
+        }
+
+        // Convert skills
+        foreach (var skill in dataverseResults.Skills)
+        {
+            results.Add(new ScopeSearchResult
+            {
+                ScopeId = skill.Id.ToString(),
+                Name = skill.Name,
+                DisplayName = skill.Name,
+                ScopeType = "Skill",
+                Description = skill.Description,
+                OwnerType = skill.OwnerType == ScopeOwnerType.System ? "system" : "customer"
+            });
+        }
+
+        // Convert knowledge
+        foreach (var knowledge in dataverseResults.Knowledge)
+        {
+            results.Add(new ScopeSearchResult
+            {
+                ScopeId = knowledge.Id.ToString(),
+                Name = knowledge.Name,
+                DisplayName = knowledge.Name,
+                ScopeType = "Knowledge",
+                Description = knowledge.Description,
+                OwnerType = knowledge.OwnerType == ScopeOwnerType.System ? "system" : "customer"
+            });
+        }
+
+        // Convert tools
+        foreach (var tool in dataverseResults.Tools)
+        {
+            results.Add(new ScopeSearchResult
+            {
+                ScopeId = tool.Id.ToString(),
+                Name = tool.Name,
+                DisplayName = tool.Name,
+                ScopeType = "Tool",
+                Description = tool.Description,
+                OwnerType = tool.OwnerType == ScopeOwnerType.System ? "system" : "customer"
+            });
+        }
+
+        return results.Take(limit).ToList();
+    }
+
+    /// <summary>
+    /// Search the fallback catalog for scopes matching the query.
+    /// Uses simple string matching on name and description.
+    /// </summary>
+    private static List<ScopeSearchResult> SearchFallbackCatalog(string query, string? scopeType, int limit)
+    {
+        var results = new List<ScopeSearchResult>();
+        var queryLower = query.ToLowerInvariant();
+
+        // Helper to check if an entry matches the query
+        bool Matches(Prompts.ScopeCatalogEntry entry) =>
+            string.IsNullOrEmpty(query) ||
+            entry.Name.Contains(queryLower, StringComparison.OrdinalIgnoreCase) ||
+            entry.DisplayName.Contains(queryLower, StringComparison.OrdinalIgnoreCase) ||
+            entry.Description.Contains(queryLower, StringComparison.OrdinalIgnoreCase);
+
+        // Helper to calculate match score
+        double CalculateScore(Prompts.ScopeCatalogEntry entry)
+        {
+            if (string.IsNullOrEmpty(query)) return 0.5;
+            var nameMatch = entry.DisplayName.Contains(queryLower, StringComparison.OrdinalIgnoreCase) ? 0.4 : 0.0;
+            var descMatch = entry.Description.Contains(queryLower, StringComparison.OrdinalIgnoreCase) ? 0.3 : 0.0;
+            var exactMatch = entry.DisplayName.Equals(query, StringComparison.OrdinalIgnoreCase) ? 0.3 : 0.0;
+            return nameMatch + descMatch + exactMatch;
+        }
+
+        // Search actions
+        if (scopeType == null || scopeType == "action" || scopeType == "all")
+        {
+            foreach (var entry in FallbackScopeCatalog.GetActions().Where(Matches))
+            {
+                results.Add(new ScopeSearchResult
+                {
+                    ScopeId = entry.Name.ToLowerInvariant().Replace("-", "_"),
+                    Name = entry.Name,
+                    DisplayName = entry.DisplayName,
+                    ScopeType = "Action",
+                    Description = entry.Description,
+                    OwnerType = "system",
+                    MatchScore = CalculateScore(entry)
+                });
+            }
+        }
+
+        // Search skills
+        if (scopeType == null || scopeType == "skill" || scopeType == "all")
+        {
+            foreach (var entry in FallbackScopeCatalog.GetSkills().Where(Matches))
+            {
+                results.Add(new ScopeSearchResult
+                {
+                    ScopeId = entry.Name.ToLowerInvariant().Replace("-", "_"),
+                    Name = entry.Name,
+                    DisplayName = entry.DisplayName,
+                    ScopeType = "Skill",
+                    Description = entry.Description,
+                    OwnerType = "system",
+                    MatchScore = CalculateScore(entry)
+                });
+            }
+        }
+
+        // Search knowledge
+        if (scopeType == null || scopeType == "knowledge" || scopeType == "all")
+        {
+            foreach (var entry in FallbackScopeCatalog.GetKnowledge().Where(Matches))
+            {
+                results.Add(new ScopeSearchResult
+                {
+                    ScopeId = entry.Name.ToLowerInvariant().Replace("-", "_"),
+                    Name = entry.Name,
+                    DisplayName = entry.DisplayName,
+                    ScopeType = "Knowledge",
+                    Description = entry.Description,
+                    OwnerType = "system",
+                    MatchScore = CalculateScore(entry)
+                });
+            }
+        }
+
+        // Search tools
+        if (scopeType == null || scopeType == "tool" || scopeType == "all")
+        {
+            foreach (var entry in FallbackScopeCatalog.GetTools().Where(Matches))
+            {
+                results.Add(new ScopeSearchResult
+                {
+                    ScopeId = entry.Name.ToLowerInvariant().Replace("-", "_"),
+                    Name = entry.Name,
+                    DisplayName = entry.DisplayName,
+                    ScopeType = "Tool",
+                    Description = entry.Description,
+                    OwnerType = "system",
+                    MatchScore = CalculateScore(entry)
+                });
+            }
+        }
+
+        // Sort by match score descending and limit
+        return results.OrderByDescending(r => r.MatchScore ?? 0.0).Take(limit).ToList();
     }
 
     private Task<BuilderToolResult> ExecuteCreateScopeAsync(

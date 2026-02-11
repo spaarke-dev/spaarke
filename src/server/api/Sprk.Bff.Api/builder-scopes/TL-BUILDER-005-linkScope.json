@@ -1,0 +1,91 @@
+{
+  "id": "c1d2e3f4-a5b6-4c5d-8e9f-005005005005",
+  "name": "SYS-TL-BUILDER-005-linkScope",
+  "displayName": "Link Scope",
+  "description": "Attach an existing scope (Action, Skill, Knowledge, or Tool) to a node on the canvas.",
+  "scopeType": "Tool",
+  "ownerType": 1,
+  "isImmutable": true,
+  "configuration": {
+    "handlerType": "CanvasOperationHandler",
+    "operation": "linkScope",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "type": "string",
+          "description": "ID of the node to link scope to"
+        },
+        "nodeLabel": {
+          "type": "string",
+          "description": "Label of the node (alternative to nodeId)"
+        },
+        "scopeType": {
+          "type": "string",
+          "enum": ["action", "skill", "knowledge", "tool"],
+          "description": "Type of scope to link"
+        },
+        "scopeId": {
+          "type": "string",
+          "description": "ID of the scope to link"
+        },
+        "scopeName": {
+          "type": "string",
+          "description": "Name of the scope (alternative to scopeId)"
+        },
+        "replaceExisting": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, replaces existing scope of same type. If false, adds to list (for skills/knowledge)."
+        }
+      },
+      "required": ["scopeType"]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "type": "string"
+        },
+        "linkedScopeId": {
+          "type": "string"
+        },
+        "scopeType": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      }
+    },
+    "validationRules": [
+      {
+        "rule": "node must exist on canvas",
+        "errorMessage": "Node not found on canvas"
+      },
+      {
+        "rule": "scope must exist in Dataverse",
+        "errorMessage": "Scope not found"
+      },
+      {
+        "rule": "scope type must be compatible with node type",
+        "errorMessage": "This scope type cannot be linked to this node type"
+      }
+    ],
+    "scopeTypeCompatibility": {
+      "aiAnalysis": ["action", "skill", "knowledge"],
+      "condition": [],
+      "assemble": [],
+      "deliver": ["tool"],
+      "loop": [],
+      "transform": ["tool"],
+      "humanReview": [],
+      "externalApi": ["tool"]
+    }
+  },
+  "metadata": {
+    "tags": ["builder", "tool", "canvas", "scope", "link"],
+    "version": "1.0.0",
+    "category": "builder-canvas-ops"
+  }
+}

@@ -12,6 +12,8 @@ publish/
 publish-*/
 deploy.zip
 deploy-*.zip
+build_output.txt
+build_log.txt
 
 # IDE files
 .vs/
