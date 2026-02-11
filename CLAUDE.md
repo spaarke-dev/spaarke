@@ -1,6 +1,6 @@
 # CLAUDE.md - Spaarke Repository Instructions
 
-> **Last Updated**: January 6, 2026
+> **Last Updated**: February 11, 2026
 >
 > **Purpose**: This file provides repository-wide context and instructions for Claude Code when working in this codebase.
 
@@ -8,43 +8,50 @@
 
 ## Development Environment
 
-### Claude Code Extended Context Settings
+### Adaptive Thinking & Effort Control (Opus 4.6)
 
-This monorepo uses extended context settings for multi-phase feature development. These environment variables enable Claude Code to handle complex project pipelines with deep context requirements:
+Claude Opus 4.6 introduces **adaptive thinking** — the model dynamically decides when and how much to think based on task complexity. This replaces the fixed `MAX_THINKING_TOKENS` budget from Opus 4.5.
 
+**How It Works**: Instead of a fixed thinking token budget, Claude evaluates each request's complexity and allocates thinking accordingly. The **effort parameter** provides soft guidance:
+
+| Effort Level | Thinking Behavior | Use Case |
+|-------------|-------------------|----------|
+| `max` | Always thinks deeply, no constraints (Opus 4.6 only) | Architectural decisions, complex debugging, multi-system refactors |
+| `high` (default) | Always thinks deeply | Complex reasoning, difficult coding, agentic task execution |
+| `medium` | Moderate thinking, may skip for simple queries | Balanced speed/quality for standard tasks, subagent coordination |
+| `low` | Minimal thinking, skips for simple tasks | Simple lookups, classification, high-volume operations, fast subagents |
+
+**Toggle Thinking in Session**: Press **Alt+T** (or **Option+T** on Mac) to toggle thinking on/off. Press **Ctrl+O** for verbose mode to view reasoning.
+
+**Environment Variables**:
 ```bash
-MAX_THINKING_TOKENS=50000
+# Opus 4.6: MAX_THINKING_TOKENS is IGNORED (adaptive thinking controls depth)
+# Setting to 0 still disables thinking entirely on any model
 CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
 ```
 
-**Why Extended Context?**
-- **Multi-phase projects**: AI Document Intelligence R1 has 100+ tasks across 8 phases
-- **Deep resource discovery**: Skills load ADRs, knowledge docs, patterns, and existing code
-- **Context-rich task execution**: Each task includes full project history, applicable constraints
-- **Pipeline orchestration**: project-pipeline skill chains multiple component skills
-
-**When to Use**:
-- Running `/project-pipeline` for new projects with extensive specs (>2000 words)
-- Executing complex tasks that touch multiple system areas (API + PCF + Dataverse)
-- Working on AI features that require ADR-013/014/015/016 context loading
-- Phase wrap-up tasks that synthesize learnings across many prior tasks
-
 **Setting in Windows**:
 ```cmd
-setx MAX_THINKING_TOKENS "50000"
 setx CLAUDE_CODE_MAX_OUTPUT_TOKENS "64000"
 ```
 
-**Verifying settings**:
-```powershell
-# In new terminal session
-echo $env:MAX_THINKING_TOKENS
-echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
-```
+**Task-Specific Effort Guidance**:
+
+| Task Type | Recommended Effort | Why |
+|-----------|-------------------|-----|
+| `/project-pipeline` (full pipeline) | `high` or `max` | Multi-phase, deep resource discovery, 100+ tasks |
+| Task execution (FULL rigor) | `high` | Code implementation needs thorough reasoning |
+| Task execution (STANDARD) | `medium` | Tests and constrained tasks need balance |
+| Task execution (MINIMAL) | `low` | Documentation, inventory — speed over depth |
+| Subagent research/exploration | `low` or `medium` | Quick focused workers benefit from speed |
+| Agent team teammates | `medium` | Independent workers need efficiency at scale |
+| Code review / ADR check | `high` | Quality gates need thorough analysis |
+
+**Cost Impact**: Lower effort = fewer tokens = lower cost + lower latency. Use `low` for subagents and simple tasks to avoid unnecessary token spend.
 
 ### Claude Code Model and Permission Settings
 
-This repository is configured for **Opus 4.5** with **auto-accept edits** via `.claude/settings.json`:
+This repository is configured for **Opus 4.6** with **auto-accept edits** via `.claude/settings.json`:
 
 ```json
 {
@@ -57,9 +64,9 @@ This repository is configured for **Opus 4.5** with **auto-accept edits** via `.
 ```
 
 **Model Selection**:
-- **Default**: `opus` (Claude Opus 4.5 - claude-opus-4-5-20251101)
+- **Default**: `opus` (Claude Opus 4.6 - claude-opus-4-6)
 - **Check current**: `/model` or `/status` during session
-- **Override**: `claude --model sonnet` for faster, simpler tasks
+- **Override**: `claude --model sonnet` for faster, simpler tasks (Sonnet 4.5)
 
 **Permission Modes** (cycle with **Shift+Tab**):
 
@@ -67,12 +74,46 @@ This repository is configured for **Opus 4.5** with **auto-accept edits** via `.
 |------|-----------|----------|
 | **Auto-Accept** | `⏵⏵ accept edits on` | Task implementation (default) |
 | **Plan Mode** | `⏸ plan mode on` | Code analysis, planning, exploration |
+| **Delegate Mode** | (agent teams only) | Lead coordinates, teammates implement |
+| **Don't Ask** | Auto-denies unless pre-approved | Strict mode using only `/permissions` allow list |
+| **Bypass Permissions** | All prompts skipped | Fully autonomous (containers/VMs only) |
 | **Ask Mode** | (none) | Explicit approval for each change |
+
+**Skip All Confirmations** (fully autonomous execution):
+
+```bash
+# OPTION 1: Bypass all permissions (use in isolated environments only)
+claude --dangerously-skip-permissions
+
+# OPTION 2: Set in settings.json for persistent bypass
+# In .claude/settings.json:
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  }
+}
+
+# OPTION 3: Pre-approve specific tools to minimize prompts (RECOMMENDED)
+# In .claude/settings.json - allow common operations:
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Read(**)", "Glob(**)", "Grep(**)",
+      "Bash(git *)", "Bash(dotnet *)", "Bash(npm *)",
+      "Bash(az *)", "Bash(pac *)", "Bash(gh *)",
+      "Skill(*)", "Task(*)"
+    ]
+  }
+}
+```
+
+> **WARNING**: `--dangerously-skip-permissions` disables ALL safety checks. Only use in containers, VMs, or disposable environments. For daily development, use **acceptEdits** mode with a broad `allow` list instead.
 
 **Recommended Workflow**:
 
 1. **Planning Phase** (`/project-pipeline`, `/design-to-spec`):
-   - Press **Shift+Tab** twice to enter **Plan Mode**
+   - Press **Shift+Tab** to cycle to **Plan Mode**
    - Claude analyzes, reads, plans without making changes
    - Review the plan before implementation
 
@@ -80,6 +121,10 @@ This repository is configured for **Opus 4.5** with **auto-accept edits** via `.
    - Press **Shift+Tab** to return to **Auto-Accept Mode**
    - Claude implements changes automatically
    - Quality gates (code-review, adr-check) run at Step 9.5
+
+3. **Fully Autonomous Phase** (CI/CD, batch tasks):
+   - Use `claude -p "task" --dangerously-skip-permissions --output-format json`
+   - Headless mode for scripted pipelines
 
 **Starting in Specific Mode**:
 ```bash
@@ -89,9 +134,198 @@ claude --permission-mode plan
 # Start in auto-accept for implementation
 claude --permission-mode acceptEdits
 
-# Use Opus for planning, Sonnet for execution (hybrid)
-claude --model opusplan
+# Fully autonomous (containers only)
+claude --dangerously-skip-permissions
+
+# Headless mode for CI/CD pipelines
+claude -p "run dotnet test" --output-format json
 ```
+
+---
+
+## New Claude Code Features (February 2026)
+
+### Hooks System
+
+Hooks fire custom shell commands at specific points during a Claude Code session. Configure in `.claude/settings.json` or `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "command": "scripts/validate-bash-command.sh"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "command": "scripts/post-edit-lint.sh"
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "command": "scripts/run-quality-gate.sh"
+      }
+    ]
+  }
+}
+```
+
+**Available hook events**: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `TeammateIdle`, `TaskCompleted`, `Stop`
+
+**Spaarke use cases**:
+- Run `dotnet format` after file edits
+- Validate ADR compliance on code changes
+- Auto-run tests after implementation steps
+- Enforce quality gates on task completion
+
+### Headless / Non-Interactive Mode
+
+Run Claude Code programmatically without a terminal UI:
+
+```bash
+# Single query, get JSON output
+claude -p "run dotnet test and report results" --output-format json
+
+# Pipe input
+echo "explain this error" | claude -p --output-format json
+
+# Combine with skip-permissions for CI/CD
+claude -p "build and test" --dangerously-skip-permissions --output-format json
+```
+
+### MCP Server Integration
+
+Claude Code can connect to [MCP servers](https://code.claude.com/docs/en/mcp) for external tool access. Configure in settings:
+
+```json
+{
+  "mcpServers": {
+    "dataverse": {
+      "command": "node",
+      "args": ["mcp-servers/dataverse-server.js"],
+      "env": {
+        "DATAVERSE_URL": "https://spaarkedev1.crm.dynamics.com"
+      }
+    }
+  }
+}
+```
+
+MCP tools appear as regular tools and work with permission rules: `mcp__dataverse__query`.
+
+### Session Management
+
+| Command | Purpose |
+|---------|---------|
+| `/resume` | Resume a previous session |
+| `/rewind` | Rewind to an earlier point in the session |
+| `/teleport` | Resume and configure remote sessions (claude.ai subscribers) |
+| `/compact` | Compress conversation to free context |
+| `/clear` | Wipe conversation and start fresh |
+
+### Cost & Token Awareness
+
+- **Effort parameter** controls token spend per-request (see Adaptive Thinking section above)
+- Lower effort for subagents and simple tasks = significant cost savings
+- Agent teams multiply token usage per teammate — use judiciously
+- Monitor with `/status` during sessions
+
+---
+
+## Agent Teams (Experimental)
+
+Agent teams coordinate multiple Claude Code instances working in parallel. One session acts as **team lead** (orchestrator), spawning **teammates** that work independently with their own context windows and communicate directly with each other.
+
+### Enabling Agent Teams
+
+```json
+// In .claude/settings.json
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  }
+}
+```
+
+Or set the environment variable:
+```cmd
+setx CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS "1"
+```
+
+### When to Use Agent Teams vs. Subagents
+
+| Capability | Subagents (`Task` tool) | Agent Teams |
+|-----------|------------------------|-------------|
+| **Context** | Own window, results return to caller | Own window, fully independent |
+| **Communication** | Report back to main agent only | Teammates message each other directly |
+| **Coordination** | Main agent manages all work | Shared task list with self-coordination |
+| **Token cost** | Lower (results summarized) | Higher (each is a separate Claude instance) |
+| **Best for** | Focused research, exploration, quick checks | Parallel implementation, competing hypotheses, cross-layer work |
+
+**Use subagents for**: Quick research, code exploration, focused verification tasks
+**Use agent teams for**: Parallel feature implementation, multi-perspective code review, debugging with competing theories, cross-layer changes (API + PCF + tests)
+
+### Agent Teams for Spaarke Projects
+
+**Parallel code review** (3 reviewers):
+```
+Create an agent team to review PR #142. Spawn three reviewers:
+- One focused on security implications
+- One checking performance against ADRs
+- One validating test coverage
+```
+
+**Parallel feature implementation** (requires separate file ownership):
+```
+Create a team for the financial-intelligence module:
+- Teammate 1: BFF API endpoints (src/server/api/)
+- Teammate 2: PCF control (src/client/pcf/)
+- Teammate 3: Integration tests (tests/)
+Use Sonnet for each teammate. Require plan approval before changes.
+```
+
+**Investigation/debugging**:
+```
+Users report slow document uploads. Spawn 3 teammates to investigate:
+- One checking the SpeFileStore facade performance
+- One analyzing the Redis caching layer
+- One profiling the AI pipeline
+Have them debate findings and converge on root cause.
+```
+
+### Display Modes
+
+| Mode | Setting | Description |
+|------|---------|-------------|
+| **In-process** (default) | `"teammateMode": "in-process"` | All teammates in main terminal. Use Shift+Up/Down to navigate. |
+| **Split panes** | `"teammateMode": "tmux"` | Each teammate in own pane. Requires tmux or iTerm2. |
+
+```bash
+# Force in-process for a single session
+claude --teammate-mode in-process
+```
+
+### Delegate Mode
+
+When agent teams are active, press **Shift+Tab** to cycle into **Delegate Mode** — restricts the lead to coordination-only tools (spawning, messaging, task management). All implementation happens through teammates.
+
+### Key Rules for Spaarke Agent Teams
+
+- Each teammate loads `CLAUDE.md`, MCP servers, and skills automatically
+- Teammates start with the lead's permission settings
+- **Avoid file conflicts**: break work so each teammate owns different files/directories
+- Use `/conflict-check` before starting parallel work
+- Teammates cannot spawn their own teams (no nesting)
+- One team per session — clean up before starting a new team
+
+### Quality Gates with Hooks
+
+Use `TeammateIdle` and `TaskCompleted` hooks to enforce quality:
+- `TeammateIdle`: Run code-review when a teammate finishes
+- `TaskCompleted`: Run adr-check before marking task complete
 
 ---
 
@@ -812,4 +1046,4 @@ See `CLAUDE.md` files in subdirectories for module-specific guidance:
 
 ---
 
-*Last updated: January 6, 2026*
+*Last updated: February 11, 2026*
