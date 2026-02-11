@@ -6,38 +6,44 @@
 |-------|-------|
 | **Project** | financial-intelligence-module-r1 |
 | **Branch** | `work/financial-intelligence-module-r1` |
-| **Current Task** | None |
-| **Status** | Project initialized — awaiting first task |
-| **Next Action** | Execute task 001 |
-| **Last Checkpoint** | 2026-02-11 (project initialization) |
+| **Current Task** | 002 - Add Document Classification Fields |
+| **Status** | in-progress |
+| **Next Action** | Produce YAML diff for 13 new sprk_document fields |
+| **Last Checkpoint** | 2026-02-11 (task 001 complete) |
 
 ## Active Task
 
 | Field | Value |
 |-------|-------|
-| Task ID | — |
-| Task File | — |
-| Title | — |
-| Phase | — |
-| Status | Not started |
-| Rigor Level | — |
+| Task ID | 002 |
+| Task File | tasks/002-add-document-classification-fields.poml |
+| Title | Add Document Classification and Review Fields to sprk_document |
+| Phase | 1: Foundation |
+| Status | in-progress |
+| Rigor Level | STANDARD |
 
 ## Progress
 
 ### Completed Steps
-(none yet)
+- [x] Task 001: Created YAML field diff for 6 entities (51 fields, 3 alt keys, 7 global choices)
+- [x] Task 001: Owner validated and approved diff with 3 corrections applied
 
 ### Current Step
-N/A — no active task
+Task 002: Produce YAML diff for sprk_document classification/hint/association fields
 
 ### Files Modified
-(none yet)
+- `notes/scratch/001-entity-field-diff.yaml` — Entity field diff (owner-validated)
 
 ## Decisions Made
-(none yet — see CLAUDE.md for project-level decisions)
+- D1: sprk_budget status — use existing sprk_budgetstatus as-is, map Active → Open(2) in code
+- D2: Lookup naming — follow existing convention (bare names without 'id' suffix)
+- D3: Alternate key on lookup — owner will create manually if PAC CLI doesn't support
+- sprk_budgetplan → sprk_budget (entity name correction — actual entity is sprk_budget)
+- sprk_invoice.sprk_recordtype → sprk_regardingrecordtype (Lookup → sprk_recordtype_ref)
+- sprk_invoice.sprk_status → sprk_invoicestatus (field name correction)
 
 ## Next Action
-Say `work on task 001` or `execute task 001` to begin.
+Produce YAML diff for task 002 sprk_document fields, then await owner validation.
 
 ## Blockers
 None
@@ -46,6 +52,8 @@ None
 - Project initialized via `/project-pipeline` on 2026-02-11
 - spec.md reviewed and approved with owner clarifications
 - All project artifacts generated (README, plan, CLAUDE.md)
+- Task 001 complete — owner creating fields via PAC CLI
+- Design doc lists 16 fields on sprk_document; spec says 13 (classification:3, hints:6, associations:4). Need to reconcile reviewedby/reviewedon and relatedvendororgid.
 
 ## Quick Reference
 

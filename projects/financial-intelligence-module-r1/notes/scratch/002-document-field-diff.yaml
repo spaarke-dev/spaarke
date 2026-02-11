@@ -1,0 +1,209 @@
+# Finance Intelligence Module R1 — sprk_document Field Diff
+# Generated: 2026-02-11
+#
+# This file lists fields to be ADDED to the existing sprk_document entity.
+# No existing fields are modified.
+#
+# FIELD COUNT NOTE:
+#   spec.md says "13 (classification: 3, hints: 6, associations: 4)"
+#   Design doc Section 5.3 lists 16 fields:
+#     - Classification/Review: 5 (includes reviewedby + reviewedon)
+#     - Hints: 6
+#     - Associations: 5 (includes relatedvendororg)
+#   The 3 "extra" fields are: sprk_invoicereviewedby, sprk_invoicereviewedon, sprk_relatedvendororg
+#   All 16 are needed for the pipeline. Spec count of "13" appears to exclude
+#   reviewer tracking (2) and vendor org lookup (1).
+#
+# NAMING: Follows D2 decision — bare lookup names (no 'id' suffix).
+#   Exception: sprk_relatedmatter, sprk_relatedproject, sprk_relatedvendororg
+#   use "related" prefix to distinguish from primary lookups on other entities.
+
+# ═══════════════════════════════════════════════════════════════════
+# CHOICE DEFINITIONS (local to sprk_document)
+# ═══════════════════════════════════════════════════════════════════
+
+choices:
+
+  sprk_classification:
+    display_name: Classification
+    options:
+      - value: 100000000
+        label: InvoiceCandidate
+      - value: 100000001
+        label: NotInvoice
+      - value: 100000002
+        label: Unknown
+
+  sprk_invoicereviewstatus:
+    display_name: Invoice Review Status
+    options:
+      - value: 100000000
+        label: ToReview
+      - value: 100000001
+        label: ConfirmedInvoice
+      - value: 100000002
+        label: RejectedNotInvoice
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ENTITY: sprk_document (EXTEND — do NOT modify existing fields)
+# ═══════════════════════════════════════════════════════════════════
+#
+# Existing fields already in use by email pipeline:
+#   - sprk_documenttype (Choice: Email=100000006, Attachment=100000007)
+#   - sprk_parentdocument (Lookup → sprk_document)
+#   - sprk_graphitemid, sprk_graphdriveid (SPE file references)
+#   - sprk_name (primary name)
+#   - sprk_documentid (PK)
+
+sprk_document:
+  constraint: Do NOT modify any existing fields
+
+  # ─────────────────────────────────────────────────────
+  # GROUP 1: Classification + Review (5 fields)
+  # ─────────────────────────────────────────────────────
+  classification_fields:
+    - logical_name: sprk_classification
+      display_name: Classification
+      type: Choice
+      choice: sprk_classification       # InvoiceCandidate | NotInvoice | Unknown
+      required: false                    # null until classification job runs
+      purpose: AI classification result from Playbook A
+
+    - logical_name: sprk_classificationconfidence
+      display_name: Classification Confidence
+      type: Decimal
+      precision: 4                       # 0.0000 to 1.0000
+      min_value: 0
+      max_value: 1
+      required: false                    # null until classification job runs
+      purpose: AI confidence score (0..1)
+
+    - logical_name: sprk_invoicereviewstatus
+      display_name: Invoice Review Status
+      type: Choice
+      choice: sprk_invoicereviewstatus   # ToReview | ConfirmedInvoice | RejectedNotInvoice
+      required: false                    # null until classification determines review needed
+      purpose: Human review state — used by Invoice Review Queue view filter
+
+    - logical_name: sprk_invoicereviewedby
+      display_name: Reviewed By
+      type: Lookup
+      target: sprk_contact
+      required: false
+      purpose: Reviewer identity — set by confirm/reject endpoint
+
+    - logical_name: sprk_invoicereviewedon
+      display_name: Reviewed On
+      type: DateTime
+      required: false
+      purpose: Review timestamp — set by confirm/reject endpoint
+
+  # ─────────────────────────────────────────────────────
+  # GROUP 2: Invoice Header Hints (6 fields)
+  # Populated by Classification Playbook (Playbook A)
+  # ─────────────────────────────────────────────────────
+  hint_fields:
+    - logical_name: sprk_invoicevendornamehint
+      display_name: Vendor Name Hint
+      type: Text
+      max_length: 200
+      required: false
+      purpose: AI-extracted vendor name from attachment text
+
+    - logical_name: sprk_invoicenumberhint
+      display_name: Invoice Number Hint
+      type: Text
+      max_length: 100
+      required: false
+      purpose: AI-extracted invoice number
+
+    - logical_name: sprk_invoicedatehint
+      display_name: Invoice Date Hint
+      type: DateOnly
+      required: false
+      purpose: AI-extracted invoice date
+
+    - logical_name: sprk_invoicetotalhint
+      display_name: Total Amount Hint
+      type: Money
+      required: false
+      purpose: AI-extracted invoice total
+
+    - logical_name: sprk_invoicecurrencyhint
+      display_name: Currency Hint
+      type: Text
+      max_length: 10
+      required: false
+      purpose: AI-extracted ISO 4217 currency code
+
+    - logical_name: sprk_invoicehintsjson
+      display_name: Hints JSON
+      type: MultilineText
+      max_length: 10000
+      required: false
+      purpose: Full structured hints JSON (overflow/extensions beyond individual fields)
+
+  # ─────────────────────────────────────────────────────
+  # GROUP 3: Association Suggestions (5 fields)
+  # sprk_mattersuggestedref + sprk_mattersuggestionjson populated by
+  # classification handler's entity matching logic (post-AI-call).
+  # Lookup fields confirmed by reviewer via confirm endpoint.
+  # ─────────────────────────────────────────────────────
+  association_fields:
+    - logical_name: sprk_mattersuggestedref
+      display_name: Matter Suggestion
+      type: Text
+      max_length: 500
+      required: false
+      purpose: AI-extracted matter reference string (from invoice text)
+
+    - logical_name: sprk_mattersuggestionjson
+      display_name: Matter Suggestion JSON
+      type: MultilineText
+      max_length: 10000
+      required: false
+      purpose: Structured match candidates with confidence scores (top 5)
+
+    - logical_name: sprk_relatedmatter
+      display_name: Related Matter
+      type: Lookup
+      target: sprk_matter
+      required: false
+      purpose: Confirmed by reviewer — matter this invoice relates to
+
+    - logical_name: sprk_relatedproject
+      display_name: Related Project
+      type: Lookup
+      target: sprk_project
+      required: false
+      purpose: Confirmed by reviewer — project this invoice relates to
+
+    - logical_name: sprk_relatedvendororg
+      display_name: Related Vendor Org
+      type: Lookup
+      target: sprk_organization
+      required: false
+      purpose: Confirmed by reviewer — vendor organization
+
+
+# ═══════════════════════════════════════════════════════════════════
+# SUMMARY
+# ═══════════════════════════════════════════════════════════════════
+
+summary:
+  total_fields_to_add: 16
+  choices_to_add: 2                      # sprk_classification, sprk_invoicereviewstatus
+  breakdown:
+    classification_and_review: 5         # classification, confidence, reviewstatus, reviewedby, reviewedon
+    hints: 6                             # vendorname, number, date, total, currency, json
+    associations: 5                      # mattersuggestedref, suggestionjson, relatedmatter, relatedproject, relatedvendororg
+
+  spec_count_note: |
+    Spec says "13 (classification: 3, hints: 6, associations: 4)".
+    Actual from design doc: 16 (classification+review: 5, hints: 6, associations: 5).
+    The 3 fields not counted in spec:
+      1. sprk_invoicereviewedby (reviewer identity — needed for reject endpoint response)
+      2. sprk_invoicereviewedon (review timestamp — needed for reject endpoint response)
+      3. sprk_relatedvendororg (vendor lookup — needed for confirm endpoint)
+    All 16 are required for the pipeline. Recommend updating spec to say "16 fields".

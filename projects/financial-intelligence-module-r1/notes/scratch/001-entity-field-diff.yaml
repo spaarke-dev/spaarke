@@ -1,0 +1,643 @@
+# Finance Intelligence Module R1 — Dataverse Entity Field Diff
+# Generated: 2026-02-11
+#
+# This file lists ONLY fields/keys/choices that need to be ADDED to existing entities.
+# Existing fields (PK, sprk_name, existing lookups) are noted but not re-created.
+#
+# NAMING NOTE: Existing lookup fields use bare names (e.g., sprk_matter, sprk_invoice)
+# without "id" suffix. Design doc uses "id" suffix (sprk_matterid, sprk_invoiceid).
+# This diff follows the EXISTING convention. The code layer can alias as needed.
+
+# ═══════════════════════════════════════════════════════════════════
+# GLOBAL CHOICE DEFINITIONS (shared across entities)
+# ═══════════════════════════════════════════════════════════════════
+
+global_choices:
+
+  sprk_visibilitystate:
+    display_name: Visibility State
+    options:
+      - value: 100000000
+        label: Invoiced          # MVP — only value used in R1
+      - value: 100000001
+        label: InternalWIP       # future
+      - value: 100000002
+        label: PreBill           # future
+      - value: 100000003
+        label: Paid              # future
+      - value: 100000004
+        label: WrittenOff        # future
+
+  sprk_costtype:
+    display_name: Cost Type
+    options:
+      - value: 100000000
+        label: Fee
+      - value: 100000001
+        label: Expense
+
+  sprk_periodtype:
+    display_name: Period Type
+    options:
+      - value: 100000000
+        label: Month
+      - value: 100000001
+        label: Quarter           # post-MVP
+      - value: 100000002
+        label: Year              # post-MVP
+      - value: 100000003
+        label: ToDate
+
+  sprk_signaltype:
+    display_name: Signal Type
+    options:
+      - value: 100000000
+        label: BudgetExceeded
+      - value: 100000001
+        label: BudgetWarning
+      - value: 100000002
+        label: VelocitySpike
+      - value: 100000003
+        label: AnomalyDetected
+
+  sprk_signalseverity:
+    display_name: Signal Severity
+    options:
+      - value: 100000000
+        label: Info
+      - value: 100000001
+        label: Warning
+      - value: 100000002
+        label: Critical
+
+  sprk_invoicestatus:
+    display_name: Invoice Status
+    options:
+      - value: 100000000
+        label: ToReview
+      - value: 100000001
+        label: Reviewed
+
+  sprk_extractionstatus:
+    display_name: Extraction Status
+    options:
+      - value: 100000000
+        label: NotRun
+      - value: 100000001
+        label: Extracted
+      - value: 100000002
+        label: Failed
+
+  # sprk_invoicerecordtype: REMOVED — using existing sprk_recordtype_ref lookup table instead
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ENTITY: sprk_invoice
+# ═══════════════════════════════════════════════════════════════════
+# Existing fields: sprk_invoiceid (PK), sprk_matter (Lookup→sprk_matter),
+#                  sprk_mattername (auto), sprk_name (Text)
+
+sprk_invoice:
+  existing_fields:
+    - sprk_invoiceid          # PK — no action
+    - sprk_matter             # Lookup → sprk_matter — already exists
+    - sprk_name               # Primary name field — no action
+
+  fields_to_add:
+    - logical_name: sprk_document
+      display_name: Source Document
+      type: Lookup
+      target: sprk_document
+      required: true
+      purpose: Confirmed attachment that became this invoice
+
+    - logical_name: sprk_regardingrecordtype
+      display_name: Regarding Record Type
+      type: Lookup
+      target: sprk_recordtype_ref
+      required: true
+      purpose: Whether parent is Matter or Project (uses existing reference table)
+
+    - logical_name: sprk_project
+      display_name: Project
+      type: Lookup
+      target: sprk_project
+      required: false                    # conditional — required when recordtype=Project
+      purpose: Parent project (alternative to matter)
+
+    - logical_name: sprk_vendororg
+      display_name: Vendor Organization
+      type: Lookup
+      target: sprk_organization
+      required: true
+      purpose: Invoice vendor/firm
+
+    - logical_name: sprk_invoicenumber
+      display_name: Invoice Number
+      type: Text
+      max_length: 100
+      required: false
+      purpose: From extraction or reviewer correction
+
+    - logical_name: sprk_invoicedate
+      display_name: Invoice Date
+      type: DateOnly
+      required: false
+      purpose: From extraction or reviewer correction
+
+    - logical_name: sprk_currency
+      display_name: Currency
+      type: Text
+      max_length: 10
+      required: false
+      purpose: ISO 4217 currency code (e.g., USD, GBP)
+
+    - logical_name: sprk_totalamount
+      display_name: Total Amount
+      type: Money
+      required: false
+      purpose: Invoice total
+
+    - logical_name: sprk_invoicestatus
+      display_name: Invoice Status
+      type: Choice
+      choice: sprk_invoicestatus        # ToReview | Reviewed
+      required: true
+      default: 100000000                # ToReview
+      purpose: Minimal lifecycle — set to Reviewed by InvoiceExtractionJobHandler
+
+    - logical_name: sprk_visibilitystate
+      display_name: Visibility State
+      type: Choice
+      choice: sprk_visibilitystate      # global choice
+      required: true
+      default: 100000000                # Invoiced
+      purpose: Set to Invoiced — deterministic, never set by LLM
+
+    - logical_name: sprk_extractionstatus
+      display_name: Extraction Status
+      type: Choice
+      choice: sprk_extractionstatus     # NotRun | Extracted | Failed
+      required: true
+      default: 100000000                # NotRun
+      purpose: Playbook B execution status
+
+    - logical_name: sprk_correlationid
+      display_name: Correlation ID
+      type: Text
+      max_length: 100
+      required: true
+      purpose: Job chain traceability — NOT part of alternate key
+
+  alternate_keys_to_add:
+    - name: sprk_invoice_document_key
+      display_name: Invoice Document Key
+      fields:
+        - sprk_document                 # one invoice per confirmed document
+      purpose: Prevents duplicate invoices for same document
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ENTITY: sprk_billingevent
+# ═══════════════════════════════════════════════════════════════════
+# Existing fields: sprk_billingeventid (PK), sprk_invoice (Lookup→sprk_invoice),
+#                  sprk_invoicename (auto), sprk_name (Text)
+
+sprk_billingevent:
+  existing_fields:
+    - sprk_billingeventid     # PK — no action
+    - sprk_invoice            # Lookup → sprk_invoice — already exists
+    - sprk_name               # Primary name field — no action
+
+  fields_to_add:
+    - logical_name: sprk_eventdate
+      display_name: Event Date
+      type: DateOnly
+      required: true
+      purpose: Line date or invoice date fallback
+
+    - logical_name: sprk_matter
+      display_name: Matter
+      type: Lookup
+      target: sprk_matter
+      required: false                    # conditional
+      purpose: Parent matter (denormalized from invoice for query performance)
+
+    - logical_name: sprk_project
+      display_name: Project
+      type: Lookup
+      target: sprk_project
+      required: false                    # conditional
+      purpose: Parent project (denormalized from invoice)
+
+    - logical_name: sprk_vendororg
+      display_name: Vendor Organization
+      type: Lookup
+      target: sprk_organization
+      required: true
+      purpose: Source vendor (denormalized from invoice)
+
+    - logical_name: sprk_costtype
+      display_name: Cost Type
+      type: Choice
+      choice: sprk_costtype             # Fee | Expense
+      required: true
+      purpose: Fee line vs expense line
+
+    - logical_name: sprk_amount
+      display_name: Amount
+      type: Money
+      required: true
+      purpose: Line amount
+
+    - logical_name: sprk_currency
+      display_name: Currency
+      type: Text
+      max_length: 10
+      required: true
+      purpose: ISO 4217 currency code
+
+    - logical_name: sprk_roleclass
+      display_name: Role Class
+      type: Text
+      max_length: 100
+      required: false
+      purpose: Timekeeper role if extractable (Unknown allowed)
+
+    - logical_name: sprk_visibilitystate
+      display_name: Visibility State
+      type: Choice
+      choice: sprk_visibilitystate      # global choice
+      required: true
+      default: 100000000                # Invoiced
+      purpose: MVP always Invoiced — deterministic, never set by LLM
+
+    - logical_name: sprk_description
+      display_name: Description
+      type: MultilineText
+      max_length: 2000
+      required: false
+      purpose: Line item narrative (best-effort extraction)
+
+    - logical_name: sprk_linesequence
+      display_name: Line Sequence
+      type: WholeNumber                  # Int32
+      required: true
+      purpose: 1-based line position within invoice — part of alternate key
+
+    - logical_name: sprk_correlationid
+      display_name: Correlation ID
+      type: Text
+      max_length: 100
+      required: true
+      purpose: Job chain traceability — intentionally EXCLUDED from alternate key
+
+  alternate_keys_to_add:
+    - name: sprk_billingevent_invoice_line_key
+      display_name: Billing Event Invoice Line Key
+      fields:
+        - sprk_invoice                  # Lookup → sprk_invoice
+        - sprk_linesequence             # Int32
+      purpose: |
+        Idempotent upsert for re-extraction. correlationId excluded because
+        re-extraction generates new correlationId — old key would create duplicates.
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ENTITY: sprk_budget  (spec calls it "sprk_budgetplan" — actual name is sprk_budget)
+# ═══════════════════════════════════════════════════════════════════
+# NAMING DISCREPANCY: spec.md and task POML reference "sprk_budgetplan" but the actual
+# entity is "sprk_budget" with PK "sprk_budgetid". Code references need updating.
+#
+# Existing fields: sprk_budgetid (PK), sprk_budgetstatus (Choice, 8 options),
+#                  sprk_matter (Lookup→sprk_matter), sprk_mattername (auto),
+#                  sprk_name (Text)
+#
+# STATUS CHOICE DISCREPANCY:
+#   Existing sprk_budgetstatus options: Draft(0), Pending(1), Open(2), Completed(3),
+#     Closed(4), On Hold(5), Cancelled(6), Archived(7)
+#   Spec requires: Draft, Active, Closed
+#   Recommendation: Use existing choice as-is. Map Active → Open(2) in code,
+#     or add new Active(8) option. Owner to decide.
+
+sprk_budget:
+  entity_name_note: |
+    Spec references this as "sprk_budgetplan" but actual entity is "sprk_budget".
+    All POML tasks, spec.md, and code should reference sprk_budget / sprk_budgetid.
+    budgetbucket lookup should be sprk_budget (not sprk_budgetplanid).
+
+  existing_fields:
+    - sprk_budgetid           # PK — no action
+    - sprk_budgetstatus       # Choice (8 options) — see discrepancy note above
+    - sprk_matter             # Lookup → sprk_matter — already exists
+    - sprk_name               # Primary name field — no action
+
+  status_choice_decision_needed: |
+    Existing sprk_budgetstatus has 8 options. Spec only needs Draft/Active/Closed.
+    OPTIONS:
+      A) Use existing as-is: map Draft→0, Active→Open(2), Closed→4 in code
+      B) Add new "Active" option (value 8) to existing choice
+      C) Create separate sprk_status field with 3 options (redundant with sprk_budgetstatus)
+    RECOMMENDATION: Option A — no schema change, handle mapping in code
+
+  fields_to_add:
+    - logical_name: sprk_project
+      display_name: Project
+      type: Lookup
+      target: sprk_project
+      required: false                    # conditional — alternative to matter
+      purpose: Parent project (when budget is per-project)
+
+    - logical_name: sprk_totalbudget
+      display_name: Total Budget
+      type: Money
+      required: true
+      purpose: Overall budget amount
+
+    - logical_name: sprk_currency
+      display_name: Currency
+      type: Text
+      max_length: 10
+      required: true
+      purpose: ISO 4217 currency code
+
+  alternate_keys_to_add: []              # none required per spec
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ENTITY: sprk_budgetbucket
+# ═══════════════════════════════════════════════════════════════════
+# Existing fields: sprk_budgetbucketid (PK), sprk_name (Text)
+
+sprk_budgetbucket:
+  existing_fields:
+    - sprk_budgetbucketid     # PK — no action
+    - sprk_name               # Primary name field — no action
+
+  fields_to_add:
+    - logical_name: sprk_budget
+      display_name: Budget
+      type: Lookup
+      target: sprk_budget
+      required: true
+      purpose: Parent budget plan
+
+    - logical_name: sprk_bucketkey
+      display_name: Bucket Key
+      type: Text
+      max_length: 100
+      required: true
+      purpose: "TOTAL (MVP), future: VENDOR:*, ROLE:*"
+
+    - logical_name: sprk_periodstart
+      display_name: Period Start
+      type: DateOnly
+      required: false                    # NULL = lifetime bucket
+      purpose: Bucket period start (null for lifetime)
+
+    - logical_name: sprk_periodend
+      display_name: Period End
+      type: DateOnly
+      required: false                    # NULL = lifetime bucket
+      purpose: Bucket period end (null for lifetime)
+
+    - logical_name: sprk_amount
+      display_name: Amount
+      type: Money
+      required: true
+      purpose: Budget allocation for this bucket
+
+  alternate_keys_to_add: []              # none required per spec
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ENTITY: sprk_spendsnapshot
+# ═══════════════════════════════════════════════════════════════════
+# Existing fields: sprk_spendsnapshotid (PK), sprk_name (Text)
+
+sprk_spendsnapshot:
+  existing_fields:
+    - sprk_spendsnapshotid    # PK — no action
+    - sprk_name               # Primary name field — no action
+
+  fields_to_add:
+    - logical_name: sprk_matter
+      display_name: Matter
+      type: Lookup
+      target: sprk_matter
+      required: false                    # conditional
+      purpose: Parent matter
+
+    - logical_name: sprk_project
+      display_name: Project
+      type: Lookup
+      target: sprk_project
+      required: false                    # conditional
+      purpose: Parent project
+
+    - logical_name: sprk_periodtype
+      display_name: Period Type
+      type: Choice
+      choice: sprk_periodtype           # Month | Quarter | Year | ToDate
+      required: true
+      purpose: Aggregation window type
+
+    - logical_name: sprk_periodkey
+      display_name: Period Key
+      type: Text
+      max_length: 20
+      required: true
+      purpose: 'e.g., "2026-01", "2026-Q1", "2026", "TO_DATE"'
+
+    - logical_name: sprk_bucketkey
+      display_name: Bucket Key
+      type: Text
+      max_length: 100
+      required: true
+      purpose: "TOTAL for MVP"
+
+    - logical_name: sprk_visibilityfilter
+      display_name: Visibility Filter
+      type: Text
+      max_length: 50
+      required: true
+      purpose: "ACTUAL_INVOICED for MVP"
+
+    - logical_name: sprk_invoicedamount
+      display_name: Invoiced Amount
+      type: Money
+      required: true
+      purpose: Sum of BillingEvents in this window
+
+    - logical_name: sprk_budgetamount
+      display_name: Budget Amount
+      type: Money
+      required: false
+      purpose: From matching BudgetBucket (null if no budget)
+
+    - logical_name: sprk_budgetvariance
+      display_name: Budget Variance
+      type: Money
+      required: false
+      purpose: Budget - Invoiced (positive = under budget)
+
+    - logical_name: sprk_budgetvariancepct
+      display_name: Budget Variance Pct
+      type: Decimal
+      precision: 4
+      required: false
+      purpose: Variance / Budget × 100
+
+    - logical_name: sprk_velocitypct
+      display_name: Velocity Pct
+      type: Decimal
+      precision: 4
+      required: false
+      purpose: "% change from prior period — MoM for MVP. Null when prior=0"
+
+    - logical_name: sprk_priorperiodamount
+      display_name: Prior Period Amount
+      type: Money
+      required: false
+      purpose: Amount from comparison period (for transparency)
+
+    - logical_name: sprk_priorperiodkey
+      display_name: Prior Period Key
+      type: Text
+      max_length: 20
+      required: false
+      purpose: 'Which period was compared (e.g., "2025-12" for MoM)'
+
+    - logical_name: sprk_generatedat
+      display_name: Generated At
+      type: DateTime
+      required: true
+      purpose: Snapshot computation timestamp
+
+    - logical_name: sprk_correlationid
+      display_name: Correlation ID
+      type: Text
+      max_length: 100
+      required: true
+      purpose: Triggering job chain traceability
+
+  alternate_keys_to_add:
+    - name: sprk_spendsnapshot_composite_key
+      display_name: Spend Snapshot Composite Key
+      fields:
+        - sprk_matter                   # Lookup → sprk_matter
+        - sprk_periodtype               # Choice
+        - sprk_periodkey                # Text
+        - sprk_bucketkey                # Text
+        - sprk_visibilityfilter         # Text
+      purpose: |
+        5-field composite key for idempotent upsert on snapshot re-generation.
+        When budget allocations change or new BillingEvents arrive, the same
+        snapshot is updated rather than duplicated.
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ENTITY: sprk_spendsignal
+# ═══════════════════════════════════════════════════════════════════
+# Existing fields: sprk_spendsignalid (PK), sprk_name (Text)
+
+sprk_spendsignal:
+  existing_fields:
+    - sprk_spendsignalid      # PK — no action
+    - sprk_name               # Primary name field — no action
+
+  fields_to_add:
+    - logical_name: sprk_matter
+      display_name: Matter
+      type: Lookup
+      target: sprk_matter
+      required: false                    # conditional
+      purpose: Parent matter
+
+    - logical_name: sprk_project
+      display_name: Project
+      type: Lookup
+      target: sprk_project
+      required: false                    # conditional
+      purpose: Parent project
+
+    - logical_name: sprk_signaltype
+      display_name: Signal Type
+      type: Choice
+      choice: sprk_signaltype           # BudgetExceeded | BudgetWarning | VelocitySpike | AnomalyDetected
+      required: true
+      purpose: Signal category
+
+    - logical_name: sprk_severity
+      display_name: Severity
+      type: Choice
+      choice: sprk_signalseverity       # Info | Warning | Critical
+      required: true
+      purpose: Alert level
+
+    - logical_name: sprk_message
+      display_name: Message
+      type: Text
+      max_length: 500
+      required: true
+      purpose: Human-readable signal description
+
+    - logical_name: sprk_snapshot
+      display_name: Snapshot
+      type: Lookup
+      target: sprk_spendsnapshot
+      required: true
+      purpose: Source snapshot that triggered this signal
+
+    - logical_name: sprk_isactive
+      display_name: Is Active
+      type: Boolean
+      default: true
+      required: true
+      purpose: Active until resolved/superseded
+
+    - logical_name: sprk_generatedat
+      display_name: Generated At
+      type: DateTime
+      required: true
+      purpose: Signal detection timestamp
+
+  alternate_keys_to_add: []              # none required per spec
+
+
+# ═══════════════════════════════════════════════════════════════════
+# SUMMARY
+# ═══════════════════════════════════════════════════════════════════
+
+summary:
+  total_fields_to_add: 51
+  total_alternate_keys_to_add: 3
+  total_global_choices_to_add: 7           # was 8, removed sprk_invoicerecordtype (uses lookup)
+  per_entity:
+    sprk_invoice:       { fields: 11, alt_keys: 1 }
+    sprk_billingevent:  { fields: 11, alt_keys: 1 }
+    sprk_budget:        { fields: 3,  alt_keys: 0 }
+    sprk_budgetbucket:  { fields: 5,  alt_keys: 0 }
+    sprk_spendsnapshot: { fields: 14, alt_keys: 1 }
+    sprk_spendsignal:   { fields: 8,  alt_keys: 0 }
+
+  decisions_resolved:
+    - id: D1
+      topic: sprk_budget status choice mapping
+      decision: "Option A — use existing sprk_budgetstatus as-is, map Active → Open(2) in code"
+      status: RESOLVED
+
+    - id: D2
+      topic: Lookup field naming convention
+      decision: "Follow existing convention (bare names without 'id' suffix)"
+      status: RESOLVED
+
+    - id: D3
+      topic: Alternate key with lookup field for sprk_spendsnapshot
+      decision: "Owner will create manually if PAC CLI doesn't support lookup in alternate keys"
+      status: RESOLVED
+
+  corrections_applied:
+    - "sprk_invoicerecordtype choice → replaced with sprk_regardingrecordtype (Lookup → sprk_recordtype_ref)"
+    - "sprk_invoice.sprk_recordtype → replaced with sprk_regardingrecordtype (Lookup)"
+    - "sprk_invoice.sprk_status → renamed to sprk_invoicestatus"

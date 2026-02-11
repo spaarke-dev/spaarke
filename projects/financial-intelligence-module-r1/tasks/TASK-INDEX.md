@@ -10,8 +10,8 @@
 
 | # | Task | Status | Est. | Deps | Blocks | Rigor |
 |---|------|--------|------|------|--------|-------|
-| 001 | Create Finance Dataverse Entities (6 new entities) | 🔲 | 6h | none | 010, 011, 014, 016, 017, 019 | STANDARD |
-| 002 | Add Document Classification Fields (13 fields on sprk_document) | 🔲 | 3h | none | 011, 013 | STANDARD |
+| 001 | Create Finance Dataverse Entities (6 new entities) | ✅ | 6h | none | 010, 011, 014, 016, 017, 019 | STANDARD |
+| 002 | Add Document Classification Fields (16 fields on sprk_document) | ✅ | 3h | none | 011, 013 | STANDARD |
 | 003 | Create Dataverse Views (Invoice Review Queue, Active Invoices) | 🔲 | 2h | 001 | 047 | MINIMAL |
 | 004 | Add GetStructuredCompletionAsync&lt;T&gt; to OpenAI Client | 🔲 | 4h | none | 005, 010 | FULL |
 | 005 | Unit Tests for Structured Output Method | 🔲 | 3h | 004 | none | STANDARD |
@@ -172,9 +172,9 @@ Tasks within a group can execute simultaneously when their prerequisites are met
 
 | Phase | Total | Completed | Remaining |
 |-------|-------|-----------|-----------|
-| Phase 1 | 9 | 0 | 9 |
+| Phase 1 | 9 | 2 | 7 |
 | Phase 2 | 13 | 0 | 13 |
 | Phase 3 | 5 | 0 | 5 |
 | Phase 4 | 9 | 0 | 9 |
 | Wrap-up | 1 | 0 | 1 |
-| **Total** | **37** | **0** | **37** |
+| **Total** | **37** | **2** | **35** |

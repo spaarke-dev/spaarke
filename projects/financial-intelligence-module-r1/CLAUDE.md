@@ -132,6 +132,13 @@
 | Finance PCF panel | In scope for R1 | 2026-02-11 | Owner requested full panel |
 | Invoice indexing | New InvoiceIndexing JobType | 2026-02-11 | Not reusing generic RagIndexing |
 | Chunk enrichment | Contextual metadata prepended | 2026-02-11 | Better semantic ranking for financial queries |
+| Budget entity name | `sprk_budget` (NOT `sprk_budgetplan`) | 2026-02-11 | Actual entity name differs from design doc |
+| Budget status mapping | Use existing `sprk_budgetstatus` (map Active→Open(2) in code) | 2026-02-11 | 8-option choice already exists; no schema change |
+| Lookup naming convention | Bare names (no `id` suffix): `sprk_matter`, `sprk_invoice` | 2026-02-11 | Matches existing Dataverse convention |
+| Invoice record type | `sprk_regardingrecordtype` (Lookup→`sprk_recordtype_ref`) | 2026-02-11 | Uses existing reference table, not a Choice field |
+| Invoice status field | `sprk_invoicestatus` (not `sprk_status`) | 2026-02-11 | Avoids collision with generic status fields |
+| Reviewer identity | `sprk_invoicereviewedby` (Lookup→`sprk_contact`) | 2026-02-11 | Contact entity, not systemuser |
+| Document field count | 16 fields on `sprk_document` (not 13) | 2026-02-11 | Design doc adds reviewedby, reviewedon, relatedvendororg |
 
 ## Implementation Notes
 
