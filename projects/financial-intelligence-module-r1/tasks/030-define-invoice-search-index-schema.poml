@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Define Invoice AI Search Index Schema</title>
+    <phase>3: Invoice RAG + Search</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>031</blocks>
+    <tags>azure, azure-search, infrastructure</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New file creation with schema definitions; no code modification</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Define the invoice AI Search index schema as a JSON definition file. Fields: id (string, key), content (string, searchable), contentVector (Collection(Edm.Single), 3072 dimensions), chunkIndex (int32), invoiceId (string, filterable), documentId (string, filterable), matterId (string, filterable), projectId (string, filterable), vendorOrgId (string, filterable), vendorName (string, searchable/filterable), invoiceNumber (string, searchable/filterable), invoiceDate (DateTimeOffset, filterable/sortable), totalAmount (Double, filterable/sortable), currency (string, filterable), documentType (string, filterable), tenantId (string, filterable), indexedAt (DateTimeOffset, sortable). Include vector search configuration (HNSW algorithm, cosine metric, 3072 dimensions) and semantic configuration (invoice-semantic) with content as semantic field. Index name pattern: spaarke-invoices-{tenantId}.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure AI Search index design, vector search configuration, and semantic ranking. Familiar with the existing RAG architecture patterns in the Spaarke platform.
+  </role>
+
+  <goal>
+    A complete, validated AI Search index schema JSON definition ready for deployment, with vector search (HNSW) and semantic ranking configurations that match the spec.md Invoice Indexing Strategy.
+  </goal>
+
+  <context>
+    <background>
+      The Finance Intelligence Module requires a dedicated search index for invoice content to support hybrid search (keyword + vector + semantic ranking). This index stores chunked invoice text with contextual metadata enrichment, enabling financial queries like "fees over $10k for matter X" or "vendor billing patterns". The index schema must support typed metadata fields for filtering alongside vector search for semantic similarity. The index follows the existing RAG architecture patterns but with invoice-specific fields and metadata.
+    </background>
+    <relevant-files>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+      <file>projects/financial-intelligence-module-r1/Spaarke_Finance_Intelligence_MVP_Design 2.md</file>
+      <file>docs/guides/RAG-ARCHITECTURE.md</file>
+      <file>docs/guides/RAG-CONFIGURATION.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Index name pattern: spaarke-invoices-{tenantId} (tenant-isolated)</constraint>
+    <constraint source="spec">contentVector must be 3072 dimensions (text-embedding-3-large model)</constraint>
+    <constraint source="spec">HNSW algorithm for vector search with cosine similarity metric</constraint>
+    <constraint source="spec">Semantic configuration named "invoice-semantic" with content as primary semantic field</constraint>
+    <constraint source="spec">All metadata fields must be filterable for hybrid search queries</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path="docs/guides/RAG-ARCHITECTURE.md" reason="Existing index schema patterns and vector search configuration" />
+      <file path="docs/guides/RAG-CONFIGURATION.md" reason="RAG configuration patterns and deployment guidance" />
+      <file path=".claude/constraints/ai.md" reason="AI service constraints and embedding model specifications" />
+      <file path="projects/financial-intelligence-module-r1/spec.md" reason="Invoice Indexing Strategy section with field definitions" />
+    </files>
+    <patterns>
+      <pattern name="RAG Architecture" location="docs/guides/RAG-ARCHITECTURE.md">
+        Follow existing index schema patterns for field types, vector configuration, and semantic settings
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read RAG-ARCHITECTURE.md and RAG-CONFIGURATION.md for existing index schema patterns and vector search configuration</step>
+    <step order="2">Read spec.md Entity Model and Invoice Indexing Strategy sections for complete field definitions</step>
+    <step order="3">Read design document Section 6.4 for full schema specification including field types and search behaviors</step>
+    <step order="4">Create index schema JSON file with all 17 fields, correct types, and search attributes (filterable, sortable, searchable, facetable as appropriate)</step>
+    <step order="5">Add vector search configuration: HNSW algorithm profile with cosine metric, 3072 dimensions, efConstruction=400, efSearch=500, m=4</step>
+    <step order="6">Add semantic configuration: "invoice-semantic" with content as titleField, vendorName and invoiceNumber as keyword fields</step>
+    <step order="7">Create Bicep template for index deployment (or document deployment approach if using SearchIndexClient)</step>
+    <step order="8">Validate schema matches spec.md field definitions exactly — verify field names, types, dimensions, and search behaviors</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spec.md, design doc, and RAG architecture for schema patterns</tool>
+    <tool name="Write">Create index schema JSON and Bicep template</tool>
+    <tool name="Bash">Validate JSON schema syntax</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">Invoice AI Search index schema JSON definition file</output>
+    <output type="infrastructure">Bicep template or deployment script for index creation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Index schema JSON contains all 17 fields with correct types: id (string/key), content (string), contentVector (Collection(Edm.Single)/3072), chunkIndex (int32), invoiceId (string), documentId (string), matterId (string), projectId (string), vendorOrgId (string), vendorName (string), invoiceNumber (string), invoiceDate (DateTimeOffset), totalAmount (Double), currency (string), documentType (string), tenantId (string), indexedAt (DateTimeOffset)</criterion>
+    <criterion testable="true">Vector search configuration uses HNSW algorithm with cosine metric and 3072 dimensions</criterion>
+    <criterion testable="true">Semantic configuration named "invoice-semantic" exists with content as primary semantic field</criterion>
+    <criterion testable="true">All metadata fields (matterId, vendorOrgId, invoiceDate, totalAmount, currency, tenantId) are marked filterable</criterion>
+    <criterion testable="true">invoiceDate and totalAmount are marked sortable for result ordering</criterion>
+    <criterion testable="true">content and vendorName are marked searchable for full-text search</criterion>
+    <criterion testable="true">Index name follows pattern: spaarke-invoices-{tenantId}</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The invoice index is separate from the existing document RAG index (spaarke-rag-{tenantId}). This allows invoice-specific semantic configuration and metadata fields optimized for financial queries.
+
+    The 3072-dimension vector matches the text-embedding-3-large model used across the Spaarke platform.
+
+    Contextual metadata enrichment (vendor, matter, invoice header prepended to chunks) happens at indexing time (task 032), not at schema level. The schema just needs the content field large enough to hold enriched text.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Create FinanceAuthorizationFilter</title>
+    <phase>2: AI Services + Job Handlers</phase>
+    <status>not-started</status>
+    <estimated-hours>2.5</estimated-hours>
+    <dependencies>009</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates authorization filter for security — tags include bff-api, auth; modifies .cs files</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create FinanceAuthorizationFilter for finance endpoints. Verify user has access to the
+    matter/project referenced in the request. Follow the existing DocumentAuthorizationFilter
+    pattern using ADR-008 endpoint filter approach.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in endpoint authorization and security patterns.
+    Follow ADR-008 for endpoint filters — no global middleware for resource authorization.
+  </role>
+
+  <goal>
+    FinanceAuthorizationFilter created that validates user access to the matter/project
+    referenced in finance endpoint requests. Applied to the finance endpoint group.
+  </goal>
+
+  <context>
+    <background>
+      All finance endpoints need authorization to ensure users can only access financial data
+      for matters/projects they have permission to view. The FinanceAuthorizationFilter follows
+      the existing DocumentAuthorizationFilter pattern — it's an endpoint filter (not middleware)
+      that runs before the endpoint handler.
+
+      The filter extracts the matterId or documentId from the request, verifies the user has
+      access to the associated matter/project, and returns 403 Forbidden if not authorized.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">Use endpoint filter — NOT global middleware for resource authorization</constraint>
+    <constraint source="ADR-008">Filter runs per-endpoint, not globally — applied to finance endpoint group</constraint>
+    <constraint source="ADR-019">Return ProblemDetails for 403 Forbidden responses</constraint>
+    <constraint source="project">Verify access to the matter/project referenced in the request</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Authorization Filter" location="src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs">
+        Existing endpoint authorization filter — follow this exact pattern
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read DocumentAuthorizationFilter.cs to understand the existing authorization filter pattern</step>
+    <step order="2">Read endpoint-filters.md for filter registration and execution patterns</step>
+    <step order="3">Create FinanceAuthorizationFilter.cs in Api/Filters/</step>
+    <step order="4">Implement IEndpointFilter interface — extract matterId or documentId from request body/route</step>
+    <step order="5">Verify user has access to the associated matter/project via existing authorization service</step>
+    <step order="6">Return 403 Forbidden with ProblemDetails if not authorized</step>
+    <step order="7">Apply FinanceAuthorizationFilter to the finance endpoint group in FinanceEndpoints.cs</step>
+    <step order="8">Run dotnet build to verify compilation</step>
+    <step order="9">Update TASK-INDEX.md: change task 022 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Filters/FinanceAuthorizationFilter.cs</output>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FinanceAuthorizationFilter.cs exists in Api/Filters/</criterion>
+    <criterion testable="true">Filter implements IEndpointFilter</criterion>
+    <criterion testable="true">Filter extracts matterId or documentId from request</criterion>
+    <criterion testable="true">Filter verifies user access to associated matter/project</criterion>
+    <criterion testable="true">Returns 403 Forbidden with ProblemDetails when unauthorized</criterion>
+    <criterion testable="true">Filter applied to finance endpoint group in FinanceEndpoints.cs</criterion>
+    <criterion testable="true">Authorized requests pass through to endpoint handler</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Follow the DocumentAuthorizationFilter pattern exactly. Key aspects:
+    1. Implement IEndpointFilter (not middleware)
+    2. Extract the resource identifier (matterId/documentId) from the request
+    3. Look up the matter/project the resource belongs to
+    4. Verify the authenticated user has access to that matter/project
+    5. Return 403 with ProblemDetails if unauthorized
+    6. Call next(context) if authorized
+
+    The filter is applied at the endpoint group level in FinanceEndpoints.cs,
+    so ALL finance endpoints get authorization automatically.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

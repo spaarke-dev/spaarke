@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Configure Invoice Review Queue Dataverse View</title>
+    <phase>4: PCF Panel + Integration + Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>none</blocks>
+    <tags>dataverse, solution</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Dataverse view configuration task; no code implementation</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Configure the Invoice Review Queue Dataverse view on the sprk_invoice entity. The view should filter for invoices with sprk_status = ToReview (pending human review after classification). Columns: sprk_invoicenumber, sprk_vendororgid (lookup display), sprk_matterid (lookup display), sprk_invoicedate, sprk_totalamount, sprk_currency, sprk_recordtype, sprk_extractionstatus, createdon. Sort by createdon descending (newest first). Name the view "Invoice Review Queue" and set as a public view accessible to the Finance team.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse view configuration, solution management, and model-driven app customization. Familiar with the sprk_invoice entity schema from task 001.
+  </role>
+
+  <goal>
+    A properly configured Dataverse view that shows invoices awaiting human review, with appropriate columns and filtering for the finance team workflow.
+  </goal>
+
+  <context>
+    <background>
+      When the invoice classification handler (task 011) classifies an email attachment as InvoiceCandidate, it creates a sprk_invoice record with sprk_status = ToReview. Human reviewers need a Dataverse view to see these pending invoices, verify the classification, correct any details (matter, vendor), and confirm the invoice for extraction.
+
+      This is a standard Dataverse view configuration — no code needed, just view definition within the solution.
+    </background>
+    <relevant-files>
+      <file>src/solutions/</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Filter: sprk_status = ToReview</constraint>
+    <constraint source="spec">Sort: createdon descending (newest first)</constraint>
+    <constraint source="spec">Review queue is Dataverse view only for MVP (PCF Dataset control is future upgrade)</constraint>
+    <constraint source="ADR-022">Unmanaged solutions only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Dataverse entity and view patterns" />
+      <file path=".claude/constraints/data.md" reason="Data access constraints" />
+      <file path="projects/financial-intelligence-module-r1/spec.md" reason="Review queue requirements" />
+    </files>
+    <patterns>
+      <pattern name="Dataverse Entity Operations" location=".claude/patterns/dataverse/entity-operations.md">
+        Follow existing view configuration patterns
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md for review queue view requirements (columns, filter, sort)</step>
+    <step order="2">Configure view filter criteria: sprk_status = ToReview (choice value for ToReview)</step>
+    <step order="3">Set view columns: sprk_invoicenumber, sprk_vendororgid (lookup display name), sprk_matterid (lookup display name), sprk_invoicedate, sprk_totalamount, sprk_currency, sprk_recordtype, sprk_extractionstatus, createdon</step>
+    <step order="4">Set sort order: createdon descending</step>
+    <step order="5">Name the view "Invoice Review Queue" and set as public view</step>
+    <step order="6">Test view returns expected results (shows only ToReview status invoices)</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spec and existing solution files</tool>
+    <tool name="Write">Create or modify view definition in solution</tool>
+    <tool name="Bash">Export/import solution if needed</tool>
+  </tools>
+
+  <outputs>
+    <output type="configuration">Invoice Review Queue view on sprk_invoice entity</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">View named "Invoice Review Queue" exists on sprk_invoice entity</criterion>
+    <criterion testable="true">View filters for sprk_status = ToReview only</criterion>
+    <criterion testable="true">View displays columns: Invoice Number, Vendor (lookup name), Matter (lookup name), Invoice Date, Total Amount, Currency, Record Type, Extraction Status, Created On</criterion>
+    <criterion testable="true">View is sorted by Created On descending (newest first)</criterion>
+    <criterion testable="true">View is public and accessible to appropriate security roles</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The review queue view is the primary way human reviewers interact with classified invoices in MVP. Future upgrades may include a PCF Dataset control for a richer review experience.
+
+    Reviewers use this view to:
+    1. See newly classified invoices
+    2. Verify or correct matter/vendor assignments
+    3. Confirm the invoice (which triggers extraction via the confirm endpoint)
+
+    The sprk_extractionstatus column helps reviewers see which invoices have already been processed (NotRun = awaiting confirmation, Extracted = already processed, Failed = needs attention).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

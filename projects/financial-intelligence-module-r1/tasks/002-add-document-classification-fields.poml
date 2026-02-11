@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Add Document Classification and Review Fields to sprk_document</title>
+    <phase>1: Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>011, 013</blocks>
+    <tags>dataverse, solution, fields</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New field creation on existing entity; schema changes with explicit constraints</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add 13 new fields to the existing sprk_document entity for the Finance Intelligence Module. These fields fall into three groups: classification (3 fields — classification result, confidence score, review status), hints (6 fields — vendor name, invoice number, date, total, currency, hints JSON), and associations (4 fields — matter suggested ref, matter suggestion JSON, related matter lookup, related project lookup, related vendor org lookup). Note: the associations group has 4 fields total per spec, with the 4th being sprk_relatedvendororgid.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse entity customization and extending existing schemas without breaking downstream dependencies.
+  </role>
+
+  <goal>
+    The sprk_document entity has 13 new fields correctly defined: 3 classification fields, 6 hint fields, and 4 association fields. All field types match the spec exactly. No existing fields are modified.
+  </goal>
+
+  <context>
+    <background>
+      The existing sprk_document entity serves as the review queue object for the Finance Intelligence pipeline. After AI classification, the attachment Document receives classification results, invoice header hints, and entity matching suggestions. These fields enable:
+      1. The Invoice Review Queue view (filtered by classification + review status)
+      2. Reviewer decision-making (hints show AI-extracted invoice data)
+      3. Entity matching (suggestions for matter/vendor resolution)
+
+      Existing fields already in use:
+      - sprk_documenttype (choice: Email=100000006, Email Attachment=100000007) — already set by EmailToDocumentJobHandler
+      - sprk_parentdocument (lookup → sprk_document, for attachment→email relationship)
+      - SPE file reference fields (sprk_graphitemid, sprk_graphdriveid)
+    </background>
+    <relevant-files>
+      <file>src/solutions/</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+      <file>projects/financial-intelligence-module-r1/Spaarke_Finance_Intelligence_MVP_Design 2.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Do NOT modify existing sprk_document fields — only add new ones</constraint>
+    <constraint source="spec">sprk_documenttype already exists and distinguishes Email vs Attachment — no new field needed for document type</constraint>
+    <constraint source="ADR-022">Unmanaged solutions only</constraint>
+    <constraint source="spec">Classification choice values: InvoiceCandidate, NotInvoice, Unknown</constraint>
+    <constraint source="spec">Review status choice values: ToReview, ConfirmedInvoice, RejectedNotInvoice</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Dataverse entity field addition patterns" />
+      <file path="projects/financial-intelligence-module-r1/spec.md" reason="Field definitions in Entity Model Summary" />
+    </files>
+    <patterns>
+      <pattern name="Dataverse Entity Operations" location=".claude/patterns/dataverse/entity-operations.md">
+        Follow existing entity extension patterns for adding fields to existing entities
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md Entity Model Summary for the 13 new sprk_document field definitions</step>
+    <step order="2">Read design doc Section 5.3 for complete field specs including types, purposes, and constraints</step>
+    <step order="3">Add classification fields: sprk_classification (Choice: InvoiceCandidate/NotInvoice/Unknown), sprk_classificationconfidence (Decimal 0..1), sprk_invoicereviewstatus (Choice: ToReview/ConfirmedInvoice/RejectedNotInvoice)</step>
+    <step order="4">Add hint fields: sprk_invoicevendornamehint (Text), sprk_invoicenumberhint (Text), sprk_invoicedatehint (Date), sprk_invoicetotalhint (Money), sprk_invoicecurrencyhint (Text), sprk_invoicehintsjson (Multiline Text)</step>
+    <step order="5">Add association fields: sprk_mattersuggestedref (Text), sprk_mattersuggestionjson (Multiline Text), sprk_relatedmatterid (Lookup → sprk_matter), sprk_relatedprojectid (Lookup → sprk_project)</step>
+    <step order="6">Add reviewer tracking fields: sprk_invoicereviewedby (Lookup → systemuser), sprk_invoicereviewedon (DateTime)</step>
+    <step order="7">Verify: also add sprk_relatedvendororgid (Lookup → sprk_organization) as the 4th association field</step>
+    <step order="8">Validate total field count: 3 classification + 6 hints + 4 associations = 13 new fields (reviewer tracking fields sprk_invoicereviewedby and sprk_invoicereviewedon are included in the classification group count — verify against spec)</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spec and design docs for field definitions</tool>
+    <tool name="Write">Create field definition files in solution</tool>
+    <tool name="Edit">Modify existing solution files to add fields</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">13 new fields added to sprk_document entity</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_classification choice field exists with values InvoiceCandidate, NotInvoice, Unknown</criterion>
+    <criterion testable="true">sprk_classificationconfidence decimal field exists (0..1 range)</criterion>
+    <criterion testable="true">sprk_invoicereviewstatus choice field exists with values ToReview, ConfirmedInvoice, RejectedNotInvoice</criterion>
+    <criterion testable="true">All 6 invoice hint fields exist with correct types (Text, Date, Money, Multiline Text)</criterion>
+    <criterion testable="true">sprk_mattersuggestedref and sprk_mattersuggestionjson fields exist</criterion>
+    <criterion testable="true">Lookup fields correctly reference sprk_matter, sprk_project, sprk_organization, systemuser</criterion>
+    <criterion testable="true">Total of exactly 13 new fields added to sprk_document</criterion>
+    <criterion testable="true">No existing sprk_document fields are modified or removed</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The 13 fields break down as follows per the spec:
+    - Classification (3): sprk_classification, sprk_classificationconfidence, sprk_invoicereviewstatus
+    - Hints (6): sprk_invoicevendornamehint, sprk_invoicenumberhint, sprk_invoicedatehint, sprk_invoicetotalhint, sprk_invoicecurrencyhint, sprk_invoicehintsjson
+    - Associations (4): sprk_mattersuggestedref, sprk_mattersuggestionjson, sprk_relatedmatterid, sprk_relatedprojectid (or sprk_relatedvendororgid)
+
+    Note: sprk_invoicereviewedby and sprk_invoicereviewedon are also listed in the design doc Section 5.3 — verify whether these are counted within the 13 or are additional. The spec says "13 (classification: 3, hints: 6, associations: 4)" — design Section 5.3 lists 5 classification fields (including reviewedby and reviewedon). Reconcile field count carefully against both documents.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

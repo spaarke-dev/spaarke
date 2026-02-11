@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Implement Finance Summary Endpoint with Redis Caching</title>
+    <phase>4: PCF Panel + Integration + Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>017, 019</dependencies>
+    <blocks>041</blocks>
+    <tags>bff-api, api, endpoints, cache, redis</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation of API endpoint with Redis caching; modifies .cs files; has ADR-009 cache constraint and ADR-008 auth constraint</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement GET /api/finance/matters/{matterId}/summary endpoint that returns a consolidated financial intelligence summary for a matter. The endpoint queries: (1) SpendSnapshots where periodType=ToDate AND bucketKey=TOTAL AND visibilityFilter=ACTUAL_INVOICED for the matter, (2) active BudgetPlan for the matter, (3) active SpendSignals for the matter. Compute FinanceSummaryDto with: totalInvoiced, budgetTotal, budgetRemaining, budgetVariancePct, activeSignals (list of signal summaries), lastUpdated. Cache in Redis with key matter:{matterId}:finance-summary and TTL 5 minutes. On cache miss, compute from Dataverse and cache. Explicit cache invalidation is handled by the snapshot handler (task 017) — the 5-min TTL is a safety net only. Register in AddFinanceModule with authorization filter.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Minimal API endpoint design, Redis caching with IDistributedCache, and the Spaarke distributed cache patterns. Familiar with Dataverse query construction and the finance entity model.
+  </role>
+
+  <goal>
+    A performant finance summary endpoint that serves cached financial intelligence data for the PCF panel, with Redis-first caching per ADR-009 and explicit invalidation by upstream handlers.
+  </goal>
+
+  <context>
+    <background>
+      The Finance Intelligence PCF panel (tasks 041-044) needs a single endpoint to fetch all financial intelligence data for a matter. This endpoint consolidates data from multiple Dataverse entities (SpendSnapshots, BudgetPlan, SpendSignals) into a single response.
+
+      To avoid repeated Dataverse queries on panel refresh, results are cached in Redis with a 5-minute TTL as a safety net. The primary invalidation mechanism is explicit cache deletion by the SpendSnapshotGenerationJobHandler (task 017) after writing new snapshots.
+
+      The endpoint follows existing patterns for endpoint definition, authorization, and caching.
+    </background>
+    <relevant-files>
+      <file>Services/Ai/EmbeddingCache.cs</file>
+      <file>Api/Ai/AnalysisEndpoints.cs</file>
+      <file>Api/Filters/DocumentAuthorizationFilter.cs</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-009">Redis-first caching via IDistributedCache — no hybrid L1 cache unless profiling proves need</constraint>
+    <constraint source="ADR-009">Cache key: matter:{matterId}:finance-summary with TTL 5 minutes</constraint>
+    <constraint source="ADR-009">IDistributedCache (StackExchangeRedisCache) adds sdap: prefix automatically</constraint>
+    <constraint source="ADR-008">Use endpoint authorization filter (NOT global middleware)</constraint>
+    <constraint source="ADR-019">Return ProblemDetails for all error responses with stable errorCode</constraint>
+    <constraint source="ADR-010">Register in AddFinanceModule extension method</constraint>
+    <constraint source="spec">5-min TTL is safety net; explicit invalidation by snapshot handler is primary mechanism</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="API endpoint constraints" />
+      <file path=".claude/patterns/api/endpoint-definition.md" reason="Minimal API endpoint definition pattern" />
+      <file path=".claude/patterns/caching/distributed-cache.md" reason="Redis distributed cache pattern with IDistributedCache" />
+      <file path=".claude/adr/ADR-009-redis-first-caching.md" reason="Redis-first caching requirement" />
+      <file path=".claude/adr/ADR-019-problemdetails-errors.md" reason="ProblemDetails error response pattern" />
+    </files>
+    <patterns>
+      <pattern name="Distributed Cache" location=".claude/patterns/caching/distributed-cache.md">
+        Follow IDistributedCache pattern for Redis caching with TTL and key conventions
+      </pattern>
+      <pattern name="Endpoint Definition" location=".claude/patterns/api/endpoint-definition.md">
+        Follow Minimal API endpoint group pattern
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read distributed-cache pattern for IDistributedCache usage, key conventions, and TTL configuration</step>
+    <step order="2">Read EmbeddingCache.cs for existing IDistributedCache usage in the codebase</step>
+    <step order="3">Read spec.md for FinanceSummary response shape and data sources</step>
+    <step order="4">Create FinanceSummaryDto with fields: matterId, totalInvoiced, budgetTotal, budgetRemaining, budgetVariancePct, monthlySpendTrend (list of monthly amounts), activeSignals (list of SignalSummaryDto with signalType, severity, message), lastUpdated</step>
+    <step order="5">Create FinanceSummaryService with IDistributedCache and IDataverseService dependencies</step>
+    <step order="6">Implement cache-first logic: check Redis for matter:{matterId}:finance-summary, return if hit</step>
+    <step order="7">Implement cache-miss computation: query SpendSnapshots (ToDate, TOTAL, ACTUAL_INVOICED), BudgetPlan (active), SpendSignals (active) from Dataverse</step>
+    <step order="8">Compute summary fields: totalInvoiced from snapshot, budgetTotal/budgetRemaining from plan, budgetVariancePct from snapshot, activeSignals mapped to summaries</step>
+    <step order="9">Cache computed result in Redis with 5-minute TTL</step>
+    <step order="10">Add GET /api/finance/matters/{matterId}/summary endpoint to FinanceEndpoints group</step>
+    <step order="11">Add endpoint authorization filter</step>
+    <step order="12">Register FinanceSummaryService in AddFinanceModule</step>
+    <step order="13">Build solution and verify no compilation errors</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing cache patterns, endpoints, and spec</tool>
+    <tool name="Write">Create FinanceSummaryService, FinanceSummaryDto, SignalSummaryDto</tool>
+    <tool name="Edit">Add endpoint to FinanceEndpoints, register in AddFinanceModule</tool>
+    <tool name="Bash">Build and verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Services/Finance/FinanceSummaryService.cs</output>
+    <output type="code">Models/Finance/FinanceSummaryDto.cs</output>
+    <output type="code">Models/Finance/SignalSummaryDto.cs</output>
+    <output type="endpoint">GET /api/finance/matters/{matterId}/summary</output>
+    <output type="registration">Service registered in AddFinanceModule</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/finance/matters/{matterId}/summary endpoint exists in FinanceEndpoints group</criterion>
+    <criterion testable="true">Endpoint returns FinanceSummaryDto with totalInvoiced, budgetTotal, budgetRemaining, budgetVariancePct, activeSignals, lastUpdated</criterion>
+    <criterion testable="true">Cache key is matter:{matterId}:finance-summary with 5-minute TTL</criterion>
+    <criterion testable="true">Cache-first: returns cached result on hit without querying Dataverse</criterion>
+    <criterion testable="true">Cache-miss: queries SpendSnapshots (ToDate/TOTAL/ACTUAL_INVOICED), BudgetPlan (active), SpendSignals (active) from Dataverse</criterion>
+    <criterion testable="true">Uses IDistributedCache (not direct Redis client or L1 cache)</criterion>
+    <criterion testable="true">Endpoint has authorization filter applied</criterion>
+    <criterion testable="true">Error responses use ProblemDetails with stable errorCode</criterion>
+    <criterion testable="true">FinanceSummaryService registered in AddFinanceModule</criterion>
+    <criterion testable="true">Solution builds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The 5-minute TTL is intentionally short and serves only as a safety net. The primary invalidation mechanism is explicit cache deletion by SpendSnapshotGenerationJobHandler after writing new snapshots. This ensures the panel shows fresh data immediately after analytics processing completes.
+
+    The sdap: prefix is added automatically by the StackExchangeRedisCache provider — do not add it manually to the key.
+
+    If no BudgetPlan exists for the matter, return budgetTotal/budgetRemaining/budgetVariancePct as null (not zero). The PCF panel will display "No budget configured" in this case.
+
+    If no SpendSnapshots exist, return totalInvoiced as 0 and monthlySpendTrend as empty list. This is a valid state for a matter with no confirmed invoices yet.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+      This is a FULL rigor task — all 11 protocol steps are mandatory.
+    </protocol>
+  </execution>
+</task>

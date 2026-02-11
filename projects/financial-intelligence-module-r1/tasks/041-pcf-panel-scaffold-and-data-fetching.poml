@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Scaffold Finance Intelligence PCF Control with Data Fetching</title>
+    <phase>4: PCF Panel + Integration + Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>042</blocks>
+    <tags>pcf, react, typescript, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag triggers FULL protocol; creates .ts/.tsx files; has ADR-021/ADR-006/ADR-012 constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Scaffold the Finance Intelligence PCF control: (1) Create ControlManifest.Input.xml with platform-library declaration for React and Fluent UI, (2) Create index.ts entry point using React 16 ReactDOM.render (NOT React 18 createRoot), (3) Create FluentProvider wrapper with Dataverse theme integration, (4) Create useFinanceSummary custom hook that fetches data from GET /api/finance/matters/{matterId}/summary via the BFF API, (5) Create FinanceIntelligencePanel root component with loading/error states. Import shared components from @spaarke/ui-components where available. Follow existing PCF control patterns (SemanticSearchControl, EmailProcessingMonitor).
+  </prompt>
+
+  <role>
+    SPAARKE frontend developer. Expert in PCF control development, React 16 patterns, Fluent UI v9, and the Spaarke PCF conventions. Familiar with platform-library declarations, Dataverse theme integration, and BFF API data fetching patterns.
+  </role>
+
+  <goal>
+    A working PCF control scaffold with proper manifest, React 16 initialization, FluentProvider theming, and BFF data fetching hook. The control renders a loading state while fetching and displays the finance summary data.
+  </goal>
+
+  <context>
+    <background>
+      The Finance Intelligence PCF panel is the primary UI for the Finance Intelligence Module. It displays financial data (budget, spend, signals) for a matter in a Dataverse model-driven app form. The control follows existing PCF patterns in the Spaarke codebase (SemanticSearchControl, EmailProcessingMonitor).
+
+      Key PCF constraints:
+      - React 16 ONLY (Dataverse PCF runtime limitation)
+      - Fluent UI v9 via @fluentui/react-components
+      - Platform-library declaration in manifest (React and Fluent UI provided by platform)
+      - Dark mode and high contrast support required
+      - Bundle size under 5MB
+      - Import from @spaarke/ui-components shared component library
+
+      The data fetching hook calls the finance summary endpoint created in task 040.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SemanticSearchControl/</file>
+      <file>src/client/pcf/EmailProcessingMonitor/</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 exclusively — @fluentui/react-components only, no v8 imports</constraint>
+    <constraint source="ADR-021">React 16 APIs only — use ReactDOM.render(), NOT React 18 createRoot()</constraint>
+    <constraint source="ADR-021">Dark mode and high contrast support required (via FluentProvider theme)</constraint>
+    <constraint source="ADR-021">No hard-coded colors — use Fluent v9 semantic tokens only</constraint>
+    <constraint source="ADR-006">PCF control, NOT legacy webresource</constraint>
+    <constraint source="ADR-012">Import shared components from @spaarke/ui-components</constraint>
+    <constraint source="ADR-022">Platform-library declaration in manifest for React and Fluent UI</constraint>
+    <constraint source="spec">Bundle size under 5MB</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/pcf.md" reason="PCF control development constraints" />
+      <file path=".claude/patterns/pcf/control-initialization.md" reason="PCF control initialization and React 16 setup pattern" />
+      <file path=".claude/patterns/pcf/theme-management.md" reason="Fluent UI v9 theme integration with Dataverse" />
+      <file path="src/client/pcf/CLAUDE.md" reason="PCF-specific development guidance" />
+      <file path="docs/guides/PCF-V9-PACKAGING.md" reason="PCF packaging with platform-library declarations" />
+      <file path=".claude/adr/ADR-021-fluent-ui-v9-design-system.md" reason="Fluent UI v9 design system requirements" />
+      <file path=".claude/adr/ADR-006-pcf-over-webresources.md" reason="PCF over webresources requirement" />
+      <file path=".claude/adr/ADR-012-shared-component-library.md" reason="Shared component library requirement" />
+    </files>
+    <patterns>
+      <pattern name="PCF Control Initialization" location=".claude/patterns/pcf/control-initialization.md">
+        Follow React 16 ReactDOM.render pattern with proper cleanup in destroy()
+      </pattern>
+      <pattern name="PCF Theme Management" location=".claude/patterns/pcf/theme-management.md">
+        Follow FluentProvider wrapper pattern with Dataverse theme extraction
+      </pattern>
+      <pattern name="Existing PCF Control" location="src/client/pcf/SemanticSearchControl/">
+        Follow existing control structure for manifest, index.ts, and component organization
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing PCF controls (SemanticSearchControl, EmailProcessingMonitor) for scaffold pattern: manifest structure, index.ts entry point, component organization</step>
+    <step order="2">Read PCF CLAUDE.md and control-initialization.md for React 16 setup requirements</step>
+    <step order="3">Read theme-management.md for FluentProvider and Dataverse theme integration</step>
+    <step order="4">Read PCF-V9-PACKAGING.md for platform-library declaration syntax</step>
+    <step order="5">Create src/client/pcf/FinanceIntelligencePanel/ directory</step>
+    <step order="6">Create ControlManifest.Input.xml with: control name, platform-library declarations for React (16.x) and @fluentui/react-components, input properties (matterId as bound string), required resources</step>
+    <step order="7">Create index.ts implementing StandardControl interface: init(), updateView(), destroy() with React 16 ReactDOM.render in updateView and ReactDOM.unmountComponentAtNode in destroy</step>
+    <step order="8">Create components/FluentProviderWrapper.tsx with Dataverse theme extraction and FluentProvider setup (supports light/dark/high-contrast)</step>
+    <step order="9">Create hooks/useFinanceSummary.ts custom hook: fetches from GET /api/finance/matters/{matterId}/summary, returns { data, isLoading, error, refetch }</step>
+    <step order="10">Create components/FinanceIntelligencePanel.tsx root component: renders FluentProviderWrapper > Panel layout with loading spinner, error state, and data display placeholder</step>
+    <step order="11">Create tsconfig.json and package.json for the control (following existing control patterns)</step>
+    <step order="12">Build the control and verify no TypeScript compilation errors</step>
+    <step order="13">Verify bundle size is under 5MB</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing PCF controls, patterns, and constraints</tool>
+    <tool name="Write">Create manifest, index.ts, components, hooks, and config files</tool>
+    <tool name="Bash">Build PCF control and check bundle size</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/FinanceIntelligencePanel/ControlManifest.Input.xml</output>
+    <output type="code">src/client/pcf/FinanceIntelligencePanel/index.ts</output>
+    <output type="code">src/client/pcf/FinanceIntelligencePanel/components/FluentProviderWrapper.tsx</output>
+    <output type="code">src/client/pcf/FinanceIntelligencePanel/components/FinanceIntelligencePanel.tsx</output>
+    <output type="code">src/client/pcf/FinanceIntelligencePanel/hooks/useFinanceSummary.ts</output>
+    <output type="code">src/client/pcf/FinanceIntelligencePanel/tsconfig.json</output>
+    <output type="code">src/client/pcf/FinanceIntelligencePanel/package.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ControlManifest.Input.xml has platform-library declarations for React 16.x and @fluentui/react-components</criterion>
+    <criterion testable="true">index.ts uses ReactDOM.render() in updateView (NOT createRoot)</criterion>
+    <criterion testable="true">index.ts uses ReactDOM.unmountComponentAtNode() in destroy for cleanup</criterion>
+    <criterion testable="true">FluentProvider wrapper extracts Dataverse theme and applies to all child components</criterion>
+    <criterion testable="true">useFinanceSummary hook fetches from /api/finance/matters/{matterId}/summary and returns data, isLoading, error, refetch</criterion>
+    <criterion testable="true">FinanceIntelligencePanel renders loading state (Fluent Spinner) while fetching</criterion>
+    <criterion testable="true">FinanceIntelligencePanel renders error state with user-friendly message on failure</criterion>
+    <criterion testable="true">No Fluent UI v8 imports present — only @fluentui/react-components</criterion>
+    <criterion testable="true">Shared components imported from @spaarke/ui-components where available</criterion>
+    <criterion testable="true">TypeScript compilation succeeds with no errors</criterion>
+    <criterion testable="true">Bundle size under 5MB</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    React 16 constraint is critical — Dataverse PCF runtime does NOT support React 18. Using createRoot will cause a runtime error. Always use ReactDOM.render/unmountComponentAtNode.
+
+    The platform-library declaration means React and Fluent UI v9 are provided by the Dataverse platform, NOT bundled in the control. This significantly reduces bundle size.
+
+    The useFinanceSummary hook should use the PCF WebAPI or a fetch wrapper that handles Dataverse-provided authentication tokens. Follow the existing data fetching pattern in EmailProcessingMonitor.
+
+    The panel layout will be populated with real components in tasks 042-043. This task creates the scaffold with placeholder sections.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+      This is a FULL rigor task — all 11 protocol steps are mandatory.
+    </protocol>
+  </execution>
+</task>

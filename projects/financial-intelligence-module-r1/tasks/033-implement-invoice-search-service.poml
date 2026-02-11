@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Implement InvoiceSearchService and Search Endpoint</title>
+    <phase>3: Invoice RAG + Search</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, api, endpoints, azure-search</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation of API endpoint with search service; modifies .cs files; has ADR constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement InvoiceSearchService and GET /api/finance/invoices/search endpoint. The service performs hybrid search combining keyword search, vector search (text-embedding-3-large), and semantic ranking against the spaarke-invoices-{tenantId} index. Support filters: matterId (string, exact match), vendorOrgId (string, exact match), dateFrom/dateTo (DateTimeOffset, range on invoiceDate), amountMin/amountMax (double, range on totalAmount). Return InvoiceSearchResultDto with invoice metadata (invoiceId, invoiceNumber, vendorName, invoiceDate, totalAmount, currency, matterId) plus content snippets (highlights from semantic ranker). Register service in AddFinanceModule and add endpoint to FinanceEndpoints group with authorization filter.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure AI Search hybrid queries, Minimal API endpoint design, and the Spaarke endpoint patterns. Familiar with SearchClient, vector queries, semantic ranking, and OData filter construction.
+  </role>
+
+  <goal>
+    A fully functional invoice search endpoint that supports hybrid search (keyword + vector + semantic) with filtering by matter, vendor, date range, and amount range. The endpoint follows existing Spaarke patterns for endpoint definition, authorization, and error handling.
+  </goal>
+
+  <context>
+    <background>
+      The invoice search endpoint enables users and the AI agent to search across indexed invoice content. It combines three search modalities:
+      1. Keyword search: Traditional full-text search on content and vendorName fields
+      2. Vector search: Semantic similarity using embeddings (text-embedding-3-large, 3072 dims)
+      3. Semantic ranking: Azure AI Search semantic ranker for result re-ranking and snippet extraction
+
+      The endpoint supports typed filters for common financial queries (by matter, vendor, date range, amount range). Results include invoice metadata and highlighted content snippets from the semantic ranker.
+
+      This follows the existing SemanticSearchEndpoints pattern in the BFF API.
+    </background>
+    <relevant-files>
+      <file>Api/Ai/SemanticSearchEndpoints.cs</file>
+      <file>Api/Ai/AnalysisEndpoints.cs</file>
+      <file>Api/Filters/DocumentAuthorizationFilter.cs</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">Use endpoint authorization filter (NOT global middleware)</constraint>
+    <constraint source="ADR-019">Return ProblemDetails for all error responses with stable errorCode</constraint>
+    <constraint source="ADR-010">Register InvoiceSearchService in AddFinanceModule (not in Program.cs)</constraint>
+    <constraint source="spec">Hybrid search: keyword + vector + semantic ranking combined</constraint>
+    <constraint source="spec">Filter by matter, vendor, date range, amount range</constraint>
+    <constraint source="spec">Return invoice metadata + content snippets from semantic ranker</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="API endpoint constraints and patterns" />
+      <file path=".claude/patterns/api/endpoint-definition.md" reason="Minimal API endpoint definition pattern" />
+      <file path=".claude/adr/ADR-008-endpoint-auth-filters.md" reason="Endpoint authorization filter requirement" />
+      <file path=".claude/adr/ADR-019-problemdetails-errors.md" reason="ProblemDetails error response pattern" />
+      <file path="docs/guides/RAG-ARCHITECTURE.md" reason="RAG search patterns and hybrid query construction" />
+    </files>
+    <patterns>
+      <pattern name="Semantic Search Endpoints" location="Api/Ai/SemanticSearchEndpoints.cs">
+        Follow existing search endpoint pattern for hybrid query construction and response shaping
+      </pattern>
+      <pattern name="Endpoint Definition" location=".claude/patterns/api/endpoint-definition.md">
+        Follow Minimal API endpoint group pattern with authorization filter
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SemanticSearchEndpoints.cs for existing hybrid search endpoint pattern (query construction, SearchClient usage, response shaping)</step>
+    <step order="2">Read AnalysisEndpoints.cs for endpoint group registration pattern</step>
+    <step order="3">Read spec.md for search requirements, filter parameters, and response shape</step>
+    <step order="4">Create InvoiceSearchResultDto with fields: invoiceId, invoiceNumber, vendorName, invoiceDate, totalAmount, currency, matterId, contentSnippets (list of highlighted excerpts), score</step>
+    <step order="5">Create InvoiceSearchService with SearchClient dependency</step>
+    <step order="6">Implement hybrid search method: construct SearchOptions with keyword query, vector query (embed search text → 3072-dim vector), semantic configuration ("invoice-semantic"), and OData filters</step>
+    <step order="7">Implement OData filter construction: matterId eq '{value}', vendorOrgId eq '{value}', invoiceDate ge {dateFrom}, invoiceDate le {dateTo}, totalAmount ge {amountMin}, totalAmount le {amountMax} — combine with 'and'</step>
+    <step order="8">Map search results to InvoiceSearchResultDto, extracting semantic captions/highlights as content snippets</step>
+    <step order="9">Add GET /api/finance/invoices/search endpoint to FinanceEndpoints group with query parameters: q (search text), matterId, vendorOrgId, dateFrom, dateTo, amountMin, amountMax, top (default 20), skip (default 0)</step>
+    <step order="10">Add endpoint authorization filter</step>
+    <step order="11">Register InvoiceSearchService in AddFinanceModule DI extension method</step>
+    <step order="12">Build solution and verify no compilation errors</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing search endpoints, patterns, and spec</tool>
+    <tool name="Write">Create InvoiceSearchService and DTO files</tool>
+    <tool name="Edit">Add endpoint to FinanceEndpoints group, register in AddFinanceModule</tool>
+    <tool name="Bash">Build and verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Services/Finance/InvoiceSearchService.cs</output>
+    <output type="code">Models/Finance/InvoiceSearchResultDto.cs</output>
+    <output type="endpoint">GET /api/finance/invoices/search</output>
+    <output type="registration">Service registered in AddFinanceModule</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/finance/invoices/search endpoint exists in FinanceEndpoints group</criterion>
+    <criterion testable="true">Endpoint accepts query parameters: q, matterId, vendorOrgId, dateFrom, dateTo, amountMin, amountMax, top, skip</criterion>
+    <criterion testable="true">Search uses hybrid mode: keyword + vector + semantic ranking</criterion>
+    <criterion testable="true">Vector query uses text-embedding-3-large (3072 dimensions) to embed search text</criterion>
+    <criterion testable="true">Semantic configuration "invoice-semantic" is specified in search options</criterion>
+    <criterion testable="true">OData filters correctly constructed for all filter parameters (exact match for IDs, range for dates and amounts)</criterion>
+    <criterion testable="true">Response includes InvoiceSearchResultDto with invoice metadata and content snippets</criterion>
+    <criterion testable="true">Endpoint has authorization filter applied</criterion>
+    <criterion testable="true">Error responses use ProblemDetails with stable errorCode</criterion>
+    <criterion testable="true">InvoiceSearchService registered in AddFinanceModule</criterion>
+    <criterion testable="true">Solution builds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The hybrid search combines three modalities for best results:
+    - Keyword: Catches exact matches (invoice numbers, vendor names)
+    - Vector: Finds semantically similar content even with different wording
+    - Semantic ranking: Re-ranks combined results and extracts meaningful snippets
+
+    The semantic ranker extracts captions/highlights that serve as content snippets in the response. These are more useful than raw text excerpts because they're contextually relevant to the query.
+
+    Filter construction uses OData syntax required by Azure AI Search. Multiple filters are combined with 'and'. Empty/null filter parameters are omitted from the filter string.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+      This is a FULL rigor task — all 11 protocol steps are mandatory.
+    </protocol>
+  </execution>
+</task>

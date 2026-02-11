@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Implement IInvoiceAnalysisService / InvoiceAnalysisService</title>
+    <phase>2: AI Services + Job Handlers</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>004, 006, 009</dependencies>
+    <blocks>011, 016</blocks>
+    <tags>bff-api, ai, azure-openai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates AI service with structured output, modifies code files (.cs), tags include bff-api and ai</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement IInvoiceAnalysisService and InvoiceAnalysisService with ClassifyAttachmentAsync
+    and ExtractInvoiceFactsAsync methods. The service loads playbook prompts from Dataverse
+    via IPlaybookService, builds ChatMessages, and calls GetStructuredCompletionAsync&lt;T&gt;
+    for constrained decoding. Use gpt-4o-mini for classification and gpt-4o for extraction.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in AI architecture and the structured output pattern.
+    Follow ADR-013 for AI architecture, ADR-014 for versioned prompts, ADR-015 for data governance.
+  </role>
+
+  <goal>
+    IInvoiceAnalysisService interface and InvoiceAnalysisService implementation created.
+    ClassifyAttachmentAsync returns ClassificationResult via structured output.
+    ExtractInvoiceFactsAsync returns ExtractionResult via structured output.
+    Service registered in AddFinanceModule.
+  </goal>
+
+  <context>
+    <background>
+      The InvoiceAnalysisService is the core AI service for the finance intelligence pipeline.
+      It wraps two AI operations — classification (is this an invoice?) and extraction (what are
+      the billing facts?) — behind a clean service interface. It follows the existing
+      AppOnlyAnalysisService pattern: load playbook prompts from Dataverse, build ChatMessages
+      with system + user prompts, call IOpenAiClient for structured output. ClassificationResult
+      is AI output only — entity matching (matter suggestions) is done separately in the handler.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IOpenAiClient.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Use GetStructuredCompletionAsync&lt;T&gt; on IOpenAiClient for constrained decoding — no manual JSON parsing</constraint>
+    <constraint source="ADR-014">Load prompts from Dataverse via IPlaybookService — versioned prompt templates, not hardcoded strings</constraint>
+    <constraint source="ADR-015">Never log document content, extracted text, or prompts — log only IDs, sizes, timings</constraint>
+    <constraint source="project">ClassificationResult is AI output only — no MatterSuggestion; entity matching is handler-side</constraint>
+    <constraint source="project">Classification uses gpt-4o-mini model; extraction uses gpt-4o model</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/text-extraction.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="App-Only Analysis Service" location="src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs">
+        Reference implementation for AI service pattern — playbook loading, ChatMessage building, OpenAI call
+      </pattern>
+      <pattern name="Playbook Loading" location="src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookService.cs">
+        Loading prompt templates from Dataverse playbook records
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read AppOnlyAnalysisService.cs to understand the AI service pattern (playbook loading, ChatMessage building, OpenAI call)</step>
+    <step order="2">Read PlaybookService.cs to understand playbook prompt loading from Dataverse</step>
+    <step order="3">Read IOpenAiClient.cs to understand the GetStructuredCompletionAsync&lt;T&gt; method signature</step>
+    <step order="4">Create IInvoiceAnalysisService.cs in Services/Finance/ with ClassifyAttachmentAsync and ExtractInvoiceFactsAsync method signatures</step>
+    <step order="5">Implement InvoiceAnalysisService.cs — inject IOpenAiClient, IPlaybookService, ILogger; implement ClassifyAttachmentAsync using gpt-4o-mini</step>
+    <step order="6">Implement ExtractInvoiceFactsAsync using gpt-4o — accept reviewer corrections as optional hints parameter</step>
+    <step order="7">Register InvoiceAnalysisService in AddFinanceModule DI extension method</step>
+    <step order="8">Run dotnet build to verify compilation</step>
+    <step order="9">Update TASK-INDEX.md: change task 010 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/IInvoiceAnalysisService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceAnalysisService.cs</output>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">IInvoiceAnalysisService.cs exists in Services/Finance/</criterion>
+    <criterion testable="true">Interface defines ClassifyAttachmentAsync returning ClassificationResult</criterion>
+    <criterion testable="true">Interface defines ExtractInvoiceFactsAsync returning ExtractionResult</criterion>
+    <criterion testable="true">InvoiceAnalysisService loads playbook prompts via IPlaybookService</criterion>
+    <criterion testable="true">ClassifyAttachmentAsync calls GetStructuredCompletionAsync&lt;ClassificationResult&gt; with gpt-4o-mini</criterion>
+    <criterion testable="true">ExtractInvoiceFactsAsync calls GetStructuredCompletionAsync&lt;ExtractionResult&gt; with gpt-4o</criterion>
+    <criterion testable="true">No document content or prompt text appears in log statements</criterion>
+    <criterion testable="true">Service registered in AddFinanceModule</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    ClassificationResult is AI output only — it contains the classification category, confidence score,
+    and hints (vendor name, invoice number, date detected). It does NOT contain MatterSuggestion or
+    entity matching results. Entity matching is performed separately by the handler after the AI call.
+
+    ExtractInvoiceFactsAsync should accept optional reviewer corrections (matter, vendor, overrides)
+    as hints to improve extraction accuracy. These corrections come from the Dataverse record, not
+    from the job payload (per ADR-015).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

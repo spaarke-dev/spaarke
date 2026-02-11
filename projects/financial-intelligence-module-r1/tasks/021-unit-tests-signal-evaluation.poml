@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Unit tests for SignalEvaluationService</title>
+    <phase>2: AI Services + Job Handlers</phase>
+    <status>not-started</status>
+    <estimated-hours>2.5</estimated-hours>
+    <dependencies>018</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, unit-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing'; creates new test files; has explicit constraints</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create comprehensive unit tests for SignalEvaluationService: BudgetExceeded fires at 100%+
+    spend, BudgetWarning fires at 80% threshold, VelocitySpike fires at 50% threshold, no
+    signal when within thresholds, configurable threshold overrides.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in xUnit testing and threshold evaluation verification.
+    Follow testing constraints for consistent test structure.
+  </role>
+
+  <goal>
+    Comprehensive unit tests for SignalEvaluationService covering all signal rules.
+    Tests verify threshold evaluation logic, configurable thresholds, and no-signal scenarios.
+  </goal>
+
+  <context>
+    <background>
+      SignalEvaluationService contains threshold-based rule evaluation that determines when
+      financial signals are generated. These tests ensure the rules fire at the correct
+      thresholds and that configurable thresholds override defaults correctly.
+
+      These are P0 priority tests — signal evaluation correctness directly impacts the
+      accuracy of financial alerts shown to users.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Finance/SignalEvaluationService.cs</file>
+      <file>tests/Sprk.Bff.Api.Tests/Services/Finance/SignalEvaluationServiceTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="testing">Use xUnit with FluentAssertions</constraint>
+    <constraint source="testing">Follow Arrange-Act-Assert pattern</constraint>
+    <constraint source="testing">Test names: Method_Scenario_ExpectedResult</constraint>
+    <constraint source="project">Mock IDataverseService for SpendSnapshot queries and SpendSignal upserts</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SignalEvaluationService.cs to understand all signal rules and thresholds</step>
+    <step order="2">Create SignalEvaluationServiceTests.cs in tests/Sprk.Bff.Api.Tests/Services/Finance/</step>
+    <step order="3">Add test: EvaluateAsync_SpendAt100Percent_CreatesBudgetExceededSignal</step>
+    <step order="4">Add test: EvaluateAsync_SpendAt80Percent_CreatesBudgetWarningSignal — default threshold</step>
+    <step order="5">Add test: EvaluateAsync_VelocityIncrease50Percent_CreatesVelocitySpikeSignal — default threshold</step>
+    <step order="6">Add test: EvaluateAsync_SpendWithinAllThresholds_CreatesNoSignals</step>
+    <step order="7">Add test: EvaluateAsync_CustomBudgetWarningThreshold_UsesConfiguredValue</step>
+    <step order="8">Add test: EvaluateAsync_CustomVelocitySpikeThreshold_UsesConfiguredValue</step>
+    <step order="9">Add test: EvaluateAsync_NoBudget_SkipsBudgetSignals — no budget means no budget signals</step>
+    <step order="10">Run tests: dotnet test --filter "SignalEvaluationService"</step>
+    <step order="11">Update TASK-INDEX.md: change task 021 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Finance/SignalEvaluationServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">At least 7 unit tests for SignalEvaluationService</criterion>
+    <criterion testable="true">Tests verify BudgetExceeded fires at 100%+ spend</criterion>
+    <criterion testable="true">Tests verify BudgetWarning fires at 80% default threshold</criterion>
+    <criterion testable="true">Tests verify VelocitySpike fires at 50% default threshold</criterion>
+    <criterion testable="true">Tests verify no signal when spend within all thresholds</criterion>
+    <criterion testable="true">Tests verify configurable threshold overrides work</criterion>
+    <criterion testable="true">Tests verify graceful handling when no budget exists</criterion>
+    <criterion testable="true">All tests pass: dotnet test succeeds</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    These are P0 priority tests — signal evaluation correctness is critical for user trust.
+    Test data should include:
+    - Snapshots at exactly 80%, 99%, 100%, 101% of budget (boundary testing)
+    - Velocity at exactly 49%, 50%, 51% increase (boundary testing)
+    - Custom thresholds (e.g., 90% budget warning, 30% velocity spike)
+    - No budget scenario (should skip budget signals entirely)
+    - Multiple signals triggered simultaneously
+
+    Parallel-group E with task 020 (snapshot aggregation tests) — both test suites
+    can be developed independently.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

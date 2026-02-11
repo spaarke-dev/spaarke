@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Unit Tests for GetStructuredCompletionAsync&lt;T&gt;</title>
+    <phase>1: Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, unit-test, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing tag; creates new test files with explicit constraints from AI patterns</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Write unit tests for the GetStructuredCompletionAsync&lt;T&gt; method added in task 004. Tests should verify: correct ChatResponseFormat configuration (CreateJsonSchemaFormat with strictSchemaEnabled:true), successful deserialization of structured response to typed result, error handling for empty responses, error handling for invalid JSON responses, and circuit breaker integration.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in .NET unit testing with xUnit, Moq, and the existing test patterns in the Sprk.Bff.Api.Tests project.
+  </role>
+
+  <goal>
+    Comprehensive unit tests for GetStructuredCompletionAsync&lt;T&gt; covering happy path (correct schema, successful deserialization), edge cases (empty response, malformed JSON), and error scenarios (circuit breaker open). All tests pass.
+  </goal>
+
+  <context>
+    <background>
+      GetStructuredCompletionAsync&lt;T&gt; is a platform capability on IOpenAiClient that enforces JSON schema conformance via OpenAI's response_format parameter. Unit tests must verify the method correctly configures the request format, handles the response, and propagates errors. These tests are P0 priority per the testing strategy in plan.md.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IOpenAiClient.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs</file>
+      <file>tests/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-015">Tests must not log or assert on document content — use synthetic test data only</constraint>
+    <constraint source="project">Follow existing test patterns in the Sprk.Bff.Api.Tests project (xUnit + Moq)</constraint>
+    <constraint source="project">Tests must be deterministic and not require external Azure OpenAI connectivity</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/ai.md" reason="AI constraints for testing" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs" reason="Implementation under test" />
+    </files>
+    <patterns>
+      <pattern name="Unit Test Patterns" location="tests/">
+        Follow existing xUnit + Moq patterns in the test project
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create test class GetStructuredCompletionAsyncTests in the appropriate test project location</step>
+    <step order="2">Write test: Verify_ChatResponseFormat_Uses_JsonSchemaFormat_With_StrictEnabled — mock the OpenAI client call and assert the request uses CreateJsonSchemaFormat with strictSchemaEnabled:true</step>
+    <step order="3">Write test: Successfully_Deserializes_Response_To_Typed_Result — provide a valid JSON response matching a test schema and verify deserialization to a test record type</step>
+    <step order="4">Write test: Throws_On_Empty_Response — verify appropriate exception when OpenAI returns empty content</step>
+    <step order="5">Write test: Throws_On_Invalid_Json_Response — verify appropriate exception when response content is not valid JSON for the target type</step>
+    <step order="6">Write test: Propagates_CancellationToken — verify cancellation token is passed through to the underlying call</step>
+    <step order="7">Run all tests: dotnet test --filter "GetStructuredCompletionAsync" and verify all pass</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing test patterns</tool>
+    <tool name="Write">Create test class file</tool>
+    <tool name="Bash">Run dotnet test to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/GetStructuredCompletionAsyncTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Test class exists with at least 5 test methods</criterion>
+    <criterion testable="true">ChatResponseFormat configuration is verified (CreateJsonSchemaFormat + strictSchemaEnabled:true)</criterion>
+    <criterion testable="true">Successful deserialization test passes with a mock structured response</criterion>
+    <criterion testable="true">Empty response error handling test passes</criterion>
+    <criterion testable="true">Invalid JSON error handling test passes</criterion>
+    <criterion testable="true">All tests pass when running dotnet test</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use a simple test record type for deserialization tests (e.g., a TestResult record with a few properties). Do not use the actual ClassificationResult or ExtractionResult types — those are defined in task 006.
+
+    The circuit breaker is likely integrated via Polly in the existing OpenAiClient. Tests should verify that the structured output method uses the same resilience pipeline as existing methods, but do not need to test the circuit breaker logic itself (that's already tested).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

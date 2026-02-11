@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Write "Attachment Classification" Playbook Prompt Template</title>
+    <phase>1: Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>ai, azure-openai</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Content authoring task; no code modification; writing prompt templates for review before Dataverse deployment</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Write the system prompt and user prompt template for the "Attachment Classification" playbook (Playbook A). This classifies email attachments as InvoiceCandidate, NotInvoice, or Unknown with confidence scores and extracts invoice header hints. Model: gpt-4o-mini. The prompt must include classification taxonomy with examples, confidence calibration guidance, few-shot examples, and explicit guardrail instructions.
+  </prompt>
+
+  <role>
+    SPAARKE AI prompt engineer. Expert in designing structured output prompts for Azure OpenAI, classification taxonomy design, confidence calibration, and few-shot prompt engineering. Understands the Spaarke playbook system per ADR-014.
+  </role>
+
+  <goal>
+    Complete system prompt and user prompt template for the "Attachment Classification" playbook, saved to the project notes/prompts/ directory for review before Dataverse deployment. The prompts produce reliable classification with calibrated confidence scores and accurate invoice header hint extraction.
+  </goal>
+
+  <context>
+    <background>
+      The Attachment Classification playbook is the first AI step in the Finance Intelligence pipeline. It receives extracted text from email attachments and must:
+      1. Classify the document: InvoiceCandidate (looks like an invoice), NotInvoice (clearly not an invoice), Unknown (ambiguous)
+      2. Extract invoice header hints when the document is a candidate or unknown: vendor name, invoice number, date, total amount, currency, matter reference
+      3. Provide a confidence score (0.0-1.0) calibrated to specific thresholds
+      4. Provide reasoning for the classification
+
+      The output is enforced via OpenAI structured output (JSON schema), so the prompt focuses on classification accuracy and hint extraction quality rather than output format compliance.
+
+      Important guardrails:
+      - The prompt must NOT output VisibilityState
+      - The prompt must NOT instruct the AI to create records
+      - Entity matching (matter/vendor resolution) happens in handler code, NOT in the AI call
+    </background>
+    <relevant-files>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+      <file>projects/financial-intelligence-module-r1/Spaarke_Finance_Intelligence_MVP_Design 2.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Explicit instruction in prompt: "Do NOT output VisibilityState. Do NOT create records."</constraint>
+    <constraint source="spec">Model: gpt-4o-mini (fast, cost-effective for high-volume classification)</constraint>
+    <constraint source="ADR-014">Prompts versioned in Dataverse sprk_playbook table; this task writes the initial version for review</constraint>
+    <constraint source="ADR-015">Prompt must not instruct AI to log or retain document content</constraint>
+    <constraint source="spec">Confidence calibration: >=0.8 suggests InvoiceCandidate, &lt;0.5 suggests NotInvoice, middle range suggests Unknown</constraint>
+    <constraint source="spec">Invoice hint extraction is best-effort — null values are acceptable</constraint>
+    <constraint source="spec">Matter reference extraction looks for matter numbers, project codes, reference lines</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/ai.md" reason="AI architecture constraints and prompt guidelines" />
+      <file path="docs/guides/HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md" reason="Playbook creation and versioning patterns" />
+      <file path="docs/architecture/AI-PLAYBOOK-ARCHITECTURE.md" reason="Playbook system architecture and execution model" />
+      <file path="projects/financial-intelligence-module-r1/spec.md" reason="Playbook A specification and output schema" />
+    </files>
+    <patterns>
+      <pattern name="Playbook Creation" location="docs/guides/HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md">
+        Follow playbook creation and prompt versioning patterns
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md Playbook A section for classification taxonomy, output schema, and guardrails</step>
+    <step order="2">Read design doc Section 6.5 for detailed prompt design principles and confidence calibration guidance</step>
+    <step order="3">Write system prompt defining:
+      - Role: document classification specialist
+      - Classification taxonomy: InvoiceCandidate (invoices, billing statements, fee notes), NotInvoice (contracts, letters, reports, spreadsheets without billing), Unknown (ambiguous documents)
+      - Confidence calibration: >=0.8 for clear invoices, &lt;0.5 for clearly not invoices, 0.5-0.8 for ambiguous
+      - Invoice hint extraction instructions: extract vendor name, invoice number, date, total, currency, matter reference when document appears to be an invoice
+      - Guardrails: "Do NOT output VisibilityState. Do NOT create records. Do NOT suggest matter or vendor record assignments."
+      - Few-shot examples for each classification category</step>
+    <step order="4">Write user prompt template with placeholder for document text:
+      - {{documentText}} placeholder for extracted text content
+      - Instructions to classify the provided document and extract hints
+      - Reminder of output schema expectations</step>
+    <step order="5">Save system prompt and user prompt template to projects/financial-intelligence-module-r1/notes/prompts/classification-prompt.md for review before Dataverse deployment</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spec and design docs for prompt requirements</tool>
+    <tool name="Write">Create prompt template files</tool>
+  </tools>
+
+  <outputs>
+    <output type="content">projects/financial-intelligence-module-r1/notes/prompts/classification-prompt.md (system prompt + user prompt template)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">System prompt defines classification taxonomy with 3 categories (InvoiceCandidate, NotInvoice, Unknown)</criterion>
+    <criterion testable="true">System prompt includes confidence calibration guidance (>=0.8, &lt;0.5, middle range)</criterion>
+    <criterion testable="true">System prompt includes few-shot examples for each classification category</criterion>
+    <criterion testable="true">System prompt contains explicit guardrail: "Do NOT output VisibilityState. Do NOT create records."</criterion>
+    <criterion testable="true">User prompt template has {{documentText}} placeholder</criterion>
+    <criterion testable="true">Prompt addresses invoice hint extraction (vendor, number, date, total, currency, matter reference)</criterion>
+    <criterion testable="true">Prompt file saved to notes/prompts/ directory for review</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Prompts are NOT stored in source code for production. They are Dataverse sprk_playbook records deployed via solution import. This task writes the initial prompt content for human review. Deployment to Dataverse is a separate step.
+
+    The prompt must work with gpt-4o-mini, which is less capable than gpt-4o. Keep instructions clear and explicit. Use few-shot examples to calibrate the model's classification behavior.
+
+    The structured output JSON schema (defined in task 006) handles format enforcement. The prompt should focus on classification accuracy and hint extraction quality, not on JSON formatting.
+
+    Prompt tuning with real invoice samples happens in Phase 4 (task for confidence threshold tuning). This task creates the initial baseline prompt.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

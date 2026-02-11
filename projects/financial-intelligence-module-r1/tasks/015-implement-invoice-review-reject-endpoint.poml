@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Implement invoice review reject endpoint</title>
+    <phase>2: AI Services + Job Handlers</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>001, 009</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates API endpoint that modifies Dataverse records — tags include bff-api, api; modifies .cs files</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement POST /api/finance/invoice-review/reject endpoint. Sets
+    sprk_invoicereviewstatus=RejectedNotInvoice + reviewer fields on the document.
+    Returns 200 with confirmation response.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Minimal API endpoint patterns.
+    Follow ADR-001 for Minimal API, ADR-019 for ProblemDetails errors.
+  </role>
+
+  <goal>
+    Reject endpoint added to FinanceEndpoints group. Endpoint validates documentId,
+    updates document with rejected status and reviewer info, returns 200.
+  </goal>
+
+  <context>
+    <background>
+      When a human reviewer determines that a classified document is NOT an invoice,
+      they call this reject endpoint. The endpoint updates the document record to mark
+      it as RejectedNotInvoice and records who rejected it and when. No invoice record
+      is created, and no extraction job is enqueued.
+
+      This is the simpler counterpart to the confirm endpoint (task 014). Both endpoints
+      are part of the same /api/finance/ endpoint group defined in FinanceEndpoints.cs.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API — add to existing FinanceEndpoints MapGroup</constraint>
+    <constraint source="ADR-019">Use ProblemDetails for validation errors with stable errorCode</constraint>
+    <constraint source="project">All finance endpoints under /api/finance/ route group</constraint>
+    <constraint source="project">No invoice record creation — rejection means not an invoice</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-errors.md</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint Group" location="src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs">
+        Finance endpoint group created in task 014 — add reject endpoint to same group
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read FinanceEndpoints.cs (created in task 014) to understand the existing endpoint group</step>
+    <step order="2">Read InvoiceReviewService.cs (created in task 014) to understand the service pattern</step>
+    <step order="3">Add RejectInvoiceAsync method to InvoiceReviewService</step>
+    <step order="4">Validate documentId is provided — return ProblemDetails on validation failure</step>
+    <step order="5">Update document: set sprk_invoicereviewstatus=RejectedNotInvoice, sprk_reviewedby, sprk_reviewedon</step>
+    <step order="6">Add POST /api/finance/invoice-review/reject endpoint to FinanceEndpoints</step>
+    <step order="7">Return 200 with confirmation response body</step>
+    <step order="8">Run dotnet build to verify compilation</step>
+    <step order="9">Update TASK-INDEX.md: change task 015 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs</output>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/finance/invoice-review/reject endpoint registered in FinanceEndpoints</criterion>
+    <criterion testable="true">Validates documentId — returns ProblemDetails on failure</criterion>
+    <criterion testable="true">Document updated with RejectedNotInvoice status</criterion>
+    <criterion testable="true">Reviewer fields (reviewedby, reviewedon) set on document</criterion>
+    <criterion testable="true">No invoice record created</criterion>
+    <criterion testable="true">No extraction job enqueued</criterion>
+    <criterion testable="true">Returns 200 with confirmation response</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the simpler of the two review endpoints. It only updates the document record
+    to mark it as rejected. No invoice record, no extraction job, no downstream processing.
+
+    Parallel-group C with task 014 — both can be worked on simultaneously since they
+    operate on the same endpoint group file (FinanceEndpoints.cs) and service file
+    (InvoiceReviewService.cs). If executing in parallel, coordinate file writes.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

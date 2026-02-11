@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Implement entity matching signal aggregation</title>
+    <phase>2: AI Services + Job Handlers</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task modifies classification handler with multi-signal entity matching logic — tags include bff-api, ai</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add entity matching signal aggregation to AttachmentClassificationJobHandler. Implement
+    multi-signal matching: reference number match via IRecordMatchService (confidence 0.95),
+    vendor org match (0.60-0.85), parent email context (0.90), keyword overlap (0.40-0.60).
+    Rank candidates and store top 5 in sprk_mattersuggestionjson. Store sprk_mattersuggestedref.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in entity matching and confidence scoring.
+    Follow ADR-013 for AI architecture patterns and reuse existing IRecordMatchService.
+  </role>
+
+  <goal>
+    Entity matching signal aggregation added to classification handler. Multiple signals
+    combined with weighted confidence scoring. Top 5 matter suggestions stored in Dataverse.
+    Reuses existing IRecordMatchService for reference number and vendor matching.
+  </goal>
+
+  <context>
+    <background>
+      After AI classification, the handler needs to suggest which matter/project the invoice
+      relates to. This uses multi-signal entity matching — not AI — to provide ranked matter
+      candidates. The existing IRecordMatchService already provides reference number and org
+      matching. This task adds additional signals (parent email context, keyword overlap) and
+      combines them into a ranked suggestion list.
+
+      Signal confidence ranges:
+      - Reference number match (via IRecordMatchService): 0.95
+      - Vendor org match: 0.60-0.85 (depends on match quality)
+      - Parent email context: 0.90 (matter from originating email)
+      - Keyword overlap: 0.40-0.60 (weaker signal)
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/RecordMatching/RecordMatchService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/RecordMatching/DataverseIndexSyncService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/RecordMatchEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AttachmentClassificationJobHandler.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Entity matching is handler-side logic, NOT part of AI classification output</constraint>
+    <constraint source="ADR-015">Log only IDs and confidence scores, never document content or extracted text</constraint>
+    <constraint source="project">Store top 5 candidates in sprk_mattersuggestionjson as JSON array</constraint>
+    <constraint source="project">Store best match reference text in sprk_mattersuggestedref</constraint>
+    <constraint source="project">Reuse IRecordMatchService for reference number and vendor matching — do not duplicate</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Record Matching" location="src/server/api/Sprk.Bff.Api/Services/RecordMatching/RecordMatchService.cs">
+        Existing entity matching with confidence scoring — reuse for reference number and vendor signals
+      </pattern>
+      <pattern name="Index Sync" location="src/server/api/Sprk.Bff.Api/Services/RecordMatching/DataverseIndexSyncService.cs">
+        Dataverse index for entity matching lookups
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read RecordMatchService.cs to understand the matching API and confidence scoring</step>
+    <step order="2">Read the existing AttachmentClassificationJobHandler (task 011 output) to understand the integration point</step>
+    <step order="3">Add IRecordMatchService dependency to AttachmentClassificationJobHandler constructor</step>
+    <step order="4">Implement reference number match signal — extract reference numbers from classification hints, call IRecordMatchService, confidence 0.95</step>
+    <step order="5">Implement vendor org match signal — match vendor name from hints against known orgs, confidence 0.60-0.85</step>
+    <step order="6">Implement parent email context signal — load parent document record, get its matterId, confidence 0.90</step>
+    <step order="7">Implement keyword overlap signal — compare extracted keywords with matter descriptions, confidence 0.40-0.60</step>
+    <step order="8">Combine all signals, aggregate confidence per matter candidate, rank descending</step>
+    <step order="9">Store top 5 candidates as JSON array in sprk_mattersuggestionjson on sprk_document</step>
+    <step order="10">Store best match reference text in sprk_mattersuggestedref</step>
+    <step order="11">Run dotnet build to verify compilation</step>
+    <step order="12">Update TASK-INDEX.md: change task 012 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AttachmentClassificationJobHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Handler uses IRecordMatchService for reference number matching</criterion>
+    <criterion testable="true">Reference number match signal has confidence ~0.95</criterion>
+    <criterion testable="true">Vendor org match signal has confidence 0.60-0.85</criterion>
+    <criterion testable="true">Parent email context signal has confidence ~0.90</criterion>
+    <criterion testable="true">Keyword overlap signal has confidence 0.40-0.60</criterion>
+    <criterion testable="true">Signals aggregated per matter candidate and ranked descending</criterion>
+    <criterion testable="true">Top 5 candidates stored in sprk_mattersuggestionjson</criterion>
+    <criterion testable="true">Best match reference stored in sprk_mattersuggestedref</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The entity matching is purely handler-side logic — it runs AFTER the AI classification call.
+    ClassificationResult from AI contains hints (vendor name, invoice number, date) that are
+    inputs to entity matching, but the AI does NOT produce matter suggestions directly.
+
+    Signal aggregation strategy: for each unique matter candidate found across all signals,
+    take the highest confidence from any signal that identified it. Then rank all candidates
+    by this aggregated confidence score.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

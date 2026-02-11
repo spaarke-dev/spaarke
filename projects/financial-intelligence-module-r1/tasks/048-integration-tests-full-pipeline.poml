@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="048" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>End-to-End Integration Tests for Full Finance Pipeline</title>
+    <phase>4: PCF Panel + Integration + Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>019, 034</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing tag with explicit constraints; creates new test files</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create end-to-end integration tests for the full Finance Intelligence pipeline: Classification → Review → Extraction → Snapshot Generation → Signal Detection → Invoice Indexing. Test with mock documents using the existing test infrastructure. Cover: (1) Classification job correctly identifies invoice vs non-invoice, (2) Confirm endpoint triggers extraction job, (3) Extraction creates billing events with correct alternate keys, (4) Snapshot generation computes correct spend aggregations, (5) Signal detection fires on budget threshold breach, (6) Invoice indexing creates search documents with metadata enrichment, (7) Full chain end-to-end from email attachment to searchable indexed invoice.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in integration testing, mock service construction, and the Spaarke testing infrastructure. Familiar with the finance pipeline job handlers, Dataverse service mocking, and Azure service mocking patterns.
+  </role>
+
+  <goal>
+    Comprehensive integration test suite that validates the entire finance pipeline from classification through indexing, ensuring all handlers chain correctly and produce expected outputs.
+  </goal>
+
+  <context>
+    <background>
+      The Finance Intelligence Module has a multi-stage processing pipeline:
+      1. Email arrives → EmailToDocumentJobHandler creates document
+      2. Classification: InvoiceClassificationJobHandler classifies attachment
+      3. Review: Human reviews in Dataverse view, confirms via endpoint
+      4. Extraction: InvoiceExtractionJobHandler extracts billing events
+      5. Snapshot: SpendSnapshotGenerationJobHandler computes analytics
+      6. Signals: SpendSignalDetectionJobHandler detects threshold breaches
+      7. Indexing: InvoiceIndexingJobHandler indexes for search
+
+      Integration tests must validate each stage and the full chain. Use mock documents, mock Dataverse responses, and mock AI service responses to test the pipeline without external dependencies.
+    </background>
+    <relevant-files>
+      <file>tests/</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Tests must use mock documents — no real document processing in CI</constraint>
+    <constraint source="spec">Tests must mock Dataverse service, OpenAI client, Search client, and SPE file store</constraint>
+    <constraint source="ADR-004">Verify idempotency: running a handler twice with same input produces same result</constraint>
+    <constraint source="ADR-015">Tests must not log real document content — use synthetic test data</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="API testing constraints" />
+      <file path=".claude/constraints/jobs.md" reason="Job handler testing patterns" />
+    </files>
+    <patterns>
+      <pattern name="Integration Testing" location="tests/">
+        Follow existing integration test patterns for service mocking and test organization
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing integration test files in tests/ directory for testing patterns, mock setup, and test organization</step>
+    <step order="2">Create FinancePipelineIntegrationTests.cs test class with shared test fixtures and mock setup</step>
+    <step order="3">Create mock helpers: MockDataverseService (returns test entities), MockOpenAiClient (returns test classifications/extractions), MockSearchClient (captures indexed documents), MockSpeFileStore (returns test document bytes)</step>
+    <step order="4">Test ClassificationJob: verify InvoiceClassificationJobHandler correctly classifies a mock invoice attachment and creates sprk_invoice with status=ToReview</step>
+    <step order="5">Test ClassificationJob_NonInvoice: verify non-invoice documents are classified as NotInvoice and no sprk_invoice is created</step>
+    <step order="6">Test ConfirmEndpoint: verify POST /api/finance/invoices/{id}/confirm triggers InvoiceExtraction job enqueue</step>
+    <step order="7">Test ExtractionJob: verify InvoiceExtractionJobHandler creates billing events with correct alternate keys (invoiceId + lineSequence) and sets invoice status=Reviewed</step>
+    <step order="8">Test ExtractionJob_Idempotency: verify running extraction twice produces same billing events (upsert via alternate key)</step>
+    <step order="9">Test SnapshotGeneration: verify SpendSnapshotGenerationJobHandler computes correct spend aggregations from billing events</step>
+    <step order="10">Test SignalDetection: verify SpendSignalDetectionJobHandler fires BudgetWarning signal when spend exceeds 80% of budget</step>
+    <step order="11">Test InvoiceIndexing: verify InvoiceIndexingJobHandler creates search documents with contextual metadata enrichment header</step>
+    <step order="12">Test FullPipeline_EndToEnd: verify complete chain from classification → review → extraction → snapshot → signal → indexing</step>
+    <step order="13">Run all tests and verify they pass</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing tests and handler code for test construction</tool>
+    <tool name="Write">Create integration test files</tool>
+    <tool name="Bash">Run tests with dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Integration/FinancePipelineIntegrationTests.cs</output>
+    <output type="test">tests/Integration/Helpers/FinanceMockHelpers.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Classification test verifies invoice attachment is classified as InvoiceCandidate with sprk_invoice created</criterion>
+    <criterion testable="true">Classification test verifies non-invoice is classified as NotInvoice with no sprk_invoice created</criterion>
+    <criterion testable="true">Confirm endpoint test verifies extraction job is enqueued on confirmation</criterion>
+    <criterion testable="true">Extraction test verifies billing events created with correct alternate keys (invoiceId + lineSequence)</criterion>
+    <criterion testable="true">Extraction test verifies invoice status set to Reviewed after successful extraction</criterion>
+    <criterion testable="true">Extraction idempotency test verifies re-extraction produces same billing events</criterion>
+    <criterion testable="true">Snapshot test verifies correct spend aggregation computation from billing events</criterion>
+    <criterion testable="true">Signal detection test verifies BudgetWarning fires at 80% budget utilization</criterion>
+    <criterion testable="true">Invoice indexing test verifies search documents have contextual metadata enrichment header</criterion>
+    <criterion testable="true">End-to-end test verifies complete pipeline from classification to indexed searchable invoice</criterion>
+    <criterion testable="true">All tests pass with dotnet test</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Integration tests should use realistic but synthetic test data:
+    - Mock invoice: "Test Legal Services Invoice" with 3 line items (Partner, Associate, Paralegal)
+    - Mock non-invoice: "Test Contract Document"
+    - Mock budget plan: $100,000 budget for test matter
+    - Mock billing events totaling $85,000 (triggers 85% > 80% warning threshold)
+
+    The end-to-end test should verify the full chain by checking that each handler's output is consumable by the next handler in the pipeline. This validates the data contracts between pipeline stages.
+
+    Mock the AI responses (classification, extraction) to return predetermined results, not actual AI calls. This makes tests deterministic and fast.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

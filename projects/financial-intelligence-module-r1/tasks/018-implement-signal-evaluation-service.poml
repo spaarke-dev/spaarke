@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Implement SignalEvaluationService</title>
+    <phase>2: AI Services + Job Handlers</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>019, 021</blocks>
+    <tags>bff-api, backend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates service with configurable threshold evaluation logic — tags include bff-api; modifies .cs files</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement SignalEvaluationService: evaluate SpendSnapshots against threshold rules.
+    BudgetExceeded at 100%+ spend, BudgetWarning at configurable % (default 80%),
+    VelocitySpike at configurable % increase (default 50%). Upsert SpendSignal records.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in rule-based evaluation and Dataverse entity operations.
+    Follow deterministic computation patterns — no AI involved in signal evaluation.
+  </role>
+
+  <goal>
+    SignalEvaluationService created with EvaluateAsync method. Evaluates SpendSnapshots against
+    configurable threshold rules. Creates SpendSignal records for budget exceeded, budget warning,
+    and velocity spike conditions.
+  </goal>
+
+  <context>
+    <background>
+      The SignalEvaluationService runs after snapshot generation to detect financial anomalies.
+      It evaluates the latest spend snapshots against configurable threshold rules:
+
+      - BudgetExceeded: fires when spend >= 100% of budget (always active, not configurable)
+      - BudgetWarning: fires when spend >= configurable% of budget (default 80%)
+      - VelocitySpike: fires when MoM velocity increase >= configurable% (default 50%)
+
+      Signals are upserted to SpendSignal records in Dataverse. These power the "Active Signals"
+      section of the Finance PCF panel.
+
+      This is purely deterministic rule evaluation — no AI involved.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Finance/SpendSnapshotService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">BudgetExceeded threshold: 100% (fixed, not configurable)</constraint>
+    <constraint source="project">BudgetWarning threshold: configurable, default 80%</constraint>
+    <constraint source="project">VelocitySpike threshold: configurable, default 50% increase</constraint>
+    <constraint source="project">Thresholds configured via FinanceOptions (from task 009)</constraint>
+    <constraint source="project">SpendSignal records upserted (not duplicated) on re-evaluation</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Entity Operations" location=".claude/patterns/dataverse/entity-operations.md">
+        Dataverse late-bound CRUD, upsert, OptionSetValue patterns
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md signal evaluation requirements and threshold definitions</step>
+    <step order="2">Read entity-operations.md for Dataverse upsert patterns</step>
+    <step order="3">Create SignalEvaluationService.cs in Services/Finance/</step>
+    <step order="4">Implement EvaluateAsync(Guid matterId) method</step>
+    <step order="5">Define internal signal rule interface/abstraction for extensibility</step>
+    <step order="6">Implement BudgetExceeded rule: fires when spend/budget >= 1.0 (100%)</step>
+    <step order="7">Implement BudgetWarning rule: fires when spend/budget >= configurable threshold (default 0.80)</step>
+    <step order="8">Implement VelocitySpike rule: fires when MoM velocity >= configurable threshold (default 50%)</step>
+    <step order="9">Upsert SpendSignal records for triggered signals</step>
+    <step order="10">Register SignalEvaluationService in AddFinanceModule</step>
+    <step order="11">Run dotnet build to verify compilation</step>
+    <step order="12">Update TASK-INDEX.md: change task 018 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/SignalEvaluationService.cs</output>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SignalEvaluationService.cs exists in Services/Finance/</criterion>
+    <criterion testable="true">EvaluateAsync method queries latest SpendSnapshots for the matter</criterion>
+    <criterion testable="true">BudgetExceeded signal fires at 100%+ spend</criterion>
+    <criterion testable="true">BudgetWarning signal fires at configurable threshold (default 80%)</criterion>
+    <criterion testable="true">VelocitySpike signal fires at configurable threshold (default 50%)</criterion>
+    <criterion testable="true">SpendSignal records upserted (idempotent)</criterion>
+    <criterion testable="true">No signal created when spend is within all thresholds</criterion>
+    <criterion testable="true">Service registered in AddFinanceModule</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This service contains purely deterministic rule evaluation — no AI involved.
+    It is critical that the threshold comparisons are correct and testable.
+    Task 021 will add comprehensive unit tests for this service.
+
+    Parallel-group D with task 017 (SpendSnapshotService) — both can be developed
+    independently. They connect at the handler level (task 019) which calls both services.
+
+    The internal signal rule abstraction enables future extensibility — adding new signal
+    types (e.g., UnusualVendor, DuplicateInvoice) without modifying existing rules.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

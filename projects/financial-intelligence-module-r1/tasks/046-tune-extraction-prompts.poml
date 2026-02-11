@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Tune Extraction Prompts with Real Invoice Samples</title>
+    <phase>4: PCF Panel + Integration + Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>016, 045</dependencies>
+    <blocks>none</blocks>
+    <tags>ai, azure-openai</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>AI prompt tuning task with no code implementation; adjusts prompts based on empirical testing</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Tune the invoice extraction prompts with real invoice samples. Run the extraction pipeline (from task 016) against a variety of invoice formats (legal invoices, consulting invoices, expense reports). Verify: (1) line item parsing correctly identifies all billable line items, (2) role class extraction (Partner, Associate, Paralegal, etc.) is accurate, (3) date fallback chain works (invoice date → billing period end → document date), (4) currency and amount parsing handles various formats ($1,234.56 / USD 1234.56 / 1.234,56 EUR). Adjust prompts in Dataverse sprk_playbook records and version them.
+  </prompt>
+
+  <role>
+    SPAARKE AI engineer. Expert in LLM prompt engineering for structured data extraction, invoice parsing, and the Spaarke playbook system. Familiar with GPT-4o structured output capabilities and financial document formats.
+  </role>
+
+  <goal>
+    Extraction prompts are tuned to accurately parse line items, role classes, dates, and amounts from diverse invoice formats. Prompts are versioned in Dataverse playbook records.
+  </goal>
+
+  <context>
+    <background>
+      The invoice extraction handler (task 016) uses GPT-4o with structured output (GetStructuredCompletionAsync) to extract billing events from invoice documents. The extraction prompt is stored in a Dataverse sprk_playbook record and loaded via PlaybookService.
+
+      Prompt tuning ensures the extraction works across diverse invoice formats commonly seen in legal and consulting environments. Key extraction challenges include:
+      - Multi-format line items (tabular, narrative, mixed)
+      - Role class identification from description text
+      - Date disambiguation (invoice date vs. billing period vs. service date)
+      - International currency format variations
+    </background>
+    <relevant-files>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-015">Do not log document content, extracted text, or prompts during testing — log only extraction results (field counts, success/failure)</constraint>
+    <constraint source="spec">Prompts versioned in Dataverse sprk_playbook records, NOT in source code</constraint>
+    <constraint source="spec">Use GPT-4o (not gpt-4o-mini) for extraction — higher accuracy needed for structured data</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path="projects/financial-intelligence-module-r1/spec.md" reason="Extraction pipeline design and playbook requirements" />
+    </files>
+    <patterns>
+      <pattern name="None" location="N/A">
+        No code patterns needed — this is a prompt tuning task
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Prepare sample invoices: 3+ legal invoices, 2+ consulting invoices, 2+ expense reports, 1+ international invoice (non-USD)</step>
+    <step order="2">Run extraction pipeline on each sample, capturing extracted billing events</step>
+    <step order="3">Verify line item parsing: count extracted items vs. actual items, check amounts and descriptions</step>
+    <step order="4">Verify role class extraction: check Partner/Associate/Paralegal/Other assignments against actual roles in invoices</step>
+    <step order="5">Verify date fallback chain: confirm invoice date is used when available, billing period end as fallback, document date as last resort</step>
+    <step order="6">Verify currency/amount parsing: test USD, EUR, GBP formats and verify amounts are correctly parsed</step>
+    <step order="7">Identify extraction failures or inaccuracies and adjust prompts accordingly</step>
+    <step order="8">Update sprk_playbook records in Dataverse with tuned prompts, incrementing version</step>
+    <step order="9">Re-run extraction on samples with updated prompts and verify improvement</step>
+    <step order="10">Document final prompt versions and extraction accuracy metrics</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read extraction handler and playbook configuration</tool>
+    <tool name="Bash">Run extraction tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="configuration">Updated sprk_playbook records with tuned extraction prompts (versioned)</output>
+    <output type="documentation">Extraction accuracy metrics and test results</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Line item extraction accuracy >= 95% across all test invoice formats</criterion>
+    <criterion testable="true">Role class extraction correctly identifies at least 4 role classes (Partner, Associate, Paralegal, Other)</criterion>
+    <criterion testable="true">Date fallback chain correctly selects invoice date > billing period end > document date</criterion>
+    <criterion testable="true">Currency and amount parsing handles USD, EUR, and GBP formats correctly</criterion>
+    <criterion testable="true">Updated prompts versioned in Dataverse sprk_playbook records with incremented version numbers</criterion>
+    <criterion testable="true">Test results documented with extraction accuracy per invoice type</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Prompt tuning is iterative. Common adjustments include:
+    - Adding explicit examples of line item formats to the prompt
+    - Clarifying role class definitions with legal industry context
+    - Adding date disambiguation instructions
+    - Specifying currency format expectations
+
+    GPT-4o with structured output (constrained decoding) significantly reduces parsing errors compared to prompt-only approaches. Focus tuning on the prompt content (what to extract) rather than output format (handled by schema).
+
+    Version prompts by incrementing the sprk_playbook version field. Keep prior versions for rollback capability.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

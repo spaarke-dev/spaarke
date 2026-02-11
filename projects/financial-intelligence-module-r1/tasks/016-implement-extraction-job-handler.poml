@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Implement InvoiceExtractionJobHandler</title>
+    <phase>2: AI Services + Job Handlers</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>001, 010, 014</dependencies>
+    <blocks>019, 032, 034</blocks>
+    <tags>bff-api, worker, job, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates complex job handler with AI extraction, Dataverse writes, job chaining — tags include bff-api, worker, ai; 12 steps</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement InvoiceExtractionJobHandler: load invoice + document from Dataverse (get reviewer
+    corrections), download document from SPE, extract text, call
+    IInvoiceAnalysisService.ExtractInvoiceFactsAsync, create BillingEvent records
+    (VisibilityState=Invoiced, deterministic), update invoice (status=Reviewed,
+    extractionstatus=Extracted), enqueue SpendSnapshotGeneration + InvoiceIndexing.
+    On failure: set extractionstatus=Failed.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in background job processing, AI extraction, and
+    Dataverse record management. Follow ADR-004 for job patterns, ADR-015 for data governance.
+  </role>
+
+  <goal>
+    InvoiceExtractionJobHandler created that processes confirmed invoices through AI extraction.
+    Creates BillingEvent records from extracted facts. Updates invoice status on success/failure.
+    Enqueues downstream SpendSnapshotGeneration and InvoiceIndexing jobs.
+  </goal>
+
+  <context>
+    <background>
+      This handler is the second AI step in the pipeline — it runs AFTER a human confirms an
+      invoice via the confirm endpoint (task 014). The handler:
+      1. Loads the invoice record and its linked document from Dataverse
+      2. Reads reviewer corrections (matter, vendor overrides) from Dataverse records
+      3. Downloads the document from SPE and extracts text
+      4. Calls ExtractInvoiceFactsAsync with corrections as hints for improved accuracy
+      5. Creates BillingEvent records from extracted line items
+      6. Updates invoice status to Reviewed / ExtractionStatus=Extracted
+      7. Enqueues downstream jobs (snapshot generation + invoice indexing)
+
+      CRITICAL: VisibilityState on BillingEvent records is ALWAYS set deterministically in
+      handler code (Invoiced), NEVER by the LLM. Reviewer corrections are loaded from Dataverse
+      records, NOT from the job payload (per ADR-015).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/IJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/JobContract.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Implement IJobHandler interface; idempotent via alternate key upsert</constraint>
+    <constraint source="ADR-004">Propagate CorrelationId to all downstream calls and enqueued jobs</constraint>
+    <constraint source="ADR-015">Reviewer corrections loaded from Dataverse records, NOT from job payload — payload contains only IDs</constraint>
+    <constraint source="ADR-015">Never log document content, extracted text, or AI prompts</constraint>
+    <constraint source="ADR-016">Respect bounded concurrency for AI calls</constraint>
+    <constraint source="project">VisibilityState set deterministically in code (Invoiced) — NEVER from LLM output</constraint>
+    <constraint source="project">BillingEvent upsert via alternate key: sprk_invoiceid + sprk_linesequence</constraint>
+    <constraint source="project">On failure: set extractionstatus=Failed on invoice record</constraint>
+    <constraint source="project">InvoiceExtractionJobHandler sets sprk_invoice.sprk_status = Reviewed on success</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Job Handler with Enqueue Chaining" location="src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs">
+        Reference implementation for handler with downstream job enqueue
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EmailToDocumentJobHandler.cs for the handler pattern with enqueue chaining</step>
+    <step order="2">Read IJobHandler.cs and JobContract.cs for interface and envelope</step>
+    <step order="3">Create InvoiceExtractionJobHandler.cs in Services/Jobs/Handlers/</step>
+    <step order="4">Implement payload parsing: { invoiceId, documentId } — load invoice and document records from Dataverse</step>
+    <step order="5">Load reviewer corrections from Dataverse records (matter, vendor overrides) — NOT from job payload</step>
+    <step order="6">Download document from SPE via ISpeFileOperations, extract text via TextExtractorService</step>
+    <step order="7">Call IInvoiceAnalysisService.ExtractInvoiceFactsAsync with text and corrections as hints</step>
+    <step order="8">Create BillingEvent records from extracted line items — set VisibilityState=Invoiced deterministically in code</step>
+    <step order="9">Upsert BillingEvents via alternate key (sprk_invoiceid + sprk_linesequence) for idempotency</step>
+    <step order="10">Update invoice record: sprk_status=Reviewed, sprk_extractionstatus=Extracted</step>
+    <step order="11">Enqueue SpendSnapshotGeneration job with matterId</step>
+    <step order="12">Enqueue InvoiceIndexing job with invoiceId, documentId</step>
+    <step order="13">Handle extraction failure: set sprk_extractionstatus=Failed, log error (IDs only), return appropriate JobOutcome</step>
+    <step order="14">Register handler in AddFinanceModule</step>
+    <step order="15">Run dotnet build to verify compilation</step>
+    <step order="16">Update TASK-INDEX.md: change task 016 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs</output>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">InvoiceExtractionJobHandler.cs exists in Services/Jobs/Handlers/</criterion>
+    <criterion testable="true">Handler implements IJobHandler with JobType "InvoiceExtraction"</criterion>
+    <criterion testable="true">Handler loads invoice and document from Dataverse (not from payload)</criterion>
+    <criterion testable="true">Reviewer corrections loaded from Dataverse records, not job payload</criterion>
+    <criterion testable="true">Handler downloads document from SPE and extracts text</criterion>
+    <criterion testable="true">Handler calls ExtractInvoiceFactsAsync with corrections as hints</criterion>
+    <criterion testable="true">BillingEvent records created with VisibilityState=Invoiced (set in code, not LLM)</criterion>
+    <criterion testable="true">BillingEvents upserted via alternate key (invoiceId + lineSequence)</criterion>
+    <criterion testable="true">Invoice status updated to Reviewed/Extracted on success</criterion>
+    <criterion testable="true">SpendSnapshotGeneration job enqueued with matterId</criterion>
+    <criterion testable="true">InvoiceIndexing job enqueued with invoiceId, documentId</criterion>
+    <criterion testable="true">On failure: extractionstatus set to Failed</criterion>
+    <criterion testable="true">No document content in log statements</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the most complex handler in the finance pipeline. Key safety rules:
+
+    1. VisibilityState is ALWAYS "Invoiced" — set deterministically in handler code.
+       The LLM extracts line items but NEVER determines visibility.
+
+    2. Reviewer corrections come from Dataverse records. The confirm endpoint (task 014)
+       stores matterId, vendorOrgId on the invoice record. The handler reads these from
+       Dataverse, NOT from the job payload. This ensures ADR-015 compliance (IDs only in payloads).
+
+    3. BillingEvent alternate key is invoiceId + lineSequence (NOT correlationId).
+       Re-extraction with a new correlationId should UPDATE existing events, not create duplicates.
+
+    4. Failure handling: set extractionstatus=Failed and return. Do NOT enqueue downstream jobs.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>
