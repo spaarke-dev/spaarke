@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Implement Trend Data Query</title>
+    <phase>2: Calculator API</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>016</blocks>
+    <tags>bff-api, api, minimal-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' (code implementation), will modify .cs files</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement trend data query: retrieve last 5 KPI assessments per area for sparkline visualization (Phase 4).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer expert in ASP.NET Core and data querying.
+  </role>
+
+  <goal>
+    Add trend data to API response: Query last 5 assessments per area (ORDER BY createdon DESC LIMIT 5), return as array for sparkline graphs.
+  </goal>
+
+  <context>
+    <background>
+      Trend cards (Phase 4) display sparkline graphs showing last 5 assessment grades. Calculator API must return this data in response for each performance area.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/ScorecardCalculatorService.cs</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">Query: SELECT TOP 5 sprk_grade FROM sprk_kpiassessment WHERE sprk_matter = {matterId} AND sprk_performancearea = {area} ORDER BY createdon DESC</constraint>
+    <constraint source="spec-r1">Return data in chronological order (oldest to newest) for sparkline display</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add GetTrendData method to ScorecardCalculatorService</step>
+    <step order="2">For each performance area, query last 5 assessments (ORDER BY createdon DESC LIMIT 5)</step>
+    <step order="3">Reverse array to chronological order (oldest to newest)</step>
+    <step order="4">Add trend data arrays to RecalculateGradesResponse DTO</step>
+    <step order="5">Handle case where fewer than 5 assessments exist (return available assessments)</step>
+    <step order="6">Write unit tests for trend data query</step>
+    <step order="7">Update TASK-INDEX.md: change task 013 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/ScorecardCalculatorService.cs (updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/ScorecardCalculatorEndpoints.cs (updated)</output>
+    <output type="test">src/server/api/Sprk.Bff.Api.Tests/Services/ScorecardCalculatorServiceTests.cs (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given 5 assessments with grades [0.85, 0.88, 0.90, 0.92, 0.95], when querying trend data, then array returned in chronological order: [0.85, 0.88, 0.90, 0.92, 0.95]</criterion>
+    <criterion testable="true">Given 3 assessments, when querying trend data, then array has 3 elements (not 5)</criterion>
+    <criterion testable="true">Given no assessments, when querying trend data, then empty array returned</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference: spec-r1.md FR-09 for trend data specification
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

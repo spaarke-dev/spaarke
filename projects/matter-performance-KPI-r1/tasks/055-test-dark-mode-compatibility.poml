@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Test Dark Mode Compatibility</title>
+    <phase>6: Testing & Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>034</dependencies>
+    <blocks>090</blocks>
+    <tags>testing, dark-mode, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing'</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Test all VisualHost cards in dark mode: verify no hard-coded colors, all semantic tokens adapt correctly, color-coded grades remain distinguishable.</prompt>
+  <role>SPAARKE platform developer with Fluent UI theming expertise.</role>
+  <goal>Verify all components work correctly in dark mode per ADR-021 requirements.</goal>
+
+  <context>
+    <background>All components use Fluent UI v9 semantic tokens for dark mode support. Tests verify proper adaptation and readability.</background>
+    <relevant-files>
+      <file>tests/ui/DarkModeCompatibilityTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST NOT use hard-coded colors (hex values)</constraint>
+    <constraint source="ADR-021">All colors MUST use Fluent UI v9 semantic design tokens</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Toggle dark mode in Dataverse</step>
+    <step order="2">Test all 3 main tab metric cards in dark mode</step>
+    <step order="3">Test all 3 trend cards in dark mode</step>
+    <step order="4">Verify color-coded grades remain distinguishable (blue/yellow/red)</step>
+    <step order="5">Verify no hard-coded colors visible (inspect styles)</step>
+    <step order="6">Take screenshots for documentation</step>
+    <step order="7">Update TASK-INDEX.md status to ✅</step>
+  </steps>
+
+  <tools><tool name="browser">Manual dark mode testing</tool></tools>
+  <outputs><output type="report">Dark mode compatibility test results with screenshots</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given dark mode enabled, when viewing all cards, then all colors adapt correctly using semantic tokens</criterion>
+    <criterion testable="true">Given color-coded grades in dark mode, when viewing, then blue/yellow/red remain distinguishable</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec-r1.md NFR-05, ADR-021</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

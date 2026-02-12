@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Add Error Handling to Web Resource</title>
+    <phase>2: Calculator API</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>014</dependencies>
+    <blocks>none</blocks>
+    <tags>dataverse, javascript, webresource</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task will modify JavaScript code with error handling logic</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add robust error handling to web resource: retry logic (3 attempts), console logging, user-friendly error dialog if API call fails after retries.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in JavaScript error handling and user experience.
+  </role>
+
+  <goal>
+    Ensure web resource gracefully handles API failures: retry 3x, log errors, show user dialog, but NEVER block form save.
+  </goal>
+
+  <context>
+    <background>
+      API failures should not prevent KPI assessment from being saved. Web resource must handle network errors, API errors, and timeouts gracefully while providing user feedback.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeSolution/WebResources/sprk_kpiassessment_quickcreate.js</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-03">If API fails after 3 retries, log error and show user dialog: "Unable to recalculate grades. Please refresh the form."</constraint>
+    <constraint source="NFR-03">Form save MUST complete even if API fails (non-blocking)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add retry logic to API call (3 attempts with exponential backoff)</step>
+    <step order="2">Add try-catch around fetch call</step>
+    <step order="3">Log API errors to console with context (matter ID, attempt number)</step>
+    <step order="4">On final failure (after 3 retries), show Xrm.Navigation.openAlertDialog with user-friendly message</step>
+    <step order="5">Ensure form save completes even if API call fails entirely</step>
+    <step order="6">Test error scenarios: API timeout, 500 error, network failure</step>
+    <step order="7">Update TASK-INDEX.md: change task 015 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="javascript">Update JavaScript web resource</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeSolution/WebResources/sprk_kpiassessment_quickcreate.js (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given API returns 500 error on first call, when retrying, then web resource retries 2 more times (3 total)</criterion>
+    <criterion testable="true">Given API fails after 3 retries, when error dialog shown, then message is user-friendly (no stack trace)</criterion>
+    <criterion testable="true">Given API call fails, when form closes, then form close is NOT blocked or delayed</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference: spec-r1.md NFR-03 for error handling specification
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

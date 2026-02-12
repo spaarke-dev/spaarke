@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Create Calculator Endpoint Structure</title>
+    <phase>2: Calculator API</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>006</dependencies>
+    <blocks>011,012,013,014</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' (code implementation), will modify .cs files</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Foundation for subsequent calculator tasks (011, 012, 013)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create the calculator API endpoint structure: `POST /api/matters/{matterId}/recalculate-grades` using Minimal API pattern with endpoint filters for authorization.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer expert in ASP.NET Core Minimal APIs, Microsoft Graph SDK, and Dataverse integration.
+  </role>
+
+  <goal>
+    Deploy calculator endpoint scaffolding with proper authentication, authorization filters, and ProblemDetails error handling. Endpoint should accept matter ID and return updated grades.
+  </goal>
+
+  <context>
+    <background>
+      This endpoint is called by JavaScript web resource (Phase 2, task 014) after KPI assessment save. It queries Dataverse for assessments, calculates current grades and historical averages, updates matter fields, and returns trend data for sparkline graphs (Phase 4).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/ScorecardCalculatorEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/ScorecardCalculatorService.cs</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API pattern (no Azure Functions, no Controllers)</constraint>
+    <constraint source="ADR-008">MUST use endpoint filters for authorization (not global middleware)</constraint>
+    <constraint source="ADR-019">MUST return ProblemDetails for API errors</constraint>
+    <constraint source="NFR-01">API response time MUST be < 500ms</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ScorecardCalculatorEndpoints.cs in Sprk.Bff.Api/Endpoints/</step>
+    <step order="2">Add POST endpoint: app.MapPost("/api/matters/{matterId:guid}/recalculate-grades", ...)</step>
+    <step order="3">Add endpoint filter for Dataverse OBO authorization</step>
+    <step order="4">Create ScorecardCalculatorService.cs placeholder in Services/</step>
+    <step order="5">Inject ScorecardCalculatorService into endpoint</step>
+    <step order="6">Add request/response DTOs (RecalculateGradesResponse with current/average/trend data)</step>
+    <step order="7">Implement endpoint handler (call service, return response)</step>
+    <step order="8">Add ProblemDetails error handling for exceptions</step>
+    <step order="9">Register service in DI container (Program.cs)</step>
+    <step order="10">Write basic endpoint test (verify endpoint exists, returns 200 with valid matterId)</step>
+    <step order="11">Update TASK-INDEX.md: change task 010 status to ✅ completed</step>
+    <step order="12">Document any deviations in projects/matter-performance-KPI-r1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/ScorecardCalculatorEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/ScorecardCalculatorService.cs</output>
+    <output type="test">src/server/api/Sprk.Bff.Api.Tests/Endpoints/ScorecardCalculatorEndpointsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the endpoint is registered, when sending POST to /api/matters/{guid}/recalculate-grades with valid auth, then endpoint returns 200 OK.
+    </criterion>
+    <criterion testable="true">
+      Given invalid authentication, when calling endpoint, then returns 401 Unauthorized with ProblemDetails.
+    </criterion>
+    <criterion testable="true">
+      Given invalid matter ID, when calling endpoint, then returns 404 Not Found with ProblemDetails.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Implementation hints:
+    - Follow endpoint-definition.md pattern for consistent structure
+    - Service implementation (RecalculateGrades method) will be added in tasks 011, 012, 013
+    - For now, service can return placeholder data (all zeros)
+    - Endpoint filter should verify Dataverse user token (OBO flow)
+    - Response DTO structure:
+      {
+        "guidelineCurrent": 0.95,
+        "guidelineAverage": 0.90,
+        "guidelineTrend": [0.85, 0.88, 0.90, 0.92, 0.95],
+        "budgetCurrent": 0.80,
+        ...
+      }
+
+    Reference: spec-r1.md FR-04 for complete endpoint specification
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in <knowledge><files>.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Configure Guidelines Card</title>
+    <phase>3: Main Tab Cards</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>022,016</dependencies>
+    <blocks>033</blocks>
+    <tags>visualhost, frontend, config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task will create new configuration/integration code</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Configure Guidelines Report Card metric card on matter main form: bind to sprk_guidelinecompliancegrade_current field, set icon, configure contextual text.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with VisualHost and Dataverse form configuration expertise.
+  </role>
+
+  <goal>
+    Deploy Guidelines card on matter main tab displaying current guideline compliance grade with blue/yellow/red color coding.
+  </goal>
+
+  <context>
+    <background>
+      Using Report Card component from task 022, configure first of 3 metric cards. Card displays current guideline grade and contextual text: "You have an X% in Guideline compliance".
+    </background>
+    <relevant-files>
+      <file>src/client/shared/visual-host/configurations/matter-main-cards.ts</file>
+      <file>projects/matter-performance-KPI-r1/notes/report-card-component-usage.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">Field binding: sprk_guidelinecompliancegrade_current</constraint>
+    <constraint source="spec-r1">Contextual text: "You have an {grade}% in Guideline compliance"</constraint>
+    <constraint source="spec-r1">Icon: Guidelines icon (select from Fluent UI icons)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/shared/visual-host/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create or update matter main form card configuration file</step>
+    <step order="2">Add Guidelines card configuration with props: areaName="Guidelines", icon="Checkmark", gradeField="sprk_guidelinecompliancegrade_current"</step>
+    <step order="3">Set contextTemplate="You have an {grade}% in Guideline compliance"</step>
+    <step order="4">Register card with VisualHost framework</step>
+    <step order="5">Test card renders on matter main form</step>
+    <step order="6">Verify data binding (grade value displays correctly)</step>
+    <step order="7">Update TASK-INDEX.md: change task 030 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="typescript">Configure card</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/visual-host/configurations/matter-main-cards.ts</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Card Renders">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter</url>
+      <steps>
+        <step>Navigate to Matter form</step>
+        <step>Verify Guidelines card appears on main tab</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Guidelines card renders without errors</expected>
+    </test>
+    <test name="Data Binding">
+      <steps>
+        <step>Open matter with Guidelines assessments</step>
+        <step>Verify card displays current grade value</step>
+        <step>Verify contextual text shows percentage</step>
+      </steps>
+      <expected>Card displays correct grade and contextual text</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given matter with Guidelines grade=0.95, when viewing main form, then Guidelines card displays "A+" with blue color</criterion>
+    <criterion testable="true">Given contextual text, when rendered, then text shows "You have an 95% in Guideline compliance"</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task can run in parallel with tasks 031 (Budget) and 032 (Outcomes) - Group B.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

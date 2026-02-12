@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Configure KPI Assessments Subgrid</title>
+    <phase>4: Report Card Tab</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>006</dependencies>
+    <blocks>045</blocks>
+    <tags>dataverse, solution, forms</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task will create subgrid configuration (new resource)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Configure KPI Assessments subgrid on Report Card tab displaying all assessments for the matter, sorted by Created On descending.</prompt>
+  <role>SPAARKE platform developer with Dataverse form configuration expertise.</role>
+  <goal>Deploy subgrid showing all sprk_kpiassessment records with columns: Performance Area, KPI Name, Grade, Created On.</goal>
+
+  <context>
+    <background>Subgrid appears below trend cards, displays all historical KPI assessments for the matter.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeSolution/Forms/sprk_matter_reportcard_tab.xml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">Columns: Performance Area, KPI Name, Grade, Created On, Assessment Notes (preview)</constraint>
+    <constraint source="spec-r1">Sort: Created On DESC</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Report Card tab on matter form</step>
+    <step order="2">Add subgrid control</step>
+    <step order="3">Configure entity and relationship bindings</step>
+    <step order="4">Add columns and set sort order</step>
+    <step order="5">Update TASK-INDEX.md status to ✅</step>
+  </steps>
+
+  <tools><tool name="xml-editor">Edit form XML</tool></tools>
+  <outputs><output type="solution-xml">src/solutions/SpaarkeSolution/Forms/sprk_matter_reportcard_tab.xml</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given matter with assessments, when viewing Report Card tab, then subgrid displays all records sorted by date descending</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec-r1.md FR-10</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

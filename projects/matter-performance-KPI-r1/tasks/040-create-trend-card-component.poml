@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Create Trend Card Component</title>
+    <phase>4: Report Card Tab</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>016</dependencies>
+    <blocks>041,042,043</blocks>
+    <tags>pcf, react, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'pcf' (code implementation), will create .tsx files</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create Trend Card React component for Report Card tab: displays area name, historical average, trend indicator (↑ ↓ →), and sparkline graph placeholder.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer expert in React, Fluent UI v9, and data visualization.
+  </role>
+
+  <goal>
+    Deploy reusable Trend Card component ready for sparkline (task 041) and linear regression (task 042) integration.
+  </goal>
+
+  <context>
+    <background>
+      Trend cards display above subgrid on Report Card tab. Each shows historical average grade, trend direction, and sparkline of last 5 assessments.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/visual-host/components/TrendCard.tsx</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent UI v9 components and design tokens</constraint>
+    <constraint source="spec-r1">Display: area name, historical average, trend indicator, sparkline graph</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create TrendCard.tsx component in visual-host/components/</step>
+    <step order="2">Define props: areaName, historicalAverage, trendData (number[]), trendDirection ("up"|"down"|"flat")</step>
+    <step order="3">Layout: area name (top), average grade (center), trend indicator (arrow icon), sparkline placeholder (bottom)</step>
+    <step order="4">Style using Fluent UI v9 makeStyles</step>
+    <step order="5">Add placeholder for sparkline (will be implemented in task 041)</step>
+    <step order="6">Export component from visual-host module</step>
+    <step order="7">Update TASK-INDEX.md: change task 040 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/React project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/visual-host/components/TrendCard.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given component renders, when viewing, then area name, average, and trend indicator are visible</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference: spec-r1.md FR-09
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

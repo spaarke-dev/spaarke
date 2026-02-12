@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Implement Sparkline Rendering</title>
+    <phase>4: Report Card Tab</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>043</blocks>
+    <tags>pcf, react, frontend, visualization</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'pcf' (code implementation), will modify .tsx files</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement sparkline graph rendering in Trend Card: mini line graph displaying last 5 assessment grades using lightweight charting library.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with data visualization and charting expertise.
+  </role>
+
+  <goal>
+    Integrate sparkline chart into Trend Card component, displaying last 5 grades as mini line graph.
+  </goal>
+
+  <context>
+    <background>
+      Sparkline shows trend visualization for last 5 assessments. Must be lightweight (bundle size concern) and compatible with Fluent UI v9 theming.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/visual-host/components/TrendCard.tsx</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">Display last 5 assessment grades as line graph</constraint>
+    <constraint source="ADR-021">Chart must support Fluent UI v9 theming (light/dark mode)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Evaluate lightweight charting libraries (Recharts, Victory, or custom SVG)</step>
+    <step order="2">Install chosen library if needed (npm install)</step>
+    <step order="3">Integrate sparkline component into TrendCard.tsx</step>
+    <step order="4">Configure chart: no axes, no labels, simple line only</step>
+    <step order="5">Apply Fluent UI v9 color tokens to line color</step>
+    <step order="6">Test with sample data arrays of varying lengths (1-5 values)</step>
+    <step order="7">Verify dark mode compatibility</step>
+    <step order="8">Update TASK-INDEX.md: change task 041 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Install charting library and build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/visual-host/components/TrendCard.tsx (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given trendData=[0.85,0.88,0.90,0.92,0.95], when rendering, then sparkline displays 5-point line graph</criterion>
+    <criterion testable="true">Given dark mode, when rendering, then sparkline line color uses Fluent UI semantic token</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference: spec-r1.md FR-09. Recommend Recharts for React compatibility or custom SVG for minimal bundle size.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

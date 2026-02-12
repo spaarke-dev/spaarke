@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Integration Test End-to-End Flow</title>
+    <phase>6: Testing & Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>034,045</dependencies>
+    <blocks>090</blocks>
+    <tags>testing, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing', 'integration-test'</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Write integration test validating complete flow: Add KPI assessment → API calculates grades → UI refreshes → Grades visible on main tab and Report Card tab.</prompt>
+  <role>SPAARKE platform developer with integration testing expertise.</role>
+  <goal>Verify end-to-end flow works correctly from form save to UI update.</goal>
+
+  <context>
+    <background>Integration test ensures all components work together: Quick Create form, web resource trigger, calculator API, VisualHost cards.</background>
+    <relevant-files>
+      <file>tests/integration/MatterPerformanceKPI.Integration.Tests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">Test flow: Add KPI → Save → API called → Grades updated → Form refreshed</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create integration test class</step>
+    <step order="2">Write test: Create matter, add KPI assessment, verify grades updated</step>
+    <step order="3">Write test: Add multiple assessments, verify current vs average calculation</step>
+    <step order="4">Write test: Verify parent form refresh behavior</step>
+    <step order="5">Run tests and verify all pass</step>
+    <step order="6">Update TASK-INDEX.md status to ✅</step>
+  </steps>
+
+  <tools><tool name="dotnet">Run integration tests</tool></tools>
+  <outputs><output type="test">tests/integration/MatterPerformanceKPI.Integration.Tests.cs</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given integration test runs, when all steps execute, then test passes (grades calculated and UI updated)</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: plan-r1.md Phase 6 testing strategy</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

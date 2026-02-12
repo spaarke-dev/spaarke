@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Configure Quick Create Form</title>
+    <phase>1: Data Model</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001,002,003,004</dependencies>
+    <blocks>006</blocks>
+    <tags>dataverse, solution, forms</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task will create new form configuration (new resource), has explicit constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on multiple prerequisite tasks (001, 002, 003, 004)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Configure the Quick Create form for `sprk_kpiassessment` entity with 5 fields: Performance Area, KPI Assessment, Assessment Criteria, Grade, Assessment Notes.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in Dataverse form customization and user experience design.
+  </role>
+
+  <goal>
+    Deploy Quick Create form for sprk_kpiassessment with 5 fields arranged for fast manual entry (target: < 30 seconds to complete).
+  </goal>
+
+  <context>
+    <background>
+      Quick Create form is launched via "+ Add KPI" button on Report Card tab subgrid (configured in Phase 4). Users will enter KPI assessments manually. Form must be intuitive and fast to complete. OnSave event will trigger web resource (Phase 2) to call calculator API.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeSolution/Forms/sprk_kpiassessment_quickcreate.xml</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">MUST include 5 fields: Performance Area (Choice), KPI Assessment (Text or Choice), Assessment Criteria (Multiline Text, read-only), Grade (Choice), Assessment Notes (Multiline Text)</constraint>
+    <constraint source="spec-r1">Form behavior: OnSave event triggers web resource to call calculator API</constraint>
+    <constraint source="NFR-04">Form MUST be completable in < 30 seconds (usability target)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Quick Create form XML for sprk_kpiassessment entity</step>
+    <step order="2">Add Performance Area field (dropdown, required)</step>
+    <step order="3">Add KPI Assessment field (text or choice, required)</step>
+    <step order="4">Add Assessment Criteria field (multiline text, read-only, pre-populated based on selected KPI)</step>
+    <step order="5">Add Grade field (dropdown, required)</step>
+    <step order="6">Add Assessment Notes field (multiline text, optional)</step>
+    <step order="7">Configure field order and layout (top to bottom: Performance Area, KPI Assessment, Criteria, Grade, Notes)</step>
+    <step order="8">Add OnSave event handler registration (placeholder for Phase 2 web resource)</step>
+    <step order="9">Verify form accessibility (keyboard navigation, screen reader compatibility)</step>
+    <step order="10">Update TASK-INDEX.md: change task 005 status to ✅ completed</step>
+    <step order="11">Document any deviations in projects/matter-performance-KPI-r1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="xml-editor">Edit Dataverse form customization XML</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution-xml">src/solutions/SpaarkeSolution/Forms/sprk_kpiassessment_quickcreate.xml</output>
+    <output type="code">Quick Create form configuration ready for deployment</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the form is configured, when imported to Dataverse, then Quick Create form appears with 5 fields in correct order.
+    </criterion>
+    <criterion testable="true">
+      Given the form is opened, when user completes all required fields, then form can be saved in < 30 seconds.
+    </criterion>
+    <criterion testable="true">
+      Given the form layout, when viewed on mobile/tablet, then form is responsive and usable (Fluent UI responsive design).
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Implementation hints:
+    - Do NOT deploy yet - deployment happens in task 006
+    - OnSave event handler will be added in Phase 2 (task 014) - just register the event name for now
+    - Assessment Criteria field could be auto-populated via JavaScript (future enhancement, not R1)
+    - KPI Assessment field: Consider using choice field with common KPIs, or free text for R1 simplicity
+    - Form should close automatically after save (standard Quick Create behavior)
+
+    Reference: spec-r1.md FR-03 for complete form specification
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in <knowledge><files>.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

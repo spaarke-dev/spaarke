@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Validate Accessibility WCAG 2.1 AA</title>
+    <phase>6: Testing & Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>034</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, accessibility, wcag</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing'</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Validate all VisualHost cards meet WCAG 2.1 AA accessibility standards: keyboard navigation, screen reader compatibility, color contrast.</prompt>
+  <role>SPAARKE platform developer with accessibility testing expertise.</role>
+  <goal>Verify all UI components meet NFR-05 accessibility requirements.</goal>
+
+  <context>
+    <background>All components must be accessible per WCAG 2.1 AA standards. Tests validate keyboard navigation, screen reader support, and color contrast ratios.</background>
+    <relevant-files>
+      <file>tests/accessibility/VisualHostAccessibilityTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-05">MUST meet WCAG 2.1 AA compliance</constraint>
+    <constraint source="ADR-021">Color contrast ratios must meet AA standards in both light and dark modes</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Test keyboard navigation for all cards</step>
+    <step order="2">Test screen reader compatibility (NVDA/JAWS)</step>
+    <step order="3">Validate color contrast ratios (light mode)</step>
+    <step order="4">Validate color contrast ratios (dark mode)</step>
+    <step order="5">Run automated accessibility scanner (Axe, Pa11y)</step>
+    <step order="6">Document findings and fix any issues</step>
+    <step order="7">Update TASK-INDEX.md status to ✅</step>
+  </steps>
+
+  <tools><tool name="accessibility-scanner">Run automated accessibility tests</tool></tools>
+  <outputs><output type="report">WCAG 2.1 AA compliance report</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given all VisualHost cards, when tested with accessibility scanner, then zero critical violations</criterion>
+    <criterion testable="true">Given keyboard-only navigation, when tabbing through cards, then all interactive elements are reachable</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec-r1.md NFR-05, ADR-021</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Design Report Card Metric Card</title>
+    <phase>5: VisualHost Enhancement</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>022</blocks>
+    <tags>design, visualhost, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task will create design/architecture documentation that drives code implementation</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Design Report Card metric card component architecture: props interface, layout structure, color coding logic, template substitution, based on research findings from task 020.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in React component design and Fluent UI v9.
+  </role>
+
+  <goal>
+    Complete component design specification with props interface, render logic, styling approach, and integration with VisualHost framework.
+  </goal>
+
+  <context>
+    <background>
+      Based on task 020 research, design the Report Card metric card component. Component must render icon, letter grade, color-coded background/border, and contextual text using Fluent UI v9 design tokens.
+    </background>
+    <relevant-files>
+      <file>projects/matter-performance-KPI-r1/notes/visualhost-card-research.md</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent UI v9 design tokens (no hard-coded colors)</constraint>
+    <constraint source="ADR-021">MUST support dark mode (semantic color tokens only)</constraint>
+    <constraint source="spec-r1">Card props: areaName, icon, gradeValue, contextTemplate</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/shared/visual-host/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load research report from task 020</step>
+    <step order="2">Define component props interface (TypeScript)</step>
+    <step order="3">Design layout structure (icon + grade + contextual text)</step>
+    <step order="4">Define color coding logic (grade → semantic color token mapping)</step>
+    <step order="5">Design template substitution logic for contextual text</step>
+    <step order="6">Document dark mode considerations</step>
+    <step order="7">Save design spec to projects/matter-performance-KPI-r1/notes/report-card-component-design.md</step>
+    <step order="8">Update TASK-INDEX.md: change task 021 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="markdown">Create design specification document</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/matter-performance-KPI-r1/notes/report-card-component-design.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given design spec, when reviewed, then props interface is clearly defined with TypeScript types</criterion>
+    <criterion testable="true">Given color coding logic, when reviewed, then semantic color tokens are used (not hex values)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference: spec-r1.md FR-08, FR-11 for card requirements
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

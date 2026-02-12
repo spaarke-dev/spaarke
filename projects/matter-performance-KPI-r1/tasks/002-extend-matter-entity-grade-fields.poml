@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Extend Matter Entity with Grade Fields</title>
+    <phase>1: Data Model</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>005</blocks>
+    <tags>dataverse, solution, fields</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task will create new fields on existing entity (new resources), has explicit constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add 6 decimal grade fields to the existing `sprk_matter` entity to store current and historical average grades for 3 performance areas (Guidelines, Budget, Outcomes).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in Dataverse entity customization and field management.
+  </role>
+
+  <goal>
+    Deploy 6 new decimal fields on `sprk_matter` entity: current + average grade fields for each of 3 performance areas.
+  </goal>
+
+  <context>
+    <background>
+      The calculator API (Phase 2) will update these fields after each KPI assessment save. Current grades show latest assessment, historical averages show mean of all assessments. VisualHost cards (Phase 3) will read these fields for display.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeSolution/Entities/sprk_matter.xml</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">MUST create 6 decimal fields: sprk_guidelinecompliancegrade_current, sprk_guidelinecompliancegrade_average, sprk_budgetcompliancegrade_current, sprk_budgetcompliancegrade_average, sprk_outcomecompliancegrade_current, sprk_outcomecompliancegrade_average</constraint>
+    <constraint source="spec-r1">Each field MUST be Decimal type with precision 2 (0.00 to 1.00 range)</constraint>
+    <constraint source="project">Field naming MUST follow pattern: sprk_{area}compliancegrade_{type}</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open sprk_matter entity customization in Dataverse solution</step>
+    <step order="2">Add sprk_guidelinecompliancegrade_current field (Decimal, precision 2)</step>
+    <step order="3">Add sprk_guidelinecompliancegrade_average field (Decimal, precision 2)</step>
+    <step order="4">Add sprk_budgetcompliancegrade_current field (Decimal, precision 2)</step>
+    <step order="5">Add sprk_budgetcompliancegrade_average field (Decimal, precision 2)</step>
+    <step order="6">Add sprk_outcomecompliancegrade_current field (Decimal, precision 2)</step>
+    <step order="7">Add sprk_outcomecompliancegrade_average field (Decimal, precision 2)</step>
+    <step order="8">Configure display names for each field (e.g., "Guideline Compliance Grade (Current)")</step>
+    <step order="9">Verify field metadata (required, searchable, auditable settings)</step>
+    <step order="10">Update TASK-INDEX.md: change task 002 status to ✅ completed</step>
+    <step order="11">Document any deviations in projects/matter-performance-KPI-r1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run pac commands for solution management</tool>
+    <tool name="xml-editor">Edit Dataverse solution customization XML</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution-xml">src/solutions/SpaarkeSolution/Entities/sprk_matter.xml (updated)</output>
+    <output type="code">6 new decimal fields added to sprk_matter entity</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the entity XML is updated, when imported to Dataverse, then sprk_matter entity has 6 new decimal fields.
+    </criterion>
+    <criterion testable="true">
+      Given the new fields, when viewing in Dataverse, then all 6 fields are Decimal type with precision 2 (0.00-1.00 range).
+    </criterion>
+    <criterion testable="true">
+      Given the field names, when viewing in Dataverse, then field names follow pattern sprk_{area}compliancegrade_{current|average}.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Implementation hints:
+    - Do NOT deploy yet - deployment happens in task 006
+    - These fields are updated by calculator API (Phase 2), not by users directly
+    - Current grade fields: populated by latest assessment (ORDER BY createdon DESC LIMIT 1)
+    - Average grade fields: populated by mean of all assessments (AVG query)
+    - Default value should be NULL (not 0.00) to distinguish "no assessments yet" from "grade is 0.00"
+
+    Reference: spec-r1.md FR-02 for complete field specifications
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in <knowledge><files>.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

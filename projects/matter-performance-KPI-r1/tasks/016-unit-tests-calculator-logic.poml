@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Unit Tests for Calculator Logic</title>
+    <phase>2: Calculator API</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>011,012,013</dependencies>
+    <blocks>030,031,032,040</blocks>
+    <tags>testing, unit-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing', 'unit-test'</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Tests validate critical calculator logic before UI phases proceed</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Write comprehensive unit tests for calculator service: current grade calculation, historical average, trend data query, edge cases (no assessments, single assessment).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in xUnit testing and test-driven development.
+  </role>
+
+  <goal>
+    Achieve 80%+ code coverage for ScorecardCalculatorService with tests validating all calculation logic and edge cases.
+  </goal>
+
+  <context>
+    <background>
+      Calculator logic is critical for R1 MVP. Tests must validate current grade, historical average, and trend data calculations under various scenarios.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api.Tests/Services/ScorecardCalculatorServiceTests.cs</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Target: 80%+ code coverage for ScorecardCalculatorService</constraint>
+    <constraint source="spec-r1">Tests must validate calculation accuracy per spec-r1.md FR-05, FR-06, FR-09</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ScorecardCalculatorServiceTests.cs test class</step>
+    <step order="2">Write tests for current grade calculation (multiple scenarios)</step>
+    <step order="3">Write tests for historical average calculation (including rounding)</step>
+    <step order="4">Write tests for trend data query (5 assessments, fewer than 5, zero)</step>
+    <step order="5">Write edge case tests: no assessments, single assessment, null values</step>
+    <step order="6">Run tests and verify all pass</step>
+    <step order="7">Run code coverage report and verify 80%+ coverage</step>
+    <step order="8">Update TASK-INDEX.md: change task 016 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run dotnet test with code coverage</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">src/server/api/Sprk.Bff.Api.Tests/Services/ScorecardCalculatorServiceTests.cs</output>
+    <output type="report">Code coverage report showing 80%+ coverage</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given test suite runs, when all tests execute, then all tests pass (0 failures)</criterion>
+    <criterion testable="true">Given code coverage report, when viewing ScorecardCalculatorService coverage, then coverage is 80% or higher</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference: spec-r1.md FR-05, FR-06, FR-09 for calculation specifications
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

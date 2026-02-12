@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Implement Color Coding Logic</title>
+    <phase>3: Main Tab Cards</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>030,031,032</dependencies>
+    <blocks>034</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task will modify code to implement color mapping logic</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement grade-to-color mapping logic in Report Card component: Blue (0.85-1.00), Yellow (0.70-0.84), Red (0.00-0.69) using Fluent UI v9 semantic tokens.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with Fluent UI v9 theming expertise.
+  </role>
+
+  <goal>
+    Complete color coding logic so all 3 metric cards display correct colors based on grade ranges, with full dark mode support.
+  </goal>
+
+  <context>
+    <background>
+      Report Card component needs grade-to-color mapping. Logic must use Fluent UI v9 semantic color tokens (not hex values) for dark mode compatibility.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/visual-host/components/ReportCardMetric.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">Blue: 0.85-1.00 (A-B range)</constraint>
+    <constraint source="spec-r1">Yellow: 0.70-0.84 (C range)</constraint>
+    <constraint source="spec-r1">Red: 0.00-0.69 (D-F range)</constraint>
+    <constraint source="ADR-021">MUST use Fluent UI v9 semantic tokens (colorPaletteBlueBorder1, colorPaletteYellowBackground1, colorPaletteRedForeground1)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add getGradeColor helper function to ReportCardMetric.tsx</step>
+    <step order="2">Implement grade range checks (if grade >= 0.85 return blue, elif grade >= 0.70 return yellow, else return red)</step>
+    <step order="3">Map ranges to Fluent UI v9 semantic color tokens</step>
+    <step order="4">Apply colors to card background, border, and/or text</step>
+    <step order="5">Test with all 3 grade ranges in light mode</step>
+    <step order="6">Test with all 3 grade ranges in dark mode</step>
+    <step order="7">Verify no hard-coded hex values remain</step>
+    <step order="8">Update TASK-INDEX.md: change task 033 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="typescript">Implement color logic</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/visual-host/components/ReportCardMetric.tsx (updated)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Color Coding Light Mode">
+      <steps>
+        <step>Test card with grade=0.95: Verify blue color</step>
+        <step>Test card with grade=0.75: Verify yellow color</step>
+        <step>Test card with grade=0.60: Verify red color</step>
+      </steps>
+      <expected>Colors match spec ranges</expected>
+    </test>
+    <test name="Color Coding Dark Mode">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Test all 3 grade ranges again</step>
+        <step>Verify colors adapt correctly</step>
+      </steps>
+      <expected>Semantic tokens provide appropriate dark mode colors</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given grade=0.95 (A+), when card renders, then color is blue (Fluent UI semantic token)</criterion>
+    <criterion testable="true">Given grade=0.75 (C), when card renders, then color is yellow (Fluent UI semantic token)</criterion>
+    <criterion testable="true">Given grade=0.60 (F), when card renders, then color is red (Fluent UI semantic token)</criterion>
+    <criterion testable="true">Given dark mode enabled, when card renders, then colors use semantic tokens (not hard-coded)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference: spec-r1.md FR-08 for color coding specification
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

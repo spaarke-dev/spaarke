@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Implement Historical Average Calculation</title>
+    <phase>2: Calculator API</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>016</blocks>
+    <tags>bff-api, api, minimal-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' (code implementation), will modify .cs files</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement historical average calculation logic: query all KPI assessments per area, calculate mean grade, update corresponding average grade field on Matter.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer expert in ASP.NET Core, LINQ, and statistical calculations.
+  </role>
+
+  <goal>
+    Complete historical average calculation: Query all assessments per area, compute mean (AVG), update sprk_{area}compliancegrade_average fields.
+  </goal>
+
+  <context>
+    <background>
+      Historical average shows long-term performance across all assessments. Calculator queries all assessments for an area, computes arithmetic mean, and updates Matter field.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/ScorecardCalculatorService.cs</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">Query: SELECT AVG(sprk_grade) FROM sprk_kpiassessment WHERE sprk_matter = {matterId} AND sprk_performancearea = {area}</constraint>
+    <constraint source="spec-r1">Update: sprk_{area}compliancegrade_average = avg_grade</constraint>
+    <constraint source="NFR-01">Calculation must complete in < 500ms</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add CalculateHistoricalAverages method to ScorecardCalculatorService</step>
+    <step order="2">For each performance area, query all assessments</step>
+    <step order="3">Calculate arithmetic mean of grades using LINQ .Average()</step>
+    <step order="4">Update corresponding sprk_{area}compliancegrade_average field on Matter</step>
+    <step order="5">Handle case where no assessments exist (set field to null)</step>
+    <step order="6">Round average to 2 decimal places (precision requirement)</step>
+    <step order="7">Write unit tests for average calculation logic</step>
+    <step order="8">Update TASK-INDEX.md: change task 012 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/ScorecardCalculatorService.cs (updated)</output>
+    <output type="test">src/server/api/Sprk.Bff.Api.Tests/Services/ScorecardCalculatorServiceTests.cs (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given assessments with grades [1.00, 0.85, 0.90], when calculating average, then average = 0.92 (rounded to 2 decimals)</criterion>
+    <criterion testable="true">Given 1 assessment with grade 0.95, when calculating average, then average = 0.95</criterion>
+    <criterion testable="true">Given no assessments, when calculating average, then average field = null</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference: spec-r1.md FR-06 for historical average specification
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>
