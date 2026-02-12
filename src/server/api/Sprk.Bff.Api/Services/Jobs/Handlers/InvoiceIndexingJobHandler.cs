@@ -253,7 +253,7 @@ public class InvoiceIndexingJobHandler : IJobHandler
             // For now, return minimal record to allow compilation
             // In production, this would query sprk_invoice entity with fields:
             // - sprk_invoicenumber, sprk_invoicedate, sprk_totalamount, sprk_currency
-            // - sprk_matterid (lookup), sprk_vendororgid (lookup)
+            // - sprk_matter (lookup), sprk_vendororg (lookup)
             // - sprk_extractionconfidence, sprk_reviewstatus
 
             _logger.LogWarning(

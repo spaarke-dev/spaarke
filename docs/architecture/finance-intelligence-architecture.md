@@ -261,12 +261,12 @@ Email Arrival
 
 | Entity | Logical Name | Fields | Alternate Key | Purpose |
 |--------|-------------|--------|---------------|---------|
-| **Invoice** | `sprk_invoice` | 13 + alt key | `sprk_documentid` | Lightweight confirmed invoice artifact linking Document to Matter/Vendor |
-| **BillingEvent** | `sprk_billingevent` | 13 + alt key | `sprk_invoiceid` + `sprk_linesequence` | Canonical financial fact (one per invoice line item) |
-| **BudgetPlan** | `sprk_budgetplan` | 5 | None | Budget plan header (matter-level or project-level) |
-| **BudgetBucket** | `sprk_budgetbucket` | 6 | None | Budget allocation by bucket/period |
-| **SpendSnapshot** | `sprk_spendsnapshot` | 16 + alt key | 5-field composite (matter + period + bucket + filter) | Pre-computed spend aggregation with velocity metrics |
-| **SpendSignal** | `sprk_spendsignal` | 10 | None | Threshold-based alerts (budget warnings, velocity spikes) |
+| **Invoice** | `sprk_invoice` | 13 | None | Lightweight confirmed invoice artifact linking Document to Matter/Vendor |
+| **BillingEvent** | `sprk_billingevent` | 13 + alt key | `sprk_invoice` + `sprk_linesequence` | Canonical financial fact (one per invoice line item) |
+| **Budget** | `sprk_budget` | 12 | None | Budget plan header (matter-level or project-level) |
+| **BudgetBucket** | `sprk_budgetbucket` | 8 | None | Budget allocation by bucket/period |
+| **SpendSnapshot** | `sprk_spendsnapshot` | 16 + alt key | 5-field composite (matter + project + period + periodvalue + generatedat) | Pre-computed spend aggregation with velocity metrics |
+| **SpendSignal** | `sprk_spendsignal` | 12 | None | Threshold-based alerts (budget warnings, velocity spikes) |
 
 #### Extended Entity
 
@@ -371,7 +371,7 @@ public interface ISpendSnapshotService
 - **Month-over-Month Velocity**: `VelocityPct = (current month - prior month) / prior month × 100`
 - **Snapshot Periods (MVP)**: Month, ToDate (Quarter/Year post-MVP)
 
-**Alternate Key for Idempotency**: `sprk_matterid + sprk_periodtype + sprk_periodkey + sprk_bucketkey + sprk_visibilityfilter`
+**Alternate Key for Idempotency**: `sprk_matter + sprk_project + sprk_snapshotperiod + sprk_periodvalue + sprk_generatedat`
 
 ---
 
@@ -766,7 +766,7 @@ sprk_matter / sprk_project
     ├──[denormalized fields]──────────▶ VisualHost Charts
     │                                   (Budget Gauge, Spend Timeline)
     │
-    └──[budget plan]───────────────────▶ sprk_budgetplan
+    └──[budget plan]───────────────────▶ sprk_budget
                                              │
                                              └──▶ sprk_budgetbucket
 ```
@@ -1114,8 +1114,8 @@ Task UpsertSnapshotAsync(SpendSnapshotEntity snapshot, CancellationToken ct);
 Task<IReadOnlyList<SpendSignalEntity>> GetOpenSignalsForMatterAsync(Guid matterId, CancellationToken ct);
 Task CreateSignalAsync(SpendSignalEntity signal, CancellationToken ct);
 
-// BudgetPlan operations
-Task<BudgetPlanEntity?> GetActiveBudgetPlanAsync(Guid matterId, CancellationToken ct);
+// Budget operations
+Task<BudgetEntity?> GetActiveBudgetAsync(Guid matterId, CancellationToken ct);
 ```
 
 ---
@@ -1250,7 +1250,7 @@ Task<BudgetPlanEntity?> GetActiveBudgetPlanAsync(Guid matterId, CancellationToke
 ┌─────────────────────────────────────────────────────────────────┐
 │  Microsoft Dataverse: spaarkedev1.crm.dynamics.com              │
 ├─────────────────────────────────────────────────────────────────┤
-│  Entities: sprk_invoice, sprk_billingevent, sprk_budgetplan,   │
+│  Entities: sprk_invoice, sprk_billingevent, sprk_budget,       │
 │            sprk_budgetbucket, sprk_spendsnapshot, sprk_spendsignal│
 │  Extended: sprk_document (13 finance fields)                    │
 │  Views: Invoice Review Queue, Active Invoices                   │

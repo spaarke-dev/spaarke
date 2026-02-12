@@ -402,7 +402,7 @@ public class InvoiceExtractionJobHandler : IJobHandler
         var fields = new Dictionary<string, object?>
         {
             // Alternate key fields (for upsert)
-            ["sprk_invoiceid"] = $"/sprk_invoices({invoiceId})", // OData bind syntax
+            ["sprk_invoice"] = $"/sprk_invoices({invoiceId})", // OData bind syntax (lookup field)
             ["sprk_linesequence"] = lineSequence,
 
             // Set VisibilityState DETERMINISTICALLY (not from LLM)
@@ -417,7 +417,7 @@ public class InvoiceExtractionJobHandler : IJobHandler
         // Link to matter
         if (matterId != Guid.Empty)
         {
-            fields["sprk_matterid"] = $"/sprk_matters({matterId})"; // OData bind syntax
+            fields["sprk_matter"] = $"/sprk_matters({matterId})"; // OData bind syntax (lookup field)
         }
 
         // CostType: convert string to choice value

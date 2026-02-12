@@ -61,17 +61,17 @@ Before using Finance Intelligence, ensure:
    - `sprk_invoice` (Invoice entity)
    - `sprk_billingevent` (Billing Event entity)
    - `sprk_matter` or `sprk_project` (Matter/Project entities)
-   - `sprk_budgetplan` and `sprk_budgetbucket` (if configuring budgets)
+   - `sprk_budget` and `sprk_budgetbucket` (if configuring budgets)
 3. **Feature Flag Enabled**: `AutoClassifyAttachments` feature flag must be ON for automatic classification
-4. **Budgets Configured**: At least one Budget Plan and Budget Bucket assigned to relevant matters for spend tracking
+4. **Budgets Configured**: At least one Budget and Budget Bucket assigned to relevant matters for spend tracking
 
 ### First-Time Setup Checklist
 
 - [ ] Verify email ingestion creates Document records
 - [ ] Confirm Auto-Classification feature flag is enabled
-- [ ] Create Budget Plans for matters (or import from existing system)
-- [ ] Assign Budget Buckets to Budget Plans
-- [ ] Link Budget Plans to Matters or Projects
+- [ ] Create Budgets for matters (or import from existing system)
+- [ ] Assign Budget Buckets to Budgets
+- [ ] Link Budgets to Matters or Projects
 - [ ] Configure signal thresholds (or use defaults)
 - [ ] Add "Invoice Review Queue" Dataverse view to navigation
 - [ ] Add Finance Intelligence panel to Matter form (VisualHost charts)
@@ -91,10 +91,10 @@ Before using Finance Intelligence, ensure:
 
 ### Budget Configuration
 
-**Budget Plans** define overall spend limits and tracking periods.
+**Budgets** define overall spend limits and tracking periods.
 
-**To create a Budget Plan**:
-1. Navigate to Budget Plans in Dataverse
+**To create a Budget**:
+1. Navigate to Budgets in Dataverse
 2. Click **+ New**
 3. Fill in required fields:
    - **Name**: Descriptive name (e.g., "FY2026 Outside Counsel Budget")
@@ -103,10 +103,10 @@ Before using Finance Intelligence, ensure:
    - **Start Date** and **End Date**: Budget period
 4. **Save**
 
-**Budget Buckets** allocate portions of the Budget Plan to specific categories or matters.
+**Budget Buckets** allocate portions of the Budget to specific categories or matters.
 
 **To create Budget Buckets**:
-1. Open a Budget Plan
+1. Open a Budget
 2. Go to **Budget Buckets** related tab
 3. Click **+ New Budget Bucket**
 4. Fill in:
@@ -117,7 +117,7 @@ Before using Finance Intelligence, ensure:
 
 **Linking Budgets to Matters**:
 - Open a Matter record
-- Set **Budget Plan** lookup field to the appropriate Budget Plan
+- Set **Budget** lookup field to the appropriate Budget
 - Save
 
 ### AI Model Configuration
@@ -781,12 +781,12 @@ Status: Active
 - Review rejection reasons periodically to identify systematic issues
 - Use rejection patterns to improve classification prompts
 
-### Budget Planning Requirements
+### Budgetning Requirements
 
 **For Spend Tracking to Work**:
-1. **Budget Plan must exist**: Create Budget Plan record
+1. **Budget must exist**: Create Budget record
 2. **Budget Buckets must be allocated**: At least one bucket with allocated amount
-3. **Budget Plan linked to Matter**: Matter.BudgetPlan lookup must be set
+3. **Budget linked to Matter**: Matter.BudgetPlan lookup must be set
 4. **Budget amounts > 0**: Cannot track variance without baseline
 
 **Without Budget**:
@@ -796,7 +796,7 @@ Status: Active
 - No budget-related signals
 
 **Partial Budgets**:
-- If Budget Plan exists but no buckets → Total budget used
+- If Budget exists but no buckets → Total budget used
 - If some matters have budgets, others don't → Only budgeted matters get variance tracking
 
 ### Visibility State Meanings
@@ -920,18 +920,18 @@ Status: Active
 - Utilization percentage doesn't match expected value
 
 **Possible Causes**:
-1. Budget Plan or Budget Bucket amounts incorrect
+1. Budget or Budget Bucket amounts incorrect
 2. Multiple Budget Buckets assigned to same Matter (conflicting allocations)
 3. Billing events associated with wrong Matter
 4. Snapshot aggregation logic error
 
 **Troubleshooting Steps**:
-1. Verify Budget Plan and Budget Bucket amounts:
-   - Budget Plan.TotalBudget
+1. Verify Budget and Budget Bucket amounts:
+   - Budget.TotalBudget
    - Sum of all Budget Bucket.AllocatedAmount
 2. Check if multiple buckets linked to same Matter (should only be one)
 3. Verify billing events:
-   - Check `sprk_billingevent.sprk_matterid` or `sprk_projectid`
+   - Check `sprk_billingevent.sprk_matter` or `sprk_project`
    - Sum amounts manually and compare to snapshot
 4. Check snapshot record:
    - `sprk_spendsnapshot.sprk_actualspend`
@@ -939,7 +939,7 @@ Status: Active
    - `sprk_spendsnapshot.sprk_allocatedamount`
 
 **Resolution**:
-- If budget amounts wrong: Correct Budget Plan/Bucket records, regenerate snapshots
+- If budget amounts wrong: Correct Budget/Bucket records, regenerate snapshots
 - If multiple buckets: Remove duplicates, keep only one bucket per Matter
 - If billing events wrong: Correct Matter associations, regenerate snapshots
 - Manual workaround: Trigger snapshot regeneration after fixing data
@@ -981,7 +981,7 @@ Status: Active
 | **Alternate Key** | Unique composite key on Dataverse entity used for idempotent upsert operations |
 | **Billing Event** | A single line item from an invoice (time entry, expense, fee) |
 | **Budget Bucket** | Allocation of budget to a specific category or matter |
-| **Budget Plan** | Overall spend plan with total budget and fiscal period |
+| **Budget** | Overall spend plan with total budget and fiscal period |
 | **Budget Variance** | Difference between allocated budget and actual spend |
 | **Classification** | AI categorization of attachment (Invoice Candidate, Unknown, Not Invoice) |
 | **Confidence Score** | AI certainty level (0.0 to 1.0) for classification |
@@ -1008,7 +1008,7 @@ Status: Active
 |--------|--------------|---------|
 | **Invoice** | `sprk_invoice` | Invoice record (metadata + document link) |
 | **Billing Event** | `sprk_billingevent` | Individual line item from invoice |
-| **Budget Plan** | `sprk_budgetplan` | Overall budget with fiscal period |
+| **Budget** | `sprk_budget` | Overall budget with fiscal period |
 | **Budget Bucket** | `sprk_budgetbucket` | Allocation of budget to category/matter |
 | **Spend Snapshot** | `sprk_spendsnapshot` | Pre-computed spend summary |
 | **Spend Signal** | `sprk_spendsignal` | Threshold breach alert |
