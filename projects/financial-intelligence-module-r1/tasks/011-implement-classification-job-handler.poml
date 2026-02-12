@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement AttachmentClassificationJobHandler</title>
     <phase>2: AI Services + Job Handlers</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <dependencies>001, 002, 010</dependencies>
     <blocks>012, 013</blocks>

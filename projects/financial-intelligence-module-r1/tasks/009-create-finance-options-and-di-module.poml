@@ -3,7 +3,7 @@
   <metadata>
     <title>Create FinanceOptions Configuration and AddFinanceModule() DI Registration</title>
     <phase>1: Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>006</dependencies>
     <blocks>010, 011, 014, 016, 017, 019</blocks>

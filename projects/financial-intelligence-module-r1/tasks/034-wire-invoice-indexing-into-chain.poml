@@ -3,7 +3,7 @@
   <metadata>
     <title>Wire InvoiceIndexing Job into Extraction Handler Chain</title>
     <phase>3: Invoice RAG + Search</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>016, 032</dependencies>
     <blocks>none</blocks>

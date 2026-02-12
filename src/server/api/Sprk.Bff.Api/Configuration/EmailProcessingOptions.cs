@@ -160,6 +160,13 @@ public class EmailProcessingOptions
     public bool AutoIndexToRag { get; set; } = false;
 
     /// <summary>
+    /// Whether to automatically classify email attachments using the finance classification system.
+    /// When enabled, attachment documents are queued for classification after creation.
+    /// Default is false - classification is opt-in via feature flag.
+    /// </summary>
+    public bool AutoClassifyAttachments { get; set; } = false;
+
+    /// <summary>
     /// Shared secret for Dataverse webhook validation.
     /// Must match the secret configured in Dataverse Service Endpoint.
     /// </summary>

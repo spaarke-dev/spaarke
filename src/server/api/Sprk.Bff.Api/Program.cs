@@ -14,6 +14,7 @@ using Sprk.Bff.Api.Api.Admin;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Events;
 using Sprk.Bff.Api.Api.FieldMappings;
+using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authorization;
@@ -255,6 +256,9 @@ builder.Services.AddWorkersModule(builder.Configuration);
 
 // Office Add-in module (Office integration endpoints)
 builder.Services.AddOfficeModule();
+
+// Finance Intelligence module (configuration + telemetry)
+builder.Services.AddFinanceModule(builder.Configuration);
 
 // Office Service Bus client for workers
 builder.Services.AddOfficeServiceBus(builder.Configuration);
@@ -1079,11 +1083,13 @@ builder.Services.AddOpenTelemetry()
         metrics.AddMeter("Sprk.Bff.Api.Rag");  // RAG telemetry (indexing jobs, search operations)
         metrics.AddMeter("Sprk.Bff.Api.Cache"); // Cache metrics (hits, misses, latency)
         metrics.AddMeter("Sprk.Bff.Api.CircuitBreaker"); // Circuit breaker metrics
+        metrics.AddMeter("Sprk.Bff.Api.Finance"); // Finance Intelligence metrics (classification, extraction, signals)
     })
     .WithTracing(tracing =>
     {
         tracing.AddSource("Sprk.Bff.Api.Ai"); // AI distributed tracing
         tracing.AddSource("Sprk.Bff.Api.Rag"); // RAG distributed tracing
+        tracing.AddSource("Sprk.Bff.Api.Finance"); // Finance Intelligence distributed tracing
     });
 
 // ============================================================================
@@ -1724,6 +1730,9 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:RecordMatchingEnabled
     app.MapRecordMatchEndpoints();
     app.MapRecordMatchingAdminEndpoints();
 }
+
+// Finance Intelligence endpoints (Financial Intelligence Module R1)
+app.MapFinanceEndpoints();
 
 app.Run();
 

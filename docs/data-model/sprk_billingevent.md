@@ -1,0 +1,6 @@
+| Logical Name        | Schema Name         | Display Name  | Attribute Type   | Description                            | Custom Attribute | Type   | Additional data                     |
+| ------------------- | ------------------- | ------------- | ---------------- | -------------------------------------- | ---------------- | ------ | ----------------------------------- |
+| sprk_billingeventid | sprk_BillingEventId | Billing Event | Uniqueidentifier | Unique identifier for entity instances | False            | Simple |                                     |
+| sprk_invoice        | sprk_Invoice        | Invoice       | Lookup           |                                        | True             | Simple | Targets:<br><br>sprk_invoice        |
+| sprk_invoicename    | sprk_InvoiceName    | N/A           | Text             | N/A                                    | True             | Simple | Format: Text<br><br>Max length: 850 |
+| sprk_name           | sprk_Name           | Name          | Text             |                                        | True             | Simple | Format: Text<br><br>Max length: 850 |

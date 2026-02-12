@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<visualization>
+  <name>Budget Utilization Gauge</name>
+  <description>Displays budget total, current spend, and variance as a gauge chart with color-coded status indicators</description>
+  <primaryentitytypecode>sprk_matter</primaryentitytypecode>
+  <charttype>Gauge</charttype>
+  <isdefault>false</isdefault>
+  <presentationdescription>
+    <Chart>
+      <Series>
+        <Series ChartType="RangeColumn" IsValueShownAsLabel="True" Color="70, 162, 107" BackGradientStyle="None" BackSecondaryColor="0, 0, 0" Font="{0}, 9.5px" LabelForeColor="59, 59, 59" CustomProperties="PointWidth=0.75, MaxPixelPointWidth=40">
+          <SmartLabelStyle Enabled="True" />
+        </Series>
+      </Series>
+      <ChartAreas>
+        <ChartArea BorderColor="White" BorderDashStyle="Solid">
+          <AxisY LabelAutoFitMinFontSize="8" TitleForeColor="59, 59, 59" TitleFont="{0}, 10.5px" LineColor="165, 172, 181" IntervalAutoMode="VariableCount">
+            <MajorGrid LineColor="239, 242, 246" />
+            <MajorTickMark LineColor="165, 172, 181" />
+            <LabelStyle Font="{0}, 10.5px" ForeColor="59, 59, 59" />
+          </AxisY>
+          <AxisX LabelAutoFitMinFontSize="8" TitleForeColor="59, 59, 59" TitleFont="{0}, 10.5px" LineColor="165, 172, 181" IntervalAutoMode="VariableCount">
+            <MajorGrid Enabled="False" />
+            <MajorTickMark Enabled="False" />
+            <LabelStyle Font="{0}, 10.5px" ForeColor="59, 59, 59" />
+          </AxisX>
+        </ChartArea>
+      </ChartAreas>
+      <Titles>
+        <Title Alignment="BottomLeft" DockingOffset="-3" Font="{0}, 13px" ForeColor="0, 0, 0"></Title>
+      </Titles>
+    </Chart>
+  </presentationdescription>
+  <datadescription>
+    <fetch mapping="logical" aggregate="true">
+      <entity name="sprk_matter">
+        <attribute name="sprk_budget" alias="budget_total" aggregate="sum" />
+        <attribute name="sprk_currentspend" alias="current_spend" aggregate="sum" />
+        <attribute name="sprk_budgetvariance" alias="variance" aggregate="sum" />
+        <attribute name="sprk_budgetutilizationpct" alias="utilization_pct" aggregate="avg" />
+        <attribute name="sprk_matterid" alias="matter_id" groupby="true" />
+      </entity>
+    </fetch>
+  </datadescription>
+</visualization>

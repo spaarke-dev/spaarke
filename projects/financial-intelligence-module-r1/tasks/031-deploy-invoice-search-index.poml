@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy Invoice AI Search Index to Azure</title>
     <phase>3: Invoice RAG + Search</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>030</dependencies>
     <blocks>032, 033</blocks>

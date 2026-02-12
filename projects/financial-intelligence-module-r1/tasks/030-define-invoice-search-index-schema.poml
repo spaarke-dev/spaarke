@@ -3,7 +3,7 @@
   <metadata>
     <title>Define Invoice AI Search Index Schema</title>
     <phase>3: Invoice RAG + Search</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>031</blocks>

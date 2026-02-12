@@ -3,7 +3,7 @@
   <metadata>
     <title>Write "Invoice Extraction" Playbook Prompt Template</title>
     <phase>1: Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>none</blocks>

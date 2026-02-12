@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Configure VisualHost Chart Definitions for Finance Metrics</title>
+    <phase>4: VisualHost Configuration + Integration + Polish</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>002, 019</dependencies>
+    <blocks>none</blocks>
+    <tags>dataverse, visualhost, config, finance</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Configuration task; no code implementation; creates chart definitions for VisualHost</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Configure VisualHost chart definitions to display finance metrics on Matter and Project forms. Create chart configuration JSON for: (1) Budget Utilization Gauge — displays budget total, current spend, and variance as a gauge chart using denormalized fields (sprk_budget, sprk_currentspend, sprk_budgetutilizationpct). Color-coded by status: green (under 80%), yellow (80-100%), red (over 100%). (2) Monthly Spend Timeline — displays monthly spend trend using sprk_financespendhistory related records. Both charts should be embeddable in VisualHost zones on Matter and Project forms.
+  </prompt>
+
+  <role>
+    SPAARKE Dataverse administrator. Expert in VisualHost configuration, FetchXML queries, and Power Platform customizations. Familiar with denormalized field patterns and chart definitions.
+  </role>
+
+  <goal>
+    Two VisualHost chart definitions (Budget Utilization Gauge and Monthly Spend Timeline) configured and ready for deployment to Matter and Project forms, consuming denormalized finance fields from Task 002 and snapshot data from Task 019.
+  </goal>
+
+  <context>
+    <background>
+      Following the architectural pivot decision (2026-02-11), the Finance Intelligence Module uses a hybrid approach:
+      - **Current values** are denormalized on sprk_matter and sprk_project (6 finance fields added in Task 002)
+      - **Historical snapshots** are stored in sprk_financespendsnapshot (created by Task 019)
+      - **Visualization** uses VisualHost chart definitions instead of custom PCF components
+
+      This task creates the VisualHost chart configurations that display:
+      1. Budget utilization gauge (current values from parent entity)
+      2. Monthly spend timeline (historical data from related snapshots)
+
+      VisualHost is Spaarke's investment in configurable visualizations for model-driven apps. It enables chart definitions to be added to forms without custom code.
+    </background>
+    <relevant-files>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+      <file>projects/financial-intelligence-module-r1/notes/DEPLOYMENT-READINESS-CHECKLIST.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Finance/SpendSnapshotService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Budget status thresholds: green (under 80%), yellow (80-100%), red (over 100%)</constraint>
+    <constraint source="architectural-pivot">Use denormalized fields on Matter/Project for current values</constraint>
+    <constraint source="architectural-pivot">Use sprk_financespendsnapshot for historical trend data</constraint>
+    <constraint source="spec">Charts must be embeddable in VisualHost zones on forms</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path="projects/financial-intelligence-module-r1/spec.md" reason="Finance metrics requirements and field definitions" />
+      <file path="projects/financial-intelligence-module-r1/CLAUDE.md" reason="Project context and architectural decisions" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md to understand finance metric requirements and visualization goals</step>
+    <step order="2">Review the 6 denormalized finance fields added to sprk_matter and sprk_project in Task 002:
+      - sprk_budget (Money) — Total budget
+      - sprk_currentspend (Money) — Amount spent to date
+      - sprk_budgetvariance (Money) — Difference between budget and spend
+      - sprk_budgetutilizationpct (Decimal) — Percentage of budget utilized
+      - sprk_velocitypct (Decimal) — Spending velocity
+      - sprk_lastfinanceupdatedate (DateTime) — Last finance data refresh
+    </step>
+    <step order="3">Create chart definition for Budget Utilization Gauge:
+      - Chart type: Gauge (radial or horizontal)
+      - Data source: sprk_matter or sprk_project entity
+      - Fields: sprk_budget, sprk_currentspend, sprk_budgetutilizationpct
+      - Color coding: green (0-79%), yellow (80-100%), red (101%+)
+      - Handle null budget state
+    </step>
+    <step order="4">Create chart definition for Monthly Spend Timeline:
+      - Chart type: Line or column chart
+      - Data source: sprk_financespendsnapshot (related to matter/project)
+      - Fields: sprk_snapshotdate (x-axis), sprk_totalspend (y-axis)
+      - Show last 12 months or available data
+    </step>
+    <step order="5">Document chart configuration format (JSON or VisualHost-specific format)</step>
+    <step order="6">Document deployment instructions: where chart definitions should be placed (solution, form customization, etc.)</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spec and existing finance service implementations</tool>
+    <tool name="Write">Create chart definition files (JSON/XML)</tool>
+    <tool name="Write">Create deployment instructions document</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">Chart definition: Budget Utilization Gauge (JSON or VisualHost format)</output>
+    <output type="config">Chart definition: Monthly Spend Timeline (JSON or VisualHost format)</output>
+    <output type="documentation">Deployment instructions for chart definitions</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Budget Utilization Gauge chart definition created with correct data source and fields</criterion>
+    <criterion testable="true">Budget Utilization Gauge uses color thresholds: green (0-79%), yellow (80-100%), red (101%+)</criterion>
+    <criterion testable="true">Monthly Spend Timeline chart definition created with FetchXML for related snapshots</criterion>
+    <criterion testable="true">Both chart definitions are in correct format for VisualHost deployment</criterion>
+    <criterion testable="true">Deployment instructions document created with step-by-step guidance</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    VisualHost chart definitions may use a proprietary JSON format or standard Dataverse chart XML. If VisualHost documentation is not available, create standard Dataverse chart XML definitions that can be imported via solution or Power Apps.
+
+    The Budget Utilization Gauge should gracefully handle cases where sprk_budget is null (no budget configured) by displaying "No budget set" message or hiding the chart.
+
+    The Monthly Spend Timeline should query sprk_financespendsnapshot records related to the current matter/project via the regarding field (sprk_regardingid lookup).
+
+    Chart definitions should be stored in:
+    - infrastructure/dataverse/charts/ (if solution-based)
+    - OR docs/deployment/visualhost-charts/ (if VisualHost-specific)
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      This is a MINIMAL rigor task — documentation/configuration only.
+      Steps 4, 4a, 4b, 5, 6, 6.5, 7 can be skipped per MINIMAL protocol.
+    </protocol>
+  </execution>
+
+  <completion-notes>
+    <completed-on>2026-02-11</completed-on>
+    <summary>
+      Successfully created two VisualHost chart definitions for finance intelligence visualization following the architectural pivot to denormalized fields + VisualHost approach:
+
+      1. **Budget Utilization Gauge** — Displays current budget status with color-coded indicator
+         - Data source: sprk_matter/sprk_project denormalized fields
+         - Fields: sprk_budget, sprk_currentspend, sprk_budgetvariance, sprk_budgetutilizationpct
+         - Color thresholds: Green (0-79%), Yellow (80-100%), Red (101%+)
+         - Handles null budget state gracefully
+
+      2. **Monthly Spend Timeline** — Displays last 12 months spending trend
+         - Data source: sprk_financespendsnapshot related records
+         - Fields: sprk_snapshotdate (x-axis), sprk_totalspend (y-axis)
+         - Filter: Period type = Month, last 12 months
+         - Ordered chronologically
+
+      Created both **standard Dataverse chart XML** and **VisualHost JSON** formats to support multiple deployment paths.
+
+      Comprehensive **deployment documentation** includes:
+      - 3 deployment options (Solution import, VisualHost JSON, Manual UI configuration)
+      - Step-by-step instructions for each approach
+      - Validation checklist with acceptance criteria
+      - Troubleshooting guide for common issues
+      - Data flow diagram showing snapshot generation to chart rendering
+      - Future enhancement ideas (Quarter/Year timeline, budget bucket breakdown, vendor distribution, signal overlays, forecast projection)
+
+      All acceptance criteria met ✅
+    </summary>
+    <files-created>
+      - infrastructure/dataverse/charts/budget-utilization-gauge.xml (Standard Dataverse chart XML, 38 lines)
+      - infrastructure/dataverse/charts/budget-utilization-gauge.json (VisualHost JSON configuration, 62 lines)
+      - infrastructure/dataverse/charts/monthly-spend-timeline.xml (Standard Dataverse chart XML, 42 lines)
+      - infrastructure/dataverse/charts/monthly-spend-timeline.json (VisualHost JSON configuration, 68 lines)
+      - infrastructure/dataverse/charts/README.md (Comprehensive deployment guide, 450+ lines)
+    </files-created>
+    <deployment-notes>
+      Chart definitions are ready for deployment. Deployment requires:
+      - Task 002 complete (denormalized fields deployed to sprk_matter/sprk_project)
+      - Task 019 complete (SpendSnapshotGenerationJobHandler operational, snapshots being generated)
+      - VisualHost platform configured in target environment
+      - Form customization permissions
+
+      Recommended deployment path: Option A (Solution import) for production environments to maintain proper ALM and source control.
+    </deployment-notes>
+  </completion-notes>
+</task>

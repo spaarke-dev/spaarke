@@ -3,7 +3,7 @@
   <metadata>
     <title>Add GetStructuredCompletionAsync&lt;T&gt; to IOpenAiClient</title>
     <phase>1: Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>005, 006, 010</blocks>

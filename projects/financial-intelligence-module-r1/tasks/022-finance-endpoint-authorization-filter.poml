@@ -3,7 +3,7 @@
   <metadata>
     <title>Create FinanceAuthorizationFilter</title>
     <phase>2: AI Services + Job Handlers</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2.5</estimated-hours>
     <dependencies>009</dependencies>
     <blocks>none</blocks>

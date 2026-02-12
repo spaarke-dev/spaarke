@@ -3,7 +3,7 @@
   <metadata>
     <title>Define Finance C# Record Types and JSON Schemas</title>
     <phase>1: Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>009, 010</blocks>

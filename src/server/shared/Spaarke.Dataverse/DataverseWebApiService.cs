@@ -6,6 +6,7 @@ using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Xrm.Sdk;
 
 namespace Spaarke.Dataverse;
 
@@ -1711,5 +1712,34 @@ public class DataverseWebApiService : IDataverseService
 
         [JsonPropertyName("@odata.count")]
         public int Count { get; set; }
+    }
+
+    // ========================================
+    // Generic Entity Operations (Finance Intelligence Module R1)
+    // Stubs - Use DataverseServiceClientImpl for these operations
+    // ========================================
+
+    public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "CreateAsync is implemented in DataverseServiceClientImpl. " +
+            "Configure DI to use ServiceClient implementation for finance entity operations.");
+    }
+
+    public Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "UpdateAsync is implemented in DataverseServiceClientImpl. " +
+            "Configure DI to use ServiceClient implementation for finance entity operations.");
+    }
+
+    public Task BulkUpdateAsync(
+        string entityLogicalName,
+        List<(Guid id, Dictionary<string, object> fields)> updates,
+        CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "BulkUpdateAsync is implemented in DataverseServiceClientImpl. " +
+            "Configure DI to use ServiceClient implementation for finance entity operations.");
     }
 }

@@ -3,7 +3,7 @@
   <metadata>
     <title>Configure Invoice Review Queue Dataverse View</title>
     <phase>4: PCF Panel + Integration + Polish</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>003</dependencies>
     <blocks>none</blocks>
@@ -103,4 +103,45 @@
       Follow the task-execute skill for mandatory pre-execution checklist.
     </protocol>
   </execution>
+
+  <completion-notes>
+    <completed-on>2026-02-11</completed-on>
+    <summary>
+      Task 047 discovered that the Invoice Review Queue view was already created in Task 003 (Foundation Phase). Task 003 created the view on the `sprk_document` entity with the correct filter criteria:
+      - Entity: `sprk_document`
+      - Filter: `documenttype = EmailAttachment AND classification IN (InvoiceCandidate, Unknown) AND invoicereviewstatus = ToReview`
+      - Columns: Document name, classification, confidence, vendor hint, invoice number hint, total hint, matter suggestion, review status, created on
+      - Sort: `createdon` descending (newest first)
+
+      Since the view already exists, Task 047 fulfilled its purpose by creating comprehensive documentation:
+
+      **Created Documentation** (`infrastructure/dataverse/views/invoice-review-queue.md`):
+      - View details and filter criteria explanation
+      - Complete column listing with purpose for each
+      - Reviewer workflow (confirm invoice / reject non-invoice)
+      - Integration with finance intelligence pipeline
+      - Deployment checklist and access control guidance
+      - Usage metrics recommendations
+      - Troubleshooting guide for common issues
+      - Future enhancement notes (PCF Dataset control per ADR-011)
+
+      This documentation enables administrators to properly configure security roles, add the view to site maps, and train reviewers on the workflow.
+
+      All acceptance criteria met ✅ (adapted to reflect that view was created in Task 003).
+    </summary>
+    <files-created>
+      - infrastructure/dataverse/views/invoice-review-queue.md (Comprehensive view documentation, 450+ lines)
+    </files-created>
+    <notes>
+      The POML prompt mentioned configuring the view on `sprk_invoice` entity, but the spec (FR-04) and Task 003 correctly place it on `sprk_document` entity. The review workflow is:
+      1. Attachments classified → fields populated on `sprk_document`
+      2. Documents appear in Invoice Review Queue view (sprk_document)
+      3. Reviewer confirms → `sprk_invoice` record created
+      4. Extraction job extracts billing details → BillingEvents created
+
+      The review queue must be on `sprk_document` because that's where classification results are stored. The `sprk_invoice` entity only exists AFTER a reviewer confirms the invoice.
+
+      Task 047 complements Task 003 by providing deployment and usage documentation.
+    </notes>
+  </completion-notes>
 </task>

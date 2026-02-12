@@ -3,7 +3,7 @@
   <metadata>
     <title>Tune Classification Confidence Thresholds with Test Documents</title>
     <phase>4: PCF Panel + Integration + Polish</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>011</dependencies>
     <blocks>046</blocks>

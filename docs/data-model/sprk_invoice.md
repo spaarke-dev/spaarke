@@ -1,0 +1,6 @@
+| Logical Name    | Schema Name     | Display Name | Attribute Type   | Description                            | Custom Attribute | Type   | Additional data                     |
+| --------------- | --------------- | ------------ | ---------------- | -------------------------------------- | ---------------- | ------ | ----------------------------------- |
+| sprk_invoiceid  | sprk_InvoiceId  | Invoice      | Uniqueidentifier | Unique identifier for entity instances | False            | Simple |                                     |
+| sprk_matter     | sprk_Matter     | Matter       | Lookup           |                                        | True             | Simple | Targets:<br><br>sprk_matter         |
+| sprk_mattername | sprk_MatterName | N/A          | Text             | N/A                                    | True             | Simple | Format: Text<br><br>Max length: 100 |
+| sprk_name       | sprk_Name       | Name         | Text             |                                        | True             | Simple | Format: Text<br><br>Max length: 850 |

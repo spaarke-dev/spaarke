@@ -1,0 +1,4 @@
+| Logical Name         | Schema Name          | Display Name   | Attribute Type   | Description                            | Custom Attribute | Type   | Additional data                     |
+| -------------------- | -------------------- | -------------- | ---------------- | -------------------------------------- | ---------------- | ------ | ----------------------------------- |
+| sprk_name            | sprk_Name            | Name           | Text             |                                        | True             | Simple | Format: Text<br><br>Max length: 850 |
+| sprk_spendsnapshotid | sprk_SpendSnapshotId | Spend Snapshot | Uniqueidentifier | Unique identifier for entity instances | False            | Simple |                                     |
