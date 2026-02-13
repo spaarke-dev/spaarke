@@ -22,6 +22,16 @@ public interface ISpendSnapshotService
     /// <param name="correlationId">Optional correlation ID for traceability.</param>
     /// <param name="ct">Cancellation token.</param>
     Task GenerateAsync(Guid matterId, string? correlationId = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Generate spend snapshots for a project by aggregating BillingEvent records.
+    /// Creates Month + ToDate period snapshots with budget variance and MoM velocity metrics.
+    /// Upserts via 5-field alternate key for idempotency.
+    /// </summary>
+    /// <param name="projectId">The project ID to generate snapshots for.</param>
+    /// <param name="correlationId">Optional correlation ID for traceability.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task GenerateForProjectAsync(Guid projectId, string? correlationId = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -52,6 +62,7 @@ public class SpendSnapshotService : ISpendSnapshotService
     // BillingEvent entity
     private const string BillingEventEntity = "sprk_billingevent";
     private const string BillingEvent_Matter = "sprk_matter";
+    private const string BillingEvent_Project = "sprk_project";
     private const string BillingEvent_VisibilityState = "sprk_visibilitystate";
     private const string BillingEvent_Amount = "sprk_amount";
     private const string BillingEvent_EventDate = "sprk_eventdate";
@@ -66,11 +77,13 @@ public class SpendSnapshotService : ISpendSnapshotService
     // Budget entity
     private const string BudgetEntity = "sprk_budget";
     private const string Budget_Matter = "sprk_matter";
+    private const string Budget_Project = "sprk_project";
     private const string Budget_TotalBudget = "sprk_totalbudget";
 
     // SpendSnapshot entity
     private const string SnapshotEntity = "sprk_spendsnapshot";
     private const string Snapshot_Matter = "sprk_matter";
+    private const string Snapshot_Project = "sprk_project";
     private const string Snapshot_PeriodType = "sprk_periodtype";
     private const string Snapshot_PeriodKey = "sprk_periodkey";
     private const string Snapshot_BucketKey = "sprk_bucketkey";
@@ -243,6 +256,66 @@ public class SpendSnapshotService : ISpendSnapshotService
             matterId, totalBudget, budgetResults.Entities.Count);
 
         return totalBudget;
+    }
+
+    /// <summary>
+    /// Look up budget amount for the project from Budget entity.
+    /// Project can have multiple Budget records (spanning budget cycles/time periods).
+    /// Returns the sum of all Budget.sprk_totalbudget values for this project.
+    /// Returns null if no budget is configured.
+    /// </summary>
+    private async Task<decimal?> GetBudgetAmountForProjectAsync(
+        ServiceClient serviceClient, Guid projectId, CancellationToken ct)
+    {
+        // Query ALL Budget records for this project
+        var budgetQuery = new QueryExpression(BudgetEntity)
+        {
+            ColumnSet = new ColumnSet(Budget_TotalBudget),
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression(Budget_Project, ConditionOperator.Equal, projectId)
+                }
+            }
+        };
+
+        var budgetResults = await serviceClient.RetrieveMultipleAsync(budgetQuery, ct);
+
+        if (budgetResults.Entities.Count == 0)
+        {
+            _logger.LogDebug("No budget records found for project {ProjectId}.", projectId);
+            return null;
+        }
+
+        // Sum all budget amounts (project may span multiple budget cycles)
+        var totalBudget = budgetResults.Entities
+            .Sum(e => e.GetAttributeValue<Money>(Budget_TotalBudget)?.Value ?? 0m);
+
+        _logger.LogDebug(
+            "Budget amount for project {ProjectId}: {BudgetAmount:C} (from {BudgetCount} budget record(s))",
+            projectId, totalBudget, budgetResults.Entities.Count);
+
+        return totalBudget;
+    }
+
+    /// <inheritdoc />
+    public async Task GenerateForProjectAsync(Guid projectId, string? correlationId = null, CancellationToken ct = default)
+    {
+        _logger.LogInformation(
+            "Generating spend snapshots for project {ProjectId}, CorrelationId: {CorrelationId}",
+            projectId, correlationId ?? "none");
+
+        // TODO: Implement project-level snapshot generation
+        // This will mirror GenerateAsync(matterId) but query:
+        // - BillingEvents WHERE sprk_project = projectId
+        // - Budget WHERE sprk_project = projectId
+        // - Upsert SpendSnapshot with sprk_project = projectId
+        // See GenerateAsync(Guid matterId) for full implementation pattern
+
+        throw new NotImplementedException(
+            "Project-level spend snapshot generation is planned but not yet implemented. " +
+            "Implementation will mirror Matter-level generation using Project lookups.");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
