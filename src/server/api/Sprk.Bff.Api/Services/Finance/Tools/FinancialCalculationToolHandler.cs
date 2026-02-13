@@ -9,8 +9,9 @@ using System.Text.Json;
 namespace Sprk.Bff.Api.Services.Finance.Tools;
 
 /// <summary>
-/// Tool handler that calculates and aggregates financial metrics for matters.
+/// Tool handler that calculates and aggregates financial metrics for matters or projects.
 /// Queries Dataverse to compute total spend, invoice count, budget, and remaining budget.
+/// Supports both Matter-level and Project-level financial calculations.
 /// </summary>
 public class FinancialCalculationToolHandler : IAiToolHandler
 {
@@ -24,13 +25,16 @@ public class FinancialCalculationToolHandler : IAiToolHandler
     // Entity and field constants
     private const string InvoiceEntity = "sprk_invoice";
     private const string Invoice_Matter = "sprk_matter";
+    private const string Invoice_Project = "sprk_project";
     private const string Invoice_TotalAmount = "sprk_totalamount";
     private const string Invoice_InvoiceStatus = "sprk_invoicestatus";
 
     private const string MatterEntity = "sprk_matter";
+    private const string ProjectEntity = "sprk_project";
 
     private const string BudgetEntity = "sprk_budget";
     private const string Budget_Matter = "sprk_matter";
+    private const string Budget_Project = "sprk_project";
     private const string Budget_TotalBudget = "sprk_totalbudget";
 
     // Only count invoices that are not rejected/cancelled
@@ -49,10 +53,10 @@ public class FinancialCalculationToolHandler : IAiToolHandler
     }
 
     /// <summary>
-    /// Executes financial calculations for a matter.
-    /// Queries all invoices for the matter and retrieves budget amount from Budget entity (direct lookup).
+    /// Executes financial calculations for a matter or project.
+    /// Queries all invoices and retrieves budget amount from Budget entity (direct lookup).
     /// </summary>
-    /// <param name="parameters">Tool parameters: matterId (required)</param>
+    /// <param name="parameters">Tool parameters: matterId OR projectId (mutually exclusive)</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>PlaybookToolResult with financial totals (totalSpend, invoiceCount, budget, remainingBudget)</returns>
     public async Task<PlaybookToolResult> ExecuteAsync(ToolParameters parameters, CancellationToken ct)
@@ -61,22 +65,46 @@ public class FinancialCalculationToolHandler : IAiToolHandler
 
         try
         {
-            var matterId = parameters.GetGuid("matterId");
+            // Check for matterId or projectId (mutually exclusive)
+            var hasMatter = parameters.TryGetGuid("matterId", out var matterId);
+            var hasProject = parameters.TryGetGuid("projectId", out var projectId);
 
-            _logger.LogInformation(
-                "FinancialCalculation tool executing for matter {MatterId}",
-                matterId);
+            if (!hasMatter && !hasProject)
+            {
+                return PlaybookToolResult.CreateError("Either 'matterId' or 'projectId' parameter is required.");
+            }
 
-            // Calculate financial totals
-            var totals = await CalculateMatterFinancialTotalsAsync(matterId, ct);
+            if (hasMatter && hasProject)
+            {
+                return PlaybookToolResult.CreateError("Cannot specify both 'matterId' and 'projectId'. Use one or the other.");
+            }
+
+            FinancialTotals totals;
+            string entityType;
+            Guid entityId;
+
+            if (hasMatter)
+            {
+                entityType = "Matter";
+                entityId = matterId;
+                _logger.LogInformation("FinancialCalculation tool executing for matter {MatterId}", matterId);
+                totals = await CalculateMatterFinancialTotalsAsync(matterId, ct);
+            }
+            else
+            {
+                entityType = "Project";
+                entityId = projectId;
+                _logger.LogInformation("FinancialCalculation tool executing for project {ProjectId}", projectId);
+                totals = await CalculateProjectFinancialTotalsAsync(projectId, ct);
+            }
 
             stopwatch.Stop();
 
             _logger.LogInformation(
-                "FinancialCalculation completed for matter {MatterId}: " +
+                "FinancialCalculation completed for {EntityType} {EntityId}: " +
                 "TotalSpend={TotalSpend:C}, InvoiceCount={InvoiceCount}, " +
                 "Budget={Budget:C}, RemainingBudget={RemainingBudget:C} (duration={Duration}ms)",
-                matterId, totals.TotalSpendToDate, totals.InvoiceCount,
+                entityType, entityId, totals.TotalSpendToDate, totals.InvoiceCount,
                 totals.TotalBudget, totals.RemainingBudget, stopwatch.ElapsedMilliseconds);
 
             // Return as JSON for playbook consumption
@@ -102,7 +130,7 @@ public class FinancialCalculationToolHandler : IAiToolHandler
     /// <summary>
     /// Calculate financial totals for a matter by querying invoices and budget.
     /// </summary>
-    private async Task<MatterFinancialTotals> CalculateMatterFinancialTotalsAsync(
+    private async Task<FinancialTotals> CalculateMatterFinancialTotalsAsync(
         Guid matterId,
         CancellationToken ct)
     {
@@ -154,7 +182,73 @@ public class FinancialCalculationToolHandler : IAiToolHandler
         var remainingBudget = budgetValue - totalSpend;
         var budgetUtilization = budgetValue > 0 ? (totalSpend / budgetValue) * 100 : 0;
 
-        return new MatterFinancialTotals
+        return new FinancialTotals
+        {
+            TotalBudget = budgetValue,
+            TotalSpendToDate = totalSpend,
+            RemainingBudget = remainingBudget,
+            BudgetUtilizationPercent = budgetUtilization,
+            InvoiceCount = invoiceCount,
+            AverageInvoiceAmount = invoiceCount > 0 ? totalSpend / invoiceCount : 0
+        };
+    }
+
+    /// <summary>
+    /// Calculate financial totals for a project by querying invoices and budget.
+    /// </summary>
+    private async Task<FinancialTotals> CalculateProjectFinancialTotalsAsync(
+        Guid projectId,
+        CancellationToken ct)
+    {
+        // Resolve to ServiceClient for QueryExpression support
+        var serviceClient = _dataverseService as ServiceClient;
+        if (serviceClient == null)
+        {
+            throw new InvalidOperationException(
+                "FinancialCalculationToolHandler requires IDataverseService resolved as ServiceClient " +
+                "for QueryExpression support. Ensure FinanceModule registers DataverseServiceClientImpl.");
+        }
+
+        // Query all invoices for this project
+        var invoiceQuery = new QueryExpression(InvoiceEntity)
+        {
+            ColumnSet = new ColumnSet(Invoice_TotalAmount, Invoice_InvoiceStatus),
+            Criteria = new FilterExpression(LogicalOperator.And)
+        };
+        invoiceQuery.Criteria.AddCondition(Invoice_Project, ConditionOperator.Equal, projectId);
+        invoiceQuery.Criteria.AddCondition(
+            Invoice_InvoiceStatus,
+            ConditionOperator.In,
+            InvoiceStatus_Confirmed,
+            InvoiceStatus_Extracted,
+            InvoiceStatus_Processed);
+
+        var invoiceResults = await Task.Run(() => serviceClient.RetrieveMultiple(invoiceQuery), ct);
+
+        decimal totalSpend = 0;
+        int invoiceCount = invoiceResults.Entities.Count;
+
+        foreach (var invoice in invoiceResults.Entities)
+        {
+            var amount = invoice.GetAttributeValue<Money>(Invoice_TotalAmount);
+            if (amount != null)
+            {
+                totalSpend += amount.Value;
+            }
+        }
+
+        _logger.LogDebug(
+            "Project {ProjectId} has {InvoiceCount} invoices with total spend {TotalSpend:C}",
+            projectId, invoiceCount, totalSpend);
+
+        // Get budget amount
+        var budget = await GetBudgetAmountForProjectAsync(serviceClient, projectId, ct);
+        var budgetValue = budget ?? 0m;
+
+        var remainingBudget = budgetValue - totalSpend;
+        var budgetUtilization = budgetValue > 0 ? (totalSpend / budgetValue) * 100 : 0;
+
+        return new FinancialTotals
         {
             TotalBudget = budgetValue,
             TotalSpendToDate = totalSpend,
@@ -207,12 +301,55 @@ public class FinancialCalculationToolHandler : IAiToolHandler
 
         return totalBudget;
     }
+
+    /// <summary>
+    /// Look up budget amount for the project from Budget entity.
+    /// Project can have multiple Budget records (spanning budget cycles/time periods).
+    /// Returns the sum of all Budget.sprk_totalbudget values for this project.
+    /// </summary>
+    private async Task<decimal?> GetBudgetAmountForProjectAsync(
+        ServiceClient serviceClient,
+        Guid projectId,
+        CancellationToken ct)
+    {
+        // Query ALL Budget records for this project
+        var budgetQuery = new QueryExpression(BudgetEntity)
+        {
+            ColumnSet = new ColumnSet(Budget_TotalBudget),
+            Criteria = new FilterExpression()
+        };
+        budgetQuery.Criteria.AddCondition(Budget_Project, ConditionOperator.Equal, projectId);
+
+        var budgetResults = await Task.Run(() => serviceClient.RetrieveMultiple(budgetQuery), ct);
+        if (budgetResults.Entities.Count == 0)
+        {
+            _logger.LogDebug("No budget records found for project {ProjectId}.", projectId);
+            return null;
+        }
+
+        // Sum all budget amounts (project may span multiple budget cycles)
+        decimal totalBudget = 0;
+        foreach (var budget in budgetResults.Entities)
+        {
+            var amount = budget.GetAttributeValue<Money>(Budget_TotalBudget);
+            if (amount != null)
+            {
+                totalBudget += amount.Value;
+            }
+        }
+
+        _logger.LogDebug(
+            "Budget amount for project {ProjectId}: {BudgetAmount:C} (from {BudgetCount} budget record(s))",
+            projectId, totalBudget, budgetResults.Entities.Count);
+
+        return totalBudget;
+    }
 }
 
 /// <summary>
 /// Financial totals calculated for a matter or project.
 /// </summary>
-public class MatterFinancialTotals
+public class FinancialTotals
 {
     public decimal TotalBudget { get; set; }
     public decimal TotalSpendToDate { get; set; }
