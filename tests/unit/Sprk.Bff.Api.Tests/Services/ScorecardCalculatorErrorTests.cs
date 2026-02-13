@@ -19,9 +19,21 @@ public class ScorecardCalculatorErrorTests
     private readonly ScorecardCalculatorService _service;
 
     // Performance area constants matching ScorecardCalculatorService.PerformanceArea
-    private const int Guidelines = 1;
-    private const int Budget = 2;
-    private const int Outcomes = 3;
+    private const int Guidelines = 100000000;
+    private const int Budget = 100000001;
+    private const int Outcomes = 100000002;
+
+    // Grade option set values matching ScorecardCalculatorService.GradeToDecimal
+    private const int GradeAPlus = 100000000;  // → 1.00m
+    private const int GradeA = 100000001;      // → 0.95m
+    private const int GradeBPlus = 100000002;  // → 0.90m
+    private const int GradeB = 100000003;      // → 0.85m
+    private const int GradeCPlus = 100000004;  // → 0.80m
+    private const int GradeC = 100000005;      // → 0.75m
+    private const int GradeDPlus = 100000006;  // → 0.70m
+    private const int GradeD = 100000007;      // → 0.65m
+    private const int GradeF = 100000008;      // → 0.60m
+    private const int GradeNoGrade = 100000009; // → 0.00m
 
     public ScorecardCalculatorErrorTests()
     {
@@ -94,9 +106,9 @@ public class ScorecardCalculatorErrorTests
     {
         // Arrange - queries succeed but UpdateRecordFieldsAsync throws
         var matterId = Guid.NewGuid();
-        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(90));
-        SetupAreaAssessments(matterId, Budget, CreateAssessment(85));
-        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(80));
+        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(GradeBPlus));
+        SetupAreaAssessments(matterId, Budget, CreateAssessment(GradeB));
+        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(GradeCPlus));
 
         _dataverseServiceMock
             .Setup(s => s.UpdateRecordFieldsAsync(
@@ -118,9 +130,9 @@ public class ScorecardCalculatorErrorTests
     {
         // Arrange - validate that all three area queries still execute before the update fails
         var matterId = Guid.NewGuid();
-        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(90));
-        SetupAreaAssessments(matterId, Budget, CreateAssessment(85));
-        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(80));
+        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(GradeBPlus));
+        SetupAreaAssessments(matterId, Budget, CreateAssessment(GradeB));
+        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(GradeCPlus));
 
         _dataverseServiceMock
             .Setup(s => s.UpdateRecordFieldsAsync(
@@ -231,8 +243,8 @@ public class ScorecardCalculatorErrorTests
             .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("Guidelines query failed"));
 
-        SetupAreaAssessments(matterId, Budget, CreateAssessment(85));
-        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(90));
+        SetupAreaAssessments(matterId, Budget, CreateAssessment(GradeB));
+        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(GradeBPlus));
 
         // Act & Assert - Task.WhenAll surfaces the first faulted task's exception
         var act = () => _service.RecalculateGradesAsync(matterId);
@@ -251,8 +263,8 @@ public class ScorecardCalculatorErrorTests
             .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("Guidelines query failed"));
 
-        SetupAreaAssessments(matterId, Budget, CreateAssessment(85));
-        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(90));
+        SetupAreaAssessments(matterId, Budget, CreateAssessment(GradeB));
+        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(GradeBPlus));
 
         // Act - ignore the exception
         try { await _service.RecalculateGradesAsync(matterId); } catch { /* expected */ }
@@ -285,8 +297,8 @@ public class ScorecardCalculatorErrorTests
         // Act - should not throw
         var result = await _service.RecalculateGradesAsync(matterId);
 
-        // Assert - grade -1 / 100.0 = -0.01 (service doesn't validate range, just converts)
-        result.GuidelineCurrent.Should().Be(-0.01m);
+        // Assert - grade -1 is not a known option set value, maps to 0.00 via fallback
+        result.GuidelineCurrent.Should().Be(0.00m);
     }
 
     [Fact]
@@ -301,8 +313,8 @@ public class ScorecardCalculatorErrorTests
         // Act - should not throw
         var result = await _service.RecalculateGradesAsync(matterId);
 
-        // Assert - 999 / 100.0 = 9.99 (converted but not validated)
-        result.GuidelineCurrent.Should().Be(9.99m);
+        // Assert - 999 is not a known option set value, maps to 0.00 via fallback
+        result.GuidelineCurrent.Should().Be(0.00m);
     }
 
     [Fact]
@@ -312,9 +324,9 @@ public class ScorecardCalculatorErrorTests
         var matterId = Guid.NewGuid();
         var assessments = new[]
         {
-            CreateAssessment(90),   // Valid
-            CreateAssessment(-5),   // Invalid negative
-            CreateAssessment(200)   // Invalid high
+            CreateAssessment(GradeBPlus),   // Valid → 0.90m
+            CreateAssessment(-5),   // Invalid negative → 0.00m via fallback
+            CreateAssessment(200)   // Invalid high → 0.00m via fallback
         };
         SetupAreaAssessments(matterId, Guidelines, assessments);
         SetupAreaAssessments(matterId, Budget);
@@ -323,9 +335,9 @@ public class ScorecardCalculatorErrorTests
         // Act - should not throw
         var result = await _service.RecalculateGradesAsync(matterId);
 
-        // Assert - average of (0.90, -0.05, 2.00) / 3 = 0.95
-        result.GuidelineAverage.Should().Be(0.95m);
-        result.GuidelineCurrent.Should().Be(0.90m); // First element (latest)
+        // Assert - average of (0.90, 0.00, 0.00) / 3 = 0.30
+        result.GuidelineAverage.Should().Be(0.30m);
+        result.GuidelineCurrent.Should().Be(0.90m); // First element (latest, B+ = 0.90)
         result.GuidelineTrend.Should().HaveCount(3);
     }
 
@@ -341,7 +353,7 @@ public class ScorecardCalculatorErrorTests
         // Act
         var result = await _service.RecalculateGradesAsync(matterId);
 
-        // Assert - 0 / 100.0 = 0.00
+        // Assert - 0 is not a known option set value, maps to 0.00 via fallback
         result.GuidelineCurrent.Should().Be(0.00m);
         result.GuidelineAverage.Should().Be(0.00m);
     }
@@ -357,8 +369,8 @@ public class ScorecardCalculatorErrorTests
         var matterId = Guid.NewGuid();
         SetupAreaAssessments(matterId, Guidelines);
         SetupAreaAssessments(matterId, Budget,
-            CreateAssessment(95, DateTime.UtcNow),
-            CreateAssessment(85, DateTime.UtcNow.AddDays(-30)));
+            CreateAssessment(GradeA, DateTime.UtcNow),
+            CreateAssessment(GradeB, DateTime.UtcNow.AddDays(-30)));
         SetupAreaAssessments(matterId, Outcomes);
 
         // Act
@@ -386,7 +398,7 @@ public class ScorecardCalculatorErrorTests
     {
         // Arrange - Guidelines has data, Budget and Outcomes are empty
         var matterId = Guid.NewGuid();
-        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(90));
+        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(GradeBPlus));
         SetupAreaAssessments(matterId, Budget);
         SetupAreaAssessments(matterId, Outcomes);
 

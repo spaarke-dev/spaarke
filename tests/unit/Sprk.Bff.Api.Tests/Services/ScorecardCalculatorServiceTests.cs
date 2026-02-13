@@ -19,9 +19,21 @@ public class ScorecardCalculatorServiceTests
     private readonly ScorecardCalculatorService _service;
 
     // Performance area constants matching ScorecardCalculatorService.PerformanceArea
-    private const int Guidelines = 1;
-    private const int Budget = 2;
-    private const int Outcomes = 3;
+    private const int Guidelines = 100000000;
+    private const int Budget = 100000001;
+    private const int Outcomes = 100000002;
+
+    // Grade option set values matching ScorecardCalculatorService.GradeToDecimal
+    private const int GradeAPlus = 100000000;  // → 1.00m
+    private const int GradeA = 100000001;      // → 0.95m
+    private const int GradeBPlus = 100000002;  // → 0.90m
+    private const int GradeB = 100000003;      // → 0.85m
+    private const int GradeCPlus = 100000004;  // → 0.80m
+    private const int GradeC = 100000005;      // → 0.75m
+    private const int GradeDPlus = 100000006;  // → 0.70m
+    private const int GradeD = 100000007;      // → 0.65m
+    private const int GradeF = 100000008;      // → 0.60m
+    private const int GradeNoGrade = 100000009; // → 0.00m
 
     public ScorecardCalculatorServiceTests()
     {
@@ -74,14 +86,14 @@ public class ScorecardCalculatorServiceTests
     {
         // Arrange
         var matterId = Guid.NewGuid();
-        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(95));
+        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(GradeA));
         SetupAreaAssessments(matterId, Budget);
         SetupAreaAssessments(matterId, Outcomes);
 
         // Act
         var result = await _service.RecalculateGradesAsync(matterId);
 
-        // Assert - grade 95 should become 0.95 (95 / 100.0)
+        // Assert - grade A (option set 100000001) maps to 0.95
         result.GuidelineCurrent.Should().Be(0.95m);
     }
 
@@ -92,9 +104,9 @@ public class ScorecardCalculatorServiceTests
         var matterId = Guid.NewGuid();
         var assessments = new[]
         {
-            CreateAssessment(90, DateTime.UtcNow),               // Latest (index 0)
-            CreateAssessment(85, DateTime.UtcNow.AddDays(-30)),  // Older
-            CreateAssessment(80, DateTime.UtcNow.AddDays(-60))   // Oldest
+            CreateAssessment(GradeBPlus, DateTime.UtcNow),               // Latest (index 0)
+            CreateAssessment(GradeB, DateTime.UtcNow.AddDays(-30)),  // Older
+            CreateAssessment(GradeCPlus, DateTime.UtcNow.AddDays(-60))   // Oldest
         };
         SetupAreaAssessments(matterId, Guidelines, assessments);
         SetupAreaAssessments(matterId, Budget);
@@ -103,7 +115,7 @@ public class ScorecardCalculatorServiceTests
         // Act
         var result = await _service.RecalculateGradesAsync(matterId);
 
-        // Assert - should return the first element (latest), grade 90 -> 0.90
+        // Assert - should return the first element (latest), grade B+ maps to 0.90
         result.GuidelineCurrent.Should().Be(0.90m);
     }
 
@@ -129,12 +141,12 @@ public class ScorecardCalculatorServiceTests
         // Arrange - test all defined grade choice values
         var matterId = Guid.NewGuid();
 
-        // Guidelines: A+ (100)
-        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(100));
-        // Budget: C (75)
-        SetupAreaAssessments(matterId, Budget, CreateAssessment(75));
-        // Outcomes: F (60)
-        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(60));
+        // Guidelines: A+ (option set 100000000)
+        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(GradeAPlus));
+        // Budget: C (option set 100000005)
+        SetupAreaAssessments(matterId, Budget, CreateAssessment(GradeC));
+        // Outcomes: F (option set 100000008)
+        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(GradeF));
 
         // Act
         var result = await _service.RecalculateGradesAsync(matterId);
@@ -152,13 +164,13 @@ public class ScorecardCalculatorServiceTests
     [Fact]
     public async Task RecalculateGradesAsync_MultipleAssessments_ReturnsCorrectAverage()
     {
-        // Arrange - assessments [100, 85, 90] -> average = (1.00 + 0.85 + 0.90) / 3 = 0.9166... -> 0.92
+        // Arrange - assessments [A+, B, B+] -> average = (1.00 + 0.85 + 0.90) / 3 = 0.9166... -> 0.92
         var matterId = Guid.NewGuid();
         var assessments = new[]
         {
-            CreateAssessment(100),
-            CreateAssessment(85),
-            CreateAssessment(90)
+            CreateAssessment(GradeAPlus),
+            CreateAssessment(GradeB),
+            CreateAssessment(GradeBPlus)
         };
         SetupAreaAssessments(matterId, Guidelines, assessments);
         SetupAreaAssessments(matterId, Budget);
@@ -174,9 +186,9 @@ public class ScorecardCalculatorServiceTests
     [Fact]
     public async Task RecalculateGradesAsync_SingleAssessment_AverageEqualsCurrent()
     {
-        // Arrange - single assessment [95] -> average = 0.95
+        // Arrange - single assessment [A] -> average = 0.95
         var matterId = Guid.NewGuid();
-        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(95));
+        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(GradeA));
         SetupAreaAssessments(matterId, Budget);
         SetupAreaAssessments(matterId, Outcomes);
 
@@ -207,13 +219,13 @@ public class ScorecardCalculatorServiceTests
     public async Task RecalculateGradesAsync_AverageRoundsToTwoDecimalPlaces()
     {
         // Arrange - grades that produce a long decimal average
-        // [100, 90, 80] -> (1.00 + 0.90 + 0.80) / 3 = 0.9000 -> 0.90
+        // [A+, B+, C+] -> (1.00 + 0.90 + 0.80) / 3 = 0.9000 -> 0.90
         var matterId = Guid.NewGuid();
         var assessments = new[]
         {
-            CreateAssessment(100),
-            CreateAssessment(90),
-            CreateAssessment(80)
+            CreateAssessment(GradeAPlus),
+            CreateAssessment(GradeBPlus),
+            CreateAssessment(GradeCPlus)
         };
         SetupAreaAssessments(matterId, Guidelines, assessments);
         SetupAreaAssessments(matterId, Budget);
@@ -237,11 +249,11 @@ public class ScorecardCalculatorServiceTests
         var matterId = Guid.NewGuid();
         var assessments = new[]
         {
-            CreateAssessment(95, DateTime.UtcNow),                // Newest
-            CreateAssessment(90, DateTime.UtcNow.AddDays(-10)),
-            CreateAssessment(85, DateTime.UtcNow.AddDays(-20)),
-            CreateAssessment(80, DateTime.UtcNow.AddDays(-30)),
-            CreateAssessment(75, DateTime.UtcNow.AddDays(-40))   // Oldest
+            CreateAssessment(GradeA, DateTime.UtcNow),                // Newest
+            CreateAssessment(GradeBPlus, DateTime.UtcNow.AddDays(-10)),
+            CreateAssessment(GradeB, DateTime.UtcNow.AddDays(-20)),
+            CreateAssessment(GradeCPlus, DateTime.UtcNow.AddDays(-30)),
+            CreateAssessment(GradeC, DateTime.UtcNow.AddDays(-40))   // Oldest
         };
         SetupAreaAssessments(matterId, Guidelines, assessments);
         SetupAreaAssessments(matterId, Budget);
@@ -250,7 +262,7 @@ public class ScorecardCalculatorServiceTests
         // Act
         var result = await _service.RecalculateGradesAsync(matterId);
 
-        // Assert - reversed to chronological: [75, 80, 85, 90, 95] -> [0.75, 0.80, 0.85, 0.90, 0.95]
+        // Assert - reversed to chronological: [C, C+, B, B+, A] -> [0.75, 0.80, 0.85, 0.90, 0.95]
         result.GuidelineTrend.Should().HaveCount(5);
         result.GuidelineTrend.Should().ContainInOrder(
             0.75m, 0.80m, 0.85m, 0.90m, 0.95m);
@@ -263,9 +275,9 @@ public class ScorecardCalculatorServiceTests
         var matterId = Guid.NewGuid();
         var assessments = new[]
         {
-            CreateAssessment(90, DateTime.UtcNow),
-            CreateAssessment(85, DateTime.UtcNow.AddDays(-10)),
-            CreateAssessment(80, DateTime.UtcNow.AddDays(-20))
+            CreateAssessment(GradeBPlus, DateTime.UtcNow),
+            CreateAssessment(GradeB, DateTime.UtcNow.AddDays(-10)),
+            CreateAssessment(GradeCPlus, DateTime.UtcNow.AddDays(-20))
         };
         SetupAreaAssessments(matterId, Guidelines, assessments);
         SetupAreaAssessments(matterId, Budget);
@@ -274,7 +286,7 @@ public class ScorecardCalculatorServiceTests
         // Act
         var result = await _service.RecalculateGradesAsync(matterId);
 
-        // Assert - reversed: [80, 85, 90] -> [0.80, 0.85, 0.90]
+        // Assert - reversed: [C+, B, B+] -> [0.80, 0.85, 0.90]
         result.GuidelineTrend.Should().HaveCount(3);
         result.GuidelineTrend.Should().ContainInOrder(0.80m, 0.85m, 0.90m);
     }
@@ -302,13 +314,13 @@ public class ScorecardCalculatorServiceTests
         var matterId = Guid.NewGuid();
         var assessments = new[]
         {
-            CreateAssessment(100, DateTime.UtcNow),                // Most recent
-            CreateAssessment(95, DateTime.UtcNow.AddDays(-5)),
-            CreateAssessment(90, DateTime.UtcNow.AddDays(-10)),
-            CreateAssessment(85, DateTime.UtcNow.AddDays(-15)),
-            CreateAssessment(80, DateTime.UtcNow.AddDays(-20)),    // 5th most recent
-            CreateAssessment(75, DateTime.UtcNow.AddDays(-25)),    // Excluded from trend
-            CreateAssessment(70, DateTime.UtcNow.AddDays(-30))     // Excluded from trend
+            CreateAssessment(GradeAPlus, DateTime.UtcNow),                // Most recent
+            CreateAssessment(GradeA, DateTime.UtcNow.AddDays(-5)),
+            CreateAssessment(GradeBPlus, DateTime.UtcNow.AddDays(-10)),
+            CreateAssessment(GradeB, DateTime.UtcNow.AddDays(-15)),
+            CreateAssessment(GradeCPlus, DateTime.UtcNow.AddDays(-20)),    // 5th most recent
+            CreateAssessment(GradeC, DateTime.UtcNow.AddDays(-25)),    // Excluded from trend
+            CreateAssessment(GradeDPlus, DateTime.UtcNow.AddDays(-30))     // Excluded from trend
         };
         SetupAreaAssessments(matterId, Guidelines, assessments);
         SetupAreaAssessments(matterId, Budget);
@@ -317,7 +329,7 @@ public class ScorecardCalculatorServiceTests
         // Act
         var result = await _service.RecalculateGradesAsync(matterId);
 
-        // Assert - Take(5) gets [100,95,90,85,80], Reverse -> [0.80, 0.85, 0.90, 0.95, 1.00]
+        // Assert - Take(5) gets [A+, A, B+, B, C+], Reverse -> [0.80, 0.85, 0.90, 0.95, 1.00]
         result.GuidelineTrend.Should().HaveCount(5);
         result.GuidelineTrend.Should().ContainInOrder(
             0.80m, 0.85m, 0.90m, 0.95m, 1.00m);
@@ -358,7 +370,7 @@ public class ScorecardCalculatorServiceTests
     {
         // Arrange - only Guidelines has data, Budget and Outcomes are empty
         var matterId = Guid.NewGuid();
-        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(90));
+        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(GradeBPlus));
         SetupAreaAssessments(matterId, Budget);
         SetupAreaAssessments(matterId, Outcomes);
 
@@ -384,9 +396,9 @@ public class ScorecardCalculatorServiceTests
     [Fact]
     public async Task RecalculateGradesAsync_GradeValueZero_ReturnsDecimalZero()
     {
-        // Arrange - Grade 0 (No Grade) should map to 0.00m
+        // Arrange - No Grade (option set 100000009) should map to 0.00m
         var matterId = Guid.NewGuid();
-        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(0));
+        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(GradeNoGrade));
         SetupAreaAssessments(matterId, Budget);
         SetupAreaAssessments(matterId, Outcomes);
 
@@ -408,9 +420,9 @@ public class ScorecardCalculatorServiceTests
     {
         // Arrange
         var matterId = Guid.NewGuid();
-        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(95));
-        SetupAreaAssessments(matterId, Budget, CreateAssessment(85));
-        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(90));
+        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(GradeA));
+        SetupAreaAssessments(matterId, Budget, CreateAssessment(GradeB));
+        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(GradeBPlus));
 
         Dictionary<string, object?>? capturedFields = null;
         _dataverseServiceMock
@@ -536,18 +548,18 @@ public class ScorecardCalculatorServiceTests
 
         // Guidelines: 3 assessments
         SetupAreaAssessments(matterId, Guidelines,
-            CreateAssessment(95, DateTime.UtcNow),
-            CreateAssessment(90, DateTime.UtcNow.AddDays(-30)),
-            CreateAssessment(85, DateTime.UtcNow.AddDays(-60)));
+            CreateAssessment(GradeA, DateTime.UtcNow),
+            CreateAssessment(GradeBPlus, DateTime.UtcNow.AddDays(-30)),
+            CreateAssessment(GradeB, DateTime.UtcNow.AddDays(-60)));
 
         // Budget: 2 assessments
         SetupAreaAssessments(matterId, Budget,
-            CreateAssessment(80, DateTime.UtcNow),
-            CreateAssessment(75, DateTime.UtcNow.AddDays(-30)));
+            CreateAssessment(GradeCPlus, DateTime.UtcNow),
+            CreateAssessment(GradeC, DateTime.UtcNow.AddDays(-30)));
 
         // Outcomes: 1 assessment
         SetupAreaAssessments(matterId, Outcomes,
-            CreateAssessment(100, DateTime.UtcNow));
+            CreateAssessment(GradeAPlus, DateTime.UtcNow));
 
         // Act
         var result = await _service.RecalculateGradesAsync(matterId);

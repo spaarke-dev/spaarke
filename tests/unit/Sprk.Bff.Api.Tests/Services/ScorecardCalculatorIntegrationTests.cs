@@ -18,10 +18,22 @@ public class ScorecardCalculatorIntegrationTests
     private readonly Mock<ILogger<ScorecardCalculatorService>> _loggerMock;
     private readonly ScorecardCalculatorService _service;
 
-    // Performance area constants matching ScorecardCalculatorService.PerformanceArea
-    private const int Guidelines = 1;
-    private const int Budget = 2;
-    private const int Outcomes = 3;
+    // Performance area option set values matching ScorecardCalculatorService.PerformanceArea
+    private const int Guidelines = 100000000;
+    private const int Budget = 100000001;
+    private const int Outcomes = 100000002;
+
+    // Grade option set values matching ScorecardCalculatorService.GradeToDecimal
+    private const int GradeAPlus = 100000000;  // → 1.00m
+    private const int GradeA = 100000001;      // → 0.95m
+    private const int GradeBPlus = 100000002;  // → 0.90m
+    private const int GradeB = 100000003;      // → 0.85m
+    private const int GradeCPlus = 100000004;  // → 0.80m
+    private const int GradeC = 100000005;      // → 0.75m
+    private const int GradeDPlus = 100000006;  // → 0.70m
+    private const int GradeD = 100000007;      // → 0.65m
+    private const int GradeF = 100000008;      // → 0.60m
+    private const int GradeNoGrade = 100000009; // → 0.00m
 
     public ScorecardCalculatorIntegrationTests()
     {
@@ -66,17 +78,16 @@ public class ScorecardCalculatorIntegrationTests
     }
 
     /// <summary>
-    /// Generates an array of assessments with sequential grades, ordered DESC (newest first).
+    /// Generates an array of assessments with sequential grade option set values, ordered DESC (newest first).
+    /// Uses grades from A+ down to F in order.
     /// </summary>
-    private static KpiAssessmentRecord[] GenerateAssessments(int count, int startGrade = 80, int gradeStep = 5)
+    private static KpiAssessmentRecord[] GenerateAssessments(int count)
     {
+        var gradeValues = new[] { GradeAPlus, GradeA, GradeBPlus, GradeB, GradeCPlus, GradeC, GradeDPlus, GradeD, GradeF };
         var assessments = new KpiAssessmentRecord[count];
         for (var i = 0; i < count; i++)
         {
-            // Index 0 = newest (highest grade), index N = oldest (lowest grade)
-            var grade = startGrade + ((count - 1 - i) * gradeStep);
-            grade = Math.Min(grade, 100); // Cap at 100
-            assessments[i] = CreateAssessment(grade, DateTime.UtcNow.AddDays(-i * 10));
+            assessments[i] = CreateAssessment(gradeValues[i % gradeValues.Length], DateTime.UtcNow.AddDays(-i * 10));
         }
         return assessments;
     }
@@ -90,17 +101,17 @@ public class ScorecardCalculatorIntegrationTests
     {
         // Arrange - one assessment per area with different grades
         var matterId = Guid.NewGuid();
-        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(95));
-        SetupAreaAssessments(matterId, Budget, CreateAssessment(85));
-        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(100));
+        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(GradeA));
+        SetupAreaAssessments(matterId, Budget, CreateAssessment(GradeB));
+        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(GradeAPlus));
 
         // Act
         var result = await _service.RecalculateGradesAsync(matterId);
 
         // Assert - current grades match the single assessment per area
-        result.GuidelineCurrent.Should().Be(0.95m, "single Guidelines assessment of 95 should yield 0.95");
-        result.BudgetCurrent.Should().Be(0.85m, "single Budget assessment of 85 should yield 0.85");
-        result.OutcomeCurrent.Should().Be(1.00m, "single Outcomes assessment of 100 should yield 1.00");
+        result.GuidelineCurrent.Should().Be(0.95m, "single Guidelines assessment of A should yield 0.95");
+        result.BudgetCurrent.Should().Be(0.85m, "single Budget assessment of B should yield 0.85");
+        result.OutcomeCurrent.Should().Be(1.00m, "single Outcomes assessment of A+ should yield 1.00");
 
         // Assert - averages equal current when there is only one assessment
         result.GuidelineAverage.Should().Be(0.95m);
@@ -123,36 +134,36 @@ public class ScorecardCalculatorIntegrationTests
         // Arrange - 5 assessments per area, ordered DESC (newest first)
         var matterId = Guid.NewGuid();
 
-        // Guidelines: grades 95, 90, 85, 80, 75 (newest to oldest)
+        // Guidelines: grades A, B+, B, C+, C (newest to oldest)
         var guidelineAssessments = new[]
         {
-            CreateAssessment(95, DateTime.UtcNow),
-            CreateAssessment(90, DateTime.UtcNow.AddDays(-10)),
-            CreateAssessment(85, DateTime.UtcNow.AddDays(-20)),
-            CreateAssessment(80, DateTime.UtcNow.AddDays(-30)),
-            CreateAssessment(75, DateTime.UtcNow.AddDays(-40))
+            CreateAssessment(GradeA, DateTime.UtcNow),
+            CreateAssessment(GradeBPlus, DateTime.UtcNow.AddDays(-10)),
+            CreateAssessment(GradeB, DateTime.UtcNow.AddDays(-20)),
+            CreateAssessment(GradeCPlus, DateTime.UtcNow.AddDays(-30)),
+            CreateAssessment(GradeC, DateTime.UtcNow.AddDays(-40))
         };
         SetupAreaAssessments(matterId, Guidelines, guidelineAssessments);
 
-        // Budget: grades 100, 90, 80, 70, 60 (newest to oldest)
+        // Budget: grades A+, B+, C+, D+, F (newest to oldest)
         var budgetAssessments = new[]
         {
-            CreateAssessment(100, DateTime.UtcNow),
-            CreateAssessment(90, DateTime.UtcNow.AddDays(-10)),
-            CreateAssessment(80, DateTime.UtcNow.AddDays(-20)),
-            CreateAssessment(70, DateTime.UtcNow.AddDays(-30)),
-            CreateAssessment(60, DateTime.UtcNow.AddDays(-40))
+            CreateAssessment(GradeAPlus, DateTime.UtcNow),
+            CreateAssessment(GradeBPlus, DateTime.UtcNow.AddDays(-10)),
+            CreateAssessment(GradeCPlus, DateTime.UtcNow.AddDays(-20)),
+            CreateAssessment(GradeDPlus, DateTime.UtcNow.AddDays(-30)),
+            CreateAssessment(GradeF, DateTime.UtcNow.AddDays(-40))
         };
         SetupAreaAssessments(matterId, Budget, budgetAssessments);
 
-        // Outcomes: grades 85, 85, 85, 85, 85 (all same, newest to oldest)
+        // Outcomes: grades B, B, B, B, B (all same, newest to oldest)
         var outcomeAssessments = new[]
         {
-            CreateAssessment(85, DateTime.UtcNow),
-            CreateAssessment(85, DateTime.UtcNow.AddDays(-10)),
-            CreateAssessment(85, DateTime.UtcNow.AddDays(-20)),
-            CreateAssessment(85, DateTime.UtcNow.AddDays(-30)),
-            CreateAssessment(85, DateTime.UtcNow.AddDays(-40))
+            CreateAssessment(GradeB, DateTime.UtcNow),
+            CreateAssessment(GradeB, DateTime.UtcNow.AddDays(-10)),
+            CreateAssessment(GradeB, DateTime.UtcNow.AddDays(-20)),
+            CreateAssessment(GradeB, DateTime.UtcNow.AddDays(-30)),
+            CreateAssessment(GradeB, DateTime.UtcNow.AddDays(-40))
         };
         SetupAreaAssessments(matterId, Outcomes, outcomeAssessments);
 
@@ -169,7 +180,7 @@ public class ScorecardCalculatorIntegrationTests
         result.GuidelineAverage.Should().Be(0.85m);
         // Budget: (1.00+0.90+0.80+0.70+0.60)/5 = 0.80
         result.BudgetAverage.Should().Be(0.80m);
-        // Outcomes: all 0.85 -> average = 0.85
+        // Outcomes: all B (0.85) -> average = 0.85
         result.OutcomeAverage.Should().Be(0.85m);
 
         // Assert - trend data (reversed to chronological: oldest to newest)
@@ -222,9 +233,9 @@ public class ScorecardCalculatorIntegrationTests
     {
         // Arrange - set up assessments so we can verify the update values
         var matterId = Guid.NewGuid();
-        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(90));
-        SetupAreaAssessments(matterId, Budget, CreateAssessment(80));
-        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(100));
+        SetupAreaAssessments(matterId, Guidelines, CreateAssessment(GradeBPlus));
+        SetupAreaAssessments(matterId, Budget, CreateAssessment(GradeCPlus));
+        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(GradeAPlus));
 
         Dictionary<string, object?>? capturedFields = null;
         _dataverseServiceMock
@@ -272,16 +283,16 @@ public class ScorecardCalculatorIntegrationTests
 
         // Guidelines: 5 assessments (full trend window)
         SetupAreaAssessments(matterId, Guidelines,
-            CreateAssessment(100, DateTime.UtcNow),
-            CreateAssessment(95, DateTime.UtcNow.AddDays(-10)),
-            CreateAssessment(90, DateTime.UtcNow.AddDays(-20)),
-            CreateAssessment(85, DateTime.UtcNow.AddDays(-30)),
-            CreateAssessment(80, DateTime.UtcNow.AddDays(-40)));
+            CreateAssessment(GradeAPlus, DateTime.UtcNow),
+            CreateAssessment(GradeA, DateTime.UtcNow.AddDays(-10)),
+            CreateAssessment(GradeBPlus, DateTime.UtcNow.AddDays(-20)),
+            CreateAssessment(GradeB, DateTime.UtcNow.AddDays(-30)),
+            CreateAssessment(GradeCPlus, DateTime.UtcNow.AddDays(-40)));
 
         // Budget: 2 assessments (partial trend)
         SetupAreaAssessments(matterId, Budget,
-            CreateAssessment(75, DateTime.UtcNow),
-            CreateAssessment(70, DateTime.UtcNow.AddDays(-30)));
+            CreateAssessment(GradeC, DateTime.UtcNow),
+            CreateAssessment(GradeDPlus, DateTime.UtcNow.AddDays(-30)));
 
         // Outcomes: 0 assessments (empty)
         SetupAreaAssessments(matterId, Outcomes);
@@ -298,7 +309,7 @@ public class ScorecardCalculatorIntegrationTests
 
         // Assert - Budget: partial data
         result.BudgetCurrent.Should().Be(0.75m);
-        // (0.75+0.70)/2 = 0.725 -> Math.Round uses banker's rounding -> 0.72
+        // (C:0.75 + D+:0.70)/2 = 0.725 -> Math.Round uses banker's rounding -> 0.72
         result.BudgetAverage.Should().Be(0.72m);
         result.BudgetTrend.Should().HaveCount(2);
         result.BudgetTrend.Should().ContainInOrder(0.70m, 0.75m);

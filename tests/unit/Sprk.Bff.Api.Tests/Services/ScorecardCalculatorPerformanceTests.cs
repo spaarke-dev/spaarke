@@ -21,9 +21,21 @@ public class ScorecardCalculatorPerformanceTests
     private readonly ScorecardCalculatorService _service;
 
     // Performance area constants matching ScorecardCalculatorService.PerformanceArea
-    private const int Guidelines = 1;
-    private const int Budget = 2;
-    private const int Outcomes = 3;
+    private const int Guidelines = 100000000;
+    private const int Budget = 100000001;
+    private const int Outcomes = 100000002;
+
+    // Grade option set values matching ScorecardCalculatorService.GradeToDecimal
+    private const int GradeAPlus = 100000000;  // → 1.00m
+    private const int GradeA = 100000001;      // → 0.95m
+    private const int GradeBPlus = 100000002;  // → 0.90m
+    private const int GradeB = 100000003;      // → 0.85m
+    private const int GradeCPlus = 100000004;  // → 0.80m
+    private const int GradeC = 100000005;      // → 0.75m
+    private const int GradeDPlus = 100000006;  // → 0.70m
+    private const int GradeD = 100000007;      // → 0.65m
+    private const int GradeF = 100000008;      // → 0.60m
+    private const int GradeNoGrade = 100000009; // → 0.00m
 
     /// <summary>NFR-01 threshold: calculator must complete within 500ms.</summary>
     private const double MaxAllowedMilliseconds = 500;
@@ -44,7 +56,7 @@ public class ScorecardCalculatorPerformanceTests
     private static KpiAssessmentRecord[] GenerateAssessments(int count)
     {
         var assessments = new KpiAssessmentRecord[count];
-        var gradeValues = new[] { 100, 95, 90, 85, 80, 75, 70, 65, 60 };
+        var gradeValues = new[] { GradeAPlus, GradeA, GradeBPlus, GradeB, GradeCPlus, GradeC, GradeDPlus, GradeD, GradeF };
 
         for (var i = 0; i < count; i++)
         {

@@ -1447,14 +1447,27 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         throw new NotImplementedException("QueryChildRecordIdsAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
     }
 
-    public Task UpdateRecordFieldsAsync(
+    public async Task UpdateRecordFieldsAsync(
         string entityLogicalName,
         Guid recordId,
         Dictionary<string, object?> fields,
         CancellationToken ct = default)
     {
-        // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
-        throw new NotImplementedException("UpdateRecordFieldsAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
+        if (fields.Count == 0)
+        {
+            _logger.LogDebug("No fields to update for {Entity}({Id})", entityLogicalName, recordId);
+            return;
+        }
+
+        var entity = new Entity(entityLogicalName, recordId);
+
+        foreach (var field in fields)
+        {
+            entity[field.Key] = field.Value;
+        }
+
+        await _serviceClient.UpdateAsync(entity, ct);
+        _logger.LogInformation("Updated {Entity}({Id}) with {FieldCount} fields", entityLogicalName, recordId, fields.Count);
     }
 
     // ========================================
