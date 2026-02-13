@@ -6,14 +6,17 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Models;
+using Sprk.Bff.Api.Services.Finance.Tools;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 
 /// <summary>
 /// Job handler for invoice extraction jobs.
-/// Extracts invoice facts via AI and creates BillingEvent records in Dataverse.
+/// Extracts invoice facts via AI and updates Dataverse records via OutputOrchestrator.
+/// MVP: Stores extraction as JSON on invoice, updates matter totals (no BillingEvents).
 ///
+/// Architecture: Uses OutputOrchestrator pattern for declarative playbook-driven updates.
 /// Follows ADR-013: AI via BFF API (not separate service).
 /// Follows ADR-014: Playbook-based prompts (FinanceExtraction).
 /// Follows ADR-015: No content logging (IDs only).
@@ -24,23 +27,16 @@ public class InvoiceExtractionJobHandler : IJobHandler
     private readonly ISpeFileOperations _speFileOperations;
     private readonly TextExtractorService _textExtractorService;
     private readonly IDataverseService _dataverseService;
+    private readonly IOutputOrchestratorService _outputOrchestrator;
+    private readonly IPlaybookLookupService _playbookLookup;
+    private readonly FinancialCalculationToolHandler _financialCalculationTool;
     private readonly JobSubmissionService _jobSubmissionService;
     private readonly FinanceTelemetry _telemetry;
     private readonly ILogger<InvoiceExtractionJobHandler> _logger;
 
-    // VisibilityState choice value for BillingEvents (DETERMINISTIC, not from LLM)
-    private const int VisibilityStateInvoiced = 100000001;
-
-    // Invoice status choice values
-    private const int InvoiceStatusReviewed = 100000001;
-
     // Extraction status choice values
     private const int ExtractionStatusExtracted = 100000001;
     private const int ExtractionStatusFailed = 100000002;
-
-    // CostType choice values
-    private const int CostTypeFee = 100000000;
-    private const int CostTypeExpense = 100000001;
 
     /// <summary>
     /// Job type constant - must match the JobType used by InvoiceReviewService.
@@ -52,6 +48,9 @@ public class InvoiceExtractionJobHandler : IJobHandler
         ISpeFileOperations speFileOperations,
         TextExtractorService textExtractorService,
         IDataverseService dataverseService,
+        IOutputOrchestratorService outputOrchestrator,
+        IPlaybookLookupService playbookLookup,
+        FinancialCalculationToolHandler financialCalculationTool,
         JobSubmissionService jobSubmissionService,
         FinanceTelemetry telemetry,
         ILogger<InvoiceExtractionJobHandler> logger)
@@ -60,6 +59,9 @@ public class InvoiceExtractionJobHandler : IJobHandler
         _speFileOperations = speFileOperations ?? throw new ArgumentNullException(nameof(speFileOperations));
         _textExtractorService = textExtractorService ?? throw new ArgumentNullException(nameof(textExtractorService));
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _outputOrchestrator = outputOrchestrator ?? throw new ArgumentNullException(nameof(outputOrchestrator));
+        _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
+        _financialCalculationTool = financialCalculationTool ?? throw new ArgumentNullException(nameof(financialCalculationTool));
         _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -216,52 +218,112 @@ public class InvoiceExtractionJobHandler : IJobHandler
                 "AI extraction completed for document {DocumentId}: {LineItemCount} line items, confidence {Confidence}",
                 documentId, aiExtractionResult.LineItems.Length, aiExtractionResult.ExtractionConfidence);
 
-            // Create BillingEvent records for each line item
-            var createdCount = 0;
-            for (var i = 0; i < aiExtractionResult.LineItems.Length; i++)
-            {
-                var lineItem = aiExtractionResult.LineItems[i];
-                var lineSequence = i + 1; // 1-based sequence
+            // Build PlaybookExecutionContext with variables for OutputOrchestrator
+            var context = new PlaybookExecutionContext();
 
+            // context.* variables (from job payload)
+            context.SetVariable("context.invoiceId", invoiceId.ToString());
+            context.SetVariable("context.documentId", documentId.ToString());
+            context.SetVariable("context.matterId", (invoice.MatterId ?? Guid.Empty).ToString());
+
+            // extraction.* variables (from AI extraction result)
+            context.SetVariable("extraction.aiSummary", GenerateAiSummary(aiExtractionResult));
+            context.SetVariable("extraction.extractedJson", JsonSerializer.Serialize(aiExtractionResult, new JsonSerializerOptions
+            {
+                WriteIndented = false,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            }));
+            context.SetVariable("extraction.totalAmount", aiExtractionResult.Header?.TotalAmount ?? 0);
+            context.SetVariable("extraction.invoiceNumber", aiExtractionResult.Header?.InvoiceNumber ?? string.Empty);
+            context.SetVariable("extraction.invoiceDate", aiExtractionResult.Header?.InvoiceDate ?? string.Empty);
+            context.SetVariable("extraction.currency", aiExtractionResult.Header?.Currency ?? "USD");
+
+            // calculation.* variables from FinancialCalculationToolHandler (TL-011)
+            // Calculates matter-level aggregates: total spend, invoice count, budget, remaining budget
+            var calculationParams = new ToolParameters(new Dictionary<string, object>
+            {
+                ["matterId"] = invoice.MatterId ?? Guid.Empty
+            });
+
+            var calculationResult = await _financialCalculationTool.ExecuteAsync(calculationParams, ct);
+            if (calculationResult.Success && calculationResult.Data != null)
+            {
                 try
                 {
-                    await CreateBillingEventAsync(
-                        lineItem,
-                        lineSequence,
-                        invoiceId,
-                        invoice.MatterId ?? Guid.Empty,
-                        ct);
+                    var dataString = calculationResult.Data.ToString();
+                    if (!string.IsNullOrEmpty(dataString))
+                    {
+                        var calculationData = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                            dataString,
+                            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-                    createdCount++;
+                        if (calculationData != null)
+                        {
+                            context.SetVariable("calculation.totalSpend",
+                                calculationData.ContainsKey("totalSpend") ? calculationData["totalSpend"].GetDecimal() : 0);
+                            context.SetVariable("calculation.invoiceCount",
+                                calculationData.ContainsKey("invoiceCount") ? calculationData["invoiceCount"].GetInt32() : 0);
+                            context.SetVariable("calculation.remainingBudget",
+                                calculationData.ContainsKey("remainingBudget") ? calculationData["remainingBudget"].GetDecimal() : 0);
+                            context.SetVariable("calculation.budgetUtilization",
+                                calculationData.ContainsKey("budgetUtilization") ? calculationData["budgetUtilization"].GetDecimal() : 0);
+
+                            _logger.LogDebug(
+                                "Financial calculation succeeded for matter {MatterId}: TotalSpend={TotalSpend}, " +
+                                "InvoiceCount={InvoiceCount}, RemainingBudget={RemainingBudget}",
+                                invoice.MatterId,
+                                calculationData.ContainsKey("totalSpend") ? calculationData["totalSpend"].GetDecimal() : 0,
+                                calculationData.ContainsKey("invoiceCount") ? calculationData["invoiceCount"].GetInt32() : 0,
+                                calculationData.ContainsKey("remainingBudget") ? calculationData["remainingBudget"].GetDecimal() : 0);
+                        }
+                    }
                 }
-                catch (Exception ex)
+                catch (JsonException ex)
                 {
-                    _logger.LogWarning(ex,
-                        "Failed to create BillingEvent for invoice {InvoiceId}, line {LineSequence}: {Error}",
-                        invoiceId, lineSequence, ex.Message);
-                    // Continue processing remaining line items
+                    _logger.LogWarning(ex, "Failed to parse financial calculation result, using defaults");
+                    // Fallback to defaults
+                    context.SetVariable("calculation.totalSpend", 0);
+                    context.SetVariable("calculation.invoiceCount", 0);
+                    context.SetVariable("calculation.remainingBudget", 0);
                 }
-            }
-
-            _logger.LogInformation(
-                "Created {CreatedCount} of {TotalCount} BillingEvent records for invoice {InvoiceId}",
-                createdCount, aiExtractionResult.LineItems.Length, invoiceId);
-
-            // Update invoice status: Reviewed + Extracted
-            await UpdateInvoiceStatusAsync(invoiceId, InvoiceStatusReviewed, ExtractionStatusExtracted, ct);
-
-            // Enqueue downstream jobs
-            if (invoice.MatterId.HasValue)
-            {
-                // Enqueue SpendSnapshotGeneration job
-                await EnqueueSpendSnapshotJobAsync(invoice.MatterId.Value, job.CorrelationId, ct);
             }
             else
             {
                 _logger.LogWarning(
-                    "Invoice {InvoiceId} has no matter association, skipping SpendSnapshotGeneration",
-                    invoiceId);
+                    "Financial calculation failed for matter {MatterId}: {Error}, using defaults",
+                    invoice.MatterId, calculationResult.Error ?? "Unknown error");
+
+                // Fallback to defaults
+                context.SetVariable("calculation.totalSpend", 0);
+                context.SetVariable("calculation.invoiceCount", 0);
+                context.SetVariable("calculation.remainingBudget", 0);
             }
+
+            _logger.LogDebug(
+                "PlaybookExecutionContext built with {VariableCount} variables for invoice {InvoiceId}",
+                context.Variables.Count, invoiceId);
+
+            // Apply outputMapping via OutputOrchestrator
+            // Look up playbook by portable code (works in all environments - DEV/QA/PROD)
+            // Uses alternate key "sprk_playbookcode" = "PB-013" instead of environment-specific GUID
+            // Result is cached for 1 hour to minimize Dataverse queries
+            var playbook = await _playbookLookup.GetByCodeAsync("PB-013", ct);
+            var outputResult = await _outputOrchestrator.ApplyOutputMappingAsync(playbook.Id, context, ct);
+
+            if (!outputResult.Success)
+            {
+                _logger.LogError(
+                    "OutputOrchestrator failed for invoice {InvoiceId}: {ErrorMessage}",
+                    invoiceId, outputResult.ErrorMessage);
+
+                // Mark invoice as Failed and return Success to prevent retry
+                await UpdateInvoiceExtractionStatusAsync(invoiceId, ExtractionStatusFailed, ct);
+                return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
+            }
+
+            _logger.LogInformation(
+                "OutputOrchestrator succeeded for invoice {InvoiceId}: {UpdateCount} entities updated",
+                invoiceId, outputResult.Updates.Count);
 
             // Enqueue InvoiceIndexing job
             await EnqueueInvoiceIndexingJobAsync(invoiceId, documentId, job.CorrelationId, ct);
@@ -269,8 +331,8 @@ public class InvoiceExtractionJobHandler : IJobHandler
             _telemetry.RecordExtractionSuccess(extractionStopwatch, documentIdStr);
 
             _logger.LogInformation(
-                "Invoice extraction job {JobId} completed in {Duration}ms. Invoice {InvoiceId} -> {LineItemCount} BillingEvents",
-                job.JobId, stopwatch.ElapsedMilliseconds, invoiceId, createdCount);
+                "Invoice extraction job {JobId} completed in {Duration}ms. Invoice {InvoiceId} extracted with {LineItemCount} line items and updated via OutputOrchestrator",
+                job.JobId, stopwatch.ElapsedMilliseconds, invoiceId, aiExtractionResult.LineItems?.Length ?? 0);
 
             return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
         }
@@ -300,6 +362,76 @@ public class InvoiceExtractionJobHandler : IJobHandler
 
             return JobOutcome.Poisoned(job.JobId, JobType, ex.Message, job.Attempt, stopwatch.Elapsed);
         }
+    }
+
+    /// <summary>
+    /// Generates a human-readable AI summary from extracted invoice facts.
+    /// Maximum 5000 characters to fit in sprk_aisummary field.
+    /// </summary>
+    private static string GenerateAiSummary(ExtractionResult extractionResult)
+    {
+        if (extractionResult == null || extractionResult.Header == null)
+        {
+            return "Unable to generate summary - no facts extracted.";
+        }
+
+        var header = extractionResult.Header;
+        var summary = new System.Text.StringBuilder();
+
+        // Invoice header
+        summary.AppendLine($"Invoice #{header.InvoiceNumber ?? "N/A"} from {header.VendorName ?? "Unknown Vendor"}");
+
+        if (!string.IsNullOrEmpty(header.InvoiceDate))
+        {
+            summary.AppendLine($"Date: {header.InvoiceDate}");
+        }
+
+        summary.AppendLine($"Total: {header.Currency ?? "USD"} {header.TotalAmount:N2}");
+
+        if (!string.IsNullOrEmpty(header.PaymentTerms))
+        {
+            summary.AppendLine($"Payment Terms: {header.PaymentTerms}");
+        }
+
+        summary.AppendLine();
+
+        // Line items summary
+        if (extractionResult.LineItems != null && extractionResult.LineItems.Length > 0)
+        {
+            summary.AppendLine($"Line Items ({extractionResult.LineItems.Length}):");
+
+            foreach (var item in extractionResult.LineItems.Take(10)) // Limit to first 10 items
+            {
+                var description = item.Description?.Length > 60
+                    ? item.Description.Substring(0, 57) + "..."
+                    : item.Description ?? "N/A";
+
+                var hours = item.Hours.HasValue ? $"{item.Hours.Value:N2}" : "N/A";
+                var rate = item.Rate.HasValue ? $"{item.Rate.Value:N2}" : "N/A";
+                var amount = $"{item.Amount:N2}";
+                var costType = item.CostType ?? "N/A";
+
+                summary.AppendLine($"  - {description} | Type: {costType} | Hours: {hours} | Rate: {rate} | Amt: {amount}");
+            }
+
+            if (extractionResult.LineItems.Length > 10)
+            {
+                summary.AppendLine($"  ... and {extractionResult.LineItems.Length - 10} more items");
+            }
+        }
+        else
+        {
+            summary.AppendLine("No line items extracted.");
+        }
+
+        // Truncate if exceeds field limit (5000 chars)
+        var result = summary.ToString();
+        if (result.Length > 5000)
+        {
+            result = result.Substring(0, 4997) + "...";
+        }
+
+        return result;
     }
 
     private InvoiceExtractionPayload? ParsePayload(JsonDocument? payload)
@@ -381,118 +513,6 @@ public class InvoiceExtractionJobHandler : IJobHandler
         }
     }
 
-    /// <summary>
-    /// Create a BillingEvent record from an extracted line item.
-    /// Uses UpdateDocumentFieldsAsync pattern with Dictionary for field values.
-    /// </summary>
-    private Task CreateBillingEventAsync(
-        BillingEventLine lineItem,
-        int lineSequence,
-        Guid invoiceId,
-        Guid matterId,
-        CancellationToken ct)
-    {
-        // NOTE: This is a simplified implementation using UpdateDocumentFieldsAsync pattern
-        // In a real implementation, you would need to either:
-        // 1. Add a CreateBillingEventAsync method to IDataverseService
-        // 2. Use the DataverseServiceClientImpl directly for custom entity creation
-        // 3. Use the OData Web API directly
-
-        // For now, this is a placeholder showing the data structure
-        var fields = new Dictionary<string, object?>
-        {
-            // Alternate key fields (for upsert)
-            ["sprk_invoice"] = $"/sprk_invoices({invoiceId})", // OData bind syntax (lookup field)
-            ["sprk_linesequence"] = lineSequence,
-
-            // Set VisibilityState DETERMINISTICALLY (not from LLM)
-            ["sprk_visibilitystate"] = VisibilityStateInvoiced,
-
-            // Line item data from AI extraction
-            ["sprk_description"] = lineItem.Description,
-            ["sprk_amount"] = lineItem.Amount,
-            ["sprk_currency"] = lineItem.Currency
-        };
-
-        // Link to matter
-        if (matterId != Guid.Empty)
-        {
-            fields["sprk_matter"] = $"/sprk_matters({matterId})"; // OData bind syntax (lookup field)
-        }
-
-        // CostType: convert string to choice value
-        if (!string.IsNullOrEmpty(lineItem.CostType))
-        {
-            var costType = lineItem.CostType.Equals("Fee", StringComparison.OrdinalIgnoreCase)
-                ? CostTypeFee
-                : CostTypeExpense;
-            fields["sprk_costtype"] = costType;
-        }
-
-        // Optional fields
-        if (!string.IsNullOrEmpty(lineItem.EventDate) && DateOnly.TryParse(lineItem.EventDate, out var eventDate))
-        {
-            fields["sprk_eventdate"] = eventDate.ToDateTime(TimeOnly.MinValue).ToString("yyyy-MM-dd");
-        }
-
-        if (!string.IsNullOrEmpty(lineItem.RoleClass))
-        {
-            fields["sprk_roleclass"] = lineItem.RoleClass;
-        }
-
-        if (lineItem.Hours.HasValue)
-        {
-            fields["sprk_hours"] = (double)lineItem.Hours.Value;
-        }
-
-        if (lineItem.Rate.HasValue)
-        {
-            fields["sprk_rate"] = lineItem.Rate.Value;
-        }
-
-        // NOTE: This would need actual implementation
-        // For now, log what would be created
-        _logger.LogDebug(
-            "Would create/update BillingEvent for invoice {InvoiceId}, line {LineSequence} with {FieldCount} fields",
-            invoiceId, lineSequence, fields.Count);
-
-        // TODO: Implement actual billing event creation when method is available
-        // await _dataverseService.CreateOrUpdateBillingEventAsync(fields, ct);
-        return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// Update invoice status and extraction status using UpdateDocumentFieldsAsync pattern.
-    /// </summary>
-    private async Task UpdateInvoiceStatusAsync(
-        Guid invoiceId,
-        int status,
-        int extractionStatus,
-        CancellationToken ct)
-    {
-        try
-        {
-            var fields = new Dictionary<string, object?>
-            {
-                ["sprk_status"] = status,
-                ["sprk_extractionstatus"] = extractionStatus
-            };
-
-            // NOTE: This assumes UpdateDocumentFieldsAsync works for sprk_invoice entities
-            // May need a separate UpdateInvoiceFieldsAsync method
-            await _dataverseService.UpdateDocumentFieldsAsync(invoiceId.ToString(), fields, ct);
-
-            _logger.LogInformation(
-                "Updated invoice {InvoiceId} status to Reviewed, extraction status to Extracted",
-                invoiceId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Failed to update invoice {InvoiceId} status: {Error}",
-                invoiceId, ex.Message);
-        }
-    }
 
     /// <summary>
     /// Update invoice extraction status only (for failure cases).
@@ -523,46 +543,6 @@ public class InvoiceExtractionJobHandler : IJobHandler
         }
     }
 
-    /// <summary>
-    /// Enqueue SpendSnapshotGeneration job with matterId payload.
-    /// </summary>
-    private async Task EnqueueSpendSnapshotJobAsync(
-        Guid matterId,
-        string? correlationId,
-        CancellationToken ct)
-    {
-        try
-        {
-            var spendSnapshotJob = new JobContract
-            {
-                JobId = Guid.NewGuid(),
-                JobType = "SpendSnapshotGeneration",
-                SubjectId = matterId.ToString(),
-                CorrelationId = correlationId ?? Activity.Current?.Id ?? Guid.NewGuid().ToString(),
-                IdempotencyKey = $"spend-snapshot-{matterId}-{DateTimeOffset.UtcNow:yyyyMMdd}",
-                Attempt = 1,
-                MaxAttempts = 3,
-                CreatedAt = DateTimeOffset.UtcNow,
-                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new
-                {
-                    MatterId = matterId,
-                    EnqueuedAt = DateTimeOffset.UtcNow
-                }))
-            };
-
-            await _jobSubmissionService.SubmitJobAsync(spendSnapshotJob, ct);
-
-            _logger.LogInformation(
-                "Enqueued SpendSnapshotGeneration job {JobId} for matter {MatterId}",
-                spendSnapshotJob.JobId, matterId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Failed to enqueue SpendSnapshotGeneration job for matter {MatterId}: {Error}. Extraction will continue.",
-                matterId, ex.Message);
-        }
-    }
 
     /// <summary>
     /// Enqueue InvoiceIndexing job with invoiceId and documentId payload.

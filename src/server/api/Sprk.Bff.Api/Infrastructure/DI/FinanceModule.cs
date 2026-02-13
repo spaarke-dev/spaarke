@@ -1,5 +1,9 @@
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Tools;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Tools;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Telemetry;
@@ -70,11 +74,88 @@ public static class FinanceModule
         services.AddScoped<IFinanceSummaryService, FinanceSummaryService>();
 
         // ============================================================================
+        // Output Orchestrator Service (playbook-driven Dataverse updates)
+        // ============================================================================
+        // Scoped: reads outputMapping from playbooks and applies field updates to Dataverse
+        // Enables business analysts to configure field mappings via Playbook Builder without code deployment
+        // Variable resolution: ${context.invoiceId}, ${extraction.aiSummary}, etc.
+        // Type conversions: Money, EntityReference, DateTime
+        // Delegates to DataverseUpdateHandler for optimistic concurrency and retry logic
+        services.AddScoped<IOutputOrchestratorService, OutputOrchestratorService>();
+
+        // ============================================================================
+        // Playbook Lookup Service (cached alternate key lookups for SaaS portability)
+        // ============================================================================
+        // Scoped: retrieves playbooks by portable code (e.g., "PB-013") instead of environment-specific GUIDs
+        // Enables multi-environment deployments (DEV/QA/PROD) without hardcoded GUIDs or config changes
+        // Caching: IMemoryCache with 1-hour TTL to minimize Dataverse queries (critical for high-volume scenarios)
+        // Uses RetrieveByAlternateKeyAsync for indexed, fast lookups via sprk_playbookcode alternate key
+        // Example: GetByCodeAsync("PB-013") returns same playbook across all environments (different GUIDs)
+        services.AddScoped<IPlaybookLookupService, PlaybookLookupService>();
+
+        // ============================================================================
+        // Action Lookup Service (cached alternate key lookups for SaaS portability)
+        // ============================================================================
+        // Scoped: retrieves AI actions by portable code (e.g., "ACT-001") instead of environment-specific GUIDs
+        // Enables multi-environment deployments (DEV/QA/PROD) without hardcoded action GUIDs
+        // Caching: IMemoryCache with 1-hour TTL to minimize Dataverse queries
+        // Uses RetrieveByAlternateKeyAsync for indexed, fast lookups via sprk_actioncode alternate key
+        services.AddScoped<IActionLookupService, ActionLookupService>();
+
+        // ============================================================================
+        // Skill Lookup Service (cached alternate key lookups for SaaS portability)
+        // ============================================================================
+        // Scoped: retrieves AI skills by portable code (e.g., "SKILL-001") instead of environment-specific GUIDs
+        // Enables multi-environment deployments (DEV/QA/PROD) without hardcoded skill GUIDs
+        // Caching: IMemoryCache with 1-hour TTL to minimize Dataverse queries
+        // Uses RetrieveByAlternateKeyAsync for indexed, fast lookups via sprk_skillcode alternate key
+        services.AddScoped<ISkillLookupService, SkillLookupService>();
+
+        // ============================================================================
+        // Tool Lookup Service (cached alternate key lookups for SaaS portability)
+        // ============================================================================
+        // Scoped: retrieves AI tools by portable code (e.g., "TL-001") instead of environment-specific GUIDs
+        // Enables multi-environment deployments (DEV/QA/PROD) without hardcoded tool GUIDs
+        // Caching: IMemoryCache with 1-hour TTL to minimize Dataverse queries
+        // Uses RetrieveByAlternateKeyAsync for indexed, fast lookups via sprk_toolcode alternate key
+        services.AddScoped<IToolLookupService, ToolLookupService>();
+
+        // ============================================================================
+        // Dataverse Update Handler (low-level update operations with concurrency control)
+        // ============================================================================
+        // Scoped: handles Dataverse entity updates with optimistic concurrency and retry logic
+        // NOT a tool handler - called by OutputOrchestrator for record updates
+        // Features: row version checking, exponential backoff, concurrency conflict detection
+        // Used by playbooks to update invoice and matter records
+        services.AddScoped<IDataverseUpdateHandler, DataverseUpdateHandler>();
+
+        // ============================================================================
         // Telemetry: Finance metrics and distributed tracing (OpenTelemetry-compatible)
         // ============================================================================
         // Singleton: stateless, tracks metrics across all requests
         // Meter name: "Sprk.Bff.Api.Finance" for OpenTelemetry configuration
         services.AddSingleton<FinanceTelemetry>();
+
+        // ============================================================================
+        // AI Tool Handlers (IAiToolHandler) - called by playbooks for workflow orchestration
+        // ============================================================================
+        // Tool handlers execute specific actions during playbook-driven workflows
+        // Registered as IAiToolHandler for playbook tool discovery and execution
+
+        // FinancialCalculationToolHandler - calculates and updates matter/project financial totals
+        // Operations: "recalculate" (from all invoices) or "increment" (add single invoice)
+        // Uses optimistic concurrency with row version checks and exponential backoff retry
+        services.AddScoped<IAiToolHandler, FinancialCalculationToolHandler>();
+
+        // DataverseUpdateToolHandler - generic entity record update from playbook context
+        // Allows playbooks to update arbitrary entity fields without custom handlers
+        // Handles type conversion for Money, EntityReference, and other Dataverse types
+        services.AddScoped<IAiToolHandler, DataverseUpdateToolHandler>();
+
+        // InvoiceExtractionToolHandler - wraps InvoiceAnalysisService for playbook workflows
+        // Extracts invoice facts, generates AI summary, serializes to JSON for storage
+        // Returns: aiSummary (5000 char limit), extractedJson (20000 char limit), facts object
+        services.AddScoped<IAiToolHandler, InvoiceExtractionToolHandler>();
 
         // ============================================================================
         // Attachment Classification Job Handler (ADR-013: AI via BFF, ADR-015: no content logging)

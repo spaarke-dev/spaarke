@@ -353,6 +353,12 @@ public class DataverseWebApiService : IDataverseService
         _logger.LogInformation("[DATAVERSE-API] Updated document {DocumentId} with {FieldCount} fields", documentId, fields.Count);
     }
 
+    public Task<Entity> RetrieveAsync(string entityLogicalName, Guid id, string[] columns, CancellationToken ct = default)
+    {
+        // Not implemented in Web API version - use DataverseServiceClientImpl
+        throw new NotImplementedException("RetrieveAsync is not implemented in Web API version. Use DataverseServiceClientImpl for this operation.");
+    }
+
     public async Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default)
     {
         await EnsureAuthenticatedAsync(ct);
@@ -1741,5 +1747,16 @@ public class DataverseWebApiService : IDataverseService
         throw new NotImplementedException(
             "BulkUpdateAsync is implemented in DataverseServiceClientImpl. " +
             "Configure DI to use ServiceClient implementation for finance entity operations.");
+    }
+
+    public Task<Entity> RetrieveByAlternateKeyAsync(
+        string entityLogicalName,
+        KeyAttributeCollection alternateKeyValues,
+        string[]? columns = null,
+        CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "RetrieveByAlternateKeyAsync is implemented in DataverseServiceClientImpl. " +
+            "Configure DI to use ServiceClient implementation for alternate key lookups.");
     }
 }

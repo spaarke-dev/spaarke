@@ -245,6 +245,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         _logger.LogInformation("[DATAVERSE] Updated document {DocumentId} with {FieldCount} fields", documentId, fields.Count);
     }
 
+    public async Task<Entity> RetrieveAsync(string entityLogicalName, Guid id, string[] columns, CancellationToken ct = default)
+    {
+        var columnSet = new ColumnSet(columns);
+        var entity = await _serviceClient.RetrieveAsync(entityLogicalName, id, columnSet, ct);
+        _logger.LogDebug("[DATAVERSE] Retrieved {EntityType} {RecordId} with {ColumnCount} columns",
+            entityLogicalName, id, columns.Length);
+        return entity;
+    }
+
     public async Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default)
     {
         var document = new Entity("sprk_document", Guid.Parse(id));
@@ -1623,6 +1632,61 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             throw new InvalidOperationException(
                 $"Failed to bulk update {entityLogicalName} records: {ex.Message}", ex);
+        }
+    }
+
+    public async Task<Entity> RetrieveByAlternateKeyAsync(
+        string entityLogicalName,
+        KeyAttributeCollection alternateKeyValues,
+        string[]? columns = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            _logger.LogDebug(
+                "[DATAVERSE] Retrieving {EntityType} by alternate key with {KeyCount} keys",
+                entityLogicalName,
+                alternateKeyValues.Count);
+
+            // Build column set (null = all columns)
+            var columnSet = columns != null && columns.Length > 0
+                ? new ColumnSet(columns)
+                : new ColumnSet(true);
+
+            // Use RetrieveRequest with KeyAttributes for alternate key lookup
+            var retrieveRequest = new Microsoft.Xrm.Sdk.Messages.RetrieveRequest
+            {
+                Target = new EntityReference(entityLogicalName, alternateKeyValues),
+                ColumnSet = columnSet
+            };
+
+            var response = await Task.Run(() =>
+                (Microsoft.Xrm.Sdk.Messages.RetrieveResponse)_serviceClient.Execute(retrieveRequest),
+                ct);
+
+            if (response?.Entity == null)
+            {
+                throw new InvalidOperationException(
+                    $"Entity {entityLogicalName} not found with provided alternate key values");
+            }
+
+            _logger.LogDebug(
+                "[DATAVERSE] Retrieved {EntityType} by alternate key. Record ID: {RecordId}",
+                entityLogicalName,
+                response.Entity.Id);
+
+            return response.Entity;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                exception: ex,
+                message: "[DATAVERSE] Error retrieving {EntityType} by alternate key. Keys: {AlternateKeys}",
+                entityLogicalName,
+                string.Join(", ", alternateKeyValues.Select(k => $"{k.Key}={k.Value}")));
+
+            throw new InvalidOperationException(
+                $"Failed to retrieve {entityLogicalName} by alternate key: {ex.Message}", ex);
         }
     }
 

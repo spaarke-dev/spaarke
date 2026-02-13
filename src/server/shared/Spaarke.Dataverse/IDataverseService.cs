@@ -19,6 +19,16 @@ public interface IDataverseService
     Task UpdateDocumentFieldsAsync(string documentId, Dictionary<string, object?> fields, CancellationToken ct = default);
     Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default);
     Task DeleteDocumentAsync(string id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieve a Dataverse entity by ID with specified columns.
+    /// </summary>
+    /// <param name="entityLogicalName">Entity logical name (e.g., "sprk_invoice", "sprk_matter")</param>
+    /// <param name="id">Record ID</param>
+    /// <param name="columns">Array of column names to retrieve</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Retrieved entity</returns>
+    Task<Entity> RetrieveAsync(string entityLogicalName, Guid id, string[] columns, CancellationToken ct = default);
     Task<IEnumerable<DocumentEntity>> GetDocumentsByContainerAsync(string containerId, CancellationToken ct = default);
     Task<DocumentAccessLevel> GetUserAccessAsync(string userId, string documentId, CancellationToken ct = default);
 
@@ -405,5 +415,30 @@ public interface IDataverseService
     Task BulkUpdateAsync(
         string entityLogicalName,
         List<(Guid id, Dictionary<string, object> fields)> updates,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieve a Dataverse entity using alternate key(s) instead of GUID.
+    /// Alternate keys provide portable logical identifiers that remain stable across environments.
+    /// </summary>
+    /// <param name="entityLogicalName">Entity logical name (e.g., "sprk_analysisplaybook")</param>
+    /// <param name="alternateKeyValues">Key-value pairs for alternate key lookup (e.g., { "sprk_playbookcode", "PB-013" })</param>
+    /// <param name="columns">Array of column names to retrieve (null = all columns)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Retrieved entity</returns>
+    /// <exception cref="InvalidOperationException">Thrown if entity not found or alternate key not indexed</exception>
+    /// <example>
+    /// // Retrieve playbook by code (portable across environments)
+    /// var keyValues = new KeyAttributeCollection { { "sprk_playbookcode", "PB-013" } };
+    /// var playbook = await _dataverseService.RetrieveByAlternateKeyAsync(
+    ///     "sprk_analysisplaybook",
+    ///     keyValues,
+    ///     new[] { "sprk_name", "sprk_configjson" },
+    ///     ct);
+    /// </example>
+    Task<Entity> RetrieveByAlternateKeyAsync(
+        string entityLogicalName,
+        KeyAttributeCollection alternateKeyValues,
+        string[]? columns = null,
         CancellationToken ct = default);
 }
