@@ -31,7 +31,7 @@
 
 ## Architecture Overview
 
-VisualHost is a **configuration-driven visualization framework** for Dataverse model-driven apps. A single PCF control renders 10 different visual types based on a `sprk_chartdefinition` entity record. It also provides **drill-through navigation** that opens web resource-based dataset grids (such as the Events Page) in Dataverse dialogs with full context filtering.
+VisualHost is a **configuration-driven visualization framework** for Dataverse model-driven apps. A single PCF control renders 11 different visual types based on a `sprk_chartdefinition` entity record (10 base types + ReportCardMetric preset). It also provides **drill-through navigation** that opens web resource-based dataset grids (such as the Events Page) in Dataverse dialogs with full context filtering.
 
 ```
                     ┌──────────────────────────────┐
@@ -68,7 +68,7 @@ VisualHost is a **configuration-driven visualization framework** for Dataverse m
                     └──┬──┬──┬──┬──┬──┘  └────────────────────┘
                        │  │  │  │  │
               Chart Components    Card Components
-              (10 visual types)   (shared library)
+              (11 visual types)   (shared library)
 ```
 
 ### Design Principles
@@ -90,31 +90,42 @@ VisualHost is a **configuration-driven visualization framework** for Dataverse m
 src/client/pcf/VisualHost/
 ├── control/
 │   ├── ControlManifest.Input.xml    # PCF manifest (properties, platform libs)
-│   ├── index.ts                      # PCF lifecycle (init, updateView, destroy)
+│   ├── index.ts                      # PCF lifecycle (init, updateView, destroy) (121 lines)
 │   ├── types/
-│   │   └── index.ts                  # Enums, interfaces (IChartDefinition, DrillInteraction)
+│   │   └── index.ts                  # Enums, interfaces (IChartDefinition, DrillInteraction) (214 lines)
 │   ├── components/
-│   │   ├── VisualHostRoot.tsx        # Main orchestration + drill-through navigation (~483 lines)
-│   │   ├── ChartRenderer.tsx         # Visual type router (374 lines)
-│   │   ├── MetricCard.tsx            # Single value display
-│   │   ├── MetricCardMatrix.tsx     # Responsive card grid for matrix mode
-│   │   ├── BarChart.tsx              # Bar chart (vertical/horizontal)
-│   │   ├── LineChart.tsx             # Line/area chart
-│   │   ├── DonutChart.tsx            # Donut/pie chart
-│   │   ├── StatusDistributionBar.tsx # Colored status bar
-│   │   ├── CalendarVisual.tsx        # Calendar heat map
-│   │   ├── MiniTable.tsx             # Compact ranked table
+│   │   ├── VisualHostRoot.tsx        # Main orchestration + drill-through navigation (436 lines)
+│   │   ├── ChartRenderer.tsx         # Visual type router (430 lines)
+│   │   ├── MetricCard.tsx            # Single value display (339 lines)
+│   │   ├── MetricCardMatrix.tsx      # Responsive card grid for matrix mode (502 lines)
+│   │   ├── BarChart.tsx              # Bar chart (vertical/horizontal) (185 lines)
+│   │   ├── LineChart.tsx             # Line/area chart (155 lines)
+│   │   ├── DonutChart.tsx            # Donut/pie chart (158 lines)
+│   │   ├── StatusDistributionBar.tsx # Colored status bar (216 lines)
+│   │   ├── CalendarVisual.tsx        # Calendar heat map (303 lines)
+│   │   ├── MiniTable.tsx             # Compact ranked table (227 lines)
 │   │   ├── DueDateCard.tsx           # Single event card (172 lines)
-│   │   └── DueDateCardList.tsx       # Event card list (250 lines)
+│   │   ├── DueDateCardList.tsx       # Event card list (265 lines)
+│   │   ├── TrendCard.tsx             # Trend sparkline card (255 lines)
+│   │   ├── GradeMetricCard.tsx       # [DEPRECATED] Legacy grade card — use ReportCardMetric preset (234 lines)
+│   │   └── ErrorBoundary.tsx         # React error boundary wrapper (80 lines)
+│   ├── configurations/
+│   │   ├── matterMainCards.ts        # Matter main tab card configurations (129 lines)
+│   │   └── matterReportCardTrends.ts # Report card trend configurations (72 lines)
+│   ├── providers/
+│   │   └── ThemeProvider.ts          # Fluent UI theme integration (228 lines)
 │   ├── services/
-│   │   ├── ConfigurationLoader.ts    # Chart definition loading + cache (447 lines)
-│   │   ├── DataAggregationService.ts # Record fetch + aggregation (561 lines)
-│   │   ├── ViewDataService.ts        # Query resolution, FetchXML (619 lines)
-│   │   └── ClickActionHandler.ts     # Click action execution (197 lines)
+│   │   ├── ConfigurationLoader.ts    # Chart definition loading + cache (399 lines)
+│   │   ├── DataAggregationService.ts # Record fetch + aggregation (566 lines)
+│   │   ├── ViewDataService.ts        # Query resolution, FetchXML (620 lines)
+│   │   └── ClickActionHandler.ts     # Click action execution (166 lines)
 │   └── utils/
-│       ├── logger.ts                 # Structured logging utility
-│       ├── valueFormatters.ts        # Centralized value formatting
-│       └── cardConfigResolver.ts     # 3-tier card configuration resolution
+│       ├── logger.ts                 # Structured logging utility (55 lines)
+│       ├── valueFormatters.ts        # Centralized value formatting (74 lines)
+│       ├── cardConfigResolver.ts     # 3-tier card configuration resolution (164 lines)
+│       ├── chartColors.ts            # Chart color palette utility (170 lines)
+│       ├── gradeUtils.ts             # Grade calculation utilities (130 lines)
+│       └── trendAnalysis.ts          # Trend analysis utilities (54 lines)
 ├── Solution/                          # Dataverse solution packaging
 │   ├── solution.xml                   # Solution manifest
 │   ├── customizations.xml             # Solution customizations
@@ -127,18 +138,22 @@ src/client/pcf/VisualHost/
 
 ```
 VisualHostRoot
+├── ErrorBoundary (React error boundary wrapper)
+├── ThemeProvider (Fluent UI theme integration)
 ├── Toolbar (expand button + tooltip)
 ├── Loading State (Spinner)
 ├── Error State (MessageBar)
 ├── ChartRenderer
 │   ├── MetricCard (renders as MetricCardMatrix in matrix mode)
 │   │   └── MetricCardMatrix (responsive CSS Grid of metric cards)
+│   ├── ReportCardMetric (preset → routes through MetricCard pipeline with grade defaults)
 │   ├── BarChart (via @fluentui/react-charting)
 │   ├── LineChart (via @fluentui/react-charting)
 │   ├── DonutChart (via @fluentui/react-charting)
 │   ├── StatusDistributionBar
 │   ├── CalendarVisual
 │   ├── MiniTable
+│   ├── TrendCard (trend sparkline visualization)
 │   ├── DueDateCardVisual
 │   │   └── EventDueDateCard (from @spaarke/ui-components)
 │   └── DueDateCardListVisual
@@ -147,6 +162,9 @@ VisualHostRoot
 ├── Drill-Through Dialog (opened via handleExpandClick)
 │   └── Web Resource (e.g., Events Page) with context params
 └── Version Badge (v1.2.33)
+
+Deprecated (still present, scheduled for removal):
+└── GradeMetricCard — replaced by ReportCardMetric preset in cardConfigResolver
 ```
 
 ---
@@ -335,6 +353,9 @@ These components are defined within the VisualHost PCF control and render specif
 | **StatusDistributionBar** | segments, title, showLabels, showCounts, height | IChartData.dataPoints |
 | **CalendarVisual** | events, title, showNavigation | IChartData.dataPoints → ICalendarEvent[] |
 | **MiniTable** | items, columns, title, topN, showRank | IChartData.dataPoints → IMiniTableItem[] |
+| **TrendCard** | trend data, sparkline visualization | Trend data series |
+| **ErrorBoundary** | children, fallback | Wraps components for error isolation |
+| ~~**GradeMetricCard**~~ | ~~grade, area, icon, colorRules~~ | ~~DEPRECATED: Use ReportCardMetric preset via MetricCard~~ |
 
 ### Shared Components (from @spaarke/ui-components)
 
@@ -932,14 +953,14 @@ Version must be updated in **5 locations** for each release:
 ### Solution Contents
 
 ```
-VisualHostSolution_v1.2.2.zip
+VisualHostSolution_v1.2.33.zip
 ├── [Content_Types].xml
 ├── solution.xml
 ├── customizations.xml
 └── Controls/
     └── sprk_Spaarke.Visuals.VisualHost/
         ├── ControlManifest.xml
-        ├── bundle.js (~825 KiB compressed (v1.2.33); ~4.97 MiB uncompressed)
+        ├── bundle.js (~825 KiB compressed; ~4.97 MiB uncompressed)
         └── styles.css
 ```
 
@@ -1043,7 +1064,7 @@ This section captures architectural context relevant to the next project that wi
 |------|--------------|------------------|
 | **Drill-through target** | Single `sprk_drillthroughtarget` field (web resource name) | Could support multiple targets per click action type, or per-visual-type targets |
 | **Context params** | Fixed set: entityName, filterField, filterValue, viewId, mode | Extensible via `sprk_optionsjson` for additional custom params |
-| **Visual types** | 11 types (enum 100000000–100000010), with ReportCardMetric as a MetricCard preset | Add new types by extending the enum and ChartRenderer switch; card configuration is now extensible via ICardConfig without new components |
+| **Visual types** | 11 types (enum 100000000–100000010), with ReportCardMetric as a MetricCard preset, plus TrendCard | Add new types by extending the enum and ChartRenderer switch; card configuration is now extensible via ICardConfig without new components |
 | **Click actions** | 4 actions + expand button | Could add: open in new tab, navigate to URL, trigger Power Automate flow |
 | **Data services** | Client-side aggregation only | Could add server-side aggregation via BFF API for large datasets |
 
