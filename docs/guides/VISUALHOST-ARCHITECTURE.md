@@ -1,6 +1,6 @@
 # VisualHost - Architecture Documentation
 
-> **Version**: 1.2.29 | **Last Updated**: February 9, 2026
+> **Version**: 1.2.33 | **Last Updated**: February 13, 2026
 >
 > **Audience**: Developers, solution architects, AI coding agents
 >
@@ -97,6 +97,7 @@ src/client/pcf/VisualHost/
 │   │   ├── VisualHostRoot.tsx        # Main orchestration + drill-through navigation (~483 lines)
 │   │   ├── ChartRenderer.tsx         # Visual type router (374 lines)
 │   │   ├── MetricCard.tsx            # Single value display
+│   │   ├── MetricCardMatrix.tsx     # Responsive card grid for matrix mode
 │   │   ├── BarChart.tsx              # Bar chart (vertical/horizontal)
 │   │   ├── LineChart.tsx             # Line/area chart
 │   │   ├── DonutChart.tsx            # Donut/pie chart
@@ -111,7 +112,9 @@ src/client/pcf/VisualHost/
 │   │   ├── ViewDataService.ts        # Query resolution, FetchXML (619 lines)
 │   │   └── ClickActionHandler.ts     # Click action execution (197 lines)
 │   └── utils/
-│       └── logger.ts                 # Structured logging utility
+│       ├── logger.ts                 # Structured logging utility
+│       ├── valueFormatters.ts        # Centralized value formatting
+│       └── cardConfigResolver.ts     # 3-tier card configuration resolution
 ├── Solution/                          # Dataverse solution packaging
 │   ├── solution.xml                   # Solution manifest
 │   ├── customizations.xml             # Solution customizations
@@ -128,7 +131,8 @@ VisualHostRoot
 ├── Loading State (Spinner)
 ├── Error State (MessageBar)
 ├── ChartRenderer
-│   ├── MetricCard
+│   ├── MetricCard (renders as MetricCardMatrix in matrix mode)
+│   │   └── MetricCardMatrix (responsive CSS Grid of metric cards)
 │   ├── BarChart (via @fluentui/react-charting)
 │   ├── LineChart (via @fluentui/react-charting)
 │   ├── DonutChart (via @fluentui/react-charting)
@@ -142,7 +146,7 @@ VisualHostRoot
 │       └── "View All" Link
 ├── Drill-Through Dialog (opened via handleExpandClick)
 │   └── Web Resource (e.g., Events Page) with context params
-└── Version Badge (v1.2.29)
+└── Version Badge (v1.2.33)
 ```
 
 ---
@@ -180,8 +184,9 @@ DataAggregationService.fetchAndAggregate(context, definition)
   │          b. Execute via ?fetchXml=...
   │       3. Group records by sprk_groupbyfield (uses formatted value annotations for labels)
   │       4. Aggregate per group (Count/Sum/Average/Min/Max)
-  │       5. Sort groups alphabetically by label (A→Z)
-  │       6. Cache result → Return IChartData
+  │       5. Capture option set colors from OData annotation (`@OData.Community.Display.V1.Color`) and sort order from numeric field values
+  │       6. Sort groups alphabetically by label (A→Z)
+  │       7. Cache result → Return IChartData
   ▼
 ChartRenderer: Switch on sprk_visualtype
   │
@@ -260,6 +265,8 @@ ChartRenderer: Routes to DueDateCardVisual or DueDateCardListVisual
 
 **Grouping & Labels:**
 - Uses `@OData.Community.Display.V1.FormattedValue` annotation for human-readable labels on lookup and choice fields
+- Captures option set hex colors from `@OData.Community.Display.V1.Color` annotation per data point
+- Captures numeric field values as `sortOrder` for option set ordering
 - Groups sorted alphabetically by label (A→Z)
 
 **Aggregation Types:**
@@ -320,7 +327,8 @@ These components are defined within the VisualHost PCF control and render specif
 
 | Component | Props Interface | Data Source |
 |-----------|----------------|-------------|
-| **MetricCard** | value, label, description, trend, trendValue, compact | IChartData.dataPoints[0] |
+| **MetricCard** | value, label, description, trend, trendValue, compact, valueFormat, nullDisplay, icon, accentColor, iconColor, cardBackground, valueColor | IChartData.dataPoints[0] |
+| **MetricCardMatrix** | dataPoints, columns, width, height, justification, drillField, cardConfig | IChartData.dataPoints (multiple) |
 | **BarChart** | data, title, orientation, showLabels, showLegend, height | IChartData.dataPoints |
 | **LineChart** | data, title, variant (line/area), showLegend, lineColor | IChartData.dataPoints |
 | **DonutChart** | data, title, innerRadius, showCenterValue, centerLabel | IChartData.dataPoints |
@@ -351,6 +359,7 @@ interface IAggregatedDataPoint {
   value: number;       // Aggregated numeric value
   color?: string;      // Optional color for the data point
   fieldValue: unknown; // Original field value (for drill-through)
+  sortOrder?: number;  // Option set sort order
 }
 
 interface IChartData {
@@ -375,7 +384,47 @@ interface IEventDueDateCardProps {
   onClick?: (eventId: string) => void;
   isNavigating?: boolean;
 }
+
+// Card configuration for MetricCard and MetricCardMatrix:
+interface ICardConfig {
+  valueFormat: ValueFormatType;     // shortNumber | letterGrade | percentage | wholeNumber | decimal | currency
+  colorSource: ColorSourceType;     // none | optionSetColor | valueThreshold
+  cardDescription?: string;         // Template with {value}, {formatted}, {label}, {count} placeholders
+  nullDisplay: string;              // Text when value is null (default: "—")
+  nullDescription?: string;
+  cardSize: CardSize;               // small (140px) | medium (200px) | large (280px)
+  sortBy: CardSortBy;               // label | value | valueAsc | optionSetOrder
+  columns?: number;                 // Fixed columns (undefined = auto-fill responsive)
+  compact: boolean;
+  showTitle: boolean;
+  maxCards?: number;
+  accentFromOptionSet: boolean;     // Use option set hex color as border accent
+  iconMap?: Record<string, string>; // Map group labels → Fluent icon names
+  colorThresholds?: IColorThreshold[];
+}
 ```
+
+### Card Configuration System (v1.2.33)
+
+The MetricCard and MetricCardMatrix components use a **3-tier configuration resolution** system implemented in `cardConfigResolver.ts`. Configuration is merged top-down, with higher tiers overriding lower tiers:
+
+| Tier | Source | Description |
+|------|--------|-------------|
+| **Tier 1** | PCF property override (`valueFormatOverride`) | Per-deployment override set at form control properties |
+| **Tier 2** | Chart Definition Dataverse fields (`sprk_valueformat`, `sprk_colorsource`) | Per-chart-definition configuration in Dataverse |
+| **Tier 3** | Configuration JSON (`sprk_configurationjson`) | Full `ICardConfig` object stored as JSON on the chart definition |
+| **Tier 4** | Defaults | Built-in defaults (shortNumber format, no color source, medium size, etc.) |
+
+The `cardConfigResolver.ts` utility merges all tiers, with Tier 1 taking highest precedence.
+
+**ReportCardMetric Preset:** The `ReportCardMetric` visual type (enum `100000010`) is a preset that auto-applies domain-specific defaults via the card configuration system:
+- **valueFormat**: `letterGrade`
+- **colorSource**: `valueThreshold`
+- **Icons**: Grade-specific icons (e.g., trophy for A, warning for F)
+- **nullDisplay**: `"N/A"`
+- **sortBy**: `optionSetOrder`
+
+This preset pattern allows domain-specific card configurations without creating separate components. The `cardConfigResolver` detects the `ReportCardMetric` visual type and applies these defaults at Tier 3 level, which can still be overridden by Tiers 1-2.
 
 ---
 
@@ -890,7 +939,7 @@ VisualHostSolution_v1.2.2.zip
 └── Controls/
     └── sprk_Spaarke.Visuals.VisualHost/
         ├── ControlManifest.xml
-        ├── bundle.js (~483 KiB production)
+        ├── bundle.js (~825 KiB compressed (v1.2.33); ~4.97 MiB uncompressed)
         └── styles.css
 ```
 
@@ -928,7 +977,7 @@ These are provided by the Dataverse runtime (not bundled):
    ```typescript
    export enum VisualType {
      // ... existing types
-     NewVisualType = 100000010,
+     ReportCardMetric = 100000010,
    }
    ```
 
@@ -949,6 +998,8 @@ These are provided by the Dataverse runtime (not bundled):
 5. **Add the option set value** in Dataverse for `sprk_visualtype`
 
 6. **Bump version** in all 5 locations
+
+> **Note:** `ReportCardMetric` (100000010) is now a preset for MetricCard -- it auto-applies grade defaults via `cardConfigResolver`. This pattern can be used for other domain-specific presets without creating separate components.
 
 ### Adding a New Data Source
 
@@ -992,7 +1043,7 @@ This section captures architectural context relevant to the next project that wi
 |------|--------------|------------------|
 | **Drill-through target** | Single `sprk_drillthroughtarget` field (web resource name) | Could support multiple targets per click action type, or per-visual-type targets |
 | **Context params** | Fixed set: entityName, filterField, filterValue, viewId, mode | Extensible via `sprk_optionsjson` for additional custom params |
-| **Visual types** | 10 types (enum 100000000–100000009) | Add new types by extending the enum and ChartRenderer switch |
+| **Visual types** | 11 types (enum 100000000–100000010), with ReportCardMetric as a MetricCard preset | Add new types by extending the enum and ChartRenderer switch; card configuration is now extensible via ICardConfig without new components |
 | **Click actions** | 4 actions + expand button | Could add: open in new tab, navigate to URL, trigger Power Automate flow |
 | **Data services** | Client-side aggregation only | Could add server-side aggregation via BFF API for large datasets |
 

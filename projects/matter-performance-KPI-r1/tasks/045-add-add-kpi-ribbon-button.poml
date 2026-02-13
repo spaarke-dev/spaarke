@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Add Add KPI Ribbon Button</title>
+    <phase>4: Report Card Tab</phase>
+    <status>completed</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>044</dependencies>
+    <blocks>050</blocks>
+    <tags>dataverse, ribbon, solution</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task will create ribbon customization (new resource)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Add "+ Add KPI" button to subgrid ribbon that launches Quick Create form for KPI assessment entry.</prompt>
+  <role>SPAARKE platform developer with Dataverse ribbon customization expertise.</role>
+  <goal>Deploy ribbon button that opens Quick Create form when clicked.</goal>
+
+  <context>
+    <background>Ribbon button on subgrid provides convenient access to Quick Create form for adding assessments.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeSolution/RibbonDiff/sprk_matter_ribbon.xml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">Button label: "+ Add KPI"</constraint>
+    <constraint source="spec-r1">Action: Launch Quick Create form for sprk_kpiassessment</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load ribbon-edit skill</step>
+    <step order="2">Export matter entity ribbon</step>
+    <step order="3">Add button to subgrid ribbon</step>
+    <step order="4">Configure button action to open Quick Create form</step>
+    <step order="5">Import updated ribbon</step>
+    <step order="6">Update TASK-INDEX.md status to ✅</step>
+  </steps>
+
+  <tools><tool name="xml-editor">Edit ribbon XML</tool></tools>
+  <outputs><output type="solution-xml">src/solutions/SpaarkeSolution/RibbonDiff/sprk_matter_ribbon.xml</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given Report Card tab, when clicking "+ Add KPI" button, then Quick Create form opens</criterion>
+  </acceptance-criteria>
+
+  <notes>MANDATORY: Load ribbon-edit skill before starting. Reference: spec-r1.md FR-10</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load ribbon-edit skill and knowledge files before starting.</protocol>
+  </execution>
+</task>

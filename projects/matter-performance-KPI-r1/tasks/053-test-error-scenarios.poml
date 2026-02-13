@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Test Error Scenarios</title>
+    <phase>6: Testing & Polish</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, error-handling</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing'</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Test error scenarios: API timeout, network failure, 500 error. Verify web resource handles gracefully with user-friendly dialog and form save completes.</prompt>
+  <role>SPAARKE platform developer with error handling testing expertise.</role>
+  <goal>Validate error handling meets NFR-03 requirements (graceful degradation, form save not blocked).</goal>
+
+  <context>
+    <background>Web resource must handle API failures gracefully without blocking form save. Tests verify retry logic and user notifications.</background>
+    <relevant-files>
+      <file>tests/integration/WebResourceErrorHandlingTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-03">Form save MUST complete even if API fails (non-blocking)</constraint>
+    <constraint source="NFR-03">User MUST see friendly error message after 3 failed retries</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Test scenario: API returns 500 error</step>
+    <step order="2">Test scenario: API timeout (no response)</step>
+    <step order="3">Test scenario: Network failure</step>
+    <step order="4">Verify retry logic attempts 3 times</step>
+    <step order="5">Verify user dialog displays after final failure</step>
+    <step order="6">Verify form save completes regardless of API failure</step>
+    <step order="7">Update TASK-INDEX.md status to ✅</step>
+  </steps>
+
+  <tools><tool name="testing-framework">Run error scenario tests</tool></tools>
+  <outputs><output type="test">tests/integration/WebResourceErrorHandlingTests.cs</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given API returns 500, when web resource calls API, then retries 3 times and shows user dialog</criterion>
+    <criterion testable="true">Given API fails, when form saves, then save completes (not blocked)</criterion>
+  </acceptance-criteria>
+
+  <notes>Parallel-safe with tasks 051, 052 (Group C). Reference: spec-r1.md NFR-03</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

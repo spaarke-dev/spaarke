@@ -18,6 +18,30 @@ export enum VisualType {
   MiniTable = 100000007,
   DueDateCard = 100000008,
   DueDateCardList = 100000009,
+  ReportCardMetric = 100000010,
+}
+
+/**
+ * Value format enumeration matching Dataverse choice values
+ * Controls how aggregated values are displayed on MetricCards
+ */
+export enum ValueFormat {
+  ShortNumber = 100000000,
+  LetterGrade = 100000001,
+  Percentage = 100000002,
+  WholeNumber = 100000003,
+  Decimal = 100000004,
+  Currency = 100000005,
+}
+
+/**
+ * Color source enumeration matching Dataverse choice values
+ * Controls how per-card colors are determined in MetricCard matrix
+ */
+export enum ColorSource {
+  None = 100000000,
+  OptionSetColor = 100000001,
+  ValueThreshold = 100000002,
 }
 
 /**
@@ -75,6 +99,10 @@ export interface IChartDefinition {
 
   // Drill-through configuration
   sprk_drillthroughtarget?: string;
+
+  // MetricCard enhancement fields (v1.2.33)
+  sprk_valueformat?: ValueFormat;
+  sprk_colorsource?: ColorSource;
 }
 
 /**
@@ -100,6 +128,8 @@ export interface IAggregatedDataPoint {
   value: number;
   color?: string;
   fieldValue: unknown;
+  /** Option set sort order (for optionSetOrder sort) */
+  sortOrder?: number;
 }
 
 /**
@@ -128,4 +158,82 @@ export interface IVisualHostConfig {
 export const DEFAULT_VISUAL_HOST_CONFIG: IVisualHostConfig = {
   showToolbar: true,
   enableDrillThrough: true,
+};
+
+/**
+ * Token set names for value-based color thresholds.
+ * Each maps to a predefined set of Fluent UI v9 semantic tokens
+ * that auto-adapt to light/dark mode.
+ */
+export type ColorTokenSet = "brand" | "warning" | "danger" | "success" | "neutral";
+
+/**
+ * Color threshold rule — maps a value range to a Fluent token set
+ */
+export interface IColorThreshold {
+  /** [min, max] inclusive range (values are 0-1 for grades, raw for others) */
+  range: [number, number];
+  /** Named token set to apply when value falls in range */
+  tokenSet: ColorTokenSet;
+}
+
+/**
+ * Card size controls responsive grid min-width and typography scale
+ */
+export type CardSize = "small" | "medium" | "large";
+
+/**
+ * Sort order for cards in matrix layout
+ */
+export type CardSortBy = "label" | "value" | "valueAsc" | "optionSetOrder";
+
+/**
+ * Value format type as string (for config resolution)
+ */
+export type ValueFormatType =
+  | "shortNumber"
+  | "letterGrade"
+  | "percentage"
+  | "wholeNumber"
+  | "decimal"
+  | "currency";
+
+/**
+ * Color source type as string (for config resolution)
+ */
+export type ColorSourceType = "none" | "optionSetColor" | "valueThreshold";
+
+/**
+ * Resolved card configuration — merged from Chart Definition fields,
+ * Configuration JSON, and PCF property overrides.
+ */
+export interface ICardConfig {
+  /** How to format the aggregated value */
+  valueFormat: ValueFormatType;
+  /** How per-card colors are determined */
+  colorSource: ColorSourceType;
+  /** Template for card description. Placeholders: {value}, {formatted}, {label}, {count} */
+  cardDescription?: string;
+  /** Display text when value is null/undefined */
+  nullDisplay: string;
+  /** Description when value is null */
+  nullDescription?: string;
+  /** Card size controlling min-width and typography */
+  cardSize: CardSize;
+  /** Sort order for cards */
+  sortBy: CardSortBy;
+  /** Fixed columns (null = auto-fill responsive) */
+  columns?: number;
+  /** Compact mode */
+  compact: boolean;
+  /** Show chart title above grid */
+  showTitle: boolean;
+  /** Max visible cards (null = all) */
+  maxCards?: number;
+  /** Use option set hex color as border accent and icon tint */
+  accentFromOptionSet: boolean;
+  /** Map group labels to Fluent UI icon names */
+  iconMap?: Record<string, string>;
+  /** Value-based color threshold rules */
+  colorThresholds?: IColorThreshold[];
 };

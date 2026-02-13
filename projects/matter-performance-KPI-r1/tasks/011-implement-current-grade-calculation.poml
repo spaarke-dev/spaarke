@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Implement Current Grade Calculation</title>
+    <phase>2: Calculator API</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>016</blocks>
+    <tags>bff-api, api, minimal-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' (code implementation), will modify .cs files</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement current grade calculation logic in ScorecardCalculatorService: query latest KPI assessment per performance area and update corresponding current grade field on Matter.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer expert in ASP.NET Core, Entity Framework, and Dataverse queries.
+  </role>
+
+  <goal>
+    Complete current grade calculation: Query latest assessment per area (ORDER BY createdon DESC LIMIT 1), update sprk_{area}compliancegrade_current fields on Matter entity.
+  </goal>
+
+  <context>
+    <background>
+      Current grade shows the most recent assessment for each performance area. Calculator queries Dataverse for latest assessment, extracts grade value, and updates corresponding Matter field.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/ScorecardCalculatorService.cs</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">Query: SELECT TOP 1 sprk_grade FROM sprk_kpiassessment WHERE sprk_matter = {matterId} AND sprk_performancearea = {area} ORDER BY createdon DESC</constraint>
+    <constraint source="spec-r1">Update: sprk_{area}compliancegrade_current = latest_grade</constraint>
+    <constraint source="NFR-01">Calculation must complete in < 500ms</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add CalculateCurrentGrades method to ScorecardCalculatorService</step>
+    <step order="2">For each performance area (Guidelines, Budget, Outcomes), query latest assessment</step>
+    <step order="3">Extract grade value from latest assessment</step>
+    <step order="4">Update corresponding sprk_{area}compliancegrade_current field on Matter</step>
+    <step order="5">Handle case where no assessments exist (set field to null)</step>
+    <step order="6">Add error handling for Dataverse query failures</step>
+    <step order="7">Write unit tests for current grade calculation logic</step>
+    <step order="8">Update TASK-INDEX.md: change task 011 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/ScorecardCalculatorService.cs (updated)</output>
+    <output type="test">src/server/api/Sprk.Bff.Api.Tests/Services/ScorecardCalculatorServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a matter with 1 Guidelines assessment (grade=0.95), when calculating current grade, then sprk_guidelinecompliancegrade_current = 0.95</criterion>
+    <criterion testable="true">Given a matter with 3 Guidelines assessments (grades: 0.85, 0.90, 0.95), when calculating current grade, then sprk_guidelinecompliancegrade_current = 0.95 (latest)</criterion>
+    <criterion testable="true">Given a matter with no assessments, when calculating current grade, then current grade field = null</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference: spec-r1.md FR-05 for complete current grade specification
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

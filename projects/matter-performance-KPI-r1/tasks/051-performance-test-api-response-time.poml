@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Performance Test API Response Time</title>
+    <phase>6: Testing & Polish</phase>
+    <status>completed</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>016</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, performance</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing'</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Perform load testing on calculator API: 100 concurrent requests, verify p95 response time < 500ms.</prompt>
+  <role>SPAARKE platform developer with performance testing expertise.</role>
+  <goal>Validate API meets NFR-01 performance requirement (< 500ms response time).</goal>
+
+  <context>
+    <background>Calculator API must respond quickly to avoid blocking form save. Performance test validates response time under load.</background>
+    <relevant-files>
+      <file>tests/performance/CalculatorApiLoadTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-01">API response time MUST be < 500ms (p95)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create performance test using load testing tool (k6, JMeter, or custom)</step>
+    <step order="2">Configure test: 100 concurrent requests to calculator endpoint</step>
+    <step order="3">Run test and collect response time metrics</step>
+    <step order="4">Verify p95 response time < 500ms</step>
+    <step order="5">Document results</step>
+    <step order="6">Update TASK-INDEX.md status to ✅</step>
+  </steps>
+
+  <tools><tool name="dotnet">Run performance tests</tool></tools>
+  <outputs><output type="report">Performance test results showing p95 < 500ms</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given 100 concurrent requests, when test completes, then p95 response time < 500ms</criterion>
+  </acceptance-criteria>
+
+  <notes>Parallel-safe with tasks 052, 053 (Group C). Reference: spec-r1.md NFR-01</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

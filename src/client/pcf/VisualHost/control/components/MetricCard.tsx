@@ -17,7 +17,8 @@ import {
   ArrowUpRegular,
   ArrowDownRegular,
 } from "@fluentui/react-icons";
-import type { DrillInteraction } from "../types";
+import type { DrillInteraction, ValueFormatType } from "../types";
+import { formatValue as formatValueUtil } from "../utils/valueFormatters";
 
 export type TrendDirection = "up" | "down" | "neutral";
 
@@ -50,6 +51,20 @@ export interface IMetricCardProps {
   explicitWidth?: number;
   /** Explicit height in pixels (overrides fillContainer when both width and height set) */
   explicitHeight?: number;
+  /** Value format type for display formatting */
+  valueFormat?: ValueFormatType;
+  /** Null display text when value is null/undefined */
+  nullDisplay?: string;
+  /** Icon component to render in the card header */
+  icon?: React.ComponentType<{ className?: string }>;
+  /** Color for the left border accent (hex or token value) */
+  accentColor?: string;
+  /** Color for the icon tint */
+  iconColor?: string;
+  /** Color for the card background (Fluent token value) */
+  cardBackground?: string;
+  /** Color for the value text */
+  valueColor?: string;
 }
 
 const useStyles = makeStyles({
@@ -58,6 +73,15 @@ const useStyles = makeStyles({
     minHeight: "120px",
     cursor: "default",
     transition: "box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out",
+    position: "relative",
+    overflow: "hidden",
+  },
+  borderAccent: {
+    position: "absolute",
+    left: "0",
+    top: "0",
+    bottom: "0",
+    width: "4px",
   },
   cardInteractive: {
     cursor: "pointer",
@@ -143,21 +167,34 @@ const useStyles = makeStyles({
   trendIcon: {
     fontSize: "16px",
   },
+  headerWithIcon: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalS,
+  },
+  iconSlot: {
+    fontSize: "20px",
+    flexShrink: 0,
+  },
 });
 
 /**
- * Formats a number for display (e.g., 1000 -> 1K, 1000000 -> 1M)
+ * Formats a number for display.
+ * When valueFormat is provided, delegates to the centralized formatter.
+ * Otherwise uses legacy K/M formatting.
  */
-const formatValue = (value: string | number): string => {
-  if (typeof value === "string") return value;
-
-  if (value >= 1000000) {
-    return `${(value / 1000000).toFixed(1)}M`;
+const formatDisplayValue = (
+  val: string | number,
+  format?: ValueFormatType,
+  nullText?: string
+): string => {
+  if (format && typeof val === "number") {
+    return formatValueUtil(val, format, nullText);
   }
-  if (value >= 1000) {
-    return `${(value / 1000).toFixed(1)}K`;
-  }
-  return value.toLocaleString();
+  if (typeof val === "string") return val;
+  if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M`;
+  if (val >= 1000) return `${(val / 1000).toFixed(1)}K`;
+  return val.toLocaleString();
 };
 
 /**
@@ -178,6 +215,13 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
   justification = "left",
   explicitWidth,
   explicitHeight,
+  valueFormat,
+  nullDisplay,
+  icon: IconComponent,
+  accentColor,
+  iconColor,
+  cardBackground,
+  valueColor,
 }) => {
   const styles = useStyles();
 
@@ -241,18 +285,28 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
         compact && styles.cardCompact,
         fillContainer && !hasExplicitDimensions && styles.cardFillContainer
       )}
-      style={hasExplicitDimensions ? {
-        width: `${explicitWidth}px`,
-        height: `${explicitHeight}px`,
-        minWidth: "unset",
-        minHeight: "unset",
-      } : undefined}
+      style={{
+        ...(hasExplicitDimensions ? {
+          width: `${explicitWidth}px`,
+          height: `${explicitHeight}px`,
+          minWidth: "unset",
+          minHeight: "unset",
+        } : undefined),
+        ...(cardBackground ? { backgroundColor: cardBackground } : undefined),
+      }}
       onClick={isInteractive ? handleClick : undefined}
       onKeyDown={isInteractive ? handleKeyDown : undefined}
       tabIndex={isInteractive ? 0 : undefined}
       role={isInteractive ? "button" : undefined}
       aria-label={isInteractive ? `${label}: ${value}. Click to view details.` : undefined}
     >
+      {/* Color-coded left border accent */}
+      {accentColor && (
+        <div
+          className={styles.borderAccent}
+          style={{ backgroundColor: accentColor }}
+        />
+      )}
       <div
         className={mergeClasses(
           styles.content,
@@ -261,19 +315,33 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
           justification === "right" && styles.contentRight
         )}
       >
-        <Text
-          className={mergeClasses(styles.label, compact && styles.labelCompact)}
-        >
-          {label}
-        </Text>
+        {IconComponent ? (
+          <div className={styles.headerWithIcon}>
+            <span className={styles.iconSlot} style={iconColor ? { color: iconColor } : undefined}>
+              <IconComponent />
+            </span>
+            <Text
+              className={mergeClasses(styles.label, compact && styles.labelCompact)}
+            >
+              {label}
+            </Text>
+          </div>
+        ) : (
+          <Text
+            className={mergeClasses(styles.label, compact && styles.labelCompact)}
+          >
+            {label}
+          </Text>
+        )}
         <div className={styles.valueContainer}>
           <Text
             className={mergeClasses(
               styles.value,
               compact && styles.valueCompact
             )}
+            style={valueColor ? { color: valueColor } : undefined}
           >
-            {formatValue(value)}
+            {formatDisplayValue(value, valueFormat, nullDisplay)}
           </Text>
           {renderTrendIndicator()}
         </div>

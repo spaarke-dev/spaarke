@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Implement Contextual Text Templates</title>
+    <phase>3: Main Tab Cards</phase>
+    <status>completed</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>030,031,032</dependencies>
+    <blocks>050</blocks>
+    <tags>frontend, react</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task will modify code to implement template substitution logic</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement template substitution logic for contextual text: replace {grade} and {area} placeholders with actual values.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with string interpolation and templating expertise.
+  </role>
+
+  <goal>
+    Complete contextual text rendering so all 3 metric cards display dynamic text: "You have an X% in [Area] compliance".
+  </goal>
+
+  <context>
+    <background>
+      Contextual text templates use placeholders {grade} and {area}. Component must replace placeholders with actual grade percentage and area name.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/visual-host/components/ReportCardMetric.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">Template format: "You have an {grade}% in {area} compliance"</constraint>
+    <constraint source="spec-r1">{grade} = grade value * 100 (0.95 → 95)</constraint>
+    <constraint source="spec-r1">{area} = area name from props ("Guideline", "Budget", "Outcomes")</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/visual-host/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add renderContextualText helper function to ReportCardMetric.tsx</step>
+    <step order="2">Implement template parsing: find {grade} and {area} placeholders</step>
+    <step order="3">Replace {grade} with (gradeValue * 100).toFixed(0) + "%"</step>
+    <step order="4">Replace {area} with areaName prop value</step>
+    <step order="5">Return interpolated string</step>
+    <step order="6">Test with all 3 cards (Guidelines, Budget, Outcomes)</step>
+    <step order="7">Verify text displays correctly for various grade values</step>
+    <step order="8">Update TASK-INDEX.md: change task 034 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="typescript">Implement template logic</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/visual-host/components/ReportCardMetric.tsx (updated)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Template Substitution">
+      <steps>
+        <step>Open matter with Guidelines grade=0.95</step>
+        <step>Verify text reads: "You have an 95% in Guideline compliance"</step>
+        <step>Open matter with Budget grade=0.75</step>
+        <step>Verify text reads: "You have an 75% in Budget compliance"</step>
+      </steps>
+      <expected>Contextual text displays correct interpolated values</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given grade=0.95 and area="Guideline", when rendering contextual text, then text is "You have an 95% in Guideline compliance"</criterion>
+    <criterion testable="true">Given grade=0.75 and area="Budget", when rendering contextual text, then text is "You have an 75% in Budget compliance"</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference: spec-r1.md FR-08 for contextual text specification
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

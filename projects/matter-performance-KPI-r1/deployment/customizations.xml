@@ -1,0 +1,38 @@
+<ImportExportXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" OrganizationVersion="9.2.26014.139" OrganizationSchemaType="Standard" CRMServerServiceabilityVersion="9.2.26014.00142">
+  <Entities>
+    <Entity>
+      <Name LocalizedName="KPI Assessment" OriginalName="KPI Assessment">sprk_KPIAssessment</Name>
+      <EntityInfo>
+        <entity Name="sprk_KPIAssessment" unmodified="1">
+          <attributes />
+        </entity>
+      </EntityInfo>
+      <RibbonDiffXml>
+        <CustomActions />
+        <Templates>
+          <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+        </Templates>
+        <CommandDefinitions />
+        <RuleDefinitions>
+          <TabDisplayRules />
+          <DisplayRules />
+          <EnableRules />
+        </RuleDefinitions>
+        <LocLabels />
+      </RibbonDiffXml>
+    </Entity>
+  </Entities>
+  <Roles></Roles>
+  <Workflows></Workflows>
+  <FieldSecurityProfiles></FieldSecurityProfiles>
+  <Templates />
+  <EntityMaps />
+  <EntityRelationships />
+  <OrganizationSettings />
+  <optionsets />
+  <CustomControls />
+  <EntityDataProviders />
+  <Languages>
+    <Language>1033</Language>
+  </Languages>
+</ImportExportXml>

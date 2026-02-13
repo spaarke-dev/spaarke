@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Configure Trend Cards for 3 Areas</title>
+    <phase>4: Report Card Tab</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>041,042</dependencies>
+    <blocks>050</blocks>
+    <tags>visualhost, frontend, config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration task creating trend card instances</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Configure 3 Trend Card instances on Report Card tab for Guidelines, Budget, and Outcomes with data bindings.</prompt>
+  <role>SPAARKE platform developer with VisualHost configuration expertise.</role>
+  <goal>Deploy 3 trend cards showing historical averages, sparklines, and trend indicators.</goal>
+
+  <context>
+    <background>Trend cards appear above subgrid, bind to average fields and trend data from API.</background>
+    <relevant-files>
+      <file>src/client/shared/visual-host/configurations/matter-reportcard-tab.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">Bind to sprk_{area}compliancegrade_average fields</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/visual-host/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create configuration for 3 trend cards</step>
+    <step order="2">Configure data bindings for each area</step>
+    <step order="3">Position cards above subgrid</step>
+    <step order="4">Test rendering</step>
+    <step order="5">Update TASK-INDEX.md status to ✅</step>
+  </steps>
+
+  <tools><tool name="typescript">Configure cards</tool></tools>
+  <outputs><output type="code">src/client/shared/visual-host/configurations/matter-reportcard-tab.ts</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given matter with assessments, when viewing Report Card tab, then 3 trend cards appear with correct data</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec-r1.md FR-09</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

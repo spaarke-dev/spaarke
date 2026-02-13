@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Deploy Phase 1 to Dataverse</title>
+    <phase>1: Data Model</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks>010,020,044</blocks>
+    <tags>deploy, dataverse, solution</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with explicit deployment procedures from dataverse-deploy skill</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment task must complete before subsequent phases can proceed</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Deploy Phase 1 Dataverse customizations (sprk_kpiassessment entity, 6 grade fields on sprk_matter, Quick Create form) to development environment.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in Dataverse solution deployment and PAC CLI usage.
+  </role>
+
+  <goal>
+    Successfully deploy all Phase 1 customizations to Dataverse so Phase 2 calculator API can query entities and Phase 3/4 UI can display data.
+  </goal>
+
+  <context>
+    <background>
+      Phase 1 artifacts (tasks 001-005) create entity schema and forms but do NOT deploy. This task uses PAC CLI to import the solution to Dataverse development environment. After deployment, KPI Assessment entity will be queryable by API (Phase 2) and visible in UI (Phase 3/4).
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeSolution/</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="dataverse-deploy">MUST use pac solution import command</constraint>
+    <constraint source="dataverse-deploy">MUST publish customizations after import</constraint>
+    <constraint source="project">Deploy to development environment only (not production)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load dataverse-deploy skill for deployment procedures</step>
+    <step order="2">Authenticate to Dataverse development environment (pac auth create)</step>
+    <step order="3">Export Spaarke solution from source (pac solution export)</step>
+    <step order="4">Import solution to development environment (pac solution import)</step>
+    <step order="5">Publish customizations (pac solution publish)</step>
+    <step order="6">Verify deployment: Check sprk_kpiassessment entity exists in Dataverse</step>
+    <step order="7">Verify deployment: Check sprk_matter entity has 6 new grade fields</step>
+    <step order="8">Verify deployment: Check Quick Create form is accessible</step>
+    <step order="9">Test Quick Create form: Open form, verify all 5 fields appear, save test record</step>
+    <step order="10">Update TASK-INDEX.md: change task 006 status to ✅ completed</step>
+    <step order="11">Document any deployment issues in projects/matter-performance-KPI-r1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run pac CLI commands for solution deployment</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">Phase 1 customizations deployed to Dataverse development environment</output>
+    <output type="verification">Deployment verification report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the solution is imported, when querying Dataverse, then sprk_kpiassessment entity exists with all 7 fields.
+    </criterion>
+    <criterion testable="true">
+      Given the solution is imported, when querying sprk_matter entity, then 6 new grade fields are visible.
+    </criterion>
+    <criterion testable="true">
+      Given the Quick Create form, when launched from subgrid, then form opens with 5 fields and can save records.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Implementation hints:
+    - Follow dataverse-deploy skill procedures exactly (auth, export, import, publish)
+    - If deployment fails, check PAC CLI logs for errors
+    - After deployment, Phase 2 can proceed (calculator API will query these entities)
+    - After deployment, Phase 5 research can start in parallel (task 020)
+    - Verify deployment in Power Apps maker portal (https://make.powerapps.com)
+
+    Reference: .claude/skills/dataverse-deploy/SKILL.md for complete deployment procedure
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in <knowledge><files>.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+      MANDATORY: Load dataverse-deploy skill for deployment procedures.
+    </protocol>
+  </execution>
+</task>

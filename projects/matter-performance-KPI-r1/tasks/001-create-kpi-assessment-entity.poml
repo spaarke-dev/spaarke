@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Create KPI Assessment Entity</title>
+    <phase>1: Data Model</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002,003,004,005</blocks>
+    <tags>dataverse, solution, fields</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task will create new Dataverse entity (new files/resources), has explicit constraints from ADRs</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the `sprk_kpiassessment` Dataverse entity with all required fields for manual KPI assessment entry. This entity stores individual KPI assessments entered by users via the Quick Create form.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in Dataverse entity design and solution customization.
+  </role>
+
+  <goal>
+    Deploy `sprk_kpiassessment` entity to Dataverse with 7 fields (matter lookup, performance area, KPI name, criteria, grade, notes, createdon).
+  </goal>
+
+  <context>
+    <background>
+      R1 MVP requires manual KPI assessment entry. Users will assess matter performance across three areas (Guidelines, Budget, Outcomes) using a Quick Create form. Each assessment creates one `sprk_kpiassessment` record linked to a matter.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeSolution/sprk_kpiassessment.xml</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">Entity MUST have fields: sprk_matter (Lookup), sprk_performancearea (Choice), sprk_kpiname (Text), sprk_assessmentcriteria (Multiline Text), sprk_grade (Choice), sprk_assessmentnotes (Multiline Text)</constraint>
+    <constraint source="spec-r1">Choice field sprk_performancearea MUST have 3 options: Guidelines (value 1), Budget (value 2), Outcomes (value 3)</constraint>
+    <constraint source="spec-r1">Choice field sprk_grade MUST have 10 options with decimal values: A+ (1.00), A (0.95), B+ (0.90), B (0.85), C+ (0.80), C (0.75), D+ (0.70), D (0.65), F (0.60), No Grade (0.00)</constraint>
+    <constraint source="project">Use standard Dataverse field types (no custom option sets unless necessary)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Dataverse solution customization XML for sprk_kpiassessment entity</step>
+    <step order="2">Define primary key field (sprk_kpiassessmentid)</step>
+    <step order="3">Add sprk_matter lookup field (references sprk_matter entity)</step>
+    <step order="4">Add sprk_performancearea choice field (Guidelines=1, Budget=2, Outcomes=3)</step>
+    <step order="5">Add sprk_kpiname text field (max 200 characters)</step>
+    <step order="6">Add sprk_assessmentcriteria multiline text field</step>
+    <step order="7">Add sprk_grade choice field (10 options with decimal values as per spec)</step>
+    <step order="8">Add sprk_assessmentnotes multiline text field</step>
+    <step order="9">Configure entity metadata (display name, plural name, ownership type)</step>
+    <step order="10">Update TASK-INDEX.md: change task 001 status to ✅ completed</step>
+    <step order="11">Document any deviations in projects/matter-performance-KPI-r1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run pac commands for solution management</tool>
+    <tool name="xml-editor">Edit Dataverse solution customization XML</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution-xml">src/solutions/SpaarkeSolution/Entities/sprk_kpiassessment.xml</output>
+    <output type="code">Entity customization XML ready for deployment</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the entity XML is created, when imported to Dataverse, then sprk_kpiassessment entity exists with all 7 fields.
+    </criterion>
+    <criterion testable="true">
+      Given the sprk_performancearea field, when viewing in Dataverse, then 3 options are available: Guidelines, Budget, Outcomes.
+    </criterion>
+    <criterion testable="true">
+      Given the sprk_grade field, when viewing in Dataverse, then 10 options are available with correct decimal values (A+=1.00 through No Grade=0.00).
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Implementation hints:
+    - Use standard entity creation process (Power Apps maker portal or PAC CLI)
+    - Do NOT deploy yet - deployment happens in task 006 after all Phase 1 entities/forms are ready
+    - Ensure sprk_matter lookup field has correct relationship (N:1 to sprk_matter)
+    - Grade choice field decimal values are critical for calculation logic in Phase 2
+
+    Reference: spec-r1.md FR-01 for complete field specifications
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in <knowledge><files>.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

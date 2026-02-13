@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Project Wrap-up</title>
+    <phase>Wrap-up</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>055</dependencies>
+    <blocks>none</blocks>
+    <tags>wrap-up, documentation, cleanup</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task runs code-review + adr-check quality gates and repo-cleanup</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Complete project wrap-up: run final quality gates (code-review, adr-check), update README/PLAN status to Complete, run repo-cleanup, document lessons learned.</prompt>
+  <role>SPAARKE platform developer with project management expertise.</role>
+  <goal>Close out project cleanly with all quality gates passed, documentation updated, and repository cleaned.</goal>
+
+  <context>
+    <background>Final task ensures project is production-ready with all quality checks passed and documentation current.</background>
+    <relevant-files>
+      <file>projects/matter-performance-KPI-r1/README.md</file>
+      <file>projects/matter-performance-KPI-r1/plan-r1.md</file>
+      <file>projects/matter-performance-KPI-r1/notes/lessons-learned.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="task-create">MANDATORY: Run /code-review on all project code</constraint>
+    <constraint source="task-create">MANDATORY: Run /adr-check on all project code</constraint>
+    <constraint source="task-create">MANDATORY: Run /repo-cleanup projects/matter-performance-KPI-r1</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run /code-review on all project code (identify remaining issues)</step>
+    <step order="2">Run /adr-check on all project code (validate architecture compliance)</step>
+    <step order="3">Fix any critical issues from quality gates</step>
+    <step order="4">Run /repo-cleanup projects/matter-performance-KPI-r1 (audit and clean ephemeral files)</step>
+    <step order="5">Review cleanup report and approve removals</step>
+    <step order="6">Update README.md: Status=Complete, Phase=Complete, Progress=100%, add Completed Date, check all Graduation Criteria</step>
+    <step order="7">Update plan-r1.md: Status=Complete, all milestone statuses to ✅</step>
+    <step order="8">Create notes/lessons-learned.md if notable insights</step>
+    <step order="9">Verify all task files in TASK-INDEX.md marked completed</step>
+    <step order="10">Update TASK-INDEX.md: change task 090 status to ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="code-review">Run final quality gates</tool>
+    <tool name="repo-cleanup">Clean up ephemeral files</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/matter-performance-KPI-r1/README.md (updated to Complete)</output>
+    <output type="docs">projects/matter-performance-KPI-r1/plan-r1.md (updated to Complete)</output>
+    <output type="docs">projects/matter-performance-KPI-r1/notes/lessons-learned.md (created if needed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given code-review runs, when complete, then no critical issues remain</criterion>
+    <criterion testable="true">Given adr-check runs, when complete, then all ADR constraints validated</criterion>
+    <criterion testable="true">Given repo-cleanup runs, when complete, then ephemeral files cleaned and repository structure validated</criterion>
+    <criterion testable="true">Given README.md, when viewed, then Status=Complete and all Graduation Criteria checked</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the MANDATORY final task for every project. Ensures quality gates passed and clean project closure.
+    Reference: task-create skill Step 3.7 for wrap-up task requirements.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      MANDATORY: Load code-review, adr-check, and repo-cleanup skills before starting.
+      Follow all quality gate procedures exactly.
+    </protocol>
+  </execution>
+</task>

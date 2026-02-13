@@ -248,6 +248,10 @@ builder.Services.AddAuthorization(options =>
     });
 });
 
+// Scorecard Calculator Service - Matter performance KPI calculation (matter-performance-KPI-r1 project)
+// Scoped: each request gets its own instance; depends on IDataverseService (Singleton) + ILogger
+builder.Services.AddScoped<Sprk.Bff.Api.Services.ScorecardCalculatorService>();
+
 // Documents module (endpoints + filters)
 builder.Services.AddDocumentsModule();
 
@@ -1665,6 +1669,9 @@ app.MapFieldMappingEndpoints();
 
 // Event endpoints (Events and Workflow Automation R1 project)
 app.MapEventEndpoints();
+
+// Scorecard calculator endpoints (Matter Performance KPI R1 project)
+app.MapScorecardCalculatorEndpoints();
 
 // Analysis endpoints (if enabled)
 if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&

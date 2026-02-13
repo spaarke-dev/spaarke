@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Configure Outcomes Card</title>
+    <phase>3: Main Tab Cards</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>022,016</dependencies>
+    <blocks>033</blocks>
+    <tags>visualhost, frontend, config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task will create new configuration/integration code</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Configure Outcomes Report Card metric card on matter main form: bind to sprk_outcomecompliancegrade_current field, set icon, configure contextual text.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with VisualHost and Dataverse form configuration expertise.
+  </role>
+
+  <goal>
+    Deploy Outcomes card on matter main tab displaying current outcome compliance grade with color coding.
+  </goal>
+
+  <context>
+    <background>
+      Third of 3 metric cards. Card displays current outcome grade and contextual text: "You have an X% in Outcomes compliance".
+    </background>
+    <relevant-files>
+      <file>src/client/shared/visual-host/configurations/matter-main-cards.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">Field binding: sprk_outcomecompliancegrade_current</constraint>
+    <constraint source="spec-r1">Contextual text: "You have an {grade}% in Outcomes compliance"</constraint>
+    <constraint source="spec-r1">Icon: Target/Outcomes icon</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/shared/visual-host/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add Outcomes card configuration to matter-main-cards.ts</step>
+    <step order="2">Set props: areaName="Outcomes", icon="Target", gradeField="sprk_outcomecompliancegrade_current"</step>
+    <step order="3">Set contextTemplate="You have an {grade}% in Outcomes compliance"</step>
+    <step order="4">Test card renders on matter main form</step>
+    <step order="5">Verify data binding</step>
+    <step order="6">Update TASK-INDEX.md: change task 032 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="typescript">Configure card</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/visual-host/configurations/matter-main-cards.ts (updated)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Card Renders">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter</url>
+      <steps>
+        <step>Navigate to Matter form</step>
+        <step>Verify Outcomes card appears on main tab</step>
+      </steps>
+      <expected>Outcomes card renders correctly</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given matter with Outcomes grade=0.60, when viewing main form, then Outcomes card displays "F" with red color</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with tasks 030 and 031 (Group B).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

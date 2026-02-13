@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Report Card Tab - Matter Entity Form
+
+  Purpose: Displays KPI assessment history in a subgrid.
+  Entity: sprk_matter (parent)
+  Related Entity: sprk_kpiassessment (child via sprk_matter lookup)
+
+  Task: 044 - Configure KPI Assessments Subgrid
+  Project: matter-performance-KPI-r1
+  Spec: FR-10
+
+  Columns:
+    - Performance Area (sprk_performancearea) - Choice field
+    - KPI Name (sprk_kpiname) - Text field
+    - Grade (sprk_grade) - Choice field
+    - Created On (createdon) - DateTime
+    - Assessment Notes (sprk_assessmentnotes) - Multiline text (preview)
+
+  Sort: Created On DESC (most recent first)
+
+  Note: This XML defines the subgrid configuration. Trend cards (Tasks 040-043)
+  will be added above this subgrid in a future task.
+-->
+<tab name="tab_reportcard" id="{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}" IsUserDefined="1" locklevel="0" showlabel="true" expanded="true">
+  <labels>
+    <label description="Report Card" languagecode="1033" />
+  </labels>
+  <columns>
+    <column width="100%">
+      <sections>
+        <!-- Trend Cards Section (placeholder for tasks 040-043) -->
+        <section name="sec_reportcard_trends" showlabel="true" showbar="false" locklevel="0" id="{B2C3D4E5-F6A7-8901-BCDE-F12345678901}" IsUserDefined="1" columns="3">
+          <labels>
+            <label description="Performance Trends" languagecode="1033" />
+          </labels>
+          <rows>
+            <row>
+              <!-- Placeholder cells for 3 trend VisualHost cards -->
+              <cell id="{C3D4E5F6-A7B8-9012-CDEF-123456789012}">
+                <labels>
+                  <label description="Guidelines Trend" languagecode="1033" />
+                </labels>
+              </cell>
+              <cell id="{D4E5F6A7-B8C9-0123-DEFA-234567890123}">
+                <labels>
+                  <label description="Budget Trend" languagecode="1033" />
+                </labels>
+              </cell>
+              <cell id="{E5F6A7B8-C9D0-1234-EFAB-345678901234}">
+                <labels>
+                  <label description="Outcomes Trend" languagecode="1033" />
+                </labels>
+              </cell>
+            </row>
+          </rows>
+        </section>
+
+        <!-- KPI Assessments Subgrid Section -->
+        <section name="sec_reportcard_assessments" showlabel="true" showbar="false" locklevel="0" id="{F6A7B8C9-D0E1-2345-FABC-456789012345}" IsUserDefined="1" columns="1">
+          <labels>
+            <label description="KPI Assessments" languagecode="1033" />
+          </labels>
+          <rows>
+            <row>
+              <cell id="{A7B8C9D0-E1F2-3456-ABCD-567890123456}" showlabel="false" colspan="1">
+                <labels>
+                  <label description="KPI Assessments" languagecode="1033" />
+                </labels>
+                <control id="subgrid_kpiassessments" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}" indicationOfSubgrid="true">
+                  <parameters>
+                    <TargetEntityType>sprk_kpiassessment</TargetEntityType>
+                    <EnableQuickFind>true</EnableQuickFind>
+                    <EnableViewPicker>false</EnableViewPicker>
+                    <ViewId>{00000000-0000-0000-0000-000000000000}</ViewId>
+                    <IsUserView>false</IsUserView>
+                    <RelationshipName>sprk_matter_kpiassessments</RelationshipName>
+                    <AutoExpand>Fixed</AutoExpand>
+                    <RecordsPerPage>10</RecordsPerPage>
+                    <EnableChartPicker>false</EnableChartPicker>
+                  </parameters>
+                </control>
+              </cell>
+            </row>
+          </rows>
+        </section>
+      </sections>
+    </column>
+  </columns>
+</tab>

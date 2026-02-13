@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Implement Linear Regression Logic</title>
+    <phase>4: Report Card Tab</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>043</blocks>
+    <tags>frontend, react, math</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task will create new calculation logic (code implementation)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement linear regression calculation to determine trend direction: calculate slope from last 5 grades, return trend indicator (↑ improving, ↓ declining, → stable).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with statistical calculation expertise.
+  </role>
+
+  <goal>
+    Add trend direction calculation to Trend Card: analyze last 5 grades using linear regression, determine if trend is improving/declining/stable.
+  </goal>
+
+  <context>
+    <background>
+      Linear regression calculates slope of last 5 assessment grades. Positive slope = improving (↑), negative slope = declining (↓), near-zero slope = stable (→).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/visual-host/utils/trendAnalysis.ts</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">Threshold: slope > 0.02 = improving, slope < -0.02 = declining, else stable</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/visual-host/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create trendAnalysis.ts utility file</step>
+    <step order="2">Implement calculateLinearRegression function (least squares method)</step>
+    <step order="3">Calculate slope from last 5 grades</step>
+    <step order="4">Implement getTrendDirection function (slope → "up"|"down"|"flat")</step>
+    <step order="5">Integrate into TrendCard component</step>
+    <step order="6">Write unit tests for linear regression logic</step>
+    <step order="7">Update TASK-INDEX.md: change task 042 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="typescript">Implement calculation logic</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/visual-host/utils/trendAnalysis.ts</output>
+    <output type="test">src/client/shared/visual-host/utils/trendAnalysis.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given grades=[0.85,0.88,0.90,0.92,0.95], when calculating trend, then direction="up"</criterion>
+    <criterion testable="true">Given grades=[0.95,0.92,0.90,0.88,0.85], when calculating trend, then direction="down"</criterion>
+    <criterion testable="true">Given grades=[0.90,0.89,0.90,0.91,0.90], when calculating trend, then direction="flat"</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference: spec-r1.md FR-09 for trend calculation specification
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

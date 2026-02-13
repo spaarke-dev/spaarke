@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Create Web Resource Trigger</title>
+    <phase>2: Calculator API</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>015</blocks>
+    <tags>dataverse, javascript, webresource</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task will create JavaScript code file for web resource trigger</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create JavaScript web resource sprk_kpiassessment_quickcreate.js with OnSave event handler that calls calculator API after KPI assessment save completes.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in Dataverse JavaScript web resources and Xrm API.
+  </role>
+
+  <goal>
+    Deploy web resource that triggers calculator API asynchronously after Quick Create form save, then refreshes parent Matter form to show updated grades.
+  </goal>
+
+  <context>
+    <background>
+      Web resource is registered on Quick Create form (task 005). OnSave event fires after record save completes. Web resource extracts matter ID, calls calculator API, and refreshes parent form.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeSolution/WebResources/sprk_kpiassessment_quickcreate.js</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">MUST use addOnPostSave event (ensures save completes before API call)</constraint>
+    <constraint source="spec-r1">API call: POST /api/matters/{matterId}/recalculate-grades</constraint>
+    <constraint source="spec-r1">MUST refresh parent form: window.parent.Xrm.Page.data.refresh(false)</constraint>
+    <constraint source="NFR-03">Form save MUST NOT be blocked by API failure (async, non-blocking)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create sprk_kpiassessment_quickcreate.js in solution WebResources folder</step>
+    <step order="2">Add OnLoad event handler to register OnPostSave event</step>
+    <step order="3">In OnPostSave handler, extract Matter ID from sprk_matter lookup field</step>
+    <step order="4">Call calculator API using fetch: POST /api/matters/{matterId}/recalculate-grades</step>
+    <step order="5">On API success, refresh parent form: window.parent.Xrm.Page.data.refresh(false)</step>
+    <step order="6">Log API call to browser console for debugging</step>
+    <step order="7">Register web resource on Quick Create form (update form XML from task 005)</step>
+    <step order="8">Update TASK-INDEX.md: change task 014 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="javascript">Write JavaScript web resource</tool>
+    <tool name="xml-editor">Update form XML to register web resource</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeSolution/WebResources/sprk_kpiassessment_quickcreate.js</output>
+    <output type="solution-xml">src/solutions/SpaarkeSolution/Forms/sprk_kpiassessment_quickcreate.xml (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given Quick Create form is saved, when OnPostSave fires, then API is called with correct matter ID</criterion>
+    <criterion testable="true">Given API call succeeds, when response returns, then parent form refreshes automatically</criterion>
+    <criterion testable="true">Given API call is in progress, when form closes, then form close is NOT blocked</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference: spec-r1.md FR-07 for web resource specification. Error handling added in task 015.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

@@ -772,3 +772,19 @@ public static class RegardingRecordType
         _ => null
     };
 }
+
+/// <summary>
+/// Lightweight record returned by KPI assessment queries.
+/// Contains only the fields needed for scorecard calculations.
+/// </summary>
+public class KpiAssessmentRecord
+{
+    /// <summary>Assessment record ID.</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Grade choice value from sprk_kpigradescore (e.g. 100000000=A+, 100000001=A, 100000003=B, 100000005=C, 100000008=F, 100000009=No Grade).</summary>
+    public int Grade { get; set; }
+
+    /// <summary>Record creation timestamp (used for ordering).</summary>
+    public DateTime CreatedOn { get; set; }
+}

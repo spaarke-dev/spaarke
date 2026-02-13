@@ -441,4 +441,25 @@ public interface IDataverseService
         KeyAttributeCollection alternateKeyValues,
         string[]? columns = null,
         CancellationToken ct = default);
+
+    // ========================================
+    // KPI Assessment Operations (Matter Performance KPI R1)
+    // ========================================
+
+    /// <summary>
+    /// Query KPI assessments for a parent record (matter or project), optionally filtered by performance area.
+    /// Returns assessments ordered by createdon descending (most recent first).
+    /// </summary>
+    /// <param name="parentId">Parent record ID (matter or project)</param>
+    /// <param name="parentLookupField">Lookup field name on sprk_kpiassessment (e.g., "sprk_matter" or "sprk_project")</param>
+    /// <param name="performanceArea">Optional performance area filter (100000000=Guidelines, 100000001=Budget, 100000002=Outcomes)</param>
+    /// <param name="top">Maximum number of records to return (0 = all)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Array of KPI assessment records ordered by createdon descending</returns>
+    Task<KpiAssessmentRecord[]> QueryKpiAssessmentsAsync(
+        Guid parentId,
+        string parentLookupField = "sprk_matter",
+        int? performanceArea = null,
+        int top = 0,
+        CancellationToken ct = default);
 }

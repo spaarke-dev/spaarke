@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Research VisualHost Card Types</title>
+    <phase>5: VisualHost Enhancement</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>006</dependencies>
+    <blocks>021</blocks>
+    <tags>research, visualhost, frontend</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Research task (no code implementation), investigation and documentation only</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Research existing VisualHost metric card types to determine if Report Card metric card can extend existing component or requires new card type.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in VisualHost component library and React component architecture.
+  </role>
+
+  <goal>
+    Complete research report documenting existing metric card capabilities and recommendation: extend existing or create new card type for Report Card metrics.
+  </goal>
+
+  <context>
+    <background>
+      Report Card metric cards need: icon, large letter grade, color coding (blue/yellow/red), contextual text below. Research must determine if existing VisualHost metric cards support these features or if new component needed.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/visual-host/</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent UI v9 (no hard-coded colors, dark mode required)</constraint>
+    <constraint source="spec-r1">Card must support: area icon, letter grade display, color coding by range, contextual text template</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/visual-host/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Explore src/client/shared/visual-host/ directory structure</step>
+    <step order="2">Identify existing metric card components</step>
+    <step order="3">Review existing card capabilities (layout, styling, data binding)</step>
+    <step order="4">Assess if existing cards support: icon display, grade display, color coding, contextual text</step>
+    <step order="5">Document findings in research report</step>
+    <step order="6">Provide recommendation: Option A (extend existing) or Option B (create new)</step>
+    <step order="7">Save research report to projects/matter-performance-KPI-r1/notes/visualhost-card-research.md</step>
+    <step order="8">Update TASK-INDEX.md: change task 020 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="file-explorer">Browse VisualHost component library</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/matter-performance-KPI-r1/notes/visualhost-card-research.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given research report, when reviewed, then it contains analysis of existing metric card types</criterion>
+    <criterion testable="true">Given recommendation, when reviewed, then it provides clear guidance: extend existing or create new</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task can run in parallel with Phase 4 tasks (040-047). Reference: spec-r1.md FR-11 for card requirements.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

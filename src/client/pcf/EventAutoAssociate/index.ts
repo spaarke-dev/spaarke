@@ -57,7 +57,7 @@ const DENORMALIZED_FIELDS = {
 let entityConfigs: EntityLookupConfig[] | null = null;
 
 // Cache for Record Type lookups
-const recordTypeCache: Map<string, { id: string; name: string }> = new Map();
+const recordTypeCache = new Map<string, { id: string; name: string }>();
 
 /**
  * Get Xrm.Page from parent window (PCF runs in iframe)
@@ -418,7 +418,7 @@ async function completeAutoDetectedAssociation(
 export class EventAutoAssociate implements ComponentFramework.StandardControl<IInputs, IOutputs> {
     private container: HTMLDivElement | null = null;
     private context: ComponentFramework.Context<IInputs> | null = null;
-    private hasRun: boolean = false;
+    private hasRun = false;
 
     constructor() {
         // Constructor

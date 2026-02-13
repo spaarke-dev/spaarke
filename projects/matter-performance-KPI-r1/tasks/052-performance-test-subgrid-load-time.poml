@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Performance Test Subgrid Load Time</title>
+    <phase>6: Testing & Polish</phase>
+    <status>completed</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>045</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, performance</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing'</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Test subgrid load performance with 100 assessment records, verify load time < 2 seconds.</prompt>
+  <role>SPAARKE platform developer with UI performance testing expertise.</role>
+  <goal>Validate subgrid meets NFR-02 performance requirement (< 2s load time with 100 records).</goal>
+
+  <context>
+    <background>Subgrid must load quickly even with many assessments. Performance test validates load time at scale.</background>
+    <relevant-files>
+      <file>tests/performance/SubgridPerformanceTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-02">Subgrid load time MUST be < 2 seconds for 100 assessments</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create test matter with 100 KPI assessment records</step>
+    <step order="2">Measure subgrid load time on Report Card tab</step>
+    <step order="3">Verify load time < 2 seconds</step>
+    <step order="4">Document results</step>
+    <step order="5">Update TASK-INDEX.md status to ✅</step>
+  </steps>
+
+  <tools><tool name="browser">Measure page load performance</tool></tools>
+  <outputs><output type="report">Subgrid load time measurement results</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given matter with 100 assessments, when loading Report Card tab, then subgrid loads in < 2 seconds</criterion>
+  </acceptance-criteria>
+
+  <notes>Parallel-safe with tasks 051, 053 (Group C). Reference: spec-r1.md NFR-02</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

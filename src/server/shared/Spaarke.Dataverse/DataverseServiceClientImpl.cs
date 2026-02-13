@@ -1690,6 +1690,57 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
     }
 
+    // ========================================
+    // KPI Assessment Operations (Matter Performance KPI R1)
+    // ========================================
+
+    public async Task<KpiAssessmentRecord[]> QueryKpiAssessmentsAsync(
+        Guid parentId,
+        string parentLookupField = "sprk_matter",
+        int? performanceArea = null,
+        int top = 0,
+        CancellationToken ct = default)
+    {
+        _logger.LogDebug(
+            "Querying KPI assessments for {ParentField}={ParentId}, area={Area}, top={Top}",
+            parentLookupField, parentId, performanceArea, top);
+
+        var query = new QueryExpression("sprk_kpiassessment")
+        {
+            ColumnSet = new ColumnSet("sprk_kpigradescore", "createdon"),
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression(parentLookupField, ConditionOperator.Equal, parentId)
+                }
+            },
+            Orders = { new OrderExpression("createdon", OrderType.Descending) }
+        };
+
+        if (performanceArea.HasValue)
+        {
+            query.Criteria.Conditions.Add(
+                new ConditionExpression("sprk_performancearea", ConditionOperator.Equal, performanceArea.Value));
+        }
+
+        if (top > 0)
+        {
+            query.TopCount = top;
+        }
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+
+        return results.Entities
+            .Select(e => new KpiAssessmentRecord
+            {
+                Id = e.Id,
+                Grade = e.GetAttributeValue<OptionSetValue>("sprk_kpigradescore")?.Value ?? 0,
+                CreatedOn = e.GetAttributeValue<DateTime>("createdon")
+            })
+            .ToArray();
+    }
+
     public void Dispose()
     {
         if (!_disposed)

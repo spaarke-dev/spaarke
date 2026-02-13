@@ -62,7 +62,7 @@ interface PushMappingsResponse {
     totalRecords: number;
     updatedRecords: number;
     failedRecords: number;
-    errors: Array<{ recordId: string; error: string }>;
+    errors: { recordId: string; error: string }[];
 }
 
 type UpdateState = "idle" | "loading" | "success" | "error";

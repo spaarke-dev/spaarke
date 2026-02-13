@@ -2,7 +2,7 @@
 <manifest>
   <control namespace="Spaarke.Visuals"
            constructor="VisualHost"
-           version="1.2.29"
+           version="1.2.33"
            display-name-key="Visual Host"
            description-key="Configuration-driven visualization control for charts, cards, and calendars"
            control-type="standard">
@@ -70,6 +70,14 @@
               display-name-key="Columns"
               description-key="Number of cards per row in MetricCard matrix layout. Card width = (container width - gaps) / columns. Default: auto based on data count."
               of-type="Whole.None"
+              usage="input"
+              required="false" />
+
+    <!-- Optional: Value format override for per-placement flexibility (v1.2.33) -->
+    <property name="valueFormatOverride"
+              display-name-key="Value Format Override"
+              description-key="Override chart definition value format for this placement. Values: shortNumber, letterGrade, percentage, wholeNumber, decimal, currency."
+              of-type="SingleLine.Text"
               usage="input"
               required="false" />
 

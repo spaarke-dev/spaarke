@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Document Card Type Configuration</title>
+    <phase>5: VisualHost Enhancement</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task (no code implementation)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Document Report Card metric card configuration: props API, usage examples, color coding rules, integration with VisualHost framework.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with technical writing expertise.
+  </role>
+
+  <goal>
+    Create comprehensive documentation for Report Card metric card so other developers can configure cards for Phase 3 tasks (030-032).
+  </goal>
+
+  <context>
+    <background>
+      Phase 3 tasks (030-032) will configure 3 instances of Report Card metric card. Documentation must explain props, color coding, and integration.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/visual-host/components/ReportCardMetric.tsx</file>
+      <file>projects/matter-performance-KPI-r1/notes/report-card-component-usage.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Documentation must include: props API reference, usage examples, color coding table</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/visual-host/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create documentation file: report-card-component-usage.md</step>
+    <step order="2">Document props interface with descriptions and types</step>
+    <step order="3">Provide usage examples for all 3 areas (Guidelines, Budget, Outcomes)</step>
+    <step order="4">Document color coding rules (grade ranges → colors)</step>
+    <step order="5">Document contextual text template syntax</step>
+    <step order="6">Add troubleshooting section (common issues)</step>
+    <step order="7">Update TASK-INDEX.md: change task 023 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="markdown">Create documentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/matter-performance-KPI-r1/notes/report-card-component-usage.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given documentation, when reviewed, then props API is fully documented with types</criterion>
+    <criterion testable="true">Given usage examples, when reviewed, then examples cover all 3 performance areas</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This documentation enables Phase 3 implementation (tasks 030-032).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

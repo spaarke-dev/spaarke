@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Create Performance Area Choice Field</title>
+    <phase>1: Data Model</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>005</blocks>
+    <tags>dataverse, solution, config</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Configuration task (populating choice field options), no code implementation</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Populate the `sprk_performancearea` choice field on `sprk_kpiassessment` entity with 3 options: Guidelines, Budget, Outcomes.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in Dataverse configuration and choice field management.
+  </role>
+
+  <goal>
+    Configure `sprk_performancearea` choice field with 3 distinct options representing the performance areas for KPI assessment.
+  </goal>
+
+  <context>
+    <background>
+      Users will select one of these 3 performance areas when creating a KPI assessment via Quick Create form. This field determines which grade fields on Matter get updated (current + average for that area).
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeSolution/Entities/sprk_kpiassessment.xml</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">MUST have exactly 3 options: Guidelines (value 1), Budget (value 2), Outcomes (value 3)</constraint>
+    <constraint source="project">Option values MUST match the 3 performance areas defined in spec-r1.md</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open sprk_performancearea choice field definition in solution XML</step>
+    <step order="2">Add option: Guidelines (value=1, label="Guidelines")</step>
+    <step order="3">Add option: Budget (value=2, label="Budget")</step>
+    <step order="4">Add option: Outcomes (value=3, label="Outcomes")</step>
+    <step order="5">Verify option ordering and labels</step>
+    <step order="6">Update TASK-INDEX.md: change task 003 status to ✅ completed</step>
+    <step order="7">Document any deviations in projects/matter-performance-KPI-r1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="xml-editor">Edit Dataverse solution customization XML</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution-xml">src/solutions/SpaarkeSolution/Entities/sprk_kpiassessment.xml (updated)</output>
+    <output type="config">Performance Area choice field with 3 options configured</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the choice field is configured, when viewing in Dataverse, then 3 options are available: Guidelines, Budget, Outcomes.
+    </criterion>
+    <criterion testable="true">
+      Given the Quick Create form, when user clicks Performance Area dropdown, then all 3 options appear in correct order.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Implementation hints:
+    - Do NOT deploy yet - deployment happens in task 006
+    - Option order matters for user experience (Guidelines first, Outcomes last)
+    - These option labels will appear in Quick Create form dropdown
+
+    Reference: spec-r1.md FR-01 for Performance Area definition
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in <knowledge><files>.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

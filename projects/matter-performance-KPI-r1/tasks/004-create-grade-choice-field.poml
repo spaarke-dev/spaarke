@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Create Grade Choice Field</title>
+    <phase>1: Data Model</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>005</blocks>
+    <tags>dataverse, solution, config</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Configuration task (populating choice field with 10 grade options), no code implementation</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Populate the `sprk_grade` choice field on `sprk_kpiassessment` entity with 10 grade options (A+ through No Grade) with corresponding decimal values.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in Dataverse configuration and choice field management.
+  </role>
+
+  <goal>
+    Configure `sprk_grade` choice field with 10 options representing letter grades (A+ to F, plus No Grade) with decimal values for calculation.
+  </goal>
+
+  <context>
+    <background>
+      Users will select a grade when creating a KPI assessment. The decimal value (0.00 to 1.00) is used by the calculator API (Phase 2) to compute current grades and historical averages. Letter grades provide user-friendly labels.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeSolution/Entities/sprk_kpiassessment.xml</file>
+      <file>projects/matter-performance-KPI-r1/spec-r1.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-r1">MUST have 10 options with decimal values: A+ (1.00), A (0.95), B+ (0.90), B (0.85), C+ (0.80), C (0.75), D+ (0.70), D (0.65), F (0.60), No Grade (0.00)</constraint>
+    <constraint source="project">Decimal values MUST match spec exactly for correct color coding (Blue: 0.85-1.00, Yellow: 0.70-0.84, Red: 0.00-0.69)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open sprk_grade choice field definition in solution XML</step>
+    <step order="2">Add option: A+ (value=100, representing 1.00)</step>
+    <step order="3">Add option: A (value=95, representing 0.95)</step>
+    <step order="4">Add option: B+ (value=90, representing 0.90)</step>
+    <step order="5">Add option: B (value=85, representing 0.85)</step>
+    <step order="6">Add option: C+ (value=80, representing 0.80)</step>
+    <step order="7">Add option: C (value=75, representing 0.75)</step>
+    <step order="8">Add option: D+ (value=70, representing 0.70)</step>
+    <step order="9">Add option: D (value=65, representing 0.65)</step>
+    <step order="10">Add option: F (value=60, representing 0.60)</step>
+    <step order="11">Add option: No Grade (value=0, representing 0.00)</step>
+    <step order="12">Verify option ordering (A+ first, No Grade last)</step>
+    <step order="13">Update TASK-INDEX.md: change task 004 status to ✅ completed</step>
+    <step order="14">Document any deviations in projects/matter-performance-KPI-r1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="xml-editor">Edit Dataverse solution customization XML</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution-xml">src/solutions/SpaarkeSolution/Entities/sprk_kpiassessment.xml (updated)</output>
+    <output type="config">Grade choice field with 10 options configured</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the choice field is configured, when viewing in Dataverse, then 10 options are available with correct letter grades and decimal values.
+    </criterion>
+    <criterion testable="true">
+      Given the Quick Create form, when user clicks Grade dropdown, then all 10 options appear in correct order (A+ to No Grade).
+    </criterion>
+    <criterion testable="true">
+      Given the decimal values, when calculator API queries grades, then values align with color coding thresholds (Blue: 0.85-1.00, Yellow: 0.70-0.84, Red: 0.00-0.69).
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Implementation hints:
+    - Do NOT deploy yet - deployment happens in task 006
+    - Decimal values are stored as integers (100, 95, 90, ...) and divided by 100 in calculator logic
+    - OR store as actual decimals (1.00, 0.95, ...) depending on Dataverse choice field capabilities
+    - Verify that "No Grade" (0.00) is distinct from missing/null grades
+    - Color coding rules (Phase 3) depend on these exact decimal values
+
+    Reference: spec-r1.md FR-01 for complete Grade choice specification
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in <knowledge><files>.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

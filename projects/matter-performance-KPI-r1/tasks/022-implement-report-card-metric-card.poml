@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="matter-performance-KPI-r1">
+  <metadata>
+    <title>Implement Report Card Metric Card</title>
+    <phase>5: VisualHost Enhancement</phase>
+    <status>completed</status>
+    <estimated-hours>3-4</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>030,031,032</blocks>
+    <tags>pcf, react, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'pcf' (code implementation), will create/modify .tsx files</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement Report Card metric card React component with Fluent UI v9: icon, letter grade, color coding (blue/yellow/red), contextual text template.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer expert in React, TypeScript, Fluent UI v9, and VisualHost component development.
+  </role>
+
+  <goal>
+    Deploy Report Card metric card component to VisualHost library, ready for use in Phase 3 (main tab cards).
+  </goal>
+
+  <context>
+    <background>
+      Based on design from task 021, implement the React component. Component renders on matter main form, displays current grade with color coding, and uses Fluent UI v9 for dark mode compatibility.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/visual-host/components/ReportCardMetric.tsx</file>
+      <file>projects/matter-performance-KPI-r1/notes/report-card-component-design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent UI v9 components and design tokens</constraint>
+    <constraint source="ADR-021">MUST NOT use hard-coded colors (use semantic tokens)</constraint>
+    <constraint source="ADR-021">MUST support dark mode</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ReportCardMetric.tsx component in visual-host/components/</step>
+    <step order="2">Define props interface (IReportCardMetricProps)</step>
+    <step order="3">Implement grade-to-color mapping using Fluent UI v9 tokens</step>
+    <step order="4">Implement template substitution for contextual text</step>
+    <step order="5">Add icon rendering using Fluent UI Icon component</step>
+    <step order="6">Style component using makeStyles (Fluent UI v9 styling)</step>
+    <step order="7">Test component in both light and dark modes</step>
+    <step order="8">Export component from visual-host module</step>
+    <step order="9">Write component unit tests</step>
+    <step order="10">Update TASK-INDEX.md: change task 022 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/React project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/visual-host/components/ReportCardMetric.tsx</output>
+    <output type="test">src/client/shared/visual-host/components/ReportCardMetric.test.tsx</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Component Renders">
+      <steps>
+        <step>Open Storybook or test harness</step>
+        <step>Verify ReportCardMetric component renders with icon, grade, text</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Component renders without console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in test harness</step>
+        <step>Verify background colors adapt (blue/yellow/red use semantic tokens)</step>
+        <step>Verify text colors remain readable</step>
+        <step>Verify icon uses currentColor</step>
+      </steps>
+      <expected>All colors use Fluent UI v9 semantic tokens per ADR-021</expected>
+    </test>
+    <test name="Color Coding">
+      <steps>
+        <step>Test with grade=0.95 (A+): Verify blue color</step>
+        <step>Test with grade=0.75 (C): Verify yellow color</step>
+        <step>Test with grade=0.60 (F): Verify red color</step>
+      </steps>
+      <expected>Color coding matches spec: Blue (0.85-1.00), Yellow (0.70-0.84), Red (0.00-0.69)</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given component with grade=0.95, when rendered, then background/border is blue (Fluent UI semantic token)</criterion>
+    <criterion testable="true">Given component in dark mode, when rendered, then colors adapt correctly (no hard-coded colors)</criterion>
+    <criterion testable="true">Given contextTemplate="You have {grade}% in {area}", when rendered, then text shows interpolated values</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference: spec-r1.md FR-08, FR-11. Color ranges: Blue (0.85-1.00), Yellow (0.70-0.84), Red (0.00-0.69).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section. MANDATORY: Load PCF-V9-PACKAGING.md for packaging guidance.</protocol>
+  </execution>
+</task>

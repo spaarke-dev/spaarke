@@ -118,6 +118,10 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fetchXmlOverride = (context.parameters as any).fetchXmlOverride?.raw?.trim() || null;
 
+  // v1.2.33: Value format override per-placement
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const valueFormatOverride = (context.parameters as any).valueFormatOverride?.raw?.trim() || null;
+
   const showToolbar = context.parameters.showToolbar?.raw !== false;
   const enableDrillThrough = context.parameters.enableDrillThrough?.raw !== false;
   const height = context.parameters.height?.raw;
@@ -434,6 +438,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         onClickAction={hasClickAction(chartDefinition) ? handleClickAction : undefined}
         onViewListClick={chartDefinition.sprk_viewlisttabname ? handleViewListClick : undefined}
         fetchXmlOverride={fetchXmlOverride || undefined}
+        valueFormatOverride={valueFormatOverride || undefined}
         width={width || undefined}
         justification={justification || undefined}
         columns={columns || undefined}
@@ -463,7 +468,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
       )}
 
       {/* Version badge - lower left, unobtrusive */}
-      <span className={styles.versionBadge}>v1.2.29 • 2026-02-09</span>
+      <span className={styles.versionBadge}>v1.2.33 • 2026-02-12</span>
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>
