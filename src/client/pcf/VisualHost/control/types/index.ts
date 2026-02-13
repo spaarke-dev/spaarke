@@ -232,6 +232,10 @@ export interface ICardConfig {
   maxCards?: number;
   /** Use option set hex color as border accent and icon tint */
   accentFromOptionSet: boolean;
+  /** Show the color-coded left accent bar on cards (default: false) */
+  showAccentBar: boolean;
+  /** Font size for the matrix title (e.g., "14px", "16px") */
+  titleFontSize?: string;
   /** Map group labels to Fluent UI icon names */
   iconMap?: Record<string, string>;
   /** Value-based color threshold rules */

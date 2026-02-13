@@ -34,6 +34,7 @@ const DEFAULT_CONFIG: ICardConfig = {
   compact: false,
   showTitle: true,
   accentFromOptionSet: false,
+  showAccentBar: false,
 };
 
 /**
@@ -160,6 +161,10 @@ export function resolveCardConfig(
   const accentFromOptionSet = (json.accentFromOptionSet as boolean) ??
     (isReportCardMetric ? true : DEFAULT_CONFIG.accentFromOptionSet);
 
+  const showAccentBar = (json.showAccentBar as boolean) ?? DEFAULT_CONFIG.showAccentBar;
+
+  const titleFontSize = (json.titleFontSize as string | undefined) ?? undefined;
+
   // --- Icon Map ---
   const iconMap = (json.iconMap as Record<string, string> | undefined) ??
     (isReportCardMetric ? GRADE_ICON_MAP : undefined);
@@ -181,6 +186,8 @@ export function resolveCardConfig(
     showTitle,
     maxCards,
     accentFromOptionSet,
+    showAccentBar,
+    titleFontSize,
     iconMap,
     colorThresholds,
   };

@@ -275,21 +275,28 @@ const useStyles = makeStyles({
   },
   card: {
     display: "flex",
-    flexDirection: "column",
+    flexDirection: "row",
     boxSizing: "border-box",
     cursor: "default",
     transition: "box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out",
     padding: tokens.spacingVerticalS,
-    paddingLeft: `calc(${tokens.spacingHorizontalS} + 4px)`,
-    gap: tokens.spacingVerticalXXS,
+    paddingLeft: tokens.spacingHorizontalS,
+    gap: tokens.spacingHorizontalM,
     aspectRatio: "5 / 3",
     position: "relative",
     overflow: "hidden",
+    alignItems: "center",
+  },
+  cardWithAccentBar: {
+    paddingLeft: `calc(${tokens.spacingHorizontalS} + 4px)`,
   },
   cardCompact: {
     padding: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalXS,
+    gap: tokens.spacingHorizontalS,
+  },
+  cardCompactWithAccentBar: {
     paddingLeft: `calc(${tokens.spacingHorizontalXS} + 4px)`,
-    gap: "2px",
   },
   cardInteractive: {
     cursor: "pointer",
@@ -308,15 +315,19 @@ const useStyles = makeStyles({
     bottom: "0",
     width: "4px",
   },
-  cardHeader: {
+  cardContent: {
     display: "flex",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalS,
-    flexShrink: 0,
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXXS,
+    flexGrow: 1,
+    minWidth: 0,
   },
   iconSlot: {
-    fontSize: "20px",
+    fontSize: "28px",
     flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
   cardLabel: {
     fontSize: tokens.fontSizeBase200,
@@ -327,18 +338,11 @@ const useStyles = makeStyles({
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
-  cardValueContainer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexGrow: 1,
-  },
   cardValue: {
     fontSize: tokens.fontSizeHero700,
     fontWeight: tokens.fontWeightSemibold,
     lineHeight: tokens.lineHeightHero700,
     color: tokens.colorNeutralForeground1,
-    textAlign: "center",
   },
   cardValueLarge: {
     fontSize: tokens.fontSizeHero900,
@@ -409,6 +413,8 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
   const effectiveCompact = config?.compact ?? false;
   const effectiveColumns = config?.columns ?? columnsProp;
   const effectiveMaxCards = config?.maxCards;
+  const effectiveShowAccentBar = config?.showAccentBar ?? false;
+  const effectiveTitleFontSize = config?.titleFontSize;
 
   // Sort and limit data points
   let sortedPoints = sortDataPoints(dataPoints, effectiveSortBy);
@@ -453,7 +459,12 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
   return (
     <div className={styles.wrapper} style={wrapperStyle}>
       {showTitle && title && (
-        <Text className={styles.title}>{title}</Text>
+        <Text
+          className={styles.title}
+          style={effectiveTitleFontSize ? { fontSize: effectiveTitleFontSize } : undefined}
+        >
+          {title}
+        </Text>
       )}
       <div className={styles.grid} style={gridStyle}>
         {sortedPoints.map((dp, idx) => {
@@ -469,9 +480,12 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
           return (
             <Card
               key={`${dp.label}-${idx}`}
+              appearance="subtle"
               className={mergeClasses(
                 styles.card,
+                effectiveShowAccentBar && styles.cardWithAccentBar,
                 effectiveCompact && styles.cardCompact,
+                effectiveCompact && effectiveShowAccentBar && styles.cardCompactWithAccentBar,
                 isInteractive && styles.cardInteractive
               )}
               style={colorTokens.cardBackground ? { backgroundColor: colorTokens.cardBackground } : undefined}
@@ -484,30 +498,28 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
                   : `${dp.label}: ${formattedVal}${description ? `. ${description}` : ""}`
               }
             >
-              {/* Color-coded left border accent */}
-              {colorTokens.borderAccent && (
+              {/* Color-coded left border accent (conditional on showAccentBar) */}
+              {effectiveShowAccentBar && colorTokens.borderAccent && (
                 <div
                   className={styles.borderAccent}
                   style={{ backgroundColor: colorTokens.borderAccent }}
                 />
               )}
 
-              {/* Header: Icon + Label */}
-              <div className={styles.cardHeader}>
-                {IconComponent && (
-                  <span
-                    className={styles.iconSlot}
-                    style={colorTokens.iconColor ? { color: colorTokens.iconColor } : undefined}
-                    aria-hidden="true"
-                  >
-                    <IconComponent />
-                  </span>
-                )}
-                <Text className={styles.cardLabel}>{dp.label}</Text>
-              </div>
+              {/* Icon: left-aligned, vertically centered */}
+              {IconComponent && (
+                <span
+                  className={styles.iconSlot}
+                  style={colorTokens.iconColor ? { color: colorTokens.iconColor } : undefined}
+                  aria-hidden="true"
+                >
+                  <IconComponent />
+                </span>
+              )}
 
-              {/* Center: Formatted value */}
-              <div className={styles.cardValueContainer}>
+              {/* Content: Label, Value, Description stacked vertically */}
+              <div className={styles.cardContent}>
+                <Text className={styles.cardLabel}>{dp.label}</Text>
                 <Text
                   className={mergeClasses(
                     styles.cardValue,
@@ -518,17 +530,15 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
                 >
                   {formattedVal}
                 </Text>
+                {description && (
+                  <Text
+                    className={styles.cardDescription}
+                    style={colorTokens.valueText ? { color: colorTokens.valueText, opacity: 0.8 } : undefined}
+                  >
+                    {description}
+                  </Text>
+                )}
               </div>
-
-              {/* Bottom: Description text */}
-              {description && (
-                <Text
-                  className={styles.cardDescription}
-                  style={colorTokens.valueText ? { color: colorTokens.valueText, opacity: 0.8 } : undefined}
-                >
-                  {description}
-                </Text>
-              )}
             </Card>
           );
         })}
