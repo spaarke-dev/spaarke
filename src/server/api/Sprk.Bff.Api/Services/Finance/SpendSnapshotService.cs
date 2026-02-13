@@ -218,6 +218,39 @@ public class SpendSnapshotService : ISpendSnapshotService
     }
 
     /// <summary>
+    /// Query BillingEvent records for a project where VisibilityState = Invoiced.
+    /// </summary>
+    private async Task<List<BillingEventData>> QueryBillingEventsForProjectAsync(
+        ServiceClient serviceClient, Guid projectId, CancellationToken ct)
+    {
+        var query = new QueryExpression(BillingEventEntity)
+        {
+            ColumnSet = new ColumnSet(
+                BillingEvent_Amount,
+                BillingEvent_EventDate,
+                BillingEvent_CostType,
+                BillingEvent_VisibilityState),
+            Criteria = new FilterExpression(LogicalOperator.And)
+            {
+                Conditions =
+                {
+                    new ConditionExpression(BillingEvent_Project, ConditionOperator.Equal, projectId),
+                    new ConditionExpression(BillingEvent_VisibilityState, ConditionOperator.Equal, VisibilityState_Invoiced)
+                }
+            }
+        };
+
+        var results = await serviceClient.RetrieveMultipleAsync(query, ct);
+
+        return results.Entities.Select(e => new BillingEventData
+        {
+            Amount = e.GetAttributeValue<Money>(BillingEvent_Amount)?.Value ?? 0m,
+            EventDate = e.GetAttributeValue<DateTime>(BillingEvent_EventDate),
+            CostType = e.GetAttributeValue<OptionSetValue>(BillingEvent_CostType)?.Value ?? 0
+        }).ToList();
+    }
+
+    /// <summary>
     /// Look up budget amount for the matter from Budget entity.
     /// Matter can have multiple Budget records (spanning budget cycles/time periods).
     /// Returns the sum of all Budget.sprk_totalbudget values for this matter.
@@ -306,16 +339,58 @@ public class SpendSnapshotService : ISpendSnapshotService
             "Generating spend snapshots for project {ProjectId}, CorrelationId: {CorrelationId}",
             projectId, correlationId ?? "none");
 
-        // TODO: Implement project-level snapshot generation
-        // This will mirror GenerateAsync(matterId) but query:
-        // - BillingEvents WHERE sprk_project = projectId
-        // - Budget WHERE sprk_project = projectId
-        // - Upsert SpendSnapshot with sprk_project = projectId
-        // See GenerateAsync(Guid matterId) for full implementation pattern
+        var serviceClient = GetServiceClient();
+        var generatedAt = DateTime.UtcNow;
+        var effectiveCorrelationId = correlationId ?? Guid.NewGuid().ToString("N");
 
-        throw new NotImplementedException(
-            "Project-level spend snapshot generation is planned but not yet implemented. " +
-            "Implementation will mirror Matter-level generation using Project lookups.");
+        // Step 1: Query BillingEvents for the project where VisibilityState = Invoiced
+        var billingEvents = await QueryBillingEventsForProjectAsync(serviceClient, projectId, ct);
+
+        _logger.LogInformation(
+            "Found {EventCount} invoiced BillingEvents for project {ProjectId}",
+            billingEvents.Count, projectId);
+
+        if (billingEvents.Count == 0)
+        {
+            _logger.LogInformation(
+                "No invoiced BillingEvents found for project {ProjectId}. Skipping snapshot generation.",
+                projectId);
+            return;
+        }
+
+        // Step 2: Group by year-month for Monthly period aggregation
+        var monthlyAggregations = AggregateByMonth(billingEvents);
+
+        // Step 3: Compute ToDate aggregation (cumulative sum across all months)
+        var toDateAmount = billingEvents.Sum(e => e.Amount);
+
+        // Step 4: Look up Budget records for the project to compute variance
+        var budgetAmount = await GetBudgetAmountForProjectAsync(serviceClient, projectId, ct);
+
+        // Step 5: Compute MoM velocity for each month
+        var monthlySnapshots = ComputeMonthlySnapshotsForProject(
+            monthlyAggregations, budgetAmount, projectId, generatedAt, effectiveCorrelationId);
+
+        // Step 6: Create ToDate snapshot
+        var toDateSnapshot = CreateToDateSnapshotForProject(
+            toDateAmount, budgetAmount, projectId, generatedAt, effectiveCorrelationId);
+
+        // Step 7: Upsert all snapshots via alternate key
+        var allSnapshots = new List<Entity>(monthlySnapshots) { toDateSnapshot };
+
+        _logger.LogInformation(
+            "Upserting {SnapshotCount} spend snapshots for project {ProjectId} ({MonthCount} monthly + 1 ToDate)",
+            allSnapshots.Count, projectId, monthlySnapshots.Count);
+
+        foreach (var snapshot in allSnapshots)
+        {
+            await UpsertSnapshotAsync(serviceClient, snapshot, ct);
+        }
+
+        _logger.LogInformation(
+            "Spend snapshot generation complete for project {ProjectId}. " +
+            "Monthly periods: {MonthCount}, ToDate amount: {ToDateAmount:C}",
+            projectId, monthlySnapshots.Count, toDateAmount);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -473,6 +548,89 @@ public class SpendSnapshotService : ISpendSnapshotService
     }
 
     /// <summary>
+    /// Build monthly snapshot entities for a project with MoM velocity.
+    /// </summary>
+    private List<Entity> ComputeMonthlySnapshotsForProject(
+        SortedDictionary<string, decimal> monthlyAggregations,
+        decimal? budgetAmount,
+        Guid projectId,
+        DateTime generatedAt,
+        string correlationId)
+    {
+        var snapshots = new List<Entity>();
+        var months = monthlyAggregations.Keys.ToList();
+
+        for (var i = 0; i < months.Count; i++)
+        {
+            var periodKey = months[i];
+            var currentAmount = monthlyAggregations[periodKey];
+
+            // Compute MoM velocity
+            decimal? priorAmount = null;
+            string? priorPeriodKey = null;
+            decimal? velocityPct = null;
+
+            if (i > 0)
+            {
+                priorPeriodKey = months[i - 1];
+                priorAmount = monthlyAggregations[priorPeriodKey];
+                velocityPct = ComputeVelocityPct(currentAmount, priorAmount.Value);
+            }
+
+            // Compute budget variance (per-month: compare monthly spend vs total budget)
+            var variance = ComputeBudgetVariance(currentAmount, budgetAmount);
+            var variancePct = ComputeBudgetVariancePct(variance, budgetAmount);
+
+            var snapshot = CreateSnapshotEntityForProject(
+                projectId: projectId,
+                periodType: PeriodType_Month,
+                periodKey: periodKey,
+                invoicedAmount: currentAmount,
+                budgetAmount: budgetAmount,
+                variance: variance,
+                variancePct: variancePct,
+                velocityPct: velocityPct,
+                priorPeriodAmount: priorAmount,
+                priorPeriodKey: priorPeriodKey,
+                generatedAt: generatedAt,
+                correlationId: correlationId);
+
+            snapshots.Add(snapshot);
+        }
+
+        return snapshots;
+    }
+
+    /// <summary>
+    /// Build ToDate snapshot entity for a project with cumulative totals.
+    /// </summary>
+    private Entity CreateToDateSnapshotForProject(
+        decimal toDateAmount,
+        decimal? budgetAmount,
+        Guid projectId,
+        DateTime generatedAt,
+        string correlationId)
+    {
+        var variance = ComputeBudgetVariance(toDateAmount, budgetAmount);
+        var variancePct = ComputeBudgetVariancePct(variance, budgetAmount);
+
+        // ToDate has no velocity (no prior period comparison)
+        return CreateSnapshotEntityForProject(
+            projectId: projectId,
+            periodType: PeriodType_ToDate,
+            periodKey: ToDatePeriodKey,
+            invoicedAmount: toDateAmount,
+            budgetAmount: budgetAmount,
+            variance: variance,
+            variancePct: variancePct,
+            velocityPct: null,
+            priorPeriodAmount: null,
+            priorPeriodKey: null,
+            generatedAt: generatedAt,
+            correlationId: correlationId);
+    }
+
+    /// <summary>
     /// Create a SpendSnapshot entity with alternate key attributes for upsert.
     /// Alternate key: sprk_matter + sprk_periodtype + sprk_periodkey + sprk_bucketkey + sprk_visibilityfilter
     /// </summary>
@@ -517,6 +675,84 @@ public class SpendSnapshotService : ISpendSnapshotService
 
         // Matter lookup (also part of alternate key)
         snapshot[Snapshot_Matter] = new EntityReference("sprk_matter", matterId);
+
+        // Budget fields (nullable)
+        if (budgetAmount.HasValue)
+            snapshot[Snapshot_BudgetAmount] = new Money(budgetAmount.Value);
+        else
+            snapshot[Snapshot_BudgetAmount] = null;
+
+        if (variance.HasValue)
+            snapshot[Snapshot_BudgetVariance] = new Money(variance.Value);
+        else
+            snapshot[Snapshot_BudgetVariance] = null;
+
+        if (variancePct.HasValue)
+            snapshot[Snapshot_BudgetVariancePct] = variancePct.Value;
+        else
+            snapshot[Snapshot_BudgetVariancePct] = null;
+
+        // Velocity fields (nullable)
+        if (velocityPct.HasValue)
+            snapshot[Snapshot_VelocityPct] = velocityPct.Value;
+        else
+            snapshot[Snapshot_VelocityPct] = null;
+
+        if (priorPeriodAmount.HasValue)
+            snapshot[Snapshot_PriorPeriodAmount] = new Money(priorPeriodAmount.Value);
+        else
+            snapshot[Snapshot_PriorPeriodAmount] = null;
+
+        snapshot[Snapshot_PriorPeriodKey] = priorPeriodKey;
+
+        return snapshot;
+    }
+
+    /// <summary>
+    /// Create a SpendSnapshot entity for a project with alternate key attributes for upsert.
+    /// Alternate key: sprk_project + sprk_periodtype + sprk_periodkey + sprk_bucketkey + sprk_visibilityfilter
+    /// </summary>
+    private static Entity CreateSnapshotEntityForProject(
+        Guid projectId,
+        int periodType,
+        string periodKey,
+        decimal invoicedAmount,
+        decimal? budgetAmount,
+        decimal? variance,
+        decimal? variancePct,
+        decimal? velocityPct,
+        decimal? priorPeriodAmount,
+        string? priorPeriodKey,
+        DateTime generatedAt,
+        string correlationId)
+    {
+        // Create entity with alternate key for upsert
+        var keyAttributes = new KeyAttributeCollection
+        {
+            { Snapshot_Project, projectId },
+            { Snapshot_PeriodType, periodType },
+            { Snapshot_PeriodKey, periodKey },
+            { Snapshot_BucketKey, DefaultBucketKey },
+            { Snapshot_VisibilityFilter, DefaultVisibilityFilter }
+        };
+
+        var snapshot = new Entity(SnapshotEntity, keyAttributes);
+
+        // Primary name field (human-readable identifier)
+        var periodTypeLabel = periodType == PeriodType_Month ? "Month" : "ToDate";
+        snapshot[Snapshot_Name] = $"{periodTypeLabel}:{periodKey}:{DefaultBucketKey}";
+
+        // Required fields
+        snapshot[Snapshot_PeriodType] = new OptionSetValue(periodType);
+        snapshot[Snapshot_PeriodKey] = periodKey;
+        snapshot[Snapshot_BucketKey] = DefaultBucketKey;
+        snapshot[Snapshot_VisibilityFilter] = DefaultVisibilityFilter;
+        snapshot[Snapshot_InvoicedAmount] = new Money(invoicedAmount);
+        snapshot[Snapshot_GeneratedAt] = generatedAt;
+        snapshot[Snapshot_CorrelationId] = correlationId;
+
+        // Project lookup (also part of alternate key)
+        snapshot[Snapshot_Project] = new EntityReference("sprk_project", projectId);
 
         // Budget fields (nullable)
         if (budgetAmount.HasValue)
