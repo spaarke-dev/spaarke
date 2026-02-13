@@ -167,15 +167,15 @@ public class FinancialCalculationToolHandler : IAiToolHandler
 
     /// <summary>
     /// Look up budget amount for the matter from Budget entity.
-    /// Simple direct lookup: Budget WHERE sprk_matter = matterId.
-    /// Budget Buckets are optional subdivisions - this uses the authoritative Budget.sprk_totalbudget.
+    /// Matter can have multiple Budget records (spanning budget cycles/time periods).
+    /// Returns the sum of all Budget.sprk_totalbudget values for this matter.
     /// </summary>
     private async Task<decimal?> GetBudgetAmountForMatterAsync(
         ServiceClient serviceClient,
         Guid matterId,
         CancellationToken ct)
     {
-        // Query Budget entity to find budget for this matter
+        // Query ALL Budget records for this matter
         var budgetQuery = new QueryExpression(BudgetEntity)
         {
             ColumnSet = new ColumnSet(Budget_TotalBudget),
@@ -186,19 +186,26 @@ public class FinancialCalculationToolHandler : IAiToolHandler
         var budgetResults = await Task.Run(() => serviceClient.RetrieveMultiple(budgetQuery), ct);
         if (budgetResults.Entities.Count == 0)
         {
-            _logger.LogDebug("No budget found for matter {MatterId}.", matterId);
+            _logger.LogDebug("No budget records found for matter {MatterId}.", matterId);
             return null;
         }
 
-        // Get total budget from Budget entity (authoritative amount)
-        var budget = budgetResults.Entities[0];
-        var totalBudget = budget.GetAttributeValue<Money>(Budget_TotalBudget);
+        // Sum all budget amounts (matter may span multiple budget cycles)
+        decimal totalBudget = 0;
+        foreach (var budget in budgetResults.Entities)
+        {
+            var amount = budget.GetAttributeValue<Money>(Budget_TotalBudget);
+            if (amount != null)
+            {
+                totalBudget += amount.Value;
+            }
+        }
 
         _logger.LogDebug(
-            "Budget amount for matter {MatterId}: {BudgetAmount:C}",
-            matterId, totalBudget?.Value ?? 0);
+            "Budget amount for matter {MatterId}: {BudgetAmount:C} (from {BudgetCount} budget record(s))",
+            matterId, totalBudget, budgetResults.Entities.Count);
 
-        return totalBudget?.Value;
+        return totalBudget;
     }
 }
 
