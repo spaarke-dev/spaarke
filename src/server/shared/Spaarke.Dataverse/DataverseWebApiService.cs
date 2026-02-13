@@ -1530,6 +1530,67 @@ public class DataverseWebApiService : IDataverseService
     }
 
     // ========================================
+    // KPI Assessment Operations (Matter Performance KPI R1)
+    // ========================================
+
+    public async Task<KpiAssessmentRecord[]> QueryKpiAssessmentsAsync(
+        Guid parentId,
+        string parentLookupField = "sprk_matter",
+        int? performanceArea = null,
+        int top = 0,
+        CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var entitySetName = await GetEntitySetNameAsync("sprk_kpiassessment", ct);
+
+        // Build OData filter: parent lookup (matter or project) + optional performance area
+        // OData lookup filter uses _<fieldname>_value format
+        var filter = $"_{parentLookupField}_value eq {parentId}";
+        if (performanceArea.HasValue)
+        {
+            filter += $" and sprk_performancearea eq {performanceArea.Value}";
+        }
+
+        var url = $"{entitySetName}?$filter={filter}&$select=sprk_kpiassessmentid,sprk_kpigradescore,createdon&$orderby=createdon desc";
+        if (top > 0)
+        {
+            url += $"&$top={top}";
+        }
+
+        _logger.LogDebug(
+            "Querying KPI assessments for {ParentField}={ParentId}, area={Area}, top={Top}",
+            parentLookupField, parentId, performanceArea, top);
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (data == null)
+                return Array.Empty<KpiAssessmentRecord>();
+
+            return data.Value
+                .Select(d => new KpiAssessmentRecord
+                {
+                    Id = d.TryGetValue("sprk_kpiassessmentid", out var id) && id.ValueKind != JsonValueKind.Null
+                        ? Guid.Parse(id.GetString()!) : Guid.Empty,
+                    Grade = d.TryGetValue("sprk_kpigradescore", out var grade) && grade.ValueKind != JsonValueKind.Null
+                        ? grade.GetInt32() : 0,
+                    CreatedOn = d.TryGetValue("createdon", out var created) && created.ValueKind != JsonValueKind.Null
+                        ? DateTime.Parse(created.GetString()!) : DateTime.MinValue
+                })
+                .ToArray();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error querying KPI assessments for {ParentField}={ParentId}", parentLookupField, parentId);
+            throw;
+        }
+    }
+
+    // ========================================
     // Entity Mapping Helpers
     // ========================================
 

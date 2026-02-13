@@ -3,7 +3,7 @@
   <metadata>
     <title>Test Dark Mode Compatibility</title>
     <phase>6: Testing & Polish</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1-2</estimated-hours>
     <dependencies>034</dependencies>
     <blocks>090</blocks>

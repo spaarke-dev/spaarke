@@ -3,7 +3,7 @@
   <metadata>
     <title>Design Report Card Metric Card</title>
     <phase>5: VisualHost Enhancement</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>020</dependencies>
     <blocks>022</blocks>

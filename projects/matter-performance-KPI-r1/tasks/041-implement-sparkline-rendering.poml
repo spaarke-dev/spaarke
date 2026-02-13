@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement Sparkline Rendering</title>
     <phase>4: Report Card Tab</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2-3</estimated-hours>
     <dependencies>040</dependencies>
     <blocks>043</blocks>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Add Add KPI Ribbon Button</title>
     <phase>4: Report Card Tab</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1-2</estimated-hours>
     <dependencies>044</dependencies>
     <blocks>050</blocks>

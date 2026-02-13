@@ -364,10 +364,19 @@ export function aggregateRecords(
     const firstRecord = groupRecords[0];
     const fieldValue = firstRecord?.[groupByField];
 
+    // Capture option set color from OData annotation (if available)
+    const colorAnnotationKey = `${groupByField}@OData.Community.Display.V1.Color`;
+    const optionSetColor = firstRecord?.[colorAnnotationKey] as string | undefined;
+
+    // Capture raw numeric fieldValue as sortOrder (for option set ordering)
+    const sortOrder = typeof fieldValue === "number" ? fieldValue : undefined;
+
     dataPoints.push({
       label: groupKey,
       value,
       fieldValue,
+      color: optionSetColor,
+      sortOrder,
     });
   }
 

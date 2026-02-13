@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement Historical Average Calculation</title>
     <phase>2: Calculator API</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>016</blocks>

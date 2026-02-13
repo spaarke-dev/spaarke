@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy Phase 1 to Dataverse</title>
     <phase>1: Data Model</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>005</dependencies>
     <blocks>010,020,044</blocks>

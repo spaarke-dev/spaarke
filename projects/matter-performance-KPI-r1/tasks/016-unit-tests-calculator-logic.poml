@@ -3,7 +3,7 @@
   <metadata>
     <title>Unit Tests for Calculator Logic</title>
     <phase>2: Calculator API</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>011,012,013</dependencies>
     <blocks>030,031,032,040</blocks>

@@ -20,7 +20,7 @@
     "build-storybook": "storybook build"
   },
   "dependencies": {
-    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components"
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components/spaarke-ui-components-2.0.0.tgz"
   },
   "devDependencies": {
     "@babel/core": "^7.28.5",

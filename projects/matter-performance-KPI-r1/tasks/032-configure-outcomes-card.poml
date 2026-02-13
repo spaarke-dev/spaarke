@@ -3,7 +3,7 @@
   <metadata>
     <title>Configure Outcomes Card</title>
     <phase>3: Main Tab Cards</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>022,016</dependencies>
     <blocks>033</blocks>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement Linear Regression Logic</title>
     <phase>4: Report Card Tab</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>040</dependencies>
     <blocks>043</blocks>

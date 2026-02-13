@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Ribbon Customization: "+ Add KPI" Button
+
+  Purpose: Adds a button to the KPI Assessments subgrid command bar
+           that opens the Quick Create form for sprk_kpiassessment.
+
+  Task: 045 - Add "Add KPI" Ribbon Button
+  Project: matter-performance-KPI-r1
+  Spec: FR-10
+
+  Registration:
+    - Entity: sprk_matter
+    - Location: SubGrid ribbon (subgrid_kpiassessments)
+    - Action: Xrm.Navigation.openForm with Quick Create
+
+  Note: This XML follows the Spaarke ribbon-edit skill conventions.
+  The Alt attribute is REQUIRED on all Button elements.
+-->
+<RibbonDiffXml>
+  <CustomActions>
+    <CustomAction Id="sprk.matter.subgrid.kpi.AddKpiButton.CustomAction"
+                  Location="Mscrm.SubGrid.sprk_kpiassessment.MainTab.Management.Controls._children"
+                  Sequence="10">
+      <CommandUIDefinition>
+        <Button Id="sprk.matter.subgrid.kpi.AddKpiButton"
+                Alt="$LocLabels:sprk.matter.subgrid.kpi.AddKpiButton.Alt"
+                Command="sprk.matter.subgrid.kpi.AddKpiButton.Command"
+                LabelText="$LocLabels:sprk.matter.subgrid.kpi.AddKpiButton.LabelText"
+                ToolTipTitle="$LocLabels:sprk.matter.subgrid.kpi.AddKpiButton.ToolTipTitle"
+                ToolTipDescription="$LocLabels:sprk.matter.subgrid.kpi.AddKpiButton.ToolTipDescription"
+                TemplateAlias="o1"
+                ModernImage="Add" />
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates" />
+  </Templates>
+  <CommandDefinitions>
+    <CommandDefinition Id="sprk.matter.subgrid.kpi.AddKpiButton.Command">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/kpi_ribbon_actions.js"
+                            FunctionName="Spaarke.KpiRibbon.openQuickCreate">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules />
+    <EnableRules />
+  </RuleDefinitions>
+  <LocLabels>
+    <LocLabel Id="sprk.matter.subgrid.kpi.AddKpiButton.LabelText">
+      <Titles>
+        <Title description="+ Add KPI" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.matter.subgrid.kpi.AddKpiButton.Alt">
+      <Titles>
+        <Title description="Add KPI Assessment" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.matter.subgrid.kpi.AddKpiButton.ToolTipTitle">
+      <Titles>
+        <Title description="Add KPI Assessment" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.matter.subgrid.kpi.AddKpiButton.ToolTipDescription">
+      <Titles>
+        <Title description="Open Quick Create form to add a new KPI assessment for this matter" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

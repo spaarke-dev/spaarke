@@ -24,6 +24,7 @@ import { CalendarVisual, type ICalendarEvent } from "./CalendarVisual";
 import { MiniTable, type IMiniTableItem, type IMiniTableColumn } from "./MiniTable";
 import { DueDateCardVisual } from "./DueDateCard";
 import { DueDateCardListVisual } from "./DueDateCardList";
+import { resolveCardConfig } from "../utils/cardConfigResolver";
 import type { IConfigWebApi } from "../services/ConfigurationLoader";
 
 export interface IChartRendererProps {
@@ -45,6 +46,8 @@ export interface IChartRendererProps {
   onViewListClick?: () => void;
   /** FetchXML override from PCF property (highest query priority) */
   fetchXmlOverride?: string;
+  /** Value format override from PCF property (per-placement) */
+  valueFormatOverride?: string;
   /** Width of the container in pixels (for MetricCard matrix sizing) */
   width?: number;
   /** Content justification: left, center, right */
@@ -121,6 +124,8 @@ const getVisualTypeName = (visualType: VisualType): string => {
       return "Due Date Card";
     case VT.DueDateCardList:
       return "Due Date Card List";
+    case VT.ReportCardMetric:
+      return "Report Card Metric";
     default:
       return `Unknown (${visualType})`;
   }
@@ -139,6 +144,7 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
   onClickAction,
   onViewListClick,
   fetchXmlOverride,
+  valueFormatOverride,
   width,
   justification,
   columns,
@@ -155,7 +161,8 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
     // Some chart types don't need data (MetricCard, DueDateCard types fetch their own)
     if (sprk_visualtype !== VT.MetricCard
       && sprk_visualtype !== VT.DueDateCard
-      && sprk_visualtype !== VT.DueDateCardList) {
+      && sprk_visualtype !== VT.DueDateCardList
+      && sprk_visualtype !== VT.ReportCardMetric) {
       return (
         <div className={styles.placeholder}>
           <Text size={400}>No data available</Text>
@@ -169,11 +176,17 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
 
   switch (sprk_visualtype) {
     case VT.MetricCard: {
+      // Resolve card configuration from 3 tiers
+      const cardConfig = resolveCardConfig(chartDefinition, {
+        valueFormatOverride: valueFormatOverride || undefined,
+        columns,
+      });
+
       // Matrix mode: when groupByField produces multiple data points, render as a card grid
       if (dataPoints.length > 1 && sprk_groupbyfield) {
         return (
           <MetricCardMatrix
-            title={config.showTitle !== false ? sprk_name : undefined}
+            title={cardConfig.showTitle ? sprk_name : undefined}
             dataPoints={dataPoints}
             columns={columns}
             width={width}
@@ -181,6 +194,7 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
             justification={justification}
             onDrillInteraction={onDrillInteraction}
             drillField={drillField}
+            cardConfig={cardConfig}
           />
         );
       }
@@ -203,11 +217,13 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
           drillField={drillField}
           drillValue={dataPoints.length > 0 ? dataPoints[0].fieldValue : null}
           interactive={!!onDrillInteraction}
-          compact={config.compact as boolean | undefined}
+          compact={cardConfig.compact}
           fillContainer
           justification={justification}
           explicitWidth={width}
           explicitHeight={height}
+          valueFormat={cardConfig.valueFormat}
+          nullDisplay={cardConfig.nullDisplay}
         />
       );
     }
@@ -374,6 +390,57 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
           onClickAction={onClickAction}
           onViewListClick={onViewListClick}
           fetchXmlOverride={fetchXmlOverride}
+        />
+      );
+    }
+
+    case VT.ReportCardMetric: {
+      // ReportCardMetric is now a preset for MetricCard.
+      // resolveCardConfig auto-applies grade defaults (letterGrade, valueThreshold, icons).
+      const cardConfig = resolveCardConfig(chartDefinition, {
+        valueFormatOverride: valueFormatOverride || undefined,
+        columns,
+      });
+
+      // Matrix mode: multiple data points → card grid
+      if (dataPoints.length > 1 && sprk_groupbyfield) {
+        return (
+          <MetricCardMatrix
+            title={cardConfig.showTitle ? sprk_name : undefined}
+            dataPoints={dataPoints}
+            columns={columns}
+            width={width}
+            height={height}
+            justification={justification}
+            onDrillInteraction={onDrillInteraction}
+            drillField={drillField}
+            cardConfig={cardConfig}
+          />
+        );
+      }
+
+      // Single card mode: show first data point as enhanced MetricCard
+      const metricValue =
+        dataPoints.length > 0
+          ? dataPoints[0].value
+          : null;
+      const metricLabel = dataPoints.length > 0 ? dataPoints[0].label : sprk_name;
+
+      return (
+        <MetricCard
+          value={metricValue ?? 0}
+          label={metricLabel}
+          description={chartDefinition.sprk_description}
+          onDrillInteraction={onDrillInteraction}
+          drillField={drillField}
+          drillValue={dataPoints.length > 0 ? dataPoints[0].fieldValue : null}
+          interactive={!!onDrillInteraction}
+          fillContainer
+          justification={justification}
+          explicitWidth={width}
+          explicitHeight={height}
+          valueFormat={cardConfig.valueFormat}
+          nullDisplay={cardConfig.nullDisplay}
         />
       );
     }

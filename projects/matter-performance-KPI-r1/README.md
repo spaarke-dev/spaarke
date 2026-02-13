@@ -2,13 +2,13 @@
 
 > **Last Updated**: 2026-02-12
 >
-> **Status**: Ready for Implementation (R1 MVP)
+> **Status**: Complete (R1 MVP)
 
 ## Project Versions
 
 | Version | Scope | Status | Plan |
 |---------|-------|--------|------|
-| **R1 (Current)** | Manual KPI entry + basic visualization | Ready for Implementation | [plan-r1.md](plan-r1.md) |
+| **R1 (Current)** | Manual KPI entry + basic visualization | **Complete** | [plan-r1.md](plan-r1.md) |
 | **R2-R5 (Future)** | Assessment infrastructure + AI + rollups | Planned (future) | [plan-full.md](plan-full.md) |
 
 **This README describes the R1 MVP scope.** For full solution documentation, see [spec-full.md](spec-full.md) and [plan-full.md](plan-full.md).
@@ -39,10 +39,10 @@
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Planning |
-| **Progress** | 0% |
-| **Target Date** | TBD |
-| **Completed Date** | — |
+| **Phase** | Complete |
+| **Progress** | 100% (27/27 tasks) |
+| **Target Date** | 2026-02-12 |
+| **Completed Date** | 2026-02-12 |
 | **Owner** | Development Team |
 
 ## Problem Statement
@@ -62,37 +62,37 @@ Implement a Performance Assessment module that automatically generates Matter Re
 **R1 MVP** is considered **complete** when:
 
 ### Data Model
-- [ ] KPI Assessment entity deployed to Dataverse
-- [ ] 6 grade fields added to Matter entity (current + average × 3 areas)
-- [ ] Quick Create form configured with 5 fields
-- [ ] User can add KPI assessment in < 30 seconds
+- [x] KPI Assessment entity deployed to Dataverse (Tasks 001, 003, 004, 006)
+- [x] 6 grade fields added to Matter entity (current + average × 3 areas) (Task 002)
+- [x] Quick Create form configured with 5 fields (Task 005)
+- [x] User can add KPI assessment in < 30 seconds
 
 ### Calculator & Trigger
-- [ ] Calculator API functional: `POST /api/matters/{matterId}/recalculate-grades`
-- [ ] Current grade calculation correct (latest assessment)
-- [ ] Historical average calculation correct (mean of all)
-- [ ] Web resource trigger calls API on save
-- [ ] API response time < 500ms
-- [ ] Parent form refreshes automatically after save
+- [x] Calculator API functional: `POST /api/matters/{matterId}/recalculate-grades` (Task 010)
+- [x] Current grade calculation correct (latest assessment) (Task 011)
+- [x] Historical average calculation correct (mean of all) (Task 012)
+- [x] Web resource trigger calls API on save (Task 014)
+- [x] API response time < 500ms (Task 051: performance tests pass)
+- [x] Parent form refreshes automatically after save (Task 014)
 
 ### Main Tab Visualization
-- [ ] 3 VisualHost Report Card metric cards render on main tab
-- [ ] Cards show current grades with correct color coding (blue/yellow/red)
-- [ ] Contextual text displays: "You have an X% in [Area] compliance"
-- [ ] Dark mode works (no hard-coded colors)
+- [x] 3 VisualHost Report Card metric cards render on main tab (Tasks 030-032)
+- [x] Cards show current grades with correct color coding (blue/yellow/red) (Task 033/022)
+- [x] Contextual text displays: "You have an X% in [Area] compliance" (Task 034/022)
+- [x] Dark mode works (no hard-coded colors) (Task 055: audit PASS)
 
 ### Report Card Tab
-- [ ] 3 trend cards with historical averages + sparkline graphs (last 5 updates)
-- [ ] Trend indicators (↑ ↓ →) calculated via linear regression
-- [ ] Subgrid shows all KPI assessments for matter
-- [ ] "+ Add KPI" button launches Quick Create form
+- [x] 3 trend cards with historical averages + sparkline graphs (last 5 updates) (Tasks 040-043)
+- [x] Trend indicators (↑ ↓ →) calculated via linear regression (Task 042)
+- [x] Subgrid shows all KPI assessments for matter (Task 044)
+- [x] "+ Add KPI" button launches Quick Create form (Task 045)
 
 ### Testing & Performance
-- [ ] All unit tests pass (calculator, trend logic)
-- [ ] Integration test passes (end-to-end flow)
-- [ ] Performance targets met (API < 500ms, subgrid < 2s)
-- [ ] Error handling works (API failure → user dialog, form saves)
-- [ ] Accessibility validated (WCAG 2.1 AA)
+- [x] All unit tests pass (calculator, trend logic) (Tasks 016, 050, 053: 44 tests pass)
+- [x] Integration test passes (end-to-end flow) (Task 050)
+- [x] Performance targets met (API < 500ms, subgrid < 2s) (Tasks 051, 052)
+- [x] Error handling works (API failure → user dialog, form saves) (Tasks 015, 053)
+- [x] Accessibility validated (WCAG 2.1 AA) (Task 054: audit PASS)
 
 **Future Enhancements** (R2+): See [Full Solution Graduation Criteria](plan-full.md#graduation-criteria)
 
@@ -210,6 +210,7 @@ Implement a Performance Assessment module that automatically generates Matter Re
 | Date | Version | Change | Author |
 |------|---------|--------|--------|
 | 2026-02-12 | 1.0 | Initial project setup, spec generated from design doc | Claude Code |
+| 2026-02-12 | 2.0 | R1 MVP complete: 27/27 tasks, all graduation criteria met | Claude Code |
 
 ---
 

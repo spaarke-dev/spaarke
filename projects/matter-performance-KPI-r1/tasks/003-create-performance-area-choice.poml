@@ -3,7 +3,7 @@
   <metadata>
     <title>Create Performance Area Choice Field</title>
     <phase>1: Data Model</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>005</blocks>

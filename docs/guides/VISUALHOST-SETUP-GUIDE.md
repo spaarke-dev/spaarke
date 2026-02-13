@@ -1,6 +1,6 @@
 # VisualHost PCF Control - Setup & Configuration Guide
 
-> **Version**: 1.2.29 | **Last Updated**: February 9, 2026
+> **Version**: 1.2.33 | **Last Updated**: February 13, 2026
 >
 > **Audience**: Dataverse administrators, form designers, solution configurators
 >
@@ -22,6 +22,7 @@
 10. [Data Querying Options](#data-querying-options)
 11. [Use Cases: Visual Type Setup Walkthroughs](#use-cases-visual-type-setup-walkthroughs)
 12. [Troubleshooting](#troubleshooting)
+13. [Adding the ReportCardMetric Visual Type](#adding-the-reportcardmetric-visual-type)
 
 ---
 
@@ -29,7 +30,7 @@
 
 The **VisualHost** PCF control renders configuration-driven visualizations inside Dataverse model-driven app forms. Instead of building separate PCF controls for each chart type, a single VisualHost instance reads a `sprk_chartdefinition` record to determine:
 
-- **What** to display (visual type: bar chart, donut, metric card, due date cards, etc.)
+- **What** to display (visual type: bar chart, donut, metric card, grade card, due date cards, etc.)
 - **Where** to get data (entity, view, custom FetchXML, or PCF override)
 - **How** to aggregate (count, sum, average, min, max)
 - **What happens on click** (open record, open side pane, navigate to page)
@@ -60,6 +61,8 @@ One chart definition record = one visual instance on a form.
 | **Visual Type** (`sprk_visualtype`) | The type of visualization to render | Yes |
 | **Entity Logical Name** (`sprk_entitylogicalname`) | The Dataverse entity to query data from (e.g., `sprk_event`, `sprk_document`) | Yes (for charts) |
 | **Drill-Through Target** (`sprk_drillthroughtarget`) | Web resource name to open when the expand button is clicked (e.g., `sprk_eventspage.html`). If not set, falls back to entity list dialog. | No |
+| **Value Format** (`sprk_valueformat`) | How to format metric card values (Short Number, Letter Grade, Percentage, Whole Number, Decimal, Currency) | No (defaults to Short Number) |
+| **Color Source** (`sprk_colorsource`) | How per-card colors are determined in matrix mode (None, Option Set Color, Value Threshold) | No (defaults to None) |
 
 5. Save the record and note the **Chart Definition ID** (GUID) from the URL
 
@@ -67,7 +70,9 @@ One chart definition record = one visual instance on a form.
 
 ## Step 2: Configure Visual Type Settings
 
-### Chart Types (MetricCard, BarChart, LineChart, DonutChart, StatusBar, Calendar, MiniTable)
+### Chart Types (MetricCard, BarChart, LineChart, DonutChart, StatusBar, Calendar, MiniTable, ReportCardMetric)
+
+> **v1.2.33 Note:** MetricCard now supports **matrix mode** (renders multiple cards in a responsive grid when Group By Field is set). ReportCardMetric is now a **preset for MetricCard** — it auto-applies grade styling via `cardConfigResolver` rather than using a separate component.
 
 These visual types use the **DataAggregationService** to fetch and aggregate entity records client-side.
 
@@ -145,6 +150,10 @@ After adding the VisualHost control, configure its properties:
 | **height** | Number | Chart height in pixels. | Auto |
 | **showToolbar** | Yes/No | Show the expand button in the upper right corner. | Yes |
 | **enableDrillThrough** | Yes/No | Enable click interactions and drill-through navigation. | Yes |
+| **valueFormatOverride** | Text | Override chart definition value format for this placement. Values: shortNumber, letterGrade, percentage, wholeNumber, decimal, currency. | - |
+| **width** | Number | Width in pixels for card sizing. | Auto |
+| **columns** | Number | Number of cards per row in MetricCard matrix layout. | Auto |
+| **justification** | Text | Content alignment: left, center, right. | left |
 
 ### Priority: chartDefinition Lookup vs chartDefinitionId
 
@@ -160,22 +169,108 @@ This allows flexible configuration: bind a lookup for dynamic chart selection, o
 
 ### MetricCard (100000000)
 
-Displays a single large number with label and optional trend indicator.
+Displays a single metric value or a matrix of metric cards in a responsive CSS Grid layout.
+
+#### Single Card Mode (Default)
+
+When **Group By Field** is not set, MetricCard displays a single large number with label and optional trend indicator. This is the existing behavior.
 
 **Chart Definition Settings:**
 | Field | Value | Notes |
 |-------|-------|-------|
 | Visual Type | MetricCard | |
 | Entity Logical Name | Your entity (e.g., `sprk_document`) | |
-| Group By Field | Optional | If set, shows first group's value |
+| Group By Field | *(leave empty)* | Single card mode |
 | Aggregation Type | Count (default) or Sum/Avg | |
 
-**Options JSON Example:**
+**Options JSON Example (single card):**
 ```json
 {
   "trend": "up",
   "trendValue": 12.5,
   "compact": true
+}
+```
+
+#### Matrix Mode (v1.2.33+)
+
+When **Group By Field** is set, the DataAggregationService produces multiple data points (one per group). MetricCard renders these as a **MetricCardMatrix** -- a responsive CSS Grid of individual metric cards.
+
+**Chart Definition Settings:**
+| Field | Value | Notes |
+|-------|-------|-------|
+| Visual Type | MetricCard | |
+| Entity Logical Name | Your entity | |
+| Group By Field | Field to segment cards (e.g., `sprk_performancearea`) | Required for matrix mode |
+| Aggregation Type | Count, Sum, Average, etc. | |
+| Aggregation Field | Numeric field (e.g., `sprk_amount`) | Required for Sum/Average/Min/Max |
+| Value Format | How to format card values | Optional (defaults to Short Number) |
+| Color Source | How per-card colors are determined | Optional (defaults to None) |
+
+#### New Dataverse Fields (v1.2.33)
+
+**Value Format** (`sprk_valueformat`) -- choice field on `sprk_chartdefinition`:
+
+| Label | Value | Description |
+|-------|-------|-------------|
+| Short Number | 100000000 | Abbreviates large numbers (e.g., 1.2K, 3.5M) |
+| Letter Grade | 100000001 | Converts decimal 0.00-1.00 to letter grade (A+, B, C, etc.) |
+| Percentage | 100000002 | Displays as percentage (e.g., 85%) |
+| Whole Number | 100000003 | Displays as integer with no decimals |
+| Decimal | 100000004 | Displays with 2 decimal places |
+| Currency | 100000005 | Displays with currency symbol and formatting |
+
+**Color Source** (`sprk_colorsource`) -- choice field on `sprk_chartdefinition`:
+
+| Label | Value | Description |
+|-------|-------|-------------|
+| None | 100000000 | No per-card coloring (default neutral theme) |
+| Option Set Color | 100000001 | Uses the Dataverse option set hex color as the card accent color |
+| Value Threshold | 100000002 | Applies Fluent token sets (brand, warning, danger) based on value ranges defined in `colorThresholds` |
+
+#### Configuration JSON Options (Matrix Mode)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `cardSize` | string | `"medium"` | Card size: `"small"`, `"medium"`, `"large"` |
+| `sortBy` | string | `"label"` | Sort order: `"label"` (A-Z), `"value"` (desc), `"valueAsc"`, `"optionSetOrder"` (Dataverse option order) |
+| `maxCards` | number | *(all)* | Maximum number of cards to display |
+| `compact` | boolean | `false` | Use compact card layout with reduced padding |
+| `showTitle` | boolean | `true` | Show the chart title above the matrix |
+| `cardDescription` | string | -- | Template for card description text. Placeholders: `{value}` (raw), `{formatted}` (formatted value), `{label}` (group label), `{count}` (record count) |
+| `nullDisplay` | string | `"--"` | Text to show when a card has no data |
+| `nullDescription` | string | -- | Description text for null/no-data cards |
+| `iconMap` | object | -- | Maps group labels to Fluent icon names. Supported icons: `gavel`, `money`, `target`, `calendar`, `alert`, `checkmark`, `document`, `people`, `star`, `clipboard` |
+| `colorThresholds` | array | -- | Array of `{ "range": [min, max], "tokenSet": "brand"|"warning"|"danger" }` objects. Used when Color Source = Value Threshold |
+
+**Example: Basic matrix configuration:**
+```json
+{
+  "cardSize": "medium",
+  "sortBy": "value",
+  "showTitle": true,
+  "compact": false
+}
+```
+
+**Example: Grade-style cards with icons and color thresholds:**
+```json
+{
+  "cardSize": "medium",
+  "sortBy": "optionSetOrder",
+  "iconMap": {
+    "Guidelines": "gavel",
+    "Budget": "money",
+    "Outcomes": "target"
+  },
+  "cardDescription": "{formatted} compliance",
+  "nullDisplay": "N/A",
+  "nullDescription": "No data available",
+  "colorThresholds": [
+    { "range": [0.85, 1.00], "tokenSet": "brand" },
+    { "range": [0.70, 0.84], "tokenSet": "warning" },
+    { "range": [0.00, 0.69], "tokenSet": "danger" }
+  ]
 }
 ```
 
@@ -364,6 +459,99 @@ List of event due date cards for records related to the current parent form.
 | contextFieldName | `sprk_regardingrecordid` | Must match the chart definition's Context Field Name |
 
 **Important:** The Context Field Name must be the **field on the child entity** (Event) that points back to the parent entity. For Events, this is `sprk_regardingrecordid` (a text field containing the parent record's GUID). For direct lookup fields on other entities, use the WebAPI format with `_` prefix and `_value` suffix (e.g., `_sprk_matterid_value`).
+
+---
+
+### ReportCardMetric (100000010)
+
+> **v1.2.33:** ReportCardMetric is now a **preset for MetricCard**. The `GradeMetricCard` component is deprecated. When `sprk_visualtype = ReportCardMetric (100000010)`, the system auto-applies grade defaults via `cardConfigResolver` and renders using the MetricCard pipeline (including matrix mode support).
+
+Letter grade card with color-coded styling for KPI performance areas (Guidelines, Budget, Outcomes). Displays a grade derived from a decimal value (0.00-1.00) with automatic color coding and contextual text.
+
+**Chart Definition Settings:**
+| Field | Value | Notes |
+|-------|-------|-------|
+| Visual Type | ReportCardMetric | Preset for MetricCard -- auto-applies grade defaults |
+| Entity Logical Name | `sprk_matter` or `sprk_project` | The entity that has grade fields |
+| Aggregation Field | Grade field (e.g., `sprk_guidelinecompliancegrade_current`) | Must return a decimal 0.00-1.00 |
+| Aggregation Type | Average (100000002) | How to aggregate the grade field |
+| Configuration JSON | See below | Icon, template, color rules (now feeds into ICardConfig system) |
+
+**Auto-Applied Defaults via `cardConfigResolver`:**
+
+When Visual Type = ReportCardMetric, the following defaults are automatically applied. All can be overridden via Configuration JSON or the new Dataverse fields (`sprk_valueformat`, `sprk_colorsource`):
+
+| Setting | Default Value |
+|---------|---------------|
+| Value Format | `letterGrade` |
+| Color Source | `valueThreshold` |
+| Color Thresholds | 0.85-1.00 = brand/blue, 0.70-0.84 = warning/yellow, 0.00-0.69 = danger/red |
+| Icons | Guidelines = Gavel, Budget = Money, Outcomes = Target |
+| Null Display | `"N/A"` |
+| Null Description | `"No grade data available for {areaName}"` |
+| Sort | `optionSetOrder` |
+
+**New Approach (v1.2.33): Single Definition with Matrix Mode**
+
+Instead of creating 3 separate chart definitions (one per grade area), you can now use a **single chart definition** with Group By Field set to the performance area field. This renders all 3 grades as a matrix of cards in a responsive grid. See [Use Case 5](#use-case-5-kpi-grade-cards-on-a-matter-form-report-card) for details.
+
+**Grade Value to Letter Mapping:**
+
+| Decimal Range | Letter | Color |
+|---------------|--------|-------|
+| 1.00 | A+ | Blue |
+| 0.95-0.99 | A | Blue |
+| 0.90-0.94 | B+ | Blue |
+| 0.85-0.89 | B | Blue |
+| 0.80-0.84 | C+ | Yellow |
+| 0.75-0.79 | C | Yellow |
+| 0.70-0.74 | D+ | Yellow |
+| 0.65-0.69 | D | Red |
+| 0.00-0.64 | F | Red |
+| null | N/A | Grey |
+
+**Color Rules:**
+
+| Range | Color | Meaning |
+|-------|-------|---------|
+| 0.85-1.00 | Blue (brand) | Good performance |
+| 0.70-0.84 | Yellow (warning) | Caution |
+| 0.00-0.69 | Red (danger) | Poor performance |
+| null | Grey (neutral) | No data available |
+
+**Configuration JSON (Reference):**
+
+The Configuration JSON format is still supported and now feeds into the `ICardConfig` system used by the MetricCard pipeline:
+
+```json
+{
+  "icon": "guidelines",
+  "contextTemplate": "You have a {grade}% in {area} compliance",
+  "colorRules": [
+    { "range": [0.85, 1.00], "color": "blue" },
+    { "range": [0.70, 0.84], "color": "yellow" },
+    { "range": [0.00, 0.69], "color": "red" }
+  ]
+}
+```
+
+**Configuration JSON Fields:**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `icon` | string | Yes | -- | Icon key: `"guidelines"`, `"budget"`, `"outcomes"` |
+| `contextTemplate` | string | No | `"You have a {grade}% in {area} compliance"` | Template with `{grade}` (percentage) and `{area}` (area name) placeholders |
+| `colorRules` | array | No | Default (blue/yellow/red) | Custom color range mappings |
+
+**Available Icon Keys:**
+
+| Key | Icon | Use For |
+|-----|------|---------|
+| `guidelines` | Gavel | Rules/legal compliance areas |
+| `budget` | Money | Financial/budget areas |
+| `outcomes` | Target | Goals/outcomes areas |
+
+**Null/No-Data State:** When no grade data exists (null), the card shows "N/A" with grey styling and contextual text: "No grade data available for {areaName}".
 
 ---
 
@@ -719,6 +907,19 @@ The MetricCard uses the **DataAggregationService** which fetches records from th
 - Verify the saved view ID is correct and the view is accessible
 - Check browser console for detailed error messages
 
+### ReportCardMetric shows "N/A" instead of a grade
+- As of v1.2.33, ReportCardMetric uses the MetricCard pipeline with `resolveCardConfig` for rendering
+- This is normal when no KPI assessments have been submitted for that area
+- Submit at least one KPI assessment via the Quick Create form, which triggers the calculator API
+- Refresh the form after saving the assessment — grades update asynchronously
+- Verify the grade fields on the entity record have non-null values (e.g., `sprk_guidelinecompliancegrade_current`)
+
+### ReportCardMetric not rendering (blank space)
+- Verify `sprk_visualtype` is set to `100000010` on the chart definition record
+- If the Visual Type choice field doesn't have a "ReportCardMetric" option, you need to add it — see [Adding the ReportCardMetric Visual Type](#adding-the-reportcardmetric-visual-type) below
+- Ensure VisualHost PCF solution v1.2.33 or later is imported
+- Check browser console (F12) for rendering errors
+
 ### Bar chart shows a single "(Blank)" bar
 - **Wrong field format for Group By Field:** Choice/optionset fields use `fieldname` (e.g., `sprk_documenttype`). Lookup fields use `_fieldname_value` (e.g., `_sprk_eventtype_ref_value`). See [Group By Field Format](#group-by-field-format).
 - **Column missing from view (pre-v1.2.14):** If using a version before v1.2.14, the Group By Field column must be included in the saved view's column list. v1.2.14+ auto-injects missing columns.
@@ -731,7 +932,7 @@ The MetricCard uses the **DataAggregationService** which fetches records from th
 ### Version Badge Not Updating
 - Verify the solution was imported successfully
 - Clear browser cache (Ctrl+Shift+Delete)
-- Check the version badge in the lower-left corner of the control (should show v1.2.29)
+- Check the version badge in the lower-left corner of the control (should show v1.2.33)
 
 ### Click Actions Not Working
 - Verify `enableDrillThrough` is set to Yes on the PCF control
@@ -800,6 +1001,142 @@ The MetricCard uses the **DataAggregationService** which fetches records from th
    - The Events Page detects dialog mode, skips the Calendar side pane
    - `GridSection` injects a FetchXML condition: `<condition attribute="sprk_regardingrecordid" operator="eq" value="{matterGuid}" />`
    - Only events related to the current Matter are displayed
+
+---
+
+### Use Case 5: KPI Grade Cards on a Matter Form (Report Card)
+
+**Goal:** Display three grade cards (Guidelines, Budget, Outcomes) on a Matter form's Report Card tab, each showing the current performance grade as a letter with color coding.
+
+#### Option A: Single Chart Definition with Matrix Mode (New - Recommended)
+
+Use one chart definition with Group By Field to render all 3 grades as a responsive matrix. This approach requires fewer chart definitions and provides responsive layout automatically.
+
+**Step-by-step:**
+
+1. **Create a single Chart Definition record:**
+
+   | Field | Value |
+   |-------|-------|
+   | Name | Performance Grades |
+   | Visual Type | ReportCardMetric (100000010) |
+   | Entity Logical Name | `sprk_matter` |
+   | Group By Field | Performance area grouping field (e.g., field that segments into Guidelines/Budget/Outcomes) |
+   | Aggregation Type | Average (100000002) |
+   | Aggregation Field | Grade field (e.g., `sprk_compliancegrade_current`) |
+   | Value Format | Letter Grade (100000001) |
+   | Color Source | Value Threshold (100000002) |
+   | Configuration JSON | See below |
+
+   **Configuration JSON:**
+   ```json
+   {
+     "cardSize": "medium",
+     "sortBy": "optionSetOrder",
+     "iconMap": {
+       "Guidelines": "gavel",
+       "Budget": "money",
+       "Outcomes": "target"
+     },
+     "cardDescription": "{formatted} compliance",
+     "nullDisplay": "N/A",
+     "nullDescription": "No data available",
+     "colorThresholds": [
+       { "range": [0.85, 1.00], "tokenSet": "brand" },
+       { "range": [0.70, 0.84], "tokenSet": "warning" },
+       { "range": [0.00, 0.69], "tokenSet": "danger" }
+     ]
+   }
+   ```
+
+2. **Add one VisualHost control to the Matter form:**
+   - Place it in the Report Card tab section
+   - Set `chartDefinitionId` to the chart definition GUID
+   - No `contextFieldName` needed -- the card reads grade fields directly from the current record
+   - One VisualHost instance renders all 3 cards in a responsive CSS Grid
+
+3. **How it works at runtime:**
+   - VisualHost loads the chart definition
+   - ChartRenderer detects `VisualType = ReportCardMetric`
+   - `resolveCardConfig` applies the ReportCardMetric preset defaults (letter grade format, value threshold colors, icons)
+   - DataAggregationService groups data by the performance area field, producing 3 data points
+   - MetricCardMatrix renders 3 cards in a responsive grid with grade letters, color coding, and icons
+   - If no KPI assessments have been entered, cards show "N/A" in grey
+
+#### Option B: Three Separate Chart Definitions (Legacy)
+
+This approach still works -- ReportCardMetric preset auto-applies grade styling via `cardConfigResolver`. However, matrix mode (Option A) is preferred for fewer chart definitions and responsive layout.
+
+**Step-by-step:**
+
+1. **Create three Chart Definition records** (one per performance area):
+
+   **Guidelines Card:**
+
+   | Field | Value |
+   |-------|-------|
+   | Name | Guidelines |
+   | Visual Type | ReportCardMetric (100000010) |
+   | Entity Logical Name | `sprk_matter` |
+   | Aggregation Field | `sprk_guidelinecompliancegrade_current` |
+   | Aggregation Type | Average (100000002) |
+   | Configuration JSON | `{"icon": "guidelines", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
+
+   **Budget Card:**
+
+   | Field | Value |
+   |-------|-------|
+   | Name | Budget |
+   | Visual Type | ReportCardMetric (100000010) |
+   | Entity Logical Name | `sprk_matter` |
+   | Aggregation Field | `sprk_budgetcompliancegrade_current` |
+   | Aggregation Type | Average (100000002) |
+   | Configuration JSON | `{"icon": "budget", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
+
+   **Outcomes Card:**
+
+   | Field | Value |
+   |-------|-------|
+   | Name | Outcomes |
+   | Visual Type | ReportCardMetric (100000010) |
+   | Entity Logical Name | `sprk_matter` |
+   | Aggregation Field | `sprk_outcomecompliancegrade_current` |
+   | Aggregation Type | Average (100000002) |
+   | Configuration JSON | `{"icon": "outcomes", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
+
+2. **Note the Chart Definition IDs** (GUIDs) from each record's URL after saving.
+
+3. **Add three VisualHost controls to the Matter form:**
+   - Place them in the Report Card tab section (side by side or in a 3-column section)
+   - For each control, set `chartDefinitionId` to the corresponding chart definition GUID
+   - No `contextFieldName` needed -- the card reads the current record's grade fields directly
+
+4. **How it works at runtime:**
+   - Each VisualHost instance loads its chart definition
+   - ChartRenderer detects `VisualType = ReportCardMetric`
+   - `resolveCardConfig` applies the ReportCardMetric preset defaults (letter grade format, value threshold colors, icons)
+   - Reads the grade field value from the current matter record
+   - Color coding is applied automatically (blue/yellow/red/grey)
+   - If no KPI assessments have been entered, cards show "N/A" in grey
+
+#### Updating Grades After Adding KPI Assessments (Both Options)
+
+- KPI Assessment Quick Create form triggers the BFF API calculator endpoint on post-save
+- The calculator recalculates all three area grades and updates the matter record
+- Refresh the form to see updated grade cards
+
+### Use Case 6: KPI Grade Cards on a Project Form
+
+Same as Use Case 5, but for the Project entity. Change the entity and field names:
+
+| Field | Matter Value | Project Value |
+|-------|-------------|---------------|
+| Entity Logical Name | `sprk_matter` | `sprk_project` |
+| Guidelines Aggregation Field | `sprk_guidelinecompliancegrade_current` | `sprk_guidelinecompliancegrade_current` |
+| Budget Aggregation Field | `sprk_budgetcompliancegrade_current` | `sprk_budgetcompliancegrade_current` |
+| Outcomes Aggregation Field | `sprk_outcomecompliancegrade_current` | `sprk_outcomecompliancegrade_current` |
+
+The grade field names are the same on both entities. Only the Entity Logical Name changes.
 
 ---
 
@@ -884,6 +1221,56 @@ The MetricCard uses the **DataAggregationService** which fetches records from th
 | **PCF Properties** | |
 | contextFieldName | *(leave empty)* |
 
+### ReportCardMetric — Guidelines Grade on Matter Form
+
+| Setting | Value |
+|---------|-------|
+| **Chart Definition** | |
+| Name | Guidelines |
+| Visual Type | ReportCardMetric (100000010) |
+| Entity Logical Name | `sprk_matter` |
+| Aggregation Field | `sprk_guidelinecompliancegrade_current` |
+| Aggregation Type | Average (100000002) |
+| Configuration JSON | `{"icon": "guidelines", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
+| **PCF Properties** | |
+| chartDefinitionId | *(GUID of the chart definition)* |
+
+> **Note:** Leave all other chart definition fields empty (no Group By, no Context Field, no Base View ID). The ReportCardMetric reads the grade value directly from the aggregation field on the current record.
+>
+> **v1.2.33 Alternative:** Instead of three separate chart definitions (Guidelines, Budget, Outcomes), you can use a single chart definition with Group By Field set to the performance area field to render all three grades as a matrix. See [Use Case 5 Option A](#use-case-5-kpi-grade-cards-on-a-matter-form-report-card) for details.
+
+### ReportCardMetric — Budget Grade on Matter Form
+
+| Setting | Value |
+|---------|-------|
+| **Chart Definition** | |
+| Name | Budget |
+| Visual Type | ReportCardMetric (100000010) |
+| Entity Logical Name | `sprk_matter` |
+| Aggregation Field | `sprk_budgetcompliancegrade_current` |
+| Aggregation Type | Average (100000002) |
+| Configuration JSON | `{"icon": "budget", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
+| **PCF Properties** | |
+| chartDefinitionId | *(GUID of the chart definition)* |
+
+> **v1.2.33 Alternative:** Consider using a single chart definition with matrix mode instead of three separate definitions. See [Use Case 5 Option A](#use-case-5-kpi-grade-cards-on-a-matter-form-report-card).
+
+### ReportCardMetric — Outcomes Grade on Matter Form
+
+| Setting | Value |
+|---------|-------|
+| **Chart Definition** | |
+| Name | Outcomes |
+| Visual Type | ReportCardMetric (100000010) |
+| Entity Logical Name | `sprk_matter` |
+| Aggregation Field | `sprk_outcomecompliancegrade_current` |
+| Aggregation Type | Average (100000002) |
+| Configuration JSON | `{"icon": "outcomes", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
+| **PCF Properties** | |
+| chartDefinitionId | *(GUID of the chart definition)* |
+
+> **v1.2.33 Alternative:** Consider using a single chart definition with matrix mode instead of three separate definitions. See [Use Case 5 Option A](#use-case-5-kpi-grade-cards-on-a-matter-form-report-card).
+
 ### Bar Chart with Drill-Through to Events Page
 
 | Setting | Value |
@@ -903,6 +1290,103 @@ The MetricCard uses the **DataAggregationService** which fetches records from th
 | showToolbar | Yes |
 
 > **Note:** The Drill-Through Target must be the exact web resource name including extension. The Events Page web resource must be version 2.16.0+ for dialog mode support (calendar suppression and context filtering).
+
+---
+
+---
+
+## Adding the ReportCardMetric Visual Type
+
+If the `sprk_visualtype` choice field on `sprk_chartdefinition` does not yet include the **ReportCardMetric** option, you need to add it before creating KPI grade card definitions.
+
+### Option Set Value
+
+| Label | Value |
+|-------|-------|
+| ReportCardMetric | 100000010 |
+
+### How to Add (Manual)
+
+1. Navigate to **Settings** > **Customizations** > **Customize the System**
+2. Expand **Entities** > **Chart Definition** (`sprk_chartdefinition`) > **Fields**
+3. Open the **Visual Type** (`sprk_visualtype`) field
+4. In the **Options** section, click **Add** to add a new option:
+   - **Label**: `ReportCardMetric`
+   - **Value**: `100000010`
+5. Save and **Publish All Customizations**
+
+### How to Add (Solution Import)
+
+If using the SpaarkeCore solution or project deployment solution, the option set value should be included in the `customizations.xml`. Verify the solution XML includes the option in the `sprk_visualtype` field definition.
+
+### Verification
+
+After adding the option:
+1. Open any Chart Definition record
+2. Click the **Visual Type** dropdown
+3. Confirm **ReportCardMetric** appears in the list
+4. Create a test record with Visual Type = ReportCardMetric to verify it saves correctly
+
+---
+
+### Adding the New Chart Definition Choice Fields (v1.2.33)
+
+Two new choice columns must be added to the `sprk_chartdefinition` entity to support MetricCard matrix mode value formatting and color configuration.
+
+#### Value Format (`sprk_valueformat`)
+
+| Label | Value |
+|-------|-------|
+| Short Number | 100000000 |
+| Letter Grade | 100000001 |
+| Percentage | 100000002 |
+| Whole Number | 100000003 |
+| Decimal | 100000004 |
+| Currency | 100000005 |
+
+#### Color Source (`sprk_colorsource`)
+
+| Label | Value |
+|-------|-------|
+| None | 100000000 |
+| Option Set Color | 100000001 |
+| Value Threshold | 100000002 |
+
+#### How to Add (Manual)
+
+Follow the same process used for the Visual Type field:
+
+1. Navigate to **Settings** > **Customizations** > **Customize the System**
+2. Expand **Entities** > **Chart Definition** (`sprk_chartdefinition`) > **Fields**
+3. Click **New** to create a new field:
+   - **Display Name**: `Value Format`
+   - **Name**: `sprk_valueformat`
+   - **Data Type**: Choice (Option Set)
+   - **Type**: Local Option Set (new)
+   - Add all options from the **Value Format** table above with the specified values
+   - **Default Value**: Short Number (100000000)
+4. Save the field
+5. Create a second new field:
+   - **Display Name**: `Color Source`
+   - **Name**: `sprk_colorsource`
+   - **Data Type**: Choice (Option Set)
+   - **Type**: Local Option Set (new)
+   - Add all options from the **Color Source** table above with the specified values
+   - **Default Value**: None (100000000)
+6. Save the field
+7. **Publish All Customizations**
+
+#### How to Add (Solution Import)
+
+If using the SpaarkeCore solution or project deployment solution, the new choice fields should be included in the `customizations.xml`. Verify the solution XML includes both `sprk_valueformat` and `sprk_colorsource` field definitions with their option set values on the `sprk_chartdefinition` entity.
+
+#### Verification
+
+After adding the fields:
+1. Open any Chart Definition record
+2. Confirm **Value Format** and **Color Source** fields appear on the form (you may need to add them to the form layout)
+3. Verify each dropdown contains the expected options
+4. Create a test record with Value Format = Letter Grade and Color Source = Value Threshold to verify they save correctly
 
 ---
 

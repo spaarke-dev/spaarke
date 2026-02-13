@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{a1b2c3d4-e5f6-7890-abcd-ef1234567890}</formid>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form>
+      <tabs>
+        <tab verticallayout="true" id="{f1a2b3c4-d5e6-7890-abcd-111111111111}" IsUserDefined="1">
+          <labels>
+            <label description="" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section showlabel="false" showbar="false" IsUserDefined="0" id="{f1a2b3c4-d5e6-7890-abcd-222222222222}">
+                  <labels>
+                    <label description="KPI Assessment" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <!-- Field 1: Performance Area (Choice - required) -->
+                    <row>
+                      <cell id="{f1a2b3c4-d5e6-7890-abcd-333333333001}">
+                        <labels>
+                          <label description="Performance Area" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_performancearea" classid="{3EF39988-22BB-4f0b-BBBE-64B5A3748AEE}" datafieldname="sprk_performancearea" />
+                      </cell>
+                    </row>
+                    <!-- Field 2: KPI Name (String - required) -->
+                    <row>
+                      <cell id="{f1a2b3c4-d5e6-7890-abcd-333333333002}">
+                        <labels>
+                          <label description="KPI Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_kpiname" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_kpiname" />
+                      </cell>
+                    </row>
+                    <!-- Field 3: Assessment Criteria (Multiline Text - read-only, informational) -->
+                    <row>
+                      <cell id="{f1a2b3c4-d5e6-7890-abcd-333333333003}">
+                        <labels>
+                          <label description="Assessment Criteria" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_assessmentcriteria" classid="{E0DECE4B-6FC8-4a8f-A065-082708572369}" datafieldname="sprk_assessmentcriteria" disabled="true" />
+                      </cell>
+                    </row>
+                    <!-- Field 4: Grade (Choice - required) -->
+                    <row>
+                      <cell id="{f1a2b3c4-d5e6-7890-abcd-333333333004}">
+                        <labels>
+                          <label description="Grade" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_kpigradescore" classid="{3EF39988-22BB-4f0b-BBBE-64B5A3748AEE}" datafieldname="sprk_kpigradescore" />
+                      </cell>
+                    </row>
+                    <!-- Field 5: Assessment Notes (Multiline Text - optional) -->
+                    <row>
+                      <cell id="{f1a2b3c4-d5e6-7890-abcd-333333333005}">
+                        <labels>
+                          <label description="Assessment Notes" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_assessmentnotes" classid="{E0DECE4B-6FC8-4a8f-A065-082708572369}" datafieldname="sprk_assessmentnotes" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <!-- Form event handlers -->
+      <events>
+        <event name="onload" application="false" active="true">
+          <Handlers>
+            <Handler functionName="Spaarke.KpiAssessment.onLoad" libraryName="sprk_/scripts/kpiassessment_quickcreate.js" handlerUniqueId="{b2c3d4e5-f6a7-8901-bcde-f12345678901}" enabled="true" parameters="" passExecutionContext="true" />
+          </Handlers>
+        </event>
+      </events>
+      <!-- Web resource dependencies -->
+      <formLibraries>
+        <Library name="sprk_/scripts/kpiassessment_quickcreate.js" libraryUniqueId="{a1b2c3d4-e5f6-7890-1234-567890abcdef}" />
+      </formLibraries>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="KPI Assessment Quick Create" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="Quick Create form for adding KPI assessments to matters. Fields: Performance Area, KPI Name, Criteria, Grade, Notes." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>
