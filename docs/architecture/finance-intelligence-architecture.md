@@ -1,7 +1,7 @@
 # Finance Intelligence Module R1 — Technical Architecture
 
-> **Version**: 1.0
-> **Last Updated**: 2026-02-12
+> **Version**: 1.1
+> **Last Updated**: 2026-02-13
 > **Status**: Implementation Complete - Pending Deployment
 
 ---
@@ -263,9 +263,9 @@ Email Arrival
 |--------|-------------|--------|---------------|---------|
 | **Invoice** | `sprk_invoice` | 13 | None | Lightweight confirmed invoice artifact linking Document to Matter/Vendor |
 | **BillingEvent** | `sprk_billingevent` | 13 + alt key | `sprk_invoice` + `sprk_linesequence` | Canonical financial fact (one per invoice line item) |
-| **Budget** | `sprk_budget` | 12 | None | Budget plan header (matter-level or project-level) |
-| **BudgetBucket** | `sprk_budgetbucket` | 8 | None | Budget allocation by bucket/period |
-| **SpendSnapshot** | `sprk_spendsnapshot` | 16 + alt key | 5-field composite (matter + project + period + periodvalue + generatedat) | Pre-computed spend aggregation with velocity metrics |
+| **Budget** | `sprk_budget` | 12 | None | Budget plan header (matter-level OR project-level, 1:N relationship - matters may span multiple budget cycles) |
+| **BudgetBucket** | `sprk_budgetbucket` | 8 | None | Budget allocation by bucket/period (optional subdivisions of Budget.TotalBudget) |
+| **SpendSnapshot** | `sprk_spendsnapshot` | 16 + alt key | 5-field composite (matter + project + period + periodkey + bucketkey + visibilityfilter) | Pre-computed spend aggregation with velocity metrics |
 | **SpendSignal** | `sprk_spendsignal` | 12 | None | Threshold-based alerts (budget warnings, velocity spikes) |
 
 #### Extended Entity
@@ -291,6 +291,25 @@ Email Arrival
 **Denormalized Finance Fields** (on `sprk_matter` and `sprk_project`):
 - `sprk_budget`, `sprk_currentspend`, `sprk_budgetvariance`
 - `sprk_budgetutilizationpct`, `sprk_velocitypct`, `sprk_lastfinanceupdatedate`
+
+#### Budget Relationship Model
+
+**Matter and Project Independence**:
+- Matter and Project entities are **independent** (no required linkage)
+- Invoices can be associated with Matter **OR** Project (mutually exclusive in MVP)
+- Budgets can be linked to Matter **OR** Project (separate budget plans)
+
+**Budget 1:N Relationship**:
+- A Matter or Project can have **multiple Budget records** (1:N relationship)
+- **Rationale**: Matters/projects may span multiple fiscal periods or budget cycles
+- **Total Budget Calculation**: Sum of `Budget.sprk_totalbudget` across ALL Budget records for the Matter/Project
+- **NOT TopCount=1**: Financial calculations must SUM all Budget records, not just the first
+
+**Budget Bucket Design**:
+- BudgetBucket entities are **optional** subdivisions of `Budget.sprk_totalbudget`
+- `Budget.sprk_totalbudget` is the authoritative budget amount
+- Budget Buckets enable category-level tracking but are not required for variance calculations
+- If no Budget Buckets exist, total budget from Budget entity is used directly
 
 #### Views
 
@@ -347,7 +366,7 @@ public interface IInvoiceAnalysisService
 
 **Location**: `src/server/api/Sprk.Bff.Api/Services/Finance/ISpendSnapshotService.cs`
 
-**Purpose**: Deterministic spend aggregation with budget variance and velocity metrics.
+**Purpose**: Deterministic spend aggregation with budget variance and velocity metrics for both Matter and Project entities.
 
 **Methods**:
 ```csharp
@@ -358,20 +377,29 @@ public interface ISpendSnapshotService
     /// Computes budget variance and Month-over-Month velocity.
     /// </summary>
     /// <param name="matterId">Matter GUID</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>List of snapshots (Month + ToDate for MVP)</returns>
-    Task<IReadOnlyList<SpendSnapshot>> GenerateSnapshotsAsync(
-        Guid matterId,
-        CancellationToken cancellationToken = default);
+    /// <param name="correlationId">Optional correlation ID for traceability</param>
+    /// <param name="ct">Cancellation token</param>
+    Task GenerateAsync(Guid matterId, string? correlationId = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Generates spend snapshots for a project across all periods and buckets.
+    /// Computes budget variance and Month-over-Month velocity.
+    /// </summary>
+    /// <param name="projectId">Project GUID</param>
+    /// <param name="correlationId">Optional correlation ID for traceability</param>
+    /// <param name="ct">Cancellation token</param>
+    Task GenerateForProjectAsync(Guid projectId, string? correlationId = null, CancellationToken ct = default);
 }
 ```
 
 **Key Calculations**:
-- **Budget Variance**: `Variance = Budget - Invoiced` (positive = under budget, negative = over budget)
+- **Budget Variance**: `Variance = SUM(Budget.sprk_totalbudget) - Invoiced` (positive = under budget, negative = over budget)
+- **Total Budget**: Sum of ALL Budget records for Matter/Project (not just first record)
 - **Month-over-Month Velocity**: `VelocityPct = (current month - prior month) / prior month × 100`
 - **Snapshot Periods (MVP)**: Month, ToDate (Quarter/Year post-MVP)
+- **Bucket Keys (MVP)**: "TOTAL" only (category breakdowns post-MVP)
 
-**Alternate Key for Idempotency**: `sprk_matter + sprk_project + sprk_snapshotperiod + sprk_periodvalue + sprk_generatedat`
+**Alternate Key for Idempotency**: `sprk_matter/sprk_project + sprk_periodtype + sprk_periodkey + sprk_bucketkey + sprk_visibilityfilter`
 
 ---
 
@@ -436,6 +464,52 @@ public interface IInvoiceSearchService
 - **Searchable content**: `content` (enriched with contextual metadata before vectorization)
 - **Vector field**: `contentVector` (3072 dimensions, text-embedding-3-large)
 - **Filterable metadata**: `vendorName`, `matterName`, `matterNumber`, `invoiceNumber`, `invoiceDate`, `totalAmount`, `currency`
+
+---
+
+#### Lookup Services (Portable Alternate Keys)
+
+**Purpose**: Cached lookup services for AI configuration records using alternate keys for SaaS multi-environment portability.
+
+**Pattern**: All lookup services follow the same implementation pattern:
+- **IMemoryCache** with 1-hour TTL
+- **Alternate key lookups** via `IDataverseService.RetrieveByAlternateKeyAsync()`
+- **GUIDs regenerate** across environments; alternate keys (code fields) travel with solution imports
+
+**Implemented Services**:
+
+| Service | Entity | Alternate Key Field | Purpose |
+|---------|--------|---------------------|---------|
+| `IPlaybookLookupService` | `sprk_playbook` | `sprk_playbookcode` | AI prompt template resolution |
+| `IActionLookupService` | `sprk_analysisaction` | `sprk_actioncode` | Analysis action resolution |
+| `ISkillLookupService` | `sprk_analysisskill` | `sprk_skillcode` | Analysis skill resolution |
+| `IToolLookupService` | `sprk_analysistool` | `sprk_toolcode` | Analysis tool resolution |
+
+**Example Interface** (`IPlaybookLookupService`):
+```csharp
+public interface IPlaybookLookupService
+{
+    /// <summary>
+    /// Get playbook by portable code (alternate key).
+    /// Results are cached for 1 hour to minimize Dataverse queries.
+    /// </summary>
+    /// <param name="playbookCode">Portable playbook code (e.g., "PB-001")</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Playbook entity with ID and metadata</returns>
+    Task<PlaybookResponse> GetByCodeAsync(string playbookCode, CancellationToken ct = default);
+
+    void ClearCache(string playbookCode);
+    void ClearAllCache();
+}
+```
+
+**Performance Characteristics**:
+- First lookup: ~50-100ms (Dataverse query + cache write)
+- Cached lookups: <1ms (in-memory)
+- Cache TTL: 1 hour (configuration rarely changes)
+- Memory usage: ~1KB per cached record (negligible)
+
+**Location**: `src/server/api/Sprk.Bff.Api/Services/Ai/*LookupService.cs`
 
 ---
 
@@ -511,21 +585,24 @@ public interface IInvoiceSearchService
 
 **Location**: `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/SpendSnapshotGenerationJobHandler.cs`
 
-**Job Contract**:
+**Job Contract** (supports both Matter and Project):
 ```json
 {
   "jobType": "SpendSnapshotGeneration",
-  "matterId": "{guid}",
+  "matterId": "{guid}",        // OR projectId (mutually exclusive)
+  "projectId": "{guid}",        // OR matterId (mutually exclusive)
   "correlationId": "{guid}"
 }
 ```
 
 **Execution Flow**:
-1. Load matter and budget plan
-2. Load all `sprk_billingevent` records for matter (filtered by `VisibilityState = Invoiced`)
-3. Call `ISpendSnapshotService.GenerateSnapshotsAsync(matterId)`
+1. Load matter/project and budget plan
+2. Load all `sprk_billingevent` records for matter/project (filtered by `VisibilityState = Invoiced`)
+3. Call `ISpendSnapshotService.GenerateAsync(matterId)` OR `GenerateForProjectAsync(projectId)`
+   - Query ALL Budget records for matter/project (1:N relationship)
+   - Sum `Budget.sprk_totalbudget` across all Budget records
    - Aggregate events by period (Month, ToDate)
-   - Compute budget variance: `Budget - Invoiced`
+   - Compute budget variance: `SUM(Budget.sprk_totalbudget) - Invoiced`
    - Compute Month-over-Month velocity: `(current - prior) / prior × 100`
 4. Upsert `sprk_spendsnapshot` records via alternate key
 5. Call `ISignalEvaluationService.EvaluateSignalsAsync(snapshots)`
@@ -534,7 +611,7 @@ public interface IInvoiceSearchService
 6. Update denormalized fields on `sprk_matter` or `sprk_project`:
    - `sprk_budget`, `sprk_currentspend`, `sprk_budgetvariance`
    - `sprk_budgetutilizationpct`, `sprk_velocitypct`, `sprk_lastfinanceupdatedate`
-7. Invalidate Redis cache key: `matter:{matterId}:finance-summary`
+7. Invalidate Redis cache key: `matter:{matterId}:finance-summary` or `project:{projectId}:finance-summary`
 
 **Idempotency**: Upsert via composite alternate key ensures safe re-runs
 
@@ -657,13 +734,17 @@ public interface IInvoiceSearchService
 
 #### GET /api/finance/matters/{matterId}/summary
 
-**Purpose**: Finance summary for matter (Redis-cached, 5-min TTL).
+**Purpose**: Finance summary for matter (Redis-cached, 5-min TTL). Also available for projects.
+
+**Endpoints**:
+- `GET /api/finance/matters/{matterId}/summary`
+- `GET /api/finance/projects/{projectId}/summary`
 
 **Response** (200 OK):
 ```json
 {
-  "matterId": "{guid}",
-  "budget": 100000.00,
+  "matterId": "{guid}",           // OR projectId
+  "budget": 100000.00,             // Sum of ALL Budget records
   "currentSpend": 75000.00,
   "budgetRemaining": 25000.00,
   "budgetUtilizationPct": 75.0,
@@ -675,10 +756,11 @@ public interface IInvoiceSearchService
 ```
 
 **Logic**:
-1. Check Redis cache: `matter:{matterId}:finance-summary`
+1. Check Redis cache: `matter:{matterId}:finance-summary` or `project:{projectId}:finance-summary`
 2. If cached, return (TTL: 5 minutes)
 3. If not cached:
-   - Query Dataverse for latest `sprk_spendsnapshot` records (ToDate period)
+   - Query Dataverse for ALL Budget records (1:N) and sum `sprk_totalbudget`
+   - Query latest `sprk_spendsnapshot` records (ToDate period)
    - Query `sprk_spendsignal` for open signals
    - Compute summary
    - Cache in Redis (5-min TTL)
@@ -1333,6 +1415,8 @@ Task<BudgetEntity?> GetActiveBudgetAsync(Guid matterId, CancellationToken ct);
 |----------|------|
 | **Specification** | `projects/financial-intelligence-module-r1/spec.md` |
 | **Implementation Plan** | `projects/financial-intelligence-module-r1/plan.md` |
+| **User Guide** | `docs/guides/finance-intelligence-user-guide.md` |
+| **Spend Snapshot Visualization Guide** | `docs/guides/finance-spend-snapshot-visualization-guide.md` |
 | **Verification Results** | `projects/financial-intelligence-module-r1/notes/verification-results.md` |
 | **Lessons Learned** | `projects/financial-intelligence-module-r1/notes/lessons-learned.md` |
 | **Tuning Guides** | `projects/financial-intelligence-module-r1/notes/*-tuning-guide.md` |
@@ -1340,7 +1424,7 @@ Task<BudgetEntity?> GetActiveBudgetAsync(Guid matterId, CancellationToken ct);
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: 2026-02-12
+**Document Version**: 1.1
+**Last Updated**: 2026-02-13
 **Maintained By**: Platform Engineering Team
 **Next Review**: Post-deployment (after validation)

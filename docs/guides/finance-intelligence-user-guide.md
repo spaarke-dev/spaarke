@@ -1,7 +1,7 @@
 # Finance Intelligence User Guide
 
-> **Document Version**: 1.0
-> **Last Updated**: 2026-02-12
+> **Document Version**: 1.1
+> **Last Updated**: 2026-02-13
 > **Module**: Finance Intelligence R1
 > **Audience**: Business Users, Legal Operations, Finance Teams
 
@@ -81,9 +81,10 @@ Before using Finance Intelligence, ensure:
 | Feature | Access Point |
 |---------|--------------|
 | **Invoice Review Queue** | Navigation menu → "Invoice Review Queue" view |
-| **Finance Dashboard** | Matter form → Finance Intelligence section (budget gauge + timeline) |
+| **Finance Dashboard** | Matter/Project form → Finance Intelligence section (budget gauge + timeline) |
 | **Invoice Search** | BFF API endpoint: `POST /api/finance/invoice-search` |
-| **Spend Summary** | BFF API endpoint: `GET /api/finance/summary?matterId={id}` |
+| **Spend Summary (Matter)** | BFF API endpoint: `GET /api/finance/matters/{matterId}/summary` |
+| **Spend Summary (Project)** | BFF API endpoint: `GET /api/finance/projects/{projectId}/summary` |
 
 ---
 
@@ -93,32 +94,44 @@ Before using Finance Intelligence, ensure:
 
 **Budgets** define overall spend limits and tracking periods.
 
+**Budget Relationship Model**:
+- **Matter and Project are independent** (no required linkage between them)
+- Each Matter or Project can have **multiple Budget records** (1:N relationship)
+- **Why multiple Budgets?** Matters/projects may span multiple fiscal years or budget cycles
+- **Total Budget Calculation**: System automatically **sums ALL Budget records** for a Matter/Project (not just the first)
+
 **To create a Budget**:
 1. Navigate to Budgets in Dataverse
 2. Click **+ New**
 3. Fill in required fields:
-   - **Name**: Descriptive name (e.g., "FY2026 Outside Counsel Budget")
+   - **Name**: Descriptive name (e.g., "FY2026 Q1 Outside Counsel Budget")
    - **Fiscal Year**: Year for tracking
-   - **Total Budget**: Total authorized spend amount
+   - **Total Budget**: Total authorized spend amount for this budget period
    - **Start Date** and **End Date**: Budget period
+   - **Matter or Project**: Link to specific matter OR project (mutually exclusive)
 4. **Save**
 
-**Budget Buckets** allocate portions of the Budget to specific categories or matters.
+**Important**: If a Matter spans multiple budget cycles, create **separate Budget records** for each cycle. The system will sum them automatically.
 
-**To create Budget Buckets**:
+**Budget Buckets** (Optional):
+- Budget Buckets are **optional** subdivisions of `Budget.TotalBudget`
+- Use Budget Buckets to allocate portions of the budget to specific categories
+- **Total Budget field is authoritative** - even without Budget Buckets, variance calculations work
+
+**To create Budget Buckets** (optional):
 1. Open a Budget
 2. Go to **Budget Buckets** related tab
 3. Click **+ New Budget Bucket**
 4. Fill in:
-   - **Name**: Category or matter name
+   - **Name**: Category name (e.g., "Discovery", "Motions", "Trial Prep")
    - **Allocated Amount**: Portion of total budget
-   - **Matter or Project**: Link to specific matter (optional)
+   - **Bucket Key**: Identifier for this bucket (e.g., "DISCOVERY")
 5. **Save**
 
-**Linking Budgets to Matters**:
-- Open a Matter record
-- Set **Budget** lookup field to the appropriate Budget
-- Save
+**Linking Budgets to Matters/Projects**:
+- Budget records link directly to Matter **OR** Project (not both)
+- A Matter can have multiple Budget records (e.g., FY2026 Q1, FY2026 Q2)
+- Total budget = Sum of all linked Budget records
 
 ### AI Model Configuration
 
@@ -589,16 +602,25 @@ The Finance Intelligence panel on Matter forms consists of 3 main components:
 
 **Calculation**:
 ```
-Budget Variance = Allocated Amount - Actual Spend
+Budget Variance = SUM(Budget.TotalBudget) - Actual Spend
 ```
+
+**Note**: If a Matter/Project has multiple Budget records, the system automatically **sums ALL Budget.TotalBudget values** before calculating variance.
 
 **Interpretation**:
 - **Positive variance**: Under budget (good)
 - **Negative variance**: Over budget (alert)
 - **Zero variance**: Exactly on budget
 
-**Example**:
+**Example (Single Budget)**:
 - Allocated: $100,000
+- Spent: $87,500
+- Variance: $12,500 (12.5% under budget)
+
+**Example (Multiple Budgets)**:
+- Budget 1 (FY2026 Q1): $50,000
+- Budget 2 (FY2026 Q2): $50,000
+- Total Allocated: $100,000
 - Spent: $87,500
 - Variance: $12,500 (12.5% under budget)
 
@@ -627,8 +649,10 @@ MoM Velocity = (Current Month Spend - Previous Month Spend) / Previous Month Spe
 
 **Calculation**:
 ```
-Utilization % = (Actual Spend / Allocated Amount) × 100
+Utilization % = (Actual Spend / SUM(Budget.TotalBudget)) × 100
 ```
+
+**Note**: For Matters/Projects with multiple Budget records, the system sums all `Budget.TotalBudget` values.
 
 **Thresholds**:
 - **0-80%**: Healthy (green)
@@ -781,13 +805,18 @@ Status: Active
 - Review rejection reasons periodically to identify systematic issues
 - Use rejection patterns to improve classification prompts
 
-### Budgetning Requirements
+### Budgeting Requirements
 
 **For Spend Tracking to Work**:
-1. **Budget must exist**: Create Budget record
-2. **Budget Buckets must be allocated**: At least one bucket with allocated amount
-3. **Budget linked to Matter**: Matter.BudgetPlan lookup must be set
+1. **Budget must exist**: Create at least one Budget record linked to Matter/Project
+2. **Budget Buckets are optional**: Not required for variance calculations
+3. **Total Budget field must be set**: `Budget.TotalBudget` is the authoritative budget amount
 4. **Budget amounts > 0**: Cannot track variance without baseline
+
+**Budget Calculation**:
+- **Single Budget**: Uses `Budget.TotalBudget` directly
+- **Multiple Budgets**: System **automatically sums** ALL Budget records for the Matter/Project
+- **Example**: Matter has 3 Budget records ($50K, $30K, $20K) → Total Budget = $100K
 
 **Without Budget**:
 - Spend snapshots still generated (actual spend tracked)
@@ -796,7 +825,7 @@ Status: Active
 - No budget-related signals
 
 **Partial Budgets**:
-- If Budget exists but no buckets → Total budget used
+- If Budget exists but no buckets → `Budget.TotalBudget` used directly
 - If some matters have budgets, others don't → Only budgeted matters get variance tracking
 
 ### Visibility State Meanings
@@ -1042,8 +1071,15 @@ Classification-related fields added in Task 002:
 |----------|--------|---------|
 | `/api/finance/invoice-confirm` | POST | Confirm invoice candidate |
 | `/api/finance/invoice-reject` | POST | Reject invoice candidate |
-| `/api/finance/summary` | GET | Get cached spend summary for matter |
+| `/api/finance/matters/{matterId}/summary` | GET | Get cached spend summary for matter |
+| `/api/finance/projects/{projectId}/summary` | GET | Get cached spend summary for project |
 | `/api/finance/invoice-search` | POST | Semantic search for invoices |
+
+### Additional Documentation
+
+For detailed information on spend visualization and dashboards, see:
+- **Spend Snapshot Visualization Guide**: [`docs/guides/finance-spend-snapshot-visualization-guide.md`](../guides/finance-spend-snapshot-visualization-guide.md)
+- **Technical Architecture**: [`docs/architecture/finance-intelligence-architecture.md`](../architecture/finance-intelligence-architecture.md)
 
 ---
 
