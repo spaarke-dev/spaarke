@@ -65,7 +65,8 @@ public class SpendSnapshotService : ISpendSnapshotService
 
     // Budget entity
     private const string BudgetEntity = "sprk_budget";
-    private const string Budget_Project = "sprk_project";
+    private const string Budget_Matter = "sprk_matter";
+    private const string Budget_TotalBudget = "sprk_totalbudget";
 
     // SpendSnapshot entity
     private const string SnapshotEntity = "sprk_spendsnapshot";
@@ -204,78 +205,42 @@ public class SpendSnapshotService : ISpendSnapshotService
     }
 
     /// <summary>
-    /// Look up budget amount for the matter from BudgetBucket records.
-    /// Finds the Budget for the matter's project, then sums the TOTAL bucket amounts.
+    /// Look up budget amount for the matter from Budget entity.
+    /// Matter can have multiple Budget records (spanning budget cycles/time periods).
+    /// Returns the sum of all Budget.sprk_totalbudget values for this matter.
     /// Returns null if no budget is configured.
     /// </summary>
     private async Task<decimal?> GetBudgetAmountForMatterAsync(
         ServiceClient serviceClient, Guid matterId, CancellationToken ct)
     {
-        // First, get the matter's project lookup
-        var matterEntity = await serviceClient.RetrieveAsync(
-            "sprk_matter", matterId,
-            new ColumnSet("sprk_project"),
-            ct);
-
-        var projectRef = matterEntity?.GetAttributeValue<EntityReference>("sprk_project");
-        if (projectRef == null)
-        {
-            _logger.LogDebug("Matter {MatterId} has no project reference. No budget available.", matterId);
-            return null;
-        }
-
-        // Query budgets for the project
+        // Query ALL Budget records for this matter
         var budgetQuery = new QueryExpression(BudgetEntity)
         {
-            ColumnSet = new ColumnSet("sprk_budgetid"),
+            ColumnSet = new ColumnSet(Budget_TotalBudget),
             Criteria = new FilterExpression
             {
                 Conditions =
                 {
-                    new ConditionExpression(Budget_Project, ConditionOperator.Equal, projectRef.Id)
-                }
-            },
-            TopCount = 1
-        };
-
-        var budgetResults = await serviceClient.RetrieveMultipleAsync(budgetQuery, ct);
-        var budgetEntity = budgetResults.Entities.FirstOrDefault();
-
-        if (budgetEntity == null)
-        {
-            _logger.LogDebug("No budget found for project {ProjectId} (matter {MatterId}).", projectRef.Id, matterId);
-            return null;
-        }
-
-        // Query BudgetBucket records for the TOTAL bucket
-        var bucketQuery = new QueryExpression(BudgetBucketEntity)
-        {
-            ColumnSet = new ColumnSet(BudgetBucket_Amount, BudgetBucket_BucketKey),
-            Criteria = new FilterExpression
-            {
-                Conditions =
-                {
-                    new ConditionExpression(BudgetBucket_Budget, ConditionOperator.Equal, budgetEntity.Id),
-                    new ConditionExpression(BudgetBucket_BucketKey, ConditionOperator.Equal, DefaultBucketKey)
+                    new ConditionExpression(Budget_Matter, ConditionOperator.Equal, matterId)
                 }
             }
         };
 
-        var bucketResults = await serviceClient.RetrieveMultipleAsync(bucketQuery, ct);
+        var budgetResults = await serviceClient.RetrieveMultipleAsync(budgetQuery, ct);
 
-        if (bucketResults.Entities.Count == 0)
+        if (budgetResults.Entities.Count == 0)
         {
-            _logger.LogDebug("No TOTAL budget bucket found for budget {BudgetId}.", budgetEntity.Id);
+            _logger.LogDebug("No budget records found for matter {MatterId}.", matterId);
             return null;
         }
 
-        // Sum all matching bucket amounts (typically one for TOTAL)
-        var totalBudget = bucketResults.Entities
-            .Sum(e => e.GetAttributeValue<Money>(BudgetBucket_Amount)?.Value ?? 0m);
+        // Sum all budget amounts (matter may span multiple budget cycles)
+        var totalBudget = budgetResults.Entities
+            .Sum(e => e.GetAttributeValue<Money>(Budget_TotalBudget)?.Value ?? 0m);
 
         _logger.LogDebug(
-            "Budget amount for matter {MatterId}: {BudgetAmount:C} (from {BucketCount} bucket(s))",
-            matterId, totalBudget, bucketResults.Entities.Count);
+            "Budget amount for matter {MatterId}: {BudgetAmount:C} (from {BudgetCount} budget record(s))",
+            matterId, totalBudget, budgetResults.Entities.Count);
 
         return totalBudget;
     }
