@@ -51,7 +51,7 @@ public class ScorecardCalculatorIntegrationTests
     private void SetupAreaAssessments(Guid matterId, int performanceArea, params KpiAssessmentRecord[] assessments)
     {
         _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, performanceArea, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), performanceArea, It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(assessments);
     }
 
@@ -310,13 +310,13 @@ public class ScorecardCalculatorIntegrationTests
 
         // Verify all three areas were queried independently
         _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Once);
         _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, Budget, It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Budget, It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Once);
         _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, Outcomes, It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Outcomes, It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 

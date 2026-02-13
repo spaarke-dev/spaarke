@@ -51,7 +51,7 @@ public class ScorecardCalculatorErrorTests
     private void SetupAreaAssessments(Guid matterId, int performanceArea, params KpiAssessmentRecord[] assessments)
     {
         _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, performanceArea, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), performanceArea, It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(assessments);
     }
 
@@ -76,7 +76,7 @@ public class ScorecardCalculatorErrorTests
         // simulating a Dataverse connectivity or service error
         var matterId = Guid.NewGuid();
         _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("Dataverse service unavailable"));
 
         // Act & Assert - service propagates the exception since queries run via Task.WhenAll
@@ -135,13 +135,13 @@ public class ScorecardCalculatorErrorTests
 
         // Assert - all three area queries were invoked despite update failure
         _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Once);
         _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, Budget, It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Budget, It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Once);
         _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, Outcomes, It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Outcomes, It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -188,8 +188,8 @@ public class ScorecardCalculatorErrorTests
         cts.Cancel();
 
         _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .Returns((Guid _, int? _, int _, CancellationToken ct) =>
+            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid _, string _, int? _, int _, CancellationToken ct) =>
             {
                 ct.ThrowIfCancellationRequested();
                 return Task.FromResult(Array.Empty<KpiAssessmentRecord>());
@@ -208,7 +208,7 @@ public class ScorecardCalculatorErrorTests
         using var cts = new CancellationTokenSource();
 
         _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TaskCanceledException("The operation was cancelled"));
 
         // Act & Assert
@@ -228,7 +228,7 @@ public class ScorecardCalculatorErrorTests
         var matterId = Guid.NewGuid();
 
         _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("Guidelines query failed"));
 
         SetupAreaAssessments(matterId, Budget, CreateAssessment(85));
@@ -248,7 +248,7 @@ public class ScorecardCalculatorErrorTests
         var matterId = Guid.NewGuid();
 
         _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("Guidelines query failed"));
 
         SetupAreaAssessments(matterId, Budget, CreateAssessment(85));
@@ -259,13 +259,13 @@ public class ScorecardCalculatorErrorTests
 
         // Assert - all three area queries were invoked (Task.WhenAll runs them all)
         _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Once);
         _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, Budget, It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Budget, It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Once);
         _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, Outcomes, It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Outcomes, It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
