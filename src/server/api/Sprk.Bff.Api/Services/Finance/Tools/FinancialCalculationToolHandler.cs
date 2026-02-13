@@ -28,22 +28,15 @@ public class FinancialCalculationToolHandler : IAiToolHandler
     private const string Invoice_InvoiceStatus = "sprk_invoicestatus";
 
     private const string MatterEntity = "sprk_matter";
-    private const string Matter_Project = "sprk_project";
 
     private const string BudgetEntity = "sprk_budget";
-    private const string Budget_Project = "sprk_project";
-
-    private const string BudgetBucketEntity = "sprk_budgetbucket";
-    private const string BudgetBucket_Budget = "sprk_budget";
-    private const string BudgetBucket_BucketKey = "sprk_bucketkey";
-    private const string BudgetBucket_Amount = "sprk_amount";
+    private const string Budget_Matter = "sprk_matter";
+    private const string Budget_TotalBudget = "sprk_totalbudget";
 
     // Only count invoices that are not rejected/cancelled
     private const int InvoiceStatus_Confirmed = 100000001;
     private const int InvoiceStatus_Extracted = 100000002;
     private const int InvoiceStatus_Processed = 100000003;
-
-    private const string DefaultBucketKey = "TOTAL";
 
     public FinancialCalculationToolHandler(
         IDataverseService dataverseService,
@@ -57,7 +50,7 @@ public class FinancialCalculationToolHandler : IAiToolHandler
 
     /// <summary>
     /// Executes financial calculations for a matter.
-    /// Queries all invoices for the matter and retrieves budget from project hierarchy.
+    /// Queries all invoices for the matter and retrieves budget amount from Budget entity (direct lookup).
     /// </summary>
     /// <param name="parameters">Tool parameters: matterId (required)</param>
     /// <param name="ct">Cancellation token</param>
@@ -173,81 +166,39 @@ public class FinancialCalculationToolHandler : IAiToolHandler
     }
 
     /// <summary>
-    /// Look up budget amount for the matter from BudgetBucket records.
-    /// Finds the Budget for the matter's project, then sums the TOTAL bucket amounts.
-    /// Pattern copied from SpendSnapshotService.GetBudgetAmountForMatterAsync.
+    /// Look up budget amount for the matter from Budget entity.
+    /// Simple direct lookup: Budget WHERE sprk_matter = matterId.
+    /// Budget Buckets are optional subdivisions - this uses the authoritative Budget.sprk_totalbudget.
     /// </summary>
     private async Task<decimal?> GetBudgetAmountForMatterAsync(
         ServiceClient serviceClient,
         Guid matterId,
         CancellationToken ct)
     {
-        // Step 1: Retrieve matter to get project reference
-        var matterQuery = new QueryExpression(MatterEntity)
-        {
-            ColumnSet = new ColumnSet(Matter_Project),
-            Criteria = new FilterExpression()
-        };
-        matterQuery.Criteria.AddCondition("sprk_matterid", ConditionOperator.Equal, matterId);
-
-        var matterResults = await Task.Run(() => serviceClient.RetrieveMultiple(matterQuery), ct);
-        if (matterResults.Entities.Count == 0)
-        {
-            _logger.LogWarning("Matter {MatterId} not found.", matterId);
-            return null;
-        }
-
-        var matter = matterResults.Entities[0];
-        var projectRef = matter.GetAttributeValue<EntityReference>(Matter_Project);
-        if (projectRef == null)
-        {
-            _logger.LogDebug("Matter {MatterId} has no project reference. No budget available.", matterId);
-            return null;
-        }
-
-        // Step 2: Query Budget entity to find budget for this project
+        // Query Budget entity to find budget for this matter
         var budgetQuery = new QueryExpression(BudgetEntity)
         {
-            ColumnSet = new ColumnSet("sprk_budgetid"),
+            ColumnSet = new ColumnSet(Budget_TotalBudget),
             Criteria = new FilterExpression()
         };
-        budgetQuery.Criteria.AddCondition(Budget_Project, ConditionOperator.Equal, projectRef.Id);
+        budgetQuery.Criteria.AddCondition(Budget_Matter, ConditionOperator.Equal, matterId);
 
         var budgetResults = await Task.Run(() => serviceClient.RetrieveMultiple(budgetQuery), ct);
         if (budgetResults.Entities.Count == 0)
         {
-            _logger.LogDebug("No budget found for project {ProjectId} (matter {MatterId}).", projectRef.Id, matterId);
+            _logger.LogDebug("No budget found for matter {MatterId}.", matterId);
             return null;
         }
 
-        var budgetId = budgetResults.Entities[0].Id;
-
-        // Step 3: Query BudgetBucket records for this budget with bucketKey = "TOTAL"
-        var bucketQuery = new QueryExpression(BudgetBucketEntity)
-        {
-            ColumnSet = new ColumnSet(BudgetBucket_Amount),
-            Criteria = new FilterExpression(LogicalOperator.And)
-        };
-        bucketQuery.Criteria.AddCondition(BudgetBucket_Budget, ConditionOperator.Equal, budgetId);
-        bucketQuery.Criteria.AddCondition(BudgetBucket_BucketKey, ConditionOperator.Equal, DefaultBucketKey);
-
-        var bucketResults = await Task.Run(() => serviceClient.RetrieveMultiple(bucketQuery), ct);
-
-        decimal totalBudget = 0;
-        foreach (var bucket in bucketResults.Entities)
-        {
-            var amount = bucket.GetAttributeValue<Money>(BudgetBucket_Amount);
-            if (amount != null)
-            {
-                totalBudget += amount.Value;
-            }
-        }
+        // Get total budget from Budget entity (authoritative amount)
+        var budget = budgetResults.Entities[0];
+        var totalBudget = budget.GetAttributeValue<Money>(Budget_TotalBudget);
 
         _logger.LogDebug(
-            "Budget amount for matter {MatterId}: {BudgetAmount:C} (from {BucketCount} bucket(s))",
-            matterId, totalBudget, bucketResults.Entities.Count);
+            "Budget amount for matter {MatterId}: {BudgetAmount:C}",
+            matterId, totalBudget?.Value ?? 0);
 
-        return totalBudget;
+        return totalBudget?.Value;
     }
 }
 
