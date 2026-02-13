@@ -1,6 +1,6 @@
 # Current Task — Finance Intelligence Module R1
 
-> **Last Updated**: 2026-02-12 (by task-execute - Task 090)
+> **Last Updated**: 2026-02-12 (Phase 4: Output Orchestrator Implementation)
 > **Recovery**: Read "Quick Recovery" section first
 
 ## Quick Recovery (READ THIS FIRST)
@@ -9,153 +9,187 @@
 |-------|-------|
 | **Project** | financial-intelligence-module-r1 |
 | **Branch** | `work/financial-intelligence-module-r1` |
-| **Task** | 090 - Project Wrap-up: Final Verification and Cleanup |
-| **Progress** | 34/35 tasks (97%) - 1 task remaining (090) |
+| **Task** | Phase 4: Output Orchestrator Implementation (NEW APPROACH) |
 | **Status** | in-progress |
-| **Next Action** | Execute Step 1: Read spec.md to extract all 13 acceptance criteria |
-| **Last Checkpoint** | 2026-02-12 (Task 090 started - MINIMAL rigor protocol) |
+| **Next Action** | Implement IOutputOrchestratorService per Output-Orchestrator-Design.md (Task 1.1) |
+| **Last Checkpoint** | 2026-02-12 (Architecture pivot to generic Output Orchestrator) |
 
 ### Files Modified This Session
-- `projects/financial-intelligence-module-r1/notes/extraction-prompt-tuning-guide.md` - 550+ line extraction prompt tuning methodology
-- `projects/financial-intelligence-module-r1/notes/integration-test-implementation-guide.md` - 680+ line integration test implementation guide
-- `projects/financial-intelligence-module-r1/tasks/046-tune-extraction-prompts.poml` - Updated status to completed
-- `projects/financial-intelligence-module-r1/tasks/048-integration-tests-full-pipeline.poml` - Updated status to completed
-- `projects/financial-intelligence-module-r1/tasks/TASK-INDEX.md` - Updated progress to 34/35 tasks (97%)
-- `projects/financial-intelligence-module-r1/current-task.md` - Updated for Task 090
+- `scripts/seed-data/tools.json` - Added TL-009, TL-010, TL-011 (TL-010 will be REMOVED in new approach)
+- `scripts/seed-data/playbooks.json` - Added PB-013 with outputMapping (will be UPDATED with enhanced schema)
+- `scripts/seed-data/Verify-Finance-Playbook.ps1` - Verification script
+- `projects/financial-intelligence-module-r1/notes/Phase-3-Playbook-Configuration-Summary.md` - Phase 3 complete
+- `projects/financial-intelligence-module-r1/notes/Phase-4-7-Implementation-Plan.md` - Original plan (superseded)
+- `projects/financial-intelligence-module-r1/notes/Output-Orchestrator-Design.md` - **NEW**: Generic Output Orchestrator design
 
 ### Critical Context
-Completed Tasks 046 and 048 (documentation/implementation guides). All 34 technical tasks complete. Task 090 is final wrap-up: verify acceptance criteria, update project status, create lessons-learned, run repo-cleanup.
 
-### Remaining Tasks (1)
-- **Wrap-up**: 090 (project wrap-up - FINAL TASK)
+**ARCHITECTURE PIVOT (2026-02-12)**: Instead of TL-010 tool handler (imperative), building `IOutputOrchestratorService` that reads playbook `outputMapping` and applies updates declaratively. This enables business analysts to configure field mappings without code deployment.
 
-## Active Task
+**Vision**: Business analysts configure end-to-end processes via Playbook Builder:
+- Select tools from catalog (TL-009, TL-011)
+- Define output mappings (tool results → Dataverse fields)
+- Configure workflow order
+- NO code deployment needed to change behavior
 
-| Field | Value |
-|-------|-------|
-| Task ID | 090 |
-| Task File | `projects/financial-intelligence-module-r1/tasks/090-project-wrap-up.poml` |
-| Title | Project Wrap-up: Final Verification and Cleanup |
-| Phase | Wrap-up |
-| Status | in-progress |
-| Rigor Level | MINIMAL |
-| Started | 2026-02-12 |
+**Current State**:
+- Phase 1-2: COMPLETE (Dataverse schema, tool handlers)
+- Phase 3: COMPLETE (Playbook PB-013 deployed with tools TL-009, TL-010, TL-011)
+- Phase 4: IN PROGRESS (Output Orchestrator implementation - NEW approach)
+- Phase 5-7: PENDING (API endpoints, charts, deployment)
 
-## Progress
+**Implementation Plan**: See `Output-Orchestrator-Design.md` for complete design with 6 implementation phases.
 
-### Completed Steps (Task 090)
-- [x] Step 0.5: Determined rigor level (MINIMAL - documentation only, no code implementation)
-- [x] Step 1: Load task file (090-project-wrap-up.poml)
-- [x] Step 2: Initialize current-task.md
-- [ ] Step 3: Context Budget Check
-- [ ] Step 8: Execute 19 wrap-up steps
-- [ ] Step 9: Verify Acceptance Criteria
-- [ ] Step 10: Update Task Status
+## Active Work: Output Orchestrator Implementation
 
-### Knowledge Files Loaded
-- None required for MINIMAL rigor
+### Phase 1: Core Infrastructure (Current)
 
-### Constraints Loaded
-- None required for MINIMAL rigor
+**Tasks** (2-3 hours):
+- [ ] Task 1.1: Create `IOutputOrchestratorService.cs` interface
+- [ ] Task 1.2: Implement `OutputOrchestratorService.cs`
+- [ ] Task 1.3: Create `IDataverseUpdateHandler.cs` interface
+- [ ] Task 1.4: Implement `DataverseUpdateHandler.cs`
+- [ ] Task 1.5: Register services in DI (FinanceModule.cs)
 
-### Files to Create
-- `projects/financial-intelligence-module-r1/notes/lessons-learned.md`
-- Updates to README.md, TASK-INDEX.md, CLAUDE.md
+**Next Phases**:
+- Phase 2: Update Playbook Schema (1h) - Enhanced outputMapping, remove TL-010
+- Phase 3: Update Job Handler (1-2h) - Simplify InvoiceExtractionJobHandler
+- Phase 4: IDataverseService Extensions (1h) - Add RetrieveAsync for optimistic concurrency
+- Phase 5: Testing (2-3h) - Unit + integration tests
+- Phase 6: Deployment (1h) - Redeploy playbooks, remove TL-010
 
-## Task 090 Decisions
+### Completed Sessions
 
-(Final wrap-up task - verification and documentation only)
+**2026-02-11**: Phase 1-2 Complete
+- Dataverse schema field diffs documented
+- Tool handlers implemented (InvoiceAnalysisService, InvoiceExtractionToolHandler)
+- Unit tests for structured output
 
-## Previous Session Decisions
+**2026-02-12**: Phase 3 Complete
+- Deployed tools.json (TL-009, TL-010, TL-011)
+- Deployed playbooks.json (PB-013)
+- Verified playbook associations in Dataverse
 
-### 2026-02-11: Architectural Pivot to Denormalization + VisualHost
+**2026-02-12**: Architecture Design Complete
+- Analyzed playbook execution infrastructure
+- Identified gap: outputMapping defined but not executed
+- Designed generic Output Orchestrator solution
+- Documented in Output-Orchestrator-Design.md
 
-**Decision:** Replace custom PCF Finance Intelligence Panel with hybrid denormalization approach.
+## Key Design Decisions
 
-**Context:**
-- Initial plan: Custom PCF control with BudgetGauge and SpendTimeline components (Tasks 041-044)
-- User question: "Can't we use VisualHost instead of building separate PCF?"
-- Analysis revealed: VisualHost requires Dataverse entity data, but finance data in separate snapshot entities
+### 1. Generic vs. Specific Tool Handler
 
-**Options Evaluated:**
-1. Continue with custom PCF (Tasks 041-044) - original plan
-2. Use VisualHost with FetchXML to join snapshot entities - complex queries
-3. **SELECTED:** Add denormalized finance fields to Matter/Project + use VisualHost
+**Decision**: Generic `IOutputOrchestratorService` instead of TL-010 tool handler
 
-**Rationale:**
-- Simpler implementation (configuration vs custom code)
-- Enables direct queries and VisualHost charting
-- Hybrid approach: current values on parent entity + historical snapshots
-- User preference: BFF API service updates (not rollup/calculated fields/plugins)
-- Reduces PCF bundle size concerns
-- Aligns with existing VisualHost investment
+**Rationale**:
+- Declarative configuration (outputMapping in playbook JSON)
+- Business analysts can change field mappings without code
+- Reusable across ALL playbooks
+- Cleaner architecture aligned with playbook vision
 
-**Implementation Changes:**
-- Task 002: Add 6 finance fields to sprk_matter and sprk_project
-  - sprk_budget, sprk_currentspend, sprk_budgetvariance
-  - sprk_budgetutilizationpct, sprk_velocitypct, sprk_lastfinanceupdatedate
-- Task 019: Modify SpendSnapshotGenerationJobHandler to update parent entity fields
-- Task 042: Configure VisualHost chart definitions (2h, MINIMAL rigor)
-- Task 049: Extend IDataverseService for finance entities (addresses deployment TODOs)
-- Remove: Tasks 041, 043, 044 (custom PCF not needed)
+### 2. Where to Capture Update Specs
 
-**Future Consideration:**
-- Law Department Dashboard (screenshot provided) will be separate React 18 Custom Page project
-- Not constrained by PCF React 16 limitations
-- Out of scope for Finance Intelligence Module R1
+**Decision**: In playbook definition (playbooks.json)
 
-## Next Action
+**Alternative Options Rejected**:
+- Output Types (sprk_aioutputtypes) - too granular, limited to predefined types
+- Nodes (node-based execution) - not using node-based mode for MVP
 
-**Priority 1: Address BLOCKER TODOs**
-- Task 049: Extend IDataverseService for Finance Entities
-  - Addresses 2 BLOCKER items from deployment readiness checklist
-  - No dependencies, blocks tasks 016, 019, 032
-  - 4h estimate, FULL rigor
+**Enhanced outputMapping Schema**:
+```json
+"outputMapping": {
+  "updates": [
+    {
+      "entityType": "sprk_invoice",
+      "recordIdSource": "${context.invoiceId}",
+      "fields": {
+        "sprk_aisummary": "${extraction.aiSummary}",
+        "sprk_totalamount": {
+          "type": "Money",
+          "value": "${extraction.totalAmount}"
+        }
+      }
+    }
+  ]
+}
+```
 
-**Available Tasks (All Dependencies Met):**
-- 042 (Configure VisualHost — deps: 002 ✅, 019 ✅) — 2h, MINIMAL
-- 045 (Tune Classification Thresholds — deps: 011 ✅) — 4h, STANDARD
-- 046 (Tune Extraction Prompts — deps: 016 ✅) — 4h, STANDARD
-- 047 (Configure Review Queue View — deps: 003 ✅) — 2h, MINIMAL
-- 049 (Extend IDataverseService — no deps) — 4h, FULL ⭐ **START HERE**
+### 3. Optimistic Concurrency for Matter Totals
 
-**Remaining Deployment TODOs (7 items):**
-- BLOCKER (2): Addressed by Task 049
-- HIGH (1): Search index metadata enrichment
-- MEDIUM (3): Text storage, tenant context, metadata access
-- LOW (1): Audit trail
+**Decision**: DataverseUpdateHandler supports optimistic concurrency with retry
 
-## Blockers
-None
+**Implementation**:
+- Read current row version
+- Include version in update request
+- Retry up to 3 times with exponential backoff on conflict
 
-## Session Notes
-- Project initialized via `/project-pipeline` on 2026-02-11
-- spec.md reviewed and approved with owner clarifications
-- All project artifacts generated (README, plan, CLAUDE.md)
-- Tasks 001, 002 complete — owner creating fields via PAC CLI
-- Task 004 complete — GetStructuredCompletionAsync<T> added to platform
-- Task 041 complete (2026-02-11) — Finance Intelligence PCF control scaffold with build verification
-- **ARCHITECTURAL PIVOT (2026-02-11):** Changed from custom PCF components to VisualHost + denormalized fields
-  - REMOVED: Tasks 041, 043, 044 (custom PCF components not needed)
-  - SIMPLIFIED: Task 042 → VisualHost configuration only (2h, MINIMAL rigor)
-  - ADDED: Task 049 → Extend IDataverseService for finance entities (4h, FULL rigor)
-  - NEW APPROACH: Add 6 finance fields to sprk_matter and sprk_project
-  - UPDATE MECHANISM: SpendSnapshotGenerationJobHandler populates fields via BFF API services
-  - RATIONALE: VisualHost provides charting for single-matter display; denormalized fields enable direct queries; simpler than custom PCF
+**Rationale**:
+- Matter totals updated by multiple invoices concurrently
+- Prevent lost updates when multiple job handlers run
+- Standard Dataverse pattern for concurrent writes
 
-## Quick Reference
+## Files to Create (Phase 1)
 
-| Resource | Path |
-|----------|------|
-| Project CLAUDE.md | `projects/financial-intelligence-module-r1/CLAUDE.md` |
-| Spec | `projects/financial-intelligence-module-r1/spec.md` |
-| Plan | `projects/financial-intelligence-module-r1/plan.md` |
-| Task Index | `projects/financial-intelligence-module-r1/tasks/TASK-INDEX.md` |
+| File | Purpose | Lines |
+|------|---------|-------|
+| `IOutputOrchestratorService.cs` | Interface + models | ~100 |
+| `OutputOrchestratorService.cs` | Implementation | ~200 |
+| `IDataverseUpdateHandler.cs` | Interface | ~30 |
+| `DataverseUpdateHandler.cs` | Implementation | ~100 |
+
+## Files to Modify (Phases 2-4)
+
+| File | Changes |
+|------|---------|
+| `playbooks.json` | Enhanced outputMapping, remove TL-010 from scopes |
+| `tools.json` | Delete TL-010 entry |
+| `InvoiceExtractionJobHandler.cs` | Remove hardcoded updates, call OutputOrchestrator |
+| `IDataverseService.cs` | Add RetrieveAsync method |
+| `DataverseServiceClientImpl.cs` | Implement RetrieveAsync |
+| `FinanceModule.cs` | Register OutputOrchestrator and DataverseUpdateHandler |
+
+## Success Criteria
+
+- [ ] IOutputOrchestratorService reads outputMapping from playbook
+- [ ] Variable resolution works (${context.invoiceId} → Guid)
+- [ ] Type conversions work (Money, EntityReference, DateTime)
+- [ ] Invoice record updated with AI summary, extracted JSON, total amount
+- [ ] Matter record updated with optimistic concurrency (total spend, invoice count)
+- [ ] TL-010 removed from codebase and Dataverse
+- [ ] All unit tests pass
+- [ ] Integration test demonstrates end-to-end flow
+
+## Next Steps
+
+**Immediate** (after this checkpoint):
+1. Implement `IOutputOrchestratorService.cs` (Task 1.1)
+2. Implement `OutputOrchestratorService.cs` (Task 1.2)
+3. Implement `IDataverseUpdateHandler.cs` (Task 1.3)
+4. Implement `DataverseUpdateHandler.cs` (Task 1.4)
+5. Register services in DI (Task 1.5)
+
+**Then**:
+- Phase 2: Update playbook schema
+- Phase 3: Update job handler
+- Phase 4: Extend IDataverseService
+- Phase 5: Testing
+- Phase 6: Deployment
+
+## Related Documentation
+
+| Document | Purpose |
+|----------|---------|
+| `Output-Orchestrator-Design.md` | **PRIMARY**: Complete design with code examples |
+| `Phase-4-7-Implementation-Plan.md` | Original plan (superseded by Output Orchestrator approach) |
+| `Phase-3-Playbook-Configuration-Summary.md` | Playbook deployment summary |
+| `playbooks.json` | PB-013 definition (will be enhanced) |
+| `tools.json` | Tool definitions (TL-010 will be removed) |
 
 ## Recovery Instructions
 
-If resuming after compaction or new session:
-1. Read this file first
-2. Read `CLAUDE.md` for project context
-3. Check `tasks/TASK-INDEX.md` for overall progress
-4. Find first task with status `🔲` and execute it
+If resuming after compaction:
+1. Read `Output-Orchestrator-Design.md` for complete context
+2. Check "Quick Recovery" section above for next task
+3. Review "Success Criteria" to understand goals
+4. Continue with Phase 1 implementation tasks

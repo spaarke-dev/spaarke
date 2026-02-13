@@ -173,6 +173,47 @@
         "flag_inconsistencies": true,
         "show_methodology": true
       }
+    },
+    {
+      "id": "TL-009",
+      "sprk_name": "Invoice Extraction Tool",
+      "sprk_description": "Extract structured invoice data including header information and line items using AI-powered analysis. Generates AI summary and JSON extraction result for storage in Dataverse.",
+      "sprk_handlerclass": "InvoiceExtractionToolHandler",
+      "toolType": "01 - Entity Extraction",
+      "sprk_configuration": {
+        "model": "gpt-4o",
+        "extraction_fields": [
+          "invoice_number",
+          "invoice_date",
+          "vendor_name",
+          "total_amount",
+          "currency",
+          "line_items"
+        ],
+        "generate_summary": true,
+        "summary_max_chars": 5000,
+        "json_max_chars": 20000,
+        "confidence_threshold": 0.7
+      }
+    },
+    {
+      "id": "TL-011",
+      "sprk_name": "Financial Calculation Tool",
+      "sprk_description": "Perform financial calculations for matter-level aggregations. Calculates total spend, budget utilization, invoice count, and average invoice amount.",
+      "sprk_handlerclass": "FinancialCalculationToolHandler",
+      "toolType": "04 - Calculation",
+      "sprk_configuration": {
+        "calculations": [
+          "total_spend",
+          "budget_utilization",
+          "invoice_count",
+          "average_invoice_amount",
+          "remaining_budget"
+        ],
+        "currency": "USD",
+        "precision": 2,
+        "note": "Stubbed for MVP - will be configured via playbook actions"
+      }
     }
   ]
 }
