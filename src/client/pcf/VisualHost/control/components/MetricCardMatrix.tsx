@@ -44,7 +44,7 @@ import type {
 } from "../types";
 import { formatValue } from "../utils/valueFormatters";
 
-export type MatrixJustification = "left" | "center" | "right";
+export type MatrixJustification = "left" | "left-center" | "center" | "right-center" | "right";
 
 export interface IMetricCardMatrixProps {
   /** Title displayed above the card grid */
@@ -443,7 +443,8 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
       ? `repeat(${Math.min(effectiveColumns, count)}, 1fr)`
       : `repeat(auto-fill, minmax(${cardMinWidth}, 1fr))`,
     justifyItems:
-      justification === "center" ? "center"
+      justification === "center" || justification === "left-center" || justification === "right-center"
+        ? "center"
         : justification === "right" ? "end"
           : "stretch",
   };

@@ -45,8 +45,8 @@ export interface IMetricCardProps {
   compact?: boolean;
   /** Fill container width with 3:5 H:W ratio (aspect-ratio: 5/3) */
   fillContainer?: boolean;
-  /** Content alignment: left, center, right */
-  justification?: "left" | "center" | "right";
+  /** Content alignment: left, left-center, center, right-center, right */
+  justification?: "left" | "left-center" | "center" | "right-center" | "right";
   /** Explicit width in pixels (overrides fillContainer when both width and height set) */
   explicitWidth?: number;
   /** Explicit height in pixels (overrides fillContainer when both width and height set) */
@@ -69,12 +69,11 @@ export interface IMetricCardProps {
 
 const useStyles = makeStyles({
   card: {
-    minWidth: "200px",
-    minHeight: "120px",
     cursor: "default",
     transition: "box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out",
     position: "relative",
     overflow: "hidden",
+    minWidth: 0, // Allow card to shrink in narrow form columns
   },
   borderAccent: {
     position: "absolute",
@@ -101,8 +100,8 @@ const useStyles = makeStyles({
     width: "100%",
     minWidth: "unset",
     minHeight: "unset",
-    // 3:5 height-to-width ratio → CSS aspect-ratio is width/height = 5/3
-    aspectRatio: "5 / 3",
+    flexGrow: 1, // Fill parent flex container width
+    flexBasis: 0, // Override content-based sizing
   },
   content: {
     display: "flex",
@@ -173,8 +172,11 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
   },
   iconSlot: {
-    fontSize: "20px",
+    fontSize: "28px",
     flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
 
@@ -279,6 +281,7 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
 
   return (
     <Card
+      appearance="outline"
       className={mergeClasses(
         styles.card,
         isInteractive && styles.cardInteractive,
@@ -286,6 +289,7 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
         fillContainer && !hasExplicitDimensions && styles.cardFillContainer
       )}
       style={{
+        ...(fillContainer && !hasExplicitDimensions ? { width: "100%", flex: "1 1 0%" } : undefined),
         ...(hasExplicitDimensions ? {
           width: `${explicitWidth}px`,
           height: `${explicitHeight}px`,
@@ -311,7 +315,7 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
         className={mergeClasses(
           styles.content,
           compact && styles.contentCompact,
-          justification === "center" && styles.contentCenter,
+          (justification === "center" || justification === "left-center" || justification === "right-center") && styles.contentCenter,
           justification === "right" && styles.contentRight
         )}
       >

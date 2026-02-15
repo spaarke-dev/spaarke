@@ -31,6 +31,10 @@ import {
   AggregationError,
 } from "../services/DataAggregationService";
 import {
+  parseFieldPivotConfig,
+  fetchAndPivot,
+} from "../services/FieldPivotService";
+import {
   executeClickAction,
   hasClickAction,
 } from "../services/ClickActionHandler";
@@ -41,11 +45,12 @@ const useStyles = makeStyles({
     flexDirection: "column",
     width: "100%",
     height: "100%",
-    minHeight: "200px",
-    padding: tokens.spacingVerticalM,
-    paddingBottom: "36px", // Extra space for version badge
+    minWidth: 0, // Allow shrinking below intrinsic content width
+    padding: "2px",
+    paddingBottom: "14px", // Minimal space for version badge
     boxSizing: "border-box",
     position: "relative",
+    overflow: "hidden", // Prevent content overflow from affecting form column sizing
   },
   expandButton: {
     position: "absolute",
@@ -56,14 +61,13 @@ const useStyles = makeStyles({
   chartContainer: {
     flex: 1,
     display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "150px",
+    alignItems: "stretch",
+    width: "100%",
   },
   versionBadge: {
     position: "absolute",
     bottom: 0,
-    left: "8px",
+    left: "4px",
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground4,
     opacity: 0.6,
@@ -129,6 +133,10 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
   const justification = (context.parameters.justification?.raw?.trim() as MatrixJustification) || null;
   const columns = context.parameters.columns?.raw;
 
+  // v1.2.35: Column position for multi-column coordination
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const columnPosition = (context.parameters as any).columnPosition?.raw as number | null;
+
   useEffect(() => {
     if (!chartDefinitionId) {
       setIsLoading(false);
@@ -173,21 +181,40 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         definition.sprk_visualtype === 100000008 || // DueDateCard
         definition.sprk_visualtype === 100000009;   // DueDateCardList
 
-      // Fetch and aggregate data using DataAggregationService
-      if (definition.sprk_entitylogicalname && !skipAggregation) {
+      // v1.2.41: Check for field pivot mode — reads multiple fields from
+      // the current record and presents each as a card (generic, not KPI-specific)
+      const pivotConfig = parseFieldPivotConfig(definition.sprk_configurationjson);
+
+      if (pivotConfig && definition.sprk_entitylogicalname && contextRecordId) {
         try {
-          // DIAGNOSTIC: Log the exact context filter being passed
+          logger.info("VisualHostRoot", "Field pivot mode detected", {
+            entity: definition.sprk_entitylogicalname,
+            fields: pivotConfig.fields.length,
+          });
+          const data = await fetchAndPivot(
+            context.webAPI,
+            definition.sprk_entitylogicalname,
+            contextRecordId,
+            pivotConfig
+          );
+          setChartData(data);
+          logger.info("VisualHostRoot", `Field pivot: ${data.dataPoints.length} data points`);
+        } catch (pivotErr) {
+          logger.error("VisualHostRoot", "Field pivot error", pivotErr);
+          setChartData(null);
+        }
+      } else if (definition.sprk_entitylogicalname && !skipAggregation) {
+        // Existing data aggregation path (VIEW or BASIC mode)
+        try {
           const ctxFilter = contextFieldName && contextRecordId
             ? { fieldName: contextFieldName, recordId: contextRecordId }
             : undefined;
-          logger.info("VisualHostRoot", `[DIAG] Context filter for aggregation: ${ctxFilter ? `fieldName="${ctxFilter.fieldName}", recordId="${ctxFilter.recordId}"` : "(none - no context)"}`);
-          logger.info("VisualHostRoot", `[DIAG] PCF contextFieldName="${contextFieldName || "(empty)"}", contextRecordId="${contextRecordId || "(empty)"}"`);
+          logger.info("VisualHostRoot", `Context filter for aggregation: ${ctxFilter ? `fieldName="${ctxFilter.fieldName}", recordId="${ctxFilter.recordId}"` : "(none - no context)"}`);
 
           const data = await fetchAndAggregate(
             { webAPI: context.webAPI },
             definition,
             {
-              // v1.1.0: Add context filter if configured
               contextFilter: ctxFilter,
             }
           );
@@ -196,7 +223,6 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         } catch (aggErr) {
           if (aggErr instanceof AggregationError) {
             logger.error("VisualHostRoot", "Data aggregation error", aggErr);
-            // Show chart with no data rather than error - data fetch failed but config is valid
             setChartData(null);
           } else {
             throw aggErr;
@@ -446,10 +472,16 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
     );
   };
 
-  // Container style with optional height (width always fills parent via CSS)
-  const containerStyle: React.CSSProperties = height
-    ? { minHeight: `${height}px` }
-    : {};
+  // Container style with optional height and column-position edge padding
+  const containerStyle: React.CSSProperties = {
+    ...(height ? { minHeight: `${height}px` } : {}),
+    // v1.2.35: When columnPosition is set, remove padding on inner edges
+    // so adjacent PCFs visually merge into one cohesive row
+    ...(columnPosition === 1 ? { paddingRight: 0 } : {}),
+    ...(columnPosition != null && columnPosition >= 2 && columnPosition <= 3
+      ? { paddingLeft: 0, paddingRight: 0 } : {}),
+    ...(columnPosition != null && columnPosition >= 4 ? { paddingLeft: 0 } : {}),
+  };
 
   return (
     <div className={styles.container} style={containerStyle}>
@@ -468,7 +500,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
       )}
 
       {/* Version badge - lower left, unobtrusive */}
-      <span className={styles.versionBadge}>v1.2.33 • 2026-02-12</span>
+      <span className={styles.versionBadge}>v1.2.41 • 2026-02-15</span>
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>

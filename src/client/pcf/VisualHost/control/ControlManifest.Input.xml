@@ -2,7 +2,7 @@
 <manifest>
   <control namespace="Spaarke.Visuals"
            constructor="VisualHost"
-           version="1.2.33"
+           version="1.2.41"
            display-name-key="Visual Host"
            description-key="Configuration-driven visualization control for charts, cards, and calendars"
            control-type="standard">
@@ -57,11 +57,19 @@
               usage="input"
               required="false" />
 
-    <!-- Optional: Content justification (v1.2.16) -->
+    <!-- Optional: Content justification (v1.2.16, extended v1.2.35) -->
     <property name="justification"
               display-name-key="Justification"
-              description-key="Content alignment within section: left (default), center, right"
+              description-key="Content alignment: left (default), left-center, center, right-center, right. Use with columnPosition for multi-column coordination."
               of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
+    <!-- Optional: Column position for multi-column coordination (v1.2.35) -->
+    <property name="columnPosition"
+              display-name-key="Column Position"
+              description-key="Position of this control in a multi-column layout (1-4). Controls edge padding removal so adjacent PCFs appear as one visual. 1=left edge, 2-3=middle, 4=right edge."
+              of-type="Whole.None"
               usage="input"
               required="false" />
 

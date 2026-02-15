@@ -241,3 +241,34 @@ export interface ICardConfig {
   /** Value-based color threshold rules */
   colorThresholds?: IColorThreshold[];
 };
+
+/**
+ * Field Pivot Configuration
+ *
+ * Reads multiple fields from a single Dataverse record and presents each
+ * as a separate data point in MetricCardMatrix. Generic — works for any entity
+ * with multiple numeric fields that should display as a card row.
+ *
+ * Configured via sprk_configurationjson on the chart definition:
+ * {
+ *   "fieldPivot": {
+ *     "fields": [
+ *       { "field": "sprk_some_decimal_field", "label": "Label", "fieldValue": 1 }
+ *     ]
+ *   }
+ * }
+ */
+export interface IFieldPivotConfig {
+  fields: IFieldPivotEntry[];
+}
+
+export interface IFieldPivotEntry {
+  /** Dataverse field logical name (e.g., "sprk_budgetcompliancegrade_current") */
+  field: string;
+  /** Display label for the card (e.g., "Budget") */
+  label: string;
+  /** Value passed to icon/color resolution (e.g., option set value for iconMap keys) */
+  fieldValue?: unknown;
+  /** Explicit sort order (default: array index) */
+  sortOrder?: number;
+}
