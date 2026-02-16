@@ -1,6 +1,6 @@
 # VisualHost PCF Control - Setup & Configuration Guide
 
-> **Version**: 1.2.33 | **Last Updated**: February 13, 2026
+> **Version**: 1.2.48 | **Last Updated**: February 16, 2026
 >
 > **Audience**: Dataverse administrators, form designers, solution configurators
 >
@@ -20,9 +20,10 @@
 8. [Click Actions Configuration](#click-actions-configuration)
 9. [Drill-Through Target Configuration](#drill-through-target-configuration)
 10. [Data Querying Options](#data-querying-options)
-11. [Use Cases: Visual Type Setup Walkthroughs](#use-cases-visual-type-setup-walkthroughs)
-12. [Troubleshooting](#troubleshooting)
-13. [Adding the ReportCardMetric Visual Type](#adding-the-reportcardmetric-visual-type)
+11. [Field Pivot Data Mode](#field-pivot-data-mode)
+12. [Use Cases: Visual Type Setup Walkthroughs](#use-cases-visual-type-setup-walkthroughs)
+13. [Troubleshooting](#troubleshooting)
+14. [Adding the ReportCardMetric Visual Type](#adding-the-reportcardmetric-visual-type)
 
 ---
 
@@ -31,9 +32,10 @@
 The **VisualHost** PCF control renders configuration-driven visualizations inside Dataverse model-driven app forms. Instead of building separate PCF controls for each chart type, a single VisualHost instance reads a `sprk_chartdefinition` record to determine:
 
 - **What** to display (visual type: bar chart, donut, metric card, grade card, due date cards, etc.)
-- **Where** to get data (entity, view, custom FetchXML, or PCF override)
-- **How** to aggregate (count, sum, average, min, max)
+- **Where** to get data (entity, view, custom FetchXML, PCF override, or field pivot from a single record)
+- **How** to aggregate (count, sum, average, min, max — or field pivot: read N fields from one record with per-field formatting)
 - **What happens on click** (open record, open side pane, navigate to page)
+- **How** to style cards (card shape, sign-based coloring, responsive typography, data justification)
 
 One chart definition record = one visual instance on a form.
 
@@ -72,7 +74,7 @@ One chart definition record = one visual instance on a form.
 
 ### Chart Types (MetricCard, BarChart, LineChart, DonutChart, StatusBar, Calendar, MiniTable, ReportCardMetric)
 
-> **v1.2.33 Note:** MetricCard now supports **matrix mode** (renders multiple cards in a responsive grid when Group By Field is set). ReportCardMetric is now a **preset for MetricCard** — it auto-applies grade styling via `cardConfigResolver` rather than using a separate component.
+> **v1.2.44+ Note:** ReportCardMetric is now a **fallthrough case** in ChartRenderer — it shares the exact same code path as MetricCard with grade preset defaults auto-applied by `cardConfigResolver`. Features: configurable card shapes (`sprk_metriccardshape`), per-field value formatting, sign-based coloring, responsive typography, PCF-level title controls, show/hide version badge (v1.2.47), restructured card layout with independent icon/value positioning (v1.2.47), and content-driven card height with no whitespace (v1.2.48).
 
 These visual types use the **DataAggregationService** to fetch and aggregate entity records client-side.
 
@@ -82,7 +84,7 @@ These visual types use the **DataAggregationService** to fetch and aggregate ent
 | **Aggregation Type** (`sprk_aggregationtype`) | How to aggregate: Count, Sum, Average, Min, Max | Optional (defaults to Count) |
 | **Aggregation Field** (`sprk_aggregationfield`) | Numeric field to aggregate (e.g., `sprk_amount`) | Required for Sum/Average/Min/Max |
 | **Base View ID** (`sprk_baseviewid`) | Saved view to use as data source | Optional (uses all records if not set) |
-| **Options JSON** (`sprk_optionsjson`) | JSON object for component-specific styling options | Optional |
+| **Options JSON** (`sprk_optionsjson`) | JSON object for component-specific styling options and advanced configuration (field pivot, card config, color thresholds, icon maps). This single field holds ALL JSON configuration. | Optional |
 
 #### Group By Field Format
 
@@ -148,12 +150,16 @@ After adding the VisualHost control, configure its properties:
 | **contextFieldName** | Text | Field name for context filtering (e.g., `sprk_regardingrecordid`). Filters data to current record's related records. | - |
 | **fetchXmlOverride** | Text | FetchXML query override. Highest query priority - overrides all other data sources. | - |
 | **height** | Number | Chart height in pixels. | Auto |
+| **width** | Number | Width in pixels for card sizing. Used for MetricCard matrix card sizing (3:5 ratio). | Auto |
+| **justification** | Text | Content alignment: left, left-center, center, right-center, right. Use with `columnPosition` for multi-column coordination. | left |
+| **columnPosition** | Number | Position of this control in a multi-column layout (1-4). Controls edge padding removal so adjacent PCFs appear as one visual. 1=left edge, 2-3=middle, 4=right edge. | - |
+| **columns** | Number | Number of cards per row in MetricCard matrix layout. Card width = (container width - gaps) / columns. | Auto |
+| **valueFormatOverride** | Text | Override chart definition value format for this placement. Values: shortNumber, letterGrade, percentage, wholeNumber, decimal, currency, signedPercentage. | - |
+| **showTitle** | Yes/No | Show the chart definition name as a title above the visual. (v1.2.44) | No |
+| **titleFontSize** | Text | Base font size for the title (e.g., `14px`, `0.9rem`). Scales responsively with card size via container queries. (v1.2.44) | - |
+| **showVersion** | Yes/No | Show the version badge in the lower-left corner. When hidden, bottom padding is also removed. (v1.2.47) | Yes |
 | **showToolbar** | Yes/No | Show the expand button in the upper right corner. | Yes |
 | **enableDrillThrough** | Yes/No | Enable click interactions and drill-through navigation. | Yes |
-| **valueFormatOverride** | Text | Override chart definition value format for this placement. Values: shortNumber, letterGrade, percentage, wholeNumber, decimal, currency. | - |
-| **width** | Number | Width in pixels for card sizing. | Auto |
-| **columns** | Number | Number of cards per row in MetricCard matrix layout. | Auto |
-| **justification** | Text | Content alignment: left, center, right. | left |
 
 ### Priority: chartDefinition Lookup vs chartDefinitionId
 
@@ -207,7 +213,7 @@ When **Group By Field** is set, the DataAggregationService produces multiple dat
 | Value Format | How to format card values | Optional (defaults to Short Number) |
 | Color Source | How per-card colors are determined | Optional (defaults to None) |
 
-#### New Dataverse Fields (v1.2.33)
+#### Dataverse Fields for Card Configuration
 
 **Value Format** (`sprk_valueformat`) -- choice field on `sprk_chartdefinition`:
 
@@ -218,7 +224,9 @@ When **Group By Field** is set, the DataAggregationService produces multiple dat
 | Percentage | 100000002 | Displays as percentage (e.g., 85%) |
 | Whole Number | 100000003 | Displays as integer with no decimals |
 | Decimal | 100000004 | Displays with 2 decimal places |
-| Currency | 100000005 | Displays with currency symbol and formatting |
+| Currency | 100000005 | Displays with currency symbol and formatting (e.g., $1,234.56; negative: -$2,500.00) |
+
+> **Note:** `signedPercentage` format is available via the `valueFormatOverride` PCF property or per-field `valueFormat` in field pivot config. It displays positive values with a `+` prefix (e.g., "+13%") and negative with `-` (e.g., "-13%").
 
 **Color Source** (`sprk_colorsource`) -- choice field on `sprk_chartdefinition`:
 
@@ -227,6 +235,17 @@ When **Group By Field** is set, the DataAggregationService produces multiple dat
 | None | 100000000 | No per-card coloring (default neutral theme) |
 | Option Set Color | 100000001 | Uses the Dataverse option set hex color as the card accent color |
 | Value Threshold | 100000002 | Applies Fluent token sets (brand, warning, danger) based on value ranges defined in `colorThresholds` |
+| Sign Based | 100000003 | (v1.2.44) Colors based on value sign: negative = red (danger), zero = neutral, positive = green (success). Set `invertSign: true` in Options JSON to reverse. |
+
+**Card Shape** (`sprk_metriccardshape`) -- choice field on `sprk_chartdefinition` (v1.2.44):
+
+| Label | Value | Aspect Ratio | Description |
+|-------|-------|-------------|-------------|
+| Square | 100000000 | 1 : 1 | Square cards |
+| Vertical Rectangle | 100000001 | 3 : 5 | Tall portrait cards |
+| Horizontal Rectangle | 100000002 | 5 : 3 | Wide landscape cards (default if not set) |
+
+> **No wasted whitespace (v1.2.48):** MetricCard and MetricCardMatrix use content-driven height — no 300px minimum is applied. The card grid uses `align-content: start` to ensure cards sit at the top of their container without excess vertical space below. Chart types (BarChart, LineChart, DonutChart) still default to a 300px canvas height.
 
 #### Configuration JSON Options (Matrix Mode)
 
@@ -236,12 +255,15 @@ When **Group By Field** is set, the DataAggregationService produces multiple dat
 | `sortBy` | string | `"label"` | Sort order: `"label"` (A-Z), `"value"` (desc), `"valueAsc"`, `"optionSetOrder"` (Dataverse option order) |
 | `maxCards` | number | *(all)* | Maximum number of cards to display |
 | `compact` | boolean | `false` | Use compact card layout with reduced padding |
-| `showTitle` | boolean | `true` | Show the chart title above the matrix |
+| `showTitle` | boolean | `false` | Show the chart title above the matrix. **Note:** PCF `showTitle` property takes highest priority. Default: `false`. |
 | `cardDescription` | string | -- | Template for card description text. Placeholders: `{value}` (raw), `{formatted}` (formatted value), `{label}` (group label), `{count}` (record count) |
 | `nullDisplay` | string | `"--"` | Text to show when a card has no data |
 | `nullDescription` | string | -- | Description text for null/no-data cards |
 | `iconMap` | object | -- | Maps group labels to Fluent icon names. Supported icons: `gavel`, `money`, `target`, `calendar`, `alert`, `checkmark`, `document`, `people`, `star`, `clipboard` |
 | `colorThresholds` | array | -- | Array of `{ "range": [min, max], "tokenSet": "brand"|"warning"|"danger" }` objects. Used when Color Source = Value Threshold |
+| `dataJustification` | string | -- | (v1.2.44) Content alignment within cards: `"left"`, `"left-center"`, `"center"`, `"right-center"`, `"right"`. Controls text/value/icon alignment. |
+| `invertSign` | boolean | `false` | (v1.2.44) Invert sign-based coloring: negative becomes green (success), positive becomes red (danger). Only applies when `colorSource = "signBased"`. |
+| `aspectRatio` | string | -- | (v1.2.44) Override card aspect ratio from JSON (e.g., `"1 / 1"`, `"3 / 5"`, `"5 / 3"`). The Dataverse field `sprk_metriccardshape` takes priority. |
 
 **Example: Basic matrix configuration:**
 ```json
@@ -273,6 +295,31 @@ When **Group By Field** is set, the DataAggregationService produces multiple dat
   ]
 }
 ```
+
+**Example: Finance variance cards with sign-based coloring (v1.2.44):**
+```json
+{
+  "colorSource": "signBased",
+  "dataJustification": "center",
+  "fieldPivot": {
+    "fields": [
+      { "field": "sprk_budgetvariance", "label": "Budget Variance", "valueFormat": "currency" },
+      { "field": "sprk_velocitypct", "label": "Velocity", "valueFormat": "signedPercentage" },
+      { "field": "sprk_totalspend", "label": "Total Spend", "valueFormat": "currency" }
+    ]
+  }
+}
+```
+> Negative values display in red, positive in green. Use `"invertSign": true` if your domain treats negative as favorable (e.g., under-budget = negative variance = good).
+
+**Example: Square cards with centered data:**
+```json
+{
+  "dataJustification": "center",
+  "compact": true
+}
+```
+> Set `sprk_metriccardshape = Square (100000000)` on the chart definition for 1:1 aspect ratio cards.
 
 ---
 
@@ -462,24 +509,38 @@ List of event due date cards for records related to the current parent form.
 
 ---
 
-### ReportCardMetric (100000010)
+### ReportCardMetric (100000010) — Performance Report Card Preset
 
-> **v1.2.33:** ReportCardMetric is now a **preset for MetricCard**. The `GradeMetricCard` component is deprecated. When `sprk_visualtype = ReportCardMetric (100000010)`, the system auto-applies grade defaults via `cardConfigResolver` and renders using the MetricCard pipeline (including matrix mode support).
+> **v1.2.44 Consolidation:** ReportCardMetric is now a **fallthrough case** in ChartRenderer — it shares the exact same code path as MetricCard. The `GradeMetricCard` component is deprecated and unused. When `sprk_visualtype = ReportCardMetric (100000010)`, the system auto-applies grade defaults via `cardConfigResolver` and renders using the MetricCard pipeline. All MetricCard features (matrix mode, field pivot, card shapes, responsive typography, sign-based coloring) are available.
 
 Letter grade card with color-coded styling for KPI performance areas (Guidelines, Budget, Outcomes). Displays a grade derived from a decimal value (0.00-1.00) with automatic color coding and contextual text.
+
+**How ReportCardMetric Works Internally (v1.2.44):**
+
+```
+ChartRenderer switch(visualType):
+  case MetricCard:
+  case ReportCardMetric:    ← fallthrough — same code block
+    cardConfig = resolveCardConfig(chartDefinition, pcfOverrides)
+      ↓
+      if visualType === ReportCardMetric:
+        Apply grade preset defaults (letterGrade, valueThreshold, icons, etc.)
+      ↓
+      Merge with JSON config, Dataverse fields, and PCF overrides
+    → Render via MetricCardMatrix (same as MetricCard)
+```
 
 **Chart Definition Settings:**
 | Field | Value | Notes |
 |-------|-------|-------|
-| Visual Type | ReportCardMetric | Preset for MetricCard -- auto-applies grade defaults |
+| Visual Type | ReportCardMetric (100000010) | Auto-applies grade defaults via cardConfigResolver |
 | Entity Logical Name | `sprk_matter` or `sprk_project` | The entity that has grade fields |
-| Aggregation Field | Grade field (e.g., `sprk_guidelinecompliancegrade_current`) | Must return a decimal 0.00-1.00 |
-| Aggregation Type | Average (100000002) | How to aggregate the grade field |
-| Configuration JSON | See below | Icon, template, color rules (now feeds into ICardConfig system) |
+| Card Shape (`sprk_metriccardshape`) | *(optional, v1.2.44)* | Square, Vertical Rectangle, or Horizontal Rectangle |
+| Options JSON (`sprk_optionsjson`) | See below | Field pivot config, icons, color rules |
 
 **Auto-Applied Defaults via `cardConfigResolver`:**
 
-When Visual Type = ReportCardMetric, the following defaults are automatically applied. All can be overridden via Configuration JSON or the new Dataverse fields (`sprk_valueformat`, `sprk_colorsource`):
+When Visual Type = ReportCardMetric, the following defaults are automatically applied. All can be overridden via Configuration JSON, Dataverse fields (`sprk_valueformat`, `sprk_colorsource`, `sprk_metriccardshape`), or PCF properties:
 
 | Setting | Default Value |
 |---------|---------------|
@@ -491,9 +552,11 @@ When Visual Type = ReportCardMetric, the following defaults are automatically ap
 | Null Description | `"No grade data available for {areaName}"` |
 | Sort | `optionSetOrder` |
 
-**New Approach (v1.2.33): Single Definition with Matrix Mode**
+**Recommended Approach: Field Pivot with Single Definition**
 
-Instead of creating 3 separate chart definitions (one per grade area), you can now use a **single chart definition** with Group By Field set to the performance area field. This renders all 3 grades as a matrix of cards in a responsive grid. See [Use Case 5](#use-case-5-kpi-grade-cards-on-a-matter-form-report-card) for details.
+Use a **single chart definition** with field pivot to read 3 grade fields from the current record and display as 3 cards. See [Use Case 5](#use-case-5-kpi-grade-cards-on-a-matter-form-report-card) for step-by-step setup.
+
+> **Migration from ReportCardMetric to MetricCard:** If you prefer, you can change `sprk_visualtype` from ReportCardMetric (100000010) to MetricCard (100000000) and manually set the grade configuration in Options JSON. The rendering is identical — the only difference is that ReportCardMetric auto-applies grade defaults as fallback, while MetricCard uses generic defaults. No code changes are needed either way.
 
 **Grade Value to Letter Mapping:**
 
@@ -776,6 +839,162 @@ Context filtering works with all query priorities:
 
 ---
 
+## Field Pivot Data Mode
+
+### Overview
+
+Field pivot is a new data source mode that reads **multiple fields from a single Dataverse record** and presents each as a separate card in MetricCardMatrix. This is useful when you have N numeric fields on one entity (e.g., 3 grade fields on a matter record) and want to display them as a row of cards — without querying child records or using a view.
+
+### When to Use Field Pivot vs. Aggregation
+
+| Data Source Mode | Use When | Example |
+|------------------|----------|---------|
+| **View/Basic Aggregation** | Fetching many records, grouping by a field, aggregating per group | "Count events by type" → 5 bars on a chart |
+| **Field Pivot** (v1.2.41) | Reading N fields from the current record, displaying each as a card | "Show 3 grade fields as 3 cards" |
+| **Self-Managed** | DueDateCard types that fetch their own data | "Show upcoming events as card list" |
+
+### How It Works
+
+Field pivot is triggered when `configurationJson` on the chart definition contains a `fieldPivot` object. No new Dataverse fields or PCF properties are needed.
+
+```
+Chart Definition loaded
+  │
+  ├─ configurationJson has "fieldPivot"?
+  │    │
+  │    YES → FieldPivotService.fetchAndPivot()
+  │    │      1. Get current record ID from PCF form context
+  │    │      2. Retrieve record via context.webAPI.retrieveRecord()
+  │    │         with $select=field1,field2,...
+  │    │      3. For each field in fieldPivot.fields[]:
+  │    │           → Create IAggregatedDataPoint { label, value, fieldValue, sortOrder }
+  │    │      4. Return IChartData (same shape as aggregation output)
+  │    │
+  │    NO  → Existing fetchAndAggregate() (VIEW or BASIC mode, unchanged)
+```
+
+### Configuration
+
+Add a `fieldPivot` object to the **Options JSON** (`sprk_optionsjson`) field on the chart definition record:
+
+```json
+{
+  "fieldPivot": {
+    "fields": [
+      { "field": "sprk_field_logical_name", "label": "Display Label", "fieldValue": 1, "sortOrder": 1 }
+    ]
+  }
+}
+```
+
+**Field Pivot Entry Properties:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `field` | string | Yes | Dataverse field logical name (e.g., `sprk_budgetcompliancegrade_current`) |
+| `label` | string | Yes | Display label for the card (e.g., "Budget") |
+| `fieldValue` | any | No | Value passed to icon/color resolution (e.g., option set value for `iconMap` keys). Defaults to `label`. |
+| `sortOrder` | number | No | Explicit sort order. Defaults to array index. |
+| `valueFormat` | string | No | (v1.2.44) Per-field value format override. Values: `shortNumber`, `letterGrade`, `percentage`, `wholeNumber`, `decimal`, `currency`, `signedPercentage`. Takes highest priority for this card. |
+
+### Chart Definition Setup (Field Pivot)
+
+| Field | Value | Notes |
+|-------|-------|-------|
+| **Visual Type** | MetricCard or ReportCardMetric | Both work with field pivot |
+| **Entity Logical Name** | Entity the record belongs to (e.g., `sprk_matter`) | Required |
+| **Options JSON** (`sprk_optionsjson`) | Must contain `fieldPivot` object | See examples below |
+| **Group By Field** | *(leave empty)* | Not used in field pivot mode |
+| **Aggregation Type** | *(leave empty)* | Not used in field pivot mode |
+| **Base View ID** | *(leave empty)* | Not used in field pivot mode |
+
+### PCF Property Settings (Field Pivot)
+
+| Property | Value | Notes |
+|----------|-------|-------|
+| `chartDefinitionId` | GUID of chart definition | Or bind lookup |
+| `contextFieldName` | *(leave empty)* | Field pivot reads from the current form record directly |
+
+**Important:** The `contextRecordId` is obtained automatically from the PCF form context (`context.mode.contextInfo.entityId`). No `contextFieldName` is needed because the pivot reads from the current record, not from related records.
+
+### Example Configurations
+
+**KPI Performance Grades (3 grade fields → 3 cards):**
+```json
+{
+  "fieldPivot": {
+    "fields": [
+      { "field": "sprk_guidelinecompliancegrade_current", "label": "Guidelines", "fieldValue": 1, "sortOrder": 1 },
+      { "field": "sprk_budgetcompliancegrade_current",     "label": "Budget",     "fieldValue": 2, "sortOrder": 2 },
+      { "field": "sprk_outcomecompliancegrade_current",   "label": "Outcomes",   "fieldValue": 3, "sortOrder": 3 }
+    ]
+  },
+  "columns": 3
+}
+```
+
+**Financial Summary (4 fields → 4 cards, with per-field formatting v1.2.44):**
+```json
+{
+  "fieldPivot": {
+    "fields": [
+      { "field": "sprk_totalbudget",       "label": "Total Budget",  "fieldValue": "budget",      "valueFormat": "currency" },
+      { "field": "sprk_totalspend",        "label": "Total Spend",   "fieldValue": "spend",       "valueFormat": "currency" },
+      { "field": "sprk_remainingbudget",   "label": "Remaining",     "fieldValue": "remaining",   "valueFormat": "currency" },
+      { "field": "sprk_budgetutilization", "label": "Utilization %", "fieldValue": "utilization",  "valueFormat": "percentage" }
+    ]
+  },
+  "columns": 4,
+  "colorSource": "signBased"
+}
+```
+
+**Project Health Indicators:**
+```json
+{
+  "fieldPivot": {
+    "fields": [
+      { "field": "sprk_schedulehealth", "label": "Schedule", "fieldValue": 1 },
+      { "field": "sprk_budgethealth",   "label": "Budget",   "fieldValue": 2 },
+      { "field": "sprk_qualityhealth",  "label": "Quality",  "fieldValue": 3 },
+      { "field": "sprk_riskexposure",   "label": "Risk",     "fieldValue": 4 }
+    ]
+  }
+}
+```
+
+### Combining Field Pivot with Card Config
+
+Field pivot produces `IAggregatedDataPoint[]` — the same shape as aggregation. All card configuration options work with field pivot: `iconMap`, `colorThresholds`, `valueFormat`, `cardDescription`, `sortBy`, `dataJustification`, `colorSource`, etc.
+
+**Per-field value format (v1.2.44):** Each field pivot entry can specify its own `valueFormat`. This allows mixed formatting in a single card row — e.g., one card showing currency, another showing percentage, another showing a letter grade. Priority: `entry.valueFormat` > `cardConfig.valueFormat` (global) > default.
+
+**Example: Grade cards with icons and color thresholds:**
+```json
+{
+  "fieldPivot": {
+    "fields": [
+      { "field": "sprk_guidelinecompliancegrade_current", "label": "Guidelines", "fieldValue": 1, "sortOrder": 1 },
+      { "field": "sprk_budgetcompliancegrade_current",     "label": "Budget",     "fieldValue": 2, "sortOrder": 2 },
+      { "field": "sprk_outcomecompliancegrade_current",   "label": "Outcomes",   "fieldValue": 3, "sortOrder": 3 }
+    ]
+  },
+  "columns": 3,
+  "iconMap": {
+    "Guidelines": "gavel",
+    "Budget": "money",
+    "Outcomes": "target"
+  },
+  "colorThresholds": [
+    { "range": [0.85, 1.00], "tokenSet": "brand" },
+    { "range": [0.70, 0.84], "tokenSet": "warning" },
+    { "range": [0.00, 0.69], "tokenSet": "danger" }
+  ]
+}
+```
+
+---
+
 ## Use Cases: Visual Type Setup Walkthroughs
 
 ### Use Case 1: DueDateCard on an Event Form
@@ -908,7 +1127,7 @@ The MetricCard uses the **DataAggregationService** which fetches records from th
 - Check browser console for detailed error messages
 
 ### ReportCardMetric shows "N/A" instead of a grade
-- As of v1.2.33, ReportCardMetric uses the MetricCard pipeline with `resolveCardConfig` for rendering
+- As of v1.2.44, ReportCardMetric is a fallthrough case in ChartRenderer — it shares the MetricCard code path with grade preset defaults from `resolveCardConfig`
 - This is normal when no KPI assessments have been submitted for that area
 - Submit at least one KPI assessment via the Quick Create form, which triggers the calculator API
 - Refresh the form after saving the assessment — grades update asynchronously
@@ -917,8 +1136,20 @@ The MetricCard uses the **DataAggregationService** which fetches records from th
 ### ReportCardMetric not rendering (blank space)
 - Verify `sprk_visualtype` is set to `100000010` on the chart definition record
 - If the Visual Type choice field doesn't have a "ReportCardMetric" option, you need to add it — see [Adding the ReportCardMetric Visual Type](#adding-the-reportcardmetric-visual-type) below
-- Ensure VisualHost PCF solution v1.2.33 or later is imported
+- Ensure VisualHost PCF solution v1.2.48 or later is imported
 - Check browser console (F12) for rendering errors
+
+### Field Pivot Cards Show "0" Instead of Actual Values
+- Verify the field logical names in `fieldPivot.fields[]` match exactly what exists on the entity (check spelling, case)
+- Open the record in advanced find and confirm the fields have non-null values
+- Check browser console (F12) for `[FieldPivotService] Field "fieldname" is null/undefined` warnings
+- Ensure the record has been saved — field pivot reads committed values, not unsaved form changes
+
+### Field Pivot Not Activating (Falls Through to Aggregation)
+- Verify `configurationJson` contains a `fieldPivot` object at the top level (not nested inside another key)
+- Ensure `sprk_entitylogicalname` is set on the chart definition
+- Ensure the control is placed on an entity form (not a dashboard or standalone page) — `contextRecordId` must be available from the form context
+- Check browser console for `[VisualHostRoot] Field pivot mode detected` log — if missing, the config parsing failed
 
 ### Bar chart shows a single "(Blank)" bar
 - **Wrong field format for Group By Field:** Choice/optionset fields use `fieldname` (e.g., `sprk_documenttype`). Lookup fields use `_fieldname_value` (e.g., `_sprk_eventtype_ref_value`). See [Group By Field Format](#group-by-field-format).
@@ -932,7 +1163,13 @@ The MetricCard uses the **DataAggregationService** which fetches records from th
 ### Version Badge Not Updating
 - Verify the solution was imported successfully
 - Clear browser cache (Ctrl+Shift+Delete)
-- Check the version badge in the lower-left corner of the control (should show v1.2.33)
+- Check the version badge in the lower-left corner of the control (should show v1.2.48)
+- Verify the `showVersion` PCF property is set to Yes (default). If set to No, the badge is hidden.
+
+### Whitespace Below Cards
+- As of v1.2.48, MetricCard/MetricCardMatrix use content-driven height with no 300px minimum
+- If whitespace persists, check if the PCF `height` property is set explicitly — this applies a `minHeight` to the container
+- Verify you are running v1.2.48 or later (check the version badge)
 
 ### Click Actions Not Working
 - Verify `enableDrillThrough` is set to Yes on the PCF control
@@ -1008,7 +1245,79 @@ The MetricCard uses the **DataAggregationService** which fetches records from th
 
 **Goal:** Display three grade cards (Guidelines, Budget, Outcomes) on a Matter form's Report Card tab, each showing the current performance grade as a letter with color coding.
 
-#### Option A: Single Chart Definition with Matrix Mode (New - Recommended)
+#### Option A: Field Pivot — Single Record, Multiple Fields (Recommended)
+
+Use one chart definition with **field pivot** to read 3 grade fields from the current matter record and display each as a card. This is the simplest and most direct approach — no views, no aggregation, no grouping required. With v1.2.44, you also get responsive typography, configurable card shapes, and PCF-level title controls.
+
+**Step-by-step:**
+
+1. **Create a single Chart Definition record:**
+
+   | Field | Value |
+   |-------|-------|
+   | Name | Matter Performance Scorecard |
+   | Visual Type | ReportCardMetric (100000010) |
+   | Entity Logical Name | `sprk_matter` |
+   | Card Shape (`sprk_metriccardshape`) | Horizontal Rectangle (100000002) or leave empty for default 5:3 |
+   | Options JSON (`sprk_optionsjson`) | See below |
+
+   Leave Group By Field, Aggregation Type, Aggregation Field, and Base View ID **empty** — field pivot does not use them.
+
+   **Options JSON (`sprk_optionsjson`):**
+   ```json
+   {
+     "fieldPivot": {
+       "fields": [
+         { "field": "sprk_guidelinecompliancegrade_current", "label": "Guidelines", "fieldValue": 1, "sortOrder": 1 },
+         { "field": "sprk_budgetcompliancegrade_current",     "label": "Budget",     "fieldValue": 2, "sortOrder": 2 },
+         { "field": "sprk_outcomecompliancegrade_current",   "label": "Outcomes",   "fieldValue": 3, "sortOrder": 3 }
+       ]
+     },
+     "columns": 3,
+     "iconMap": {
+       "Guidelines": "gavel",
+       "Budget": "money",
+       "Outcomes": "target"
+     },
+     "colorThresholds": [
+       { "range": [0.85, 1.00], "tokenSet": "brand" },
+       { "range": [0.70, 0.84], "tokenSet": "warning" },
+       { "range": [0.00, 0.69], "tokenSet": "danger" }
+     ]
+   }
+   ```
+
+2. **Add one VisualHost control to the Matter form:**
+   - Place in a full-width (1-column) section on the main tab or Report Card tab
+   - Set `chartDefinitionId` to the chart definition GUID (or bind a lookup)
+   - Leave `contextFieldName` empty — field pivot reads from the current form record directly
+   - Set `showTitle` to Yes if you want the chart definition name displayed above the cards
+   - Optionally set `titleFontSize` (e.g., `14px`) to control the title size
+   - One VisualHost instance renders all 3 cards via MetricCardMatrix's internal CSS Grid
+
+3. **How it works at runtime:**
+   - VisualHost loads the chart definition
+   - Detects `configurationJson.fieldPivot` → uses FieldPivotService
+   - Calls `context.webAPI.retrieveRecord("sprk_matter", recordId, "$select=sprk_guidelinecompliancegrade_current,sprk_budgetcompliancegrade_current,sprk_outcomecompliancegrade_current")`
+   - Maps each field to an `IAggregatedDataPoint` with the configured label, value, and optional per-field valueFormat
+   - ChartRenderer hits `case MetricCard: case ReportCardMetric:` (fallthrough) — same code path
+   - `resolveCardConfig` auto-applies grade preset defaults: `letterGrade` format, `valueThreshold` colors, icons
+   - Card shape from `sprk_metriccardshape` (or default 5:3 horizontal) sets the aspect ratio
+   - MetricCardMatrix renders 3 cards with grade letters, color coding, and icons
+   - Cards use `container-type: inline-size` for responsive typography
+   - If a field is null (no KPI assessments yet), the card shows "N/A" in grey
+
+**Why field pivot is preferred for this use case:**
+- No saved view needed — reads directly from the current record
+- No aggregation — the grade values are already on the matter entity
+- One API call (`retrieveRecord`) vs. a view query + aggregation pipeline
+- Works even when there are zero KPI assessment child records (shows current grade fields)
+- Per-field `valueFormat` (v1.2.44) — each card can display a different format if needed
+- Full access to all v1.2.44 features: card shapes, sign-based coloring, responsive typography, data justification
+
+---
+
+#### Option B: Single Chart Definition with Matrix Mode (Aggregation-Based)
 
 Use one chart definition with Group By Field to render all 3 grades as a responsive matrix. This approach requires fewer chart definitions and provides responsive layout automatically.
 
@@ -1026,9 +1335,9 @@ Use one chart definition with Group By Field to render all 3 grades as a respons
    | Aggregation Field | Grade field (e.g., `sprk_compliancegrade_current`) |
    | Value Format | Letter Grade (100000001) |
    | Color Source | Value Threshold (100000002) |
-   | Configuration JSON | See below |
+   | Options JSON (`sprk_optionsjson`) | See below |
 
-   **Configuration JSON:**
+   **Options JSON (`sprk_optionsjson`):**
    ```json
    {
      "cardSize": "medium",
@@ -1063,9 +1372,9 @@ Use one chart definition with Group By Field to render all 3 grades as a respons
    - MetricCardMatrix renders 3 cards in a responsive grid with grade letters, color coding, and icons
    - If no KPI assessments have been entered, cards show "N/A" in grey
 
-#### Option B: Three Separate Chart Definitions (Legacy)
+#### Option C: Three Separate Chart Definitions (Legacy)
 
-This approach still works -- ReportCardMetric preset auto-applies grade styling via `cardConfigResolver`. However, matrix mode (Option A) is preferred for fewer chart definitions and responsive layout.
+This approach still works — ReportCardMetric (100000010) now falls through to the MetricCard code path (v1.2.44), and the grade preset defaults are auto-applied by `cardConfigResolver`. However, field pivot (Option A) is preferred for fewer chart definitions, one API call, and access to all v1.2.44 features.
 
 **Step-by-step:**
 
@@ -1080,7 +1389,7 @@ This approach still works -- ReportCardMetric preset auto-applies grade styling 
    | Entity Logical Name | `sprk_matter` |
    | Aggregation Field | `sprk_guidelinecompliancegrade_current` |
    | Aggregation Type | Average (100000002) |
-   | Configuration JSON | `{"icon": "guidelines", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
+   | Options JSON (`sprk_optionsjson`) | `{"icon": "guidelines", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
 
    **Budget Card:**
 
@@ -1091,7 +1400,7 @@ This approach still works -- ReportCardMetric preset auto-applies grade styling 
    | Entity Logical Name | `sprk_matter` |
    | Aggregation Field | `sprk_budgetcompliancegrade_current` |
    | Aggregation Type | Average (100000002) |
-   | Configuration JSON | `{"icon": "budget", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
+   | Options JSON (`sprk_optionsjson`) | `{"icon": "budget", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
 
    **Outcomes Card:**
 
@@ -1102,7 +1411,7 @@ This approach still works -- ReportCardMetric preset auto-applies grade styling 
    | Entity Logical Name | `sprk_matter` |
    | Aggregation Field | `sprk_outcomecompliancegrade_current` |
    | Aggregation Type | Average (100000002) |
-   | Configuration JSON | `{"icon": "outcomes", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
+   | Options JSON (`sprk_optionsjson`) | `{"icon": "outcomes", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
 
 2. **Note the Chart Definition IDs** (GUIDs) from each record's URL after saving.
 
@@ -1231,13 +1540,13 @@ The grade field names are the same on both entities. Only the Entity Logical Nam
 | Entity Logical Name | `sprk_matter` |
 | Aggregation Field | `sprk_guidelinecompliancegrade_current` |
 | Aggregation Type | Average (100000002) |
-| Configuration JSON | `{"icon": "guidelines", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
+| Options JSON (`sprk_optionsjson`) | `{"icon": "guidelines", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
 | **PCF Properties** | |
 | chartDefinitionId | *(GUID of the chart definition)* |
 
 > **Note:** Leave all other chart definition fields empty (no Group By, no Context Field, no Base View ID). The ReportCardMetric reads the grade value directly from the aggregation field on the current record.
 >
-> **v1.2.33 Alternative:** Instead of three separate chart definitions (Guidelines, Budget, Outcomes), you can use a single chart definition with Group By Field set to the performance area field to render all three grades as a matrix. See [Use Case 5 Option A](#use-case-5-kpi-grade-cards-on-a-matter-form-report-card) for details.
+> **v1.2.44 Recommended:** Use field pivot mode with a single chart definition instead of three separate definitions. See [Use Case 5 Option A](#use-case-5-kpi-grade-cards-on-a-matter-form-report-card) for details.
 
 ### ReportCardMetric — Budget Grade on Matter Form
 
@@ -1249,11 +1558,11 @@ The grade field names are the same on both entities. Only the Entity Logical Nam
 | Entity Logical Name | `sprk_matter` |
 | Aggregation Field | `sprk_budgetcompliancegrade_current` |
 | Aggregation Type | Average (100000002) |
-| Configuration JSON | `{"icon": "budget", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
+| Options JSON (`sprk_optionsjson`) | `{"icon": "budget", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
 | **PCF Properties** | |
 | chartDefinitionId | *(GUID of the chart definition)* |
 
-> **v1.2.33 Alternative:** Consider using a single chart definition with matrix mode instead of three separate definitions. See [Use Case 5 Option A](#use-case-5-kpi-grade-cards-on-a-matter-form-report-card).
+> **v1.2.44 Recommended:** Use field pivot mode with a single chart definition instead of three separate definitions. See [Use Case 5 Option A](#use-case-5-kpi-grade-cards-on-a-matter-form-report-card).
 
 ### ReportCardMetric — Outcomes Grade on Matter Form
 
@@ -1265,11 +1574,26 @@ The grade field names are the same on both entities. Only the Entity Logical Nam
 | Entity Logical Name | `sprk_matter` |
 | Aggregation Field | `sprk_outcomecompliancegrade_current` |
 | Aggregation Type | Average (100000002) |
-| Configuration JSON | `{"icon": "outcomes", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
+| Options JSON (`sprk_optionsjson`) | `{"icon": "outcomes", "contextTemplate": "You have a {grade}% in {area} compliance"}` |
 | **PCF Properties** | |
 | chartDefinitionId | *(GUID of the chart definition)* |
 
-> **v1.2.33 Alternative:** Consider using a single chart definition with matrix mode instead of three separate definitions. See [Use Case 5 Option A](#use-case-5-kpi-grade-cards-on-a-matter-form-report-card).
+> **v1.2.44 Recommended:** Use field pivot mode with a single chart definition instead of three separate definitions. See [Use Case 5 Option A](#use-case-5-kpi-grade-cards-on-a-matter-form-report-card).
+
+### Field Pivot — Grade Cards on Matter Form (Recommended)
+
+| Setting | Value |
+|---------|-------|
+| **Chart Definition** | |
+| Name | Matter Performance Scorecard |
+| Visual Type | ReportCardMetric (100000010) |
+| Entity Logical Name | `sprk_matter` |
+| Options JSON (`sprk_optionsjson`) | `{"fieldPivot":{"fields":[{"field":"sprk_guidelinecompliancegrade_current","label":"Guidelines","fieldValue":1,"sortOrder":1},{"field":"sprk_budgetcompliancegrade_current","label":"Budget","fieldValue":2,"sortOrder":2},{"field":"sprk_outcomecompliancegrade_current","label":"Outcomes","fieldValue":3,"sortOrder":3}]},"columns":3,"iconMap":{"Guidelines":"gavel","Budget":"money","Outcomes":"target"},"colorThresholds":[{"range":[0.85,1.00],"tokenSet":"brand"},{"range":[0.70,0.84],"tokenSet":"warning"},{"range":[0.00,0.69],"tokenSet":"danger"}]}` |
+| **PCF Properties** | |
+| chartDefinitionId | *(GUID of chart definition)* |
+| contextFieldName | *(leave empty)* |
+
+> **Note:** Field pivot reads grade fields directly from the current matter record — no views, no aggregation, no Group By Field needed. One VisualHost PCF renders all 3 cards. Requires VisualHost v1.2.44+. Current version: v1.2.48. Each field entry can optionally specify its own `valueFormat` for mixed formatting.
 
 ### Bar Chart with Drill-Through to Events Page
 
@@ -1387,6 +1711,61 @@ After adding the fields:
 2. Confirm **Value Format** and **Color Source** fields appear on the form (you may need to add them to the form layout)
 3. Verify each dropdown contains the expected options
 4. Create a test record with Value Format = Letter Grade and Color Source = Value Threshold to verify they save correctly
+
+---
+
+### Adding the Card Shape Choice Field (v1.2.44)
+
+A new choice column must be added to the `sprk_chartdefinition` entity to support configurable card shapes in MetricCard/MetricCardMatrix.
+
+#### Card Shape (`sprk_metriccardshape`)
+
+| Label | Value | Aspect Ratio |
+|-------|-------|-------------|
+| Square | 100000000 | 1 : 1 |
+| Vertical Rectangle | 100000001 | 3 : 5 |
+| Horizontal Rectangle | 100000002 | 5 : 3 |
+
+#### How to Add (Manual)
+
+1. Navigate to **Settings** > **Customizations** > **Customize the System**
+2. Expand **Entities** > **Chart Definition** (`sprk_chartdefinition`) > **Fields**
+3. Click **New** to create a new field:
+   - **Display Name**: `Metric Card Shape`
+   - **Name**: `sprk_metriccardshape`
+   - **Data Type**: Choice (Option Set)
+   - **Type**: Local Option Set (new)
+   - Add all options from the **Card Shape** table above with the specified values
+   - **Default Value**: *(none — defaults to Horizontal Rectangle behavior in code)*
+4. Save the field
+5. Add the field to the Chart Definition form
+6. **Publish All Customizations**
+
+#### How to Add (Solution Import)
+
+If using the SpaarkeCore solution or project deployment solution, the new choice field should be included in the `customizations.xml`. Verify the solution XML includes the `sprk_metriccardshape` field definition with its option set values on the `sprk_chartdefinition` entity.
+
+#### Verification
+
+After adding the field:
+1. Open any Chart Definition record
+2. Confirm **Metric Card Shape** field appears on the form
+3. Verify the dropdown contains Square, Vertical Rectangle, and Horizontal Rectangle
+4. Create a test record with Card Shape = Square and verify the MetricCard renders with 1:1 aspect ratio
+
+---
+
+### Adding Sign Based to the Color Source Choice Field (v1.2.44)
+
+If you want to use sign-based coloring from the Dataverse field (rather than only via Options JSON), add a new option to the existing `sprk_colorsource` choice field:
+
+| Label | Value |
+|-------|-------|
+| Sign Based | 100000003 |
+
+Follow the same process as adding other option set values: open the `sprk_colorsource` field, add the new option, save, and publish.
+
+> **Note:** Sign-based coloring can also be configured via Options JSON without adding this Dataverse option: set `"colorSource": "signBased"` in the `sprk_optionsjson` field.
 
 ---
 

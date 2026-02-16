@@ -2,7 +2,7 @@
 <manifest>
   <control namespace="Spaarke.Visuals"
            constructor="VisualHost"
-           version="1.2.41"
+           version="1.2.48"
            display-name-key="Visual Host"
            description-key="Configuration-driven visualization control for charts, cards, and calendars"
            control-type="standard">
@@ -88,6 +88,32 @@
               of-type="SingleLine.Text"
               usage="input"
               required="false" />
+
+    <!-- Optional: Show chart definition name as title above visual (v1.2.44) -->
+    <property name="showTitle"
+              display-name-key="Show Title"
+              description-key="Show the chart definition name as a title above the visual. Default: hidden."
+              of-type="TwoOptions"
+              usage="input"
+              required="false"
+              default-value="false" />
+
+    <!-- Optional: Title font size base (v1.2.44) -->
+    <property name="titleFontSize"
+              display-name-key="Title Font Size"
+              description-key="Base font size for the title (e.g., 14px, 0.9rem). Scales responsively with card size."
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
+    <!-- Optional: Show/hide version badge (v1.2.47) -->
+    <property name="showVersion"
+              display-name-key="Show Version"
+              description-key="Show the version badge in the lower-left corner. Default: visible."
+              of-type="TwoOptions"
+              usage="input"
+              required="false"
+              default-value="true" />
 
     <!-- Optional: Show toolbar -->
     <property name="showToolbar"

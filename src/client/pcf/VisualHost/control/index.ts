@@ -43,7 +43,6 @@ export class VisualHost
       // Fill the platform wrapper (div.pa-cb.flexbox) — without this,
       // the container shrinks to content width inside the flex parent
       container.style.width = "100%";
-      container.style.height = "100%";
 
       // Set up theme listener for dynamic theme changes
       this._cleanupThemeListener = setupThemeListener((isDark) => {
@@ -126,7 +125,7 @@ export class VisualHost
       ReactDOM.render(
         React.createElement(
           FluentProvider,
-          { theme, style: { width: "100%", height: "100%" } },
+          { theme, style: { width: "100%" } },
           React.createElement(
             ErrorBoundary,
             null,

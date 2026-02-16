@@ -41,6 +41,7 @@ import type {
   DrillInteraction,
   ICardConfig,
   ColorTokenSet,
+  ValueFormatType,
 } from "../types";
 import { formatValue } from "../utils/valueFormatters";
 
@@ -225,6 +226,18 @@ function resolveCardColors(
       return getTokenSetColors("neutral");
     }
 
+    case "signBased": {
+      // Negative → danger (red), zero → neutral, positive → success (green)
+      // invertSign flips the meaning (negative = good, positive = bad)
+      const invert = config.invertSign ?? false;
+      if (dp.value < 0) {
+        return getTokenSetColors(invert ? "success" : "danger");
+      } else if (dp.value > 0) {
+        return getTokenSetColors(invert ? "danger" : "success");
+      }
+      return getTokenSetColors("neutral");
+    }
+
     case "none":
     default:
       return {};
@@ -274,18 +287,17 @@ const useStyles = makeStyles({
     gap: `${CARD_GAP}px`,
   },
   card: {
-    display: "flex",
-    flexDirection: "row",
+    display: "grid",
+    gridTemplateRows: "auto 1fr auto",
     boxSizing: "border-box",
     cursor: "default",
     transition: "box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out",
     padding: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalS,
-    gap: tokens.spacingHorizontalM,
-    aspectRatio: "5 / 3",
+    // aspectRatio set inline from cardConfig.aspectRatio
     position: "relative",
     overflow: "hidden",
-    alignItems: "center",
+    containerType: "inline-size",
   },
   cardWithAccentBar: {
     paddingLeft: `calc(${tokens.spacingHorizontalS} + 4px)`,
@@ -293,7 +305,6 @@ const useStyles = makeStyles({
   cardCompact: {
     padding: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalXS,
-    gap: tokens.spacingHorizontalS,
   },
   cardCompactWithAccentBar: {
     paddingLeft: `calc(${tokens.spacingHorizontalXS} + 4px)`,
@@ -316,15 +327,18 @@ const useStyles = makeStyles({
     width: "4px",
   },
   cardContent: {
+    position: "relative",
     display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalXXS,
-    flexGrow: 1,
+    alignItems: "center",
+    justifyContent: "center",
     minWidth: 0,
   },
   iconSlot: {
+    position: "absolute",
+    left: 0,
+    top: "50%",
+    transform: "translateY(-50%)",
     fontSize: "28px",
-    flexShrink: 0,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -334,9 +348,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     fontWeight: tokens.fontWeightSemibold,
     lineHeight: tokens.lineHeightBase200,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    flexShrink: 0,
   },
   cardValue: {
     fontSize: tokens.fontSizeHero700,
@@ -415,6 +427,8 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
   const effectiveMaxCards = config?.maxCards;
   const effectiveShowAccentBar = config?.showAccentBar ?? false;
   const effectiveTitleFontSize = config?.titleFontSize;
+  const effectiveAspectRatio = config?.aspectRatio ?? "5 / 3";
+  const effectiveDataJustification = config?.dataJustification;
 
   // Sort and limit data points
   let sortedPoints = sortDataPoints(dataPoints, effectiveSortBy);
@@ -447,6 +461,7 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
         ? "center"
         : justification === "right" ? "end"
           : "stretch",
+    alignContent: "start", // Prevent vertical stretching — no whitespace below cards
   };
 
   // Wrapper min-height from Height prop
@@ -454,8 +469,8 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
     ? { minHeight: `${height}px` }
     : {};
 
-  // Determine whether to show title from config
-  const showTitle = config?.showTitle !== false;
+  // Determine whether to show title from config (default: hidden)
+  const showTitle = config?.showTitle ?? false;
 
   return (
     <div className={styles.wrapper} style={wrapperStyle}>
@@ -469,7 +484,9 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
       )}
       <div className={styles.grid} style={gridStyle}>
         {sortedPoints.map((dp, idx) => {
-          const formattedVal = formatValue(dp.value, effectiveValueFormat, effectiveNullDisplay);
+          // Per-field valueFormat takes priority over global config
+          const dpFormat: ValueFormatType = dp.valueFormat ?? effectiveValueFormat;
+          const formattedVal = formatValue(dp.value, dpFormat, effectiveNullDisplay);
           const colorTokens = resolveCardColors(dp, config);
           const IconComponent = getIconForDataPoint(dp, config?.iconMap);
           const description = resolveDescription(
@@ -489,7 +506,10 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
                 effectiveCompact && effectiveShowAccentBar && styles.cardCompactWithAccentBar,
                 isInteractive && styles.cardInteractive
               )}
-              style={colorTokens.cardBackground ? { backgroundColor: colorTokens.cardBackground } : undefined}
+              style={{
+                aspectRatio: effectiveAspectRatio,
+                ...(colorTokens.cardBackground ? { backgroundColor: colorTokens.cardBackground } : undefined),
+              }}
               onClick={isInteractive ? () => handleCardClick(dp) : undefined}
               tabIndex={isInteractive ? 0 : undefined}
               role={isInteractive ? "button" : "region"}
@@ -507,20 +527,20 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
                 />
               )}
 
-              {/* Icon: left-aligned, vertically centered */}
-              {IconComponent && (
-                <span
-                  className={styles.iconSlot}
-                  style={colorTokens.iconColor ? { color: colorTokens.iconColor } : undefined}
-                  aria-hidden="true"
-                >
-                  <IconComponent />
-                </span>
-              )}
+              {/* Label: top-left */}
+              <Text className={styles.cardLabel}>{dp.label}</Text>
 
-              {/* Content: Label, Value, Description stacked vertically */}
+              {/* Middle row: Icon (center-left) + Value (center) */}
               <div className={styles.cardContent}>
-                <Text className={styles.cardLabel}>{dp.label}</Text>
+                {IconComponent && (
+                  <span
+                    className={styles.iconSlot}
+                    style={colorTokens.iconColor ? { color: colorTokens.iconColor } : undefined}
+                    aria-hidden="true"
+                  >
+                    <IconComponent />
+                  </span>
+                )}
                 <Text
                   className={mergeClasses(
                     styles.cardValue,
@@ -531,15 +551,17 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
                 >
                   {formattedVal}
                 </Text>
-                {description && (
-                  <Text
-                    className={styles.cardDescription}
-                    style={colorTokens.valueText ? { color: colorTokens.valueText, opacity: 0.8 } : undefined}
-                  >
-                    {description}
-                  </Text>
-                )}
               </div>
+
+              {/* Description: bottom */}
+              {description && (
+                <Text
+                  className={styles.cardDescription}
+                  style={colorTokens.valueText ? { color: colorTokens.valueText, opacity: 0.8 } : undefined}
+                >
+                  {description}
+                </Text>
+              )}
             </Card>
           );
         })}

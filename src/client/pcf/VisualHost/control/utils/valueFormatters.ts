@@ -42,10 +42,21 @@ export function formatDecimal(value: number): string {
 }
 
 /**
- * Format a value as currency (e.g., 1234 → "$1,234")
+ * Format a value as currency (e.g., 1234 → "$1,234", -2500 → "-$2,500")
  */
 export function formatCurrency(value: number): string {
-  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  const abs = Math.abs(value);
+  const formatted = abs.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return value < 0 ? `-$${formatted}` : `$${formatted}`;
+}
+
+/**
+ * Format a value as a signed percentage (value is 0-1 decimal)
+ * Positive values get a + prefix: 0.125 → "+13%", -0.125 → "-13%"
+ */
+export function formatSignedPercentage(value: number): string {
+  const pct = Math.round(value * 100);
+  return pct > 0 ? `+${pct}%` : `${pct}%`;
 }
 
 /**
@@ -75,6 +86,8 @@ export function formatValue(
       return formatDecimal(value);
     case "currency":
       return formatCurrency(value);
+    case "signedPercentage":
+      return formatSignedPercentage(value);
     case "shortNumber":
     default:
       return formatShortNumber(value);

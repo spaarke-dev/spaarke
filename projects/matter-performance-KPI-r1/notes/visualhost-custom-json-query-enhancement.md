@@ -368,7 +368,7 @@ Response:
 }
 ```
 
-Data source: Reads `sprk_guidelinescompliancegrade_current`, `sprk_budgetcompliancegrade_current`, `sprk_outcomescompliancegrade_current` from the Matter record. These are the authoritative pre-computed values maintained by `ScorecardCalculatorService`.
+Data source: Reads `sprk_guidelinecompliancegrade_current`, `sprk_budgetcompliancegrade_current`, `sprk_outcomecompliancegrade_current` from the Matter record. These are the authoritative pre-computed values maintained by `ScorecardCalculatorService`.
 
 ### Finance Summary Endpoint (Future)
 
@@ -452,7 +452,7 @@ For the KPI Performance Scorecard, create one `sprk_chartdefinition` record:
 | `sprk_name` | "Matter Performance Scorecard" |
 | `sprk_visualtype` | ReportCardMetric (100000010) |
 | `sprk_entitylogicalname` | `sprk_matter` (informational — not used for query) |
-| `sprk_configurationjson` | See below |
+| `sprk_optionsjson` | See below (all JSON config goes in this field) |
 
 ```json
 {

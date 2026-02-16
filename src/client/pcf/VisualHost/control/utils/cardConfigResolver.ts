@@ -2,7 +2,7 @@
  * Card Configuration Resolver
  * Merges configuration from three tiers into a single ICardConfig:
  *   1. Chart Definition fields (Dataverse columns — sprk_valueformat, sprk_colorsource)
- *   2. Configuration JSON (sprk_configurationjson — flexible, complex settings)
+ *   2. Configuration JSON (sprk_optionsjson in Dataverse, mapped to sprk_configurationjson internally)
  *   3. PCF Property overrides (per-form-placement overrides)
  *
  * Priority: PCF Override > Chart Definition Field > Config JSON > Defaults
@@ -19,6 +19,7 @@ import {
   type IColorThreshold,
   ValueFormat,
   ColorSource,
+  CardShape,
   VisualType,
 } from "../types";
 
@@ -32,7 +33,7 @@ const DEFAULT_CONFIG: ICardConfig = {
   cardSize: "medium",
   sortBy: "label",
   compact: false,
-  showTitle: true,
+  showTitle: false,
   accentFromOptionSet: false,
   showAccentBar: false,
 };
@@ -77,8 +78,21 @@ function colorSourceEnumToString(enumVal: ColorSource): ColorSourceType {
   switch (enumVal) {
     case ColorSource.OptionSetColor: return "optionSetColor";
     case ColorSource.ValueThreshold: return "valueThreshold";
+    case ColorSource.SignBased: return "signBased";
     case ColorSource.None:
     default: return "none";
+  }
+}
+
+/**
+ * Map CardShape enum to CSS aspect-ratio string
+ */
+function cardShapeToAspectRatio(shape?: CardShape): string | undefined {
+  switch (shape) {
+    case CardShape.Square: return "1 / 1";
+    case CardShape.VerticalRectangle: return "3 / 5";
+    case CardShape.HorizontalRectangle: return "5 / 3";
+    default: return undefined;
   }
 }
 
@@ -107,6 +121,8 @@ export function resolveCardConfig(
   pcfOverrides?: {
     valueFormatOverride?: string;
     columns?: number;
+    showTitle?: boolean;
+    titleFontSize?: string;
   }
 ): ICardConfig {
   const json = parseConfigJson(chartDef.sprk_configurationjson);
@@ -154,7 +170,7 @@ export function resolveCardConfig(
 
   const compact = (json.compact as boolean) ?? DEFAULT_CONFIG.compact;
 
-  const showTitle = (json.showTitle as boolean) ?? DEFAULT_CONFIG.showTitle;
+  const showTitle = pcfOverrides?.showTitle ?? (json.showTitle as boolean) ?? DEFAULT_CONFIG.showTitle;
 
   const maxCards = (json.maxCards as number | undefined) ?? undefined;
 
@@ -163,7 +179,7 @@ export function resolveCardConfig(
 
   const showAccentBar = (json.showAccentBar as boolean) ?? DEFAULT_CONFIG.showAccentBar;
 
-  const titleFontSize = (json.titleFontSize as string | undefined) ?? undefined;
+  const titleFontSize = pcfOverrides?.titleFontSize ?? (json.titleFontSize as string | undefined) ?? undefined;
 
   // --- Icon Map ---
   const iconMap = (json.iconMap as Record<string, string> | undefined) ??
@@ -172,6 +188,16 @@ export function resolveCardConfig(
   // --- Color Thresholds ---
   const colorThresholds = (json.colorThresholds as IColorThreshold[] | undefined) ??
     (isReportCardMetric && colorSource === "valueThreshold" ? GRADE_COLOR_THRESHOLDS : undefined);
+
+  // --- Aspect Ratio (from Chart Definition shape field, then JSON fallback) ---
+  const aspectRatio = cardShapeToAspectRatio(chartDef.sprk_metriccardshape) ??
+    (json.aspectRatio as string | undefined) ?? undefined;
+
+  // --- Data Justification (from Config JSON) ---
+  const dataJustification = (json.dataJustification as ICardConfig["dataJustification"]) ?? undefined;
+
+  // --- Invert Sign (for signBased coloring) ---
+  const invertSign = (json.invertSign as boolean | undefined) ?? undefined;
 
   return {
     valueFormat,
@@ -190,5 +216,8 @@ export function resolveCardConfig(
     titleFontSize,
     iconMap,
     colorThresholds,
+    aspectRatio,
+    dataJustification,
+    invertSign,
   };
 }

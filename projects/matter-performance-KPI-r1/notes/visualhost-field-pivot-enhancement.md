@@ -2,7 +2,7 @@
 
 > **Version**: 1.0
 > **Created**: 2026-02-15
-> **Status**: Approved — Implementation Ready
+> **Status**: Built & Deployed (VisualHost v1.2.41)
 > **Scope**: VisualHost PCF enhancement (generic, reusable)
 
 ---
@@ -79,9 +79,9 @@ interface IFieldPivotEntry {
 {
   "fieldPivot": {
     "fields": [
-      { "field": "sprk_guidelinescompliancegrade_current", "label": "Guidelines", "fieldValue": 1, "sortOrder": 1 },
+      { "field": "sprk_guidelinecompliancegrade_current", "label": "Guidelines", "fieldValue": 1, "sortOrder": 1 },
       { "field": "sprk_budgetcompliancegrade_current",     "label": "Budget",     "fieldValue": 2, "sortOrder": 2 },
-      { "field": "sprk_outcomescompliancegrade_current",   "label": "Outcomes",   "fieldValue": 3, "sortOrder": 3 }
+      { "field": "sprk_outcomecompliancegrade_current",   "label": "Outcomes",   "fieldValue": 3, "sortOrder": 3 }
     ]
   },
   "columns": 3
@@ -132,7 +132,7 @@ For KPI Performance Grades, create one `sprk_chartdefinition` record:
 | `sprk_name` | "Matter Performance Scorecard" |
 | `sprk_visualtype` | ReportCardMetric (100000010) |
 | `sprk_entitylogicalname` | `sprk_matter` |
-| `sprk_configurationjson` | See example above |
+| `sprk_optionsjson` | See example above (all JSON config goes in this field) |
 
 The `ReportCardMetric` preset auto-applies:
 - `valueFormat: "letterGrade"` (0.85 → "B+")
@@ -160,30 +160,30 @@ The `ReportCardMetric` preset auto-applies:
 
 ### New
 
-| Component | File | Purpose | Est. Lines |
-|-----------|------|---------|------------|
-| **FieldPivotService** | `services/FieldPivotService.ts` | Generic: fetch one record, pivot N fields → N data points | ~80 |
-| **IFieldPivotConfig** | `types/index.ts` | Type definitions for fieldPivot configuration | ~15 |
+| Component | File | Purpose | Lines |
+|-----------|------|---------|-------|
+| **FieldPivotService** | `services/FieldPivotService.ts` | Generic: fetch one record, pivot N fields → N data points | 132 |
+| **IFieldPivotConfig** | `types/index.ts` | Type definitions for fieldPivot configuration | 14 |
 
 ### Modified
 
-| Component | File | Change | Est. Lines Changed |
-|-----------|------|--------|-------------------|
-| **VisualHostRoot** | `components/VisualHostRoot.tsx` | Add fieldPivot check before fetchAndAggregate | ~10 |
+| Component | File | Change | Lines Changed |
+|-----------|------|--------|---------------|
+| **VisualHostRoot** | `components/VisualHostRoot.tsx` | Add fieldPivot check before fetchAndAggregate | ~20 (import + pivot branch) |
 
 ---
 
 ## Implementation Tasks
 
-| # | Task | Est. |
-|---|------|------|
-| 1 | Add `IFieldPivotConfig` and `IFieldPivotEntry` types to `types/index.ts` | 15 min |
-| 2 | Create `services/FieldPivotService.ts` — generic record fetch + field-to-dataPoint mapping | 1.5 hr |
-| 3 | Wire into `VisualHostRoot.tsx` — detect `fieldPivot` in configurationJson, call FieldPivotService | 30 min |
-| 4 | Version bump to 1.2.41 (5 locations) | 15 min |
-| 5 | Build and package | 15 min |
-| 6 | Update VISUALHOST-ARCHITECTURE.md and VISUALHOST-SETUP-GUIDE.md | 30 min |
-| **Total** | | **~3 hours** |
+| # | Task | Status |
+|---|------|--------|
+| 1 | Add `IFieldPivotConfig` and `IFieldPivotEntry` types to `types/index.ts` | ✅ Complete |
+| 2 | Create `services/FieldPivotService.ts` — generic record fetch + field-to-dataPoint mapping (132 lines) | ✅ Complete |
+| 3 | Wire into `VisualHostRoot.tsx` — detect `fieldPivot` in configurationJson, call FieldPivotService | ✅ Complete |
+| 4 | Version bump to 1.2.41 (5 locations) | ✅ Complete |
+| 5 | Build and package (`VisualHostSolution_v1.2.41.zip`, 153KB) | ✅ Complete |
+| 6 | Deploy to Dataverse dev environment | ✅ Complete |
+| 7 | Update VISUALHOST-ARCHITECTURE.md and VISUALHOST-SETUP-GUIDE.md | ✅ Complete |
 
 ---
 
@@ -206,4 +206,4 @@ This document supersedes [visualhost-custom-json-query-enhancement.md](visualhos
 
 ---
 
-**Last Updated**: 2026-02-15
+**Last Updated**: 2026-02-15 | **Deployed**: v1.2.41 to Dataverse dev

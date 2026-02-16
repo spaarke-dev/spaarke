@@ -44,7 +44,6 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     width: "100%",
-    height: "100%",
     minWidth: 0, // Allow shrinking below intrinsic content width
     padding: "2px",
     paddingBottom: "14px", // Minimal space for version badge
@@ -59,7 +58,6 @@ const useStyles = makeStyles({
     zIndex: 10,
   },
   chartContainer: {
-    flex: 1,
     display: "flex",
     alignItems: "stretch",
     width: "100%",
@@ -132,6 +130,17 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
   const width = context.parameters.width?.raw;
   const justification = (context.parameters.justification?.raw?.trim() as MatrixJustification) || null;
   const columns = context.parameters.columns?.raw;
+
+  // v1.2.44: Show/hide chart definition name as title
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const showTitlePcf = (context.parameters as any).showTitle?.raw as boolean | null;
+  // v1.2.44: Base title font size
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const titleFontSizePcf = (context.parameters as any).titleFontSize?.raw?.trim() as string | null;
+  // v1.2.47: Show/hide version badge
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const showVersionPcf = (context.parameters as any).showVersion?.raw as boolean | null;
+  const showVersion = showVersionPcf !== false; // Default: true (show version badge)
 
   // v1.2.35: Column position for multi-column coordination
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -458,7 +467,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         chartDefinition={chartDefinition}
         chartData={chartData || undefined}
         onDrillInteraction={enableDrillThrough ? handleDrillInteraction : undefined}
-        height={height || 300}
+        height={height || undefined}
         webApi={context.webAPI}
         contextRecordId={contextRecordId || undefined}
         onClickAction={hasClickAction(chartDefinition) ? handleClickAction : undefined}
@@ -468,6 +477,8 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         width={width || undefined}
         justification={justification || undefined}
         columns={columns || undefined}
+        showTitle={showTitlePcf ?? undefined}
+        titleFontSize={titleFontSizePcf || undefined}
       />
     );
   };
@@ -475,6 +486,8 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
   // Container style with optional height and column-position edge padding
   const containerStyle: React.CSSProperties = {
     ...(height ? { minHeight: `${height}px` } : {}),
+    // v1.2.47: No bottom padding when version badge is hidden
+    ...(!showVersion ? { paddingBottom: 0 } : {}),
     // v1.2.35: When columnPosition is set, remove padding on inner edges
     // so adjacent PCFs visually merge into one cohesive row
     ...(columnPosition === 1 ? { paddingRight: 0 } : {}),
@@ -499,8 +512,10 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         </div>
       )}
 
-      {/* Version badge - lower left, unobtrusive */}
-      <span className={styles.versionBadge}>v1.2.41 • 2026-02-15</span>
+      {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
+      {showVersion && (
+        <span className={styles.versionBadge}>v1.2.48 • 2026-02-16</span>
+      )}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>

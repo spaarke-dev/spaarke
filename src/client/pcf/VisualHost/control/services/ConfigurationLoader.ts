@@ -7,7 +7,7 @@
  */
 
 import type { IChartDefinition } from "../types";
-import { VisualType, AggregationType, OnClickAction } from "../types";
+import { VisualType, AggregationType, OnClickAction, ValueFormat, ColorSource } from "../types";
 import { logger } from "../utils/logger";
 
 /**
@@ -80,6 +80,11 @@ const FIELDS = {
   // FetchXML fields
   fetchXmlQuery: "sprk_fetchxmlquery",
   fetchXmlParams: "sprk_fetchxmlparams",
+  // MetricCard configuration fields (v1.2.33)
+  valueFormat: "sprk_valueformat",
+  colorSource: "sprk_colorsource",
+  // Card shape (v1.2.44)
+  metricCardShape: "sprk_metriccardshape",
 } as const;
 
 /**
@@ -104,6 +109,9 @@ const SELECT_COLUMNS = [
   FIELDS.drillThroughTarget,
   FIELDS.fetchXmlQuery,
   FIELDS.fetchXmlParams,
+  FIELDS.valueFormat,
+  FIELDS.colorSource,
+  FIELDS.metricCardShape,
 ].join(",");
 
 /**
@@ -241,6 +249,42 @@ function parseOnClickAction(value: unknown): OnClickAction | undefined {
 }
 
 /**
+ * Validate and convert value format option set value
+ */
+function parseValueFormat(value: unknown): ValueFormat | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  const numValue = typeof value === "number" ? value : parseInt(String(value), 10);
+  if (isNaN(numValue)) {
+    return undefined;
+  }
+  if (Object.values(ValueFormat).includes(numValue)) {
+    return numValue as ValueFormat;
+  }
+  logger.warn("ConfigurationLoader", "Unknown value format", { value: numValue });
+  return undefined;
+}
+
+/**
+ * Validate and convert color source option set value
+ */
+function parseColorSource(value: unknown): ColorSource | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  const numValue = typeof value === "number" ? value : parseInt(String(value), 10);
+  if (isNaN(numValue)) {
+    return undefined;
+  }
+  if (Object.values(ColorSource).includes(numValue)) {
+    return numValue as ColorSource;
+  }
+  logger.warn("ConfigurationLoader", "Unknown color source", { value: numValue });
+  return undefined;
+}
+
+/**
  * Map Dataverse record to IChartDefinition
  */
 function mapToChartDefinition(
@@ -256,6 +300,9 @@ function mapToChartDefinition(
     sprk_aggregationtype: parseAggregationType(record[FIELDS.aggregationType]),
     sprk_groupbyfield: record[FIELDS.groupByField] as string | undefined,
     sprk_optionsjson: record[FIELDS.optionsJson] as string | undefined,
+    // Map optionsJson to configurationjson as well — single Dataverse column
+    // serves both chart rendering options and advanced configuration (field pivot, card config)
+    sprk_configurationjson: record[FIELDS.optionsJson] as string | undefined,
     // Click action fields
     sprk_onclickaction: parseOnClickAction(record[FIELDS.onClickAction]),
     sprk_onclicktarget: record[FIELDS.onClickTarget] as string | undefined,
@@ -269,6 +316,11 @@ function mapToChartDefinition(
     // FetchXML fields
     sprk_fetchxmlquery: record[FIELDS.fetchXmlQuery] as string | undefined,
     sprk_fetchxmlparams: record[FIELDS.fetchXmlParams] as string | undefined,
+    // MetricCard configuration fields (v1.2.33)
+    sprk_valueformat: parseValueFormat(record[FIELDS.valueFormat]),
+    sprk_colorsource: parseColorSource(record[FIELDS.colorSource]),
+    // Card shape (v1.2.44)
+    sprk_metriccardshape: record[FIELDS.metricCardShape] as number | undefined,
   };
 
   // Validate optionsJson is valid JSON (for early warning)

@@ -114,6 +114,7 @@ export async function fetchAndPivot(
         value: numericValue,
         fieldValue: entry.fieldValue ?? entry.label,
         sortOrder: entry.sortOrder ?? index,
+        valueFormat: entry.valueFormat,
       };
     }
   );

@@ -42,6 +42,17 @@ export enum ColorSource {
   None = 100000000,
   OptionSetColor = 100000001,
   ValueThreshold = 100000002,
+  SignBased = 100000003,
+}
+
+/**
+ * Card shape enumeration matching Dataverse option set values (sprk_metriccardshape)
+ * Controls the aspect ratio of cards in MetricCardMatrix
+ */
+export enum CardShape {
+  Square = 100000000,
+  VerticalRectangle = 100000001,
+  HorizontalRectangle = 100000002,
 }
 
 /**
@@ -81,6 +92,8 @@ export interface IChartDefinition {
   sprk_aggregationtype?: AggregationType;
   sprk_groupbyfield?: string;
   sprk_optionsjson?: string;
+  /** Advanced configuration (field pivot, card config, color thresholds).
+   *  Mapped from the same Dataverse field (sprk_optionsjson) by ConfigurationLoader. */
   sprk_configurationjson?: string;
 
   // FetchXML fields (existing in Dataverse)
@@ -103,6 +116,9 @@ export interface IChartDefinition {
   // MetricCard enhancement fields (v1.2.33)
   sprk_valueformat?: ValueFormat;
   sprk_colorsource?: ColorSource;
+
+  // Card shape (v1.2.44)
+  sprk_metriccardshape?: CardShape;
 }
 
 /**
@@ -130,6 +146,8 @@ export interface IAggregatedDataPoint {
   fieldValue: unknown;
   /** Option set sort order (for optionSetOrder sort) */
   sortOrder?: number;
+  /** Per-data-point value format override (e.g., from field pivot config) */
+  valueFormat?: ValueFormatType;
 }
 
 /**
@@ -196,12 +214,13 @@ export type ValueFormatType =
   | "percentage"
   | "wholeNumber"
   | "decimal"
-  | "currency";
+  | "currency"
+  | "signedPercentage";
 
 /**
  * Color source type as string (for config resolution)
  */
-export type ColorSourceType = "none" | "optionSetColor" | "valueThreshold";
+export type ColorSourceType = "none" | "optionSetColor" | "valueThreshold" | "signBased";
 
 /**
  * Resolved card configuration — merged from Chart Definition fields,
@@ -240,6 +259,12 @@ export interface ICardConfig {
   iconMap?: Record<string, string>;
   /** Value-based color threshold rules */
   colorThresholds?: IColorThreshold[];
+  /** Card aspect ratio (e.g., "5 / 3", "1 / 1", "3 / 5") from sprk_metriccardshape */
+  aspectRatio?: string;
+  /** Content alignment within each card: left, left-center, center, right-center, right */
+  dataJustification?: "left" | "left-center" | "center" | "right-center" | "right";
+  /** Invert sign-based coloring (negative=success, positive=danger) */
+  invertSign?: boolean;
 };
 
 /**
@@ -249,7 +274,7 @@ export interface ICardConfig {
  * as a separate data point in MetricCardMatrix. Generic — works for any entity
  * with multiple numeric fields that should display as a card row.
  *
- * Configured via sprk_configurationjson on the chart definition:
+ * Configured via sprk_optionsjson on the chart definition (mapped to sprk_configurationjson internally):
  * {
  *   "fieldPivot": {
  *     "fields": [
@@ -271,4 +296,6 @@ export interface IFieldPivotEntry {
   fieldValue?: unknown;
   /** Explicit sort order (default: array index) */
   sortOrder?: number;
+  /** Per-field value format override (e.g., "currency", "letterGrade", "signedPercentage") */
+  valueFormat?: ValueFormatType;
 }

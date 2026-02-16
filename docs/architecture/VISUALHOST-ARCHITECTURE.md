@@ -1,6 +1,6 @@
 # VisualHost - Architecture Documentation
 
-> **Version**: 1.2.33 | **Last Updated**: February 13, 2026
+> **Version**: 1.2.48 | **Last Updated**: February 16, 2026
 >
 > **Audience**: Developers, solution architects, AI coding agents
 >
@@ -31,7 +31,13 @@
 
 ## Architecture Overview
 
-VisualHost is a **configuration-driven visualization framework** for Dataverse model-driven apps. A single PCF control renders 11 different visual types based on a `sprk_chartdefinition` entity record (10 base types + ReportCardMetric preset). It also provides **drill-through navigation** that opens web resource-based dataset grids (such as the Events Page) in Dataverse dialogs with full context filtering.
+VisualHost is a **configuration-driven visualization framework** for Dataverse model-driven apps. A single PCF control renders 11 different visual types based on a `sprk_chartdefinition` entity record (10 base types + ReportCardMetric as a MetricCard preset). It supports three data source modes: **view/basic aggregation** (grouped records), **field pivot** (multiple fields from a single record), and **self-managed** (DueDateCard types). It also provides **drill-through navigation** that opens web resource-based dataset grids (such as the Events Page) in Dataverse dialogs with full context filtering.
+
+**v1.2.44 highlights:** ReportCardMetric consolidated as a MetricCard fallthrough case (single code path), configurable card shapes (`sprk_metriccardshape`), per-field value formatting on field pivot entries, sign-based conditional coloring for finance variance, signed percentage format, responsive typography via container queries, and PCF-level title visibility/font size controls.
+
+**v1.2.47 highlights:** Card layout restructured to CSS Grid (`gridTemplateRows: "auto 1fr auto"`) with label top-left, icon center-left (absolute positioned), value center-center, description bottom. Added `showVersion` PCF property to show/hide the version badge.
+
+**v1.2.48 highlights:** Fixed whitespace below MetricCard/MetricCardMatrix — cards now use content-driven height (no 300px minimum). Chart types (BarChart, LineChart, DonutChart) retain the 300px default canvas height.
 
 ```
                     ┌──────────────────────────────┐
@@ -52,14 +58,14 @@ VisualHost is a **configuration-driven visualization framework** for Dataverse m
             │   Loader     │  │ Layer │  │   Handler      │
             └──────────────┘  └───┬───┘  └───────┬────────┘
                                   │              │
-                    ┌─────────────┼──────────┐   │
-                    │             │           │   │
-              ┌─────▼─────┐ ┌────▼────┐ ┌───▼───▼──────────────┐
-              │ Aggregation│ │  View   │ │  Drill-Through       │
-              │  Service   │ │  Data   │ │  Navigation          │
-              │ (Charts)   │ │ Service │ │  (Web Resource Dialog)│
-              └────────────┘ │(Cards)  │ └──────────┬───────────┘
-                             └─────────┘            │
+                    ┌─────────────┼──────────────┐│
+                    │             │              ││
+              ┌─────▼─────┐ ┌────▼────┐ ┌──────▼▼─────┐ ┌──────────────────────┐
+              │ Aggregation│ │  View   │ │ Field Pivot │ │  Drill-Through       │
+              │  Service   │ │  Data   │ │  Service    │ │  Navigation          │
+              │ (Charts)   │ │ Service │ │ (v1.2.41)   │ │  (Web Resource Dialog)│
+              └────────────┘ │(Cards)  │ └─────────────┘ └──────────┬───────────┘
+                             └─────────┘                            │
                                   │         ┌───────▼────────────┐
                     ┌─────────────▼──────┐  │  Events Page       │
                     │      ChartRenderer │  │  (sprk_eventspage) │
@@ -75,7 +81,7 @@ VisualHost is a **configuration-driven visualization framework** for Dataverse m
 
 1. **Configuration over Code** - No code changes needed to add a new visual instance; just create a chart definition record
 2. **Single Control, Multiple Visuals** - One PCF control handles all visual types, reducing solution complexity
-3. **Layered Data Fetching** - Query priority resolution with 4 tiers, caching at each layer
+3. **Layered Data Fetching** - Three data modes (view/basic aggregation, field pivot, self-managed), query priority resolution with 4 tiers, caching at each layer
 4. **Shared Components** - Visual components in `@spaarke/ui-components` are reusable across PCF controls and Custom Pages
 5. **Platform Integration** - Deep integration with Dataverse WebAPI, form context, side panes, and navigation
 6. **Drill-Through to Dataset Grids** - Expand button opens web resource-based grids in Dataverse dialogs with context parameters
@@ -90,14 +96,14 @@ VisualHost is a **configuration-driven visualization framework** for Dataverse m
 src/client/pcf/VisualHost/
 ├── control/
 │   ├── ControlManifest.Input.xml    # PCF manifest (properties, platform libs)
-│   ├── index.ts                      # PCF lifecycle (init, updateView, destroy) (121 lines)
+│   ├── index.ts                      # PCF lifecycle (init, updateView, destroy) (146 lines)
 │   ├── types/
-│   │   └── index.ts                  # Enums, interfaces (IChartDefinition, DrillInteraction) (214 lines)
+│   │   └── index.ts                  # Enums, interfaces (IChartDefinition, CardShape, IFieldPivotConfig, ICardConfig) (~305 lines)
 │   ├── components/
-│   │   ├── VisualHostRoot.tsx        # Main orchestration + drill-through navigation (436 lines)
-│   │   ├── ChartRenderer.tsx         # Visual type router (430 lines)
-│   │   ├── MetricCard.tsx            # Single value display (339 lines)
-│   │   ├── MetricCardMatrix.tsx      # Responsive card grid for matrix mode (502 lines)
+│   │   ├── VisualHostRoot.tsx        # Main orchestration + drill-through navigation + field pivot routing (~530 lines)
+│   │   ├── ChartRenderer.tsx         # Visual type router — ReportCardMetric falls through to MetricCard; no default height for card types (~420 lines)
+│   │   ├── MetricCard.tsx            # Single value display (358 lines)
+│   │   ├── MetricCardMatrix.tsx      # Responsive card grid with container queries (~580 lines)
 │   │   ├── BarChart.tsx              # Bar chart (vertical/horizontal) (185 lines)
 │   │   ├── LineChart.tsx             # Line/area chart (155 lines)
 │   │   ├── DonutChart.tsx            # Donut/pie chart (158 lines)
@@ -107,7 +113,7 @@ src/client/pcf/VisualHost/
 │   │   ├── DueDateCard.tsx           # Single event card (172 lines)
 │   │   ├── DueDateCardList.tsx       # Event card list (265 lines)
 │   │   ├── TrendCard.tsx             # Trend sparkline card (255 lines)
-│   │   ├── GradeMetricCard.tsx       # [DEPRECATED] Legacy grade card — use ReportCardMetric preset (234 lines)
+│   │   ├── GradeMetricCard.tsx       # [DEPRECATED] Legacy — use MetricCard with ReportCardMetric visual type (234 lines)
 │   │   └── ErrorBoundary.tsx         # React error boundary wrapper (80 lines)
 │   ├── configurations/
 │   │   ├── matterMainCards.ts        # Matter main tab card configurations (129 lines)
@@ -117,12 +123,13 @@ src/client/pcf/VisualHost/
 │   ├── services/
 │   │   ├── ConfigurationLoader.ts    # Chart definition loading + cache (399 lines)
 │   │   ├── DataAggregationService.ts # Record fetch + aggregation (566 lines)
+│   │   ├── FieldPivotService.ts      # Single-record field pivot → N data points with per-field valueFormat (~135 lines)
 │   │   ├── ViewDataService.ts        # Query resolution, FetchXML (620 lines)
 │   │   └── ClickActionHandler.ts     # Click action execution (166 lines)
 │   └── utils/
 │       ├── logger.ts                 # Structured logging utility (55 lines)
-│       ├── valueFormatters.ts        # Centralized value formatting (74 lines)
-│       ├── cardConfigResolver.ts     # 3-tier card configuration resolution (164 lines)
+│       ├── valueFormatters.ts        # Centralized value formatting incl. signedPercentage, fixed currency (~85 lines)
+│       ├── cardConfigResolver.ts     # 3-tier card configuration resolution with card shape + data justification (~180 lines)
 │       ├── chartColors.ts            # Chart color palette utility (170 lines)
 │       ├── gradeUtils.ts             # Grade calculation utilities (130 lines)
 │       └── trendAnalysis.ts          # Trend analysis utilities (54 lines)
@@ -144,9 +151,13 @@ VisualHostRoot
 ├── Loading State (Spinner)
 ├── Error State (MessageBar)
 ├── ChartRenderer
-│   ├── MetricCard (renders as MetricCardMatrix in matrix mode)
-│   │   └── MetricCardMatrix (responsive CSS Grid of metric cards)
-│   ├── ReportCardMetric (preset → routes through MetricCard pipeline with grade defaults)
+│   ├── MetricCard / ReportCardMetric (fallthrough — single code path, v1.2.44)
+│   │   └── MetricCardMatrix (responsive CSS Grid with container queries, content-driven height)
+│   │       └── Cards use CSS Grid (auto/1fr/auto rows), aspect-ratio from sprk_metriccardshape
+│   │           ├── Label: top-left
+│   │           ├── Icon: center-left (absolute positioned)
+│   │           ├── Value: center-center
+│   │           └── Description: bottom
 │   ├── BarChart (via @fluentui/react-charting)
 │   ├── LineChart (via @fluentui/react-charting)
 │   ├── DonutChart (via @fluentui/react-charting)
@@ -161,10 +172,10 @@ VisualHostRoot
 │       └── "View All" Link
 ├── Drill-Through Dialog (opened via handleExpandClick)
 │   └── Web Resource (e.g., Events Page) with context params
-└── Version Badge (v1.2.33)
+└── Version Badge (v1.2.47 — controlled by showVersion PCF property, default: visible)
 
 Deprecated (still present, scheduled for removal):
-└── GradeMetricCard — replaced by ReportCardMetric preset in cardConfigResolver
+└── GradeMetricCard — replaced by MetricCard with ReportCardMetric visual type preset
 ```
 
 ---
@@ -185,11 +196,22 @@ ConfigurationLoader.loadChartDefinition(id)
   │  └── Cache Miss → WebAPI.retrieveRecord("sprk_chartdefinition", id)
   │                    → Map fields → Cache → Return
   ▼
-VisualHostRoot: Check if visual type needs aggregation
+VisualHostRoot: Determine data source mode
   │  ├── DueDateCard/DueDateCardList → Skip aggregation (self-managed data)
-  │  └── All other types → Continue to DataAggregationService
+  │  ├── configurationJson has "fieldPivot"? → FieldPivotService (v1.2.41)
+  │  └── All other types → DataAggregationService (VIEW or BASIC mode)
   ▼
-DataAggregationService.fetchAndAggregate(context, definition)
+(Branch A) FieldPivotService.fetchAndPivot()
+  │  1. Parse fieldPivot config from configurationJson
+  │  2. Get current record ID from PCF context (contextRecordId)
+  │  3. Build $select=field1,field2,... from fieldPivot.fields[]
+  │  4. Retrieve single record via context.webAPI.retrieveRecord()
+  │  5. Map each field → IAggregatedDataPoint { label, value, fieldValue, sortOrder, valueFormat }
+  │  6. Per-field valueFormat (v1.2.44): each entry's optional valueFormat carries through to the data point
+  │  7. Return IChartData (totalRecords=1, dataPoints=N)
+  │  → Falls through to ChartRenderer with same IChartData shape
+  ▼
+(Branch B) DataAggregationService.fetchAndAggregate(context, definition)
   │  ├── Cache Hit (2-min TTL) → Return cached IChartData
   │  └── Cache Miss:
   │       1. If viewId set → fetchRecordsFromView():
@@ -266,6 +288,42 @@ ChartRenderer: Routes to DueDateCardVisual or DueDateCardListVisual
 - Lookup fields → Read `_fieldname_value` computed property
 - JSON fields → Parsed with fallback to empty object
 - Drill-through target → `sprk_drillthroughtarget` (web resource name for expand dialog)
+- Card shape (v1.2.44) → `sprk_metriccardshape` option set mapped to `CardShape` enum
+
+### FieldPivotService
+
+**Purpose:** Read multiple fields from a single Dataverse record and transform each into an `IAggregatedDataPoint` for card rendering. Generic — not KPI-specific; works for any entity with multiple numeric fields. Supports per-field `valueFormat` (v1.2.44) so each pivot entry can specify its own formatting.
+
+| Function | Description |
+|----------|-------------|
+| `parseFieldPivotConfig(configurationJson)` | Parse and validate `fieldPivot` from configurationJson; returns null if not configured |
+| `fetchAndPivot(webApi, entity, recordId, pivotConfig)` | Retrieve one record, map N configured fields → N data points |
+
+**Interface:** Uses `IFieldPivotWebApi` (same `retrieveRecord` signature as PCF `context.webAPI`).
+
+**Detection:** VisualHostRoot checks for `configurationJson.fieldPivot` before the existing aggregation path. If present and `entityLogicalName` + `contextRecordId` are available, field pivot mode is used; otherwise falls back to VIEW/BASIC aggregation.
+
+**Configuration:**
+```json
+{
+  "fieldPivot": {
+    "fields": [
+      { "field": "sprk_some_field", "label": "Display Label", "fieldValue": 1, "sortOrder": 1, "valueFormat": "currency" }
+    ]
+  }
+}
+```
+
+Each entry maps to:
+- `field` → Dataverse field logical name (used in `$select`)
+- `label` → Card display label
+- `fieldValue` → Value for icon/color resolution (optional, defaults to label)
+- `sortOrder` → Sort order (optional, defaults to array index)
+- `valueFormat` → Per-field format override (v1.2.44, optional). Priority: `dp.valueFormat` > `cardConfig.valueFormat` > default
+
+**Null handling:** If a field is `null` or `undefined` on the record, the value defaults to `0` and a warning is logged.
+
+---
 
 ### DataAggregationService
 
@@ -355,7 +413,7 @@ These components are defined within the VisualHost PCF control and render specif
 | **MiniTable** | items, columns, title, topN, showRank | IChartData.dataPoints → IMiniTableItem[] |
 | **TrendCard** | trend data, sparkline visualization | Trend data series |
 | **ErrorBoundary** | children, fallback | Wraps components for error isolation |
-| ~~**GradeMetricCard**~~ | ~~grade, area, icon, colorRules~~ | ~~DEPRECATED: Use ReportCardMetric preset via MetricCard~~ |
+| ~~**GradeMetricCard**~~ | ~~grade, area, icon, colorRules~~ | ~~DEPRECATED: Use MetricCard with `sprk_visualtype = ReportCardMetric` (100000010)~~ |
 
 ### Shared Components (from @spaarke/ui-components)
 
@@ -376,11 +434,12 @@ The `EventDueDateCard` renders a single event card with:
 ```typescript
 // All chart components receive data through this interface:
 interface IAggregatedDataPoint {
-  label: string;       // Display label (group value or "Total")
-  value: number;       // Aggregated numeric value
-  color?: string;      // Optional color for the data point
-  fieldValue: unknown; // Original field value (for drill-through)
-  sortOrder?: number;  // Option set sort order
+  label: string;              // Display label (group value or "Total")
+  value: number;              // Aggregated numeric value
+  color?: string;             // Optional color for the data point
+  fieldValue: unknown;        // Original field value (for drill-through)
+  sortOrder?: number;         // Option set sort order
+  valueFormat?: ValueFormatType; // Per-data-point format override (v1.2.44, from field pivot)
 }
 
 interface IChartData {
@@ -389,6 +448,19 @@ interface IChartData {
   aggregationType: AggregationType;
   aggregationField?: string;
   groupByField?: string;
+}
+
+// Field pivot configuration:
+interface IFieldPivotConfig {
+  fields: IFieldPivotEntry[];
+}
+
+interface IFieldPivotEntry {
+  field: string;                    // Dataverse field logical name
+  label: string;                    // Display label for the card
+  fieldValue?: unknown;             // Value for icon/color resolution
+  sortOrder?: number;               // Explicit sort order (default: array index)
+  valueFormat?: ValueFormatType;    // Per-field format override (v1.2.44)
 }
 
 // Card components map Dataverse records to this interface:
@@ -408,8 +480,8 @@ interface IEventDueDateCardProps {
 
 // Card configuration for MetricCard and MetricCardMatrix:
 interface ICardConfig {
-  valueFormat: ValueFormatType;     // shortNumber | letterGrade | percentage | wholeNumber | decimal | currency
-  colorSource: ColorSourceType;     // none | optionSetColor | valueThreshold
+  valueFormat: ValueFormatType;     // shortNumber | letterGrade | percentage | wholeNumber | decimal | currency | signedPercentage
+  colorSource: ColorSourceType;     // none | optionSetColor | valueThreshold | signBased
   cardDescription?: string;         // Template with {value}, {formatted}, {label}, {count} placeholders
   nullDisplay: string;              // Text when value is null (default: "—")
   nullDescription?: string;
@@ -417,35 +489,55 @@ interface ICardConfig {
   sortBy: CardSortBy;               // label | value | valueAsc | optionSetOrder
   columns?: number;                 // Fixed columns (undefined = auto-fill responsive)
   compact: boolean;
-  showTitle: boolean;
+  showTitle: boolean;               // Default: false (v1.2.44 — hidden by default, controlled by PCF property)
+  titleFontSize?: string;           // Base font size for title (e.g., "14px"). Scales responsively. (v1.2.44)
   maxCards?: number;
   accentFromOptionSet: boolean;     // Use option set hex color as border accent
   iconMap?: Record<string, string>; // Map group labels → Fluent icon names
   colorThresholds?: IColorThreshold[];
+  aspectRatio?: string;             // Card shape: "1 / 1" (square), "3 / 5" (vertical), "5 / 3" (horizontal, default). From sprk_metriccardshape. (v1.2.44)
+  dataJustification?: string;       // Content alignment within cards: "left" | "left-center" | "center" | "right-center" | "right" (v1.2.44)
+  invertSign?: boolean;             // Invert sign-based coloring (negative=green, positive=red). For signBased colorSource. (v1.2.44)
 }
 ```
 
-### Card Configuration System (v1.2.33)
+### Card Configuration System (v1.2.33, enhanced v1.2.44)
 
 The MetricCard and MetricCardMatrix components use a **3-tier configuration resolution** system implemented in `cardConfigResolver.ts`. Configuration is merged top-down, with higher tiers overriding lower tiers:
 
 | Tier | Source | Description |
 |------|--------|-------------|
-| **Tier 1** | PCF property override (`valueFormatOverride`) | Per-deployment override set at form control properties |
-| **Tier 2** | Chart Definition Dataverse fields (`sprk_valueformat`, `sprk_colorsource`) | Per-chart-definition configuration in Dataverse |
-| **Tier 3** | Configuration JSON (`sprk_configurationjson`) | Full `ICardConfig` object stored as JSON on the chart definition |
+| **Tier 1** | PCF property overrides (`valueFormatOverride`, `columns`, `showTitle`, `titleFontSize`) | Per-deployment overrides set at form control properties |
+| **Tier 2** | Chart Definition Dataverse fields (`sprk_valueformat`, `sprk_colorsource`, `sprk_metriccardshape`) | Per-chart-definition configuration in Dataverse |
+| **Tier 3** | Configuration JSON (stored in `sprk_optionsjson`) | Full `ICardConfig` object stored as JSON on the chart definition |
 | **Tier 4** | Defaults | Built-in defaults (shortNumber format, no color source, medium size, etc.) |
 
 The `cardConfigResolver.ts` utility merges all tiers, with Tier 1 taking highest precedence.
 
-**ReportCardMetric Preset:** The `ReportCardMetric` visual type (enum `100000010`) is a preset that auto-applies domain-specific defaults via the card configuration system:
+**ReportCardMetric Consolidation (v1.2.44):** The `ReportCardMetric` visual type (enum `100000010`) is now a **fallthrough case** in ChartRenderer — it shares the exact same code path as MetricCard. The `cardConfigResolver` detects the `ReportCardMetric` visual type and auto-applies grade preset defaults:
 - **valueFormat**: `letterGrade`
 - **colorSource**: `valueThreshold`
-- **Icons**: Grade-specific icons (e.g., trophy for A, warning for F)
+- **Icons**: Grade-specific icons (e.g., gavel for Guidelines, money for Budget, target for Outcomes)
 - **nullDisplay**: `"N/A"`
 - **sortBy**: `optionSetOrder`
 
-This preset pattern allows domain-specific card configurations without creating separate components. The `cardConfigResolver` detects the `ReportCardMetric` visual type and applies these defaults at Tier 3 level, which can still be overridden by Tiers 1-2.
+This preset pattern allows domain-specific card configurations without creating separate components. The grade defaults apply at Tier 3 level and can still be overridden by Tiers 1-2. Existing Dataverse records with `sprk_visualtype = 100000010` continue to work identically — no migration required.
+
+**v1.2.44 Additions:**
+- **Card Shape** (`sprk_metriccardshape`): Dataverse option set that controls card aspect ratio. Mapped to `aspectRatio` on ICardConfig by `cardShapeToAspectRatio()` in the resolver. Values: Square (1:1), Vertical Rectangle (3:5), Horizontal Rectangle (5:3, default).
+- **Data Justification** (`dataJustification` in JSON): Controls content alignment within cards (left, left-center, center, right-center, right).
+- **Sign-Based Coloring** (`colorSource: "signBased"` in JSON or Dataverse field): Negative values render red (danger), positive green (success), zero neutral. `invertSign: true` reverses the mapping (useful when negative = good).
+- **Per-Field Value Format**: Each `IFieldPivotEntry` can specify `valueFormat` which flows through to `IAggregatedDataPoint.valueFormat`. At render time: `dp.valueFormat` > `cardConfig.valueFormat` > default.
+- **Responsive Typography**: MetricCardMatrix cards use `container-type: inline-size` for CSS container queries, enabling proportional scaling of value, label, description, and icon sizes.
+- **Title Visibility**: `showTitle` default changed from `true` to `false`. Controlled by PCF property (highest priority) then JSON config.
+
+**v1.2.47 Additions:**
+- **Show/Hide Version Badge** (`showVersion` PCF property): TwoOptions property that controls visibility of the version badge in the lower-left corner. Default: visible (`true`). When hidden, bottom padding is removed to eliminate wasted space.
+- **Card Layout Restructure**: MetricCardMatrix cards changed from flex row to CSS Grid (`gridTemplateRows: "auto 1fr auto"`). Label at top-left, icon center-left (absolute positioned independently of value), value center-center, description at bottom.
+
+**v1.2.48 Additions:**
+- **Content-Driven Card Height**: MetricCard and MetricCardMatrix no longer receive a default 300px minimum height. The ChartRenderer `height` parameter has no default — it is `undefined` unless explicitly set via the PCF `height` property. Chart types (BarChart, LineChart, DonutChart) still default to 300px canvas height via `height ?? 300`. This eliminates whitespace below card grids.
+- **Height Cascade Fix**: Removed `height: "100%"` from PCF container, FluentProvider, and VisualHostRoot container. Removed `flex: 1` from chartContainer. Cards size to fit their content naturally.
 
 ---
 
@@ -832,19 +924,24 @@ import { EventDueDateCard } from "@spaarke/ui-components/dist/components/EventDu
 
 **Location:** `src/client/pcf/VisualHost/control/services/`
 
-These services depend on the Dataverse WebAPI interface (`IConfigWebApi`) but not on PCF-specific APIs. They can be extracted for use in Custom Pages.
+These services depend on the Dataverse WebAPI interface (`IConfigWebApi` / `IFieldPivotWebApi`) but not on PCF-specific APIs. They can be extracted for use in Custom Pages.
 
 **Reusable in:**
 - PCF controls (via `context.webAPI`)
 - Custom Pages (via Dataverse client API: `Xrm.WebApi`)
-- Any context that implements `IConfigWebApi`
+- Any context that implements `IConfigWebApi` or `IFieldPivotWebApi`
 
 **Interface abstraction enables testing and reuse:**
 ```typescript
-// The service accepts any object with this interface:
+// Aggregation services accept this interface:
 interface IConfigWebApi {
   retrieveRecord(entityType: string, id: string, options?: string): Promise<Record<string, unknown>>;
   retrieveMultipleRecords(entityType: string, options?: string): Promise<{ entities: Array<Record<string, unknown>> }>;
+}
+
+// Field pivot service accepts this simpler interface:
+interface IFieldPivotWebApi {
+  retrieveRecord(entityType: string, id: string, options?: string): Promise<Record<string, unknown>>;
 }
 
 // In PCF: context.webAPI
@@ -953,7 +1050,7 @@ Version must be updated in **5 locations** for each release:
 ### Solution Contents
 
 ```
-VisualHostSolution_v1.2.33.zip
+VisualHostSolution_v1.2.48.zip
 ├── [Content_Types].xml
 ├── solution.xml
 ├── customizations.xml
@@ -1020,13 +1117,15 @@ These are provided by the Dataverse runtime (not bundled):
 
 6. **Bump version** in all 5 locations
 
-> **Note:** `ReportCardMetric` (100000010) is now a preset for MetricCard -- it auto-applies grade defaults via `cardConfigResolver`. This pattern can be used for other domain-specific presets without creating separate components.
+> **Note:** `ReportCardMetric` (100000010) is now a fallthrough case in ChartRenderer's MetricCard block (v1.2.44). It auto-applies grade defaults via `cardConfigResolver`. This pattern can be used for other domain-specific presets without creating separate components — add a new fallthrough case and add preset logic in the resolver.
 
 ### Adding a New Data Source
 
-1. **Add the service** in `control/services/`
-2. **Integrate with VisualHostRoot** data fetching flow
-3. **Consider caching** (follow existing patterns with TTL)
+1. **Add the service** in `control/services/` (see `FieldPivotService.ts` as a reference implementation)
+2. **Define a detection mechanism** — e.g., a key in `configurationJson` (field pivot uses `configurationJson.fieldPivot`)
+3. **Integrate with VisualHostRoot** data fetching flow — add a check before the existing aggregation path
+4. **Return `IChartData`** — all data sources must produce the same output shape so downstream rendering is unchanged
+5. **Consider caching** (follow existing patterns with TTL)
 
 ### Adding a New Click Action
 
@@ -1064,9 +1163,9 @@ This section captures architectural context relevant to the next project that wi
 |------|--------------|------------------|
 | **Drill-through target** | Single `sprk_drillthroughtarget` field (web resource name) | Could support multiple targets per click action type, or per-visual-type targets |
 | **Context params** | Fixed set: entityName, filterField, filterValue, viewId, mode | Extensible via `sprk_optionsjson` for additional custom params |
-| **Visual types** | 11 types (enum 100000000–100000010), with ReportCardMetric as a MetricCard preset, plus TrendCard | Add new types by extending the enum and ChartRenderer switch; card configuration is now extensible via ICardConfig without new components |
+| **Visual types** | 11 types (enum 100000000–100000010), with ReportCardMetric as a MetricCard fallthrough (v1.2.44), plus TrendCard | Add new types by extending the enum and ChartRenderer switch; card configuration is extensible via ICardConfig without new components; new presets can use the fallthrough pattern |
 | **Click actions** | 4 actions + expand button | Could add: open in new tab, navigate to URL, trigger Power Automate flow |
-| **Data services** | Client-side aggregation only | Could add server-side aggregation via BFF API for large datasets |
+| **Data services** | Client-side aggregation + field pivot with per-field valueFormat (v1.2.44) | Could add server-side aggregation via BFF API for large datasets |
 
 ### Events Page Enhancement Opportunities
 
