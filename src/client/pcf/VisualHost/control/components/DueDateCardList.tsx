@@ -15,7 +15,7 @@ import {
   MessageBar,
   MessageBarBody,
 } from "@fluentui/react-components";
-import { EventDueDateCard, type IEventDueDateCardProps } from "@spaarke/ui-components/dist/components/EventDueDateCard";
+import { EventDueDateCard, type IEventDueDateCardProps } from "./EventDueDateCard";
 import { ChevronRight20Regular } from "@fluentui/react-icons";
 import type { IChartDefinition } from "../types";
 import type { IConfigWebApi } from "../services/ConfigurationLoader";
