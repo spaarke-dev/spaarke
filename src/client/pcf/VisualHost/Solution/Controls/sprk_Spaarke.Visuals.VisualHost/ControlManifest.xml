@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Visuals" constructor="VisualHost" version="1.2.48" display-name-key="Visual Host" description-key="Configuration-driven visualization control for charts, cards, and calendars" control-type="standard" api-version="1.3.18">
+  <control namespace="Spaarke.Visuals" constructor="VisualHost" version="1.2.49" display-name-key="Visual Host" description-key="Configuration-driven visualization control for charts, cards, and calendars" control-type="standard" api-version="1.3.18">
     <external-service-usage enabled="false"/>
     <property name="chartDefinition" display-name-key="Chart Definition" description-key="Lookup to sprk_chartdefinition record. Takes precedence over static ID if both provided." of-type="Lookup.Simple" usage="bound" required="false"/>
     <property name="chartDefinitionId" display-name-key="Chart Definition ID" description-key="Static GUID of sprk_chartdefinition record. Used when lookup is empty. Enables multiple charts per form." of-type="SingleLine.Text" usage="input" required="false"/>
@@ -11,7 +11,7 @@
     <property name="justification" display-name-key="Justification" description-key="Content alignment: left (default), left-center, center, right-center, right. Use with columnPosition for multi-column coordination." of-type="SingleLine.Text" usage="input" required="false"/>
     <property name="columnPosition" display-name-key="Column Position" description-key="Position of this control in a multi-column layout (1-4). Controls edge padding removal so adjacent PCFs appear as one visual. 1=left edge, 2-3=middle, 4=right edge." of-type="Whole.None" usage="input" required="false"/>
     <property name="columns" display-name-key="Columns" description-key="Number of cards per row in MetricCard matrix layout. Card width = (container width - gaps) / columns. Default: auto based on data count." of-type="Whole.None" usage="input" required="false"/>
-    <property name="valueFormatOverride" display-name-key="Value Format Override" description-key="Override chart definition value format for this placement. Values: shortNumber, letterGrade, percentage, wholeNumber, decimal, currency." of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="valueFormatOverride" display-name-key="Value Format Override" description-key="Override chart definition value format for this placement. Values: shortNumber, letterGrade, percentage, signedPercentage, wholeNumber, decimal, currency." of-type="SingleLine.Text" usage="input" required="false"/>
     <property name="showTitle" display-name-key="Show Title" description-key="Show the chart definition name as a title above the visual. Default: hidden." of-type="TwoOptions" usage="input" required="false" default-value="false"/>
     <property name="titleFontSize" display-name-key="Title Font Size" description-key="Base font size for the title (e.g., 14px, 0.9rem). Scales responsively with card size." of-type="SingleLine.Text" usage="input" required="false"/>
     <property name="showVersion" display-name-key="Show Version" description-key="Show the version badge in the lower-left corner. Default: visible." of-type="TwoOptions" usage="input" required="false" default-value="true"/>

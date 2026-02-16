@@ -8,7 +8,7 @@
     <Descriptions>
       <Description description="Configuration-driven visualization PCF control for charts, cards, and calendars" languagecode="1033" />
     </Descriptions>
-    <Version>1.2.48</Version>
+    <Version>1.2.49</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>
