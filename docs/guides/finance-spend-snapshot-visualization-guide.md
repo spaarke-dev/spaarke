@@ -1,8 +1,11 @@
 # Finance Spend Snapshot Visualization Guide
 
 > **Created**: February 11, 2026
-> **Purpose**: Comprehensive technical guide for implementing Spend Snapshot visualizations using VisualHost PCF control
+> **Last Updated**: February 15, 2026
+> **Purpose**: Comprehensive technical guide for implementing Spend Snapshot visualizations using VisualHost PCF Field Pivot
 > **Status**: Design Document - Implementation Pending
+>
+> **✅ APPROACH**: Finance uses **VisualHost Field Pivot** to display KPI cards on Matter/Project forms by reading denormalized fields. Trend charts and dashboards use **React Custom Page** querying `sprk_spendsnapshot` directly.
 
 ---
 
@@ -361,280 +364,193 @@ For each Matter, generates **2 snapshots**:
 
 ## VisualHost Integration
 
-### Current VisualHost Capabilities
+### Field Pivot: How It Works for Finance
 
-**VisualHost PCF Control** supports three data source modes:
+**Field Pivot** is a VisualHost data mode that reads multiple fields from a single Dataverse record and presents each as a separate card in MetricCardMatrix.
 
-| Mode | Purpose | Use Case |
-|------|---------|----------|
-| **Reporting View** | Query Dataverse view | Simple lists/grids of records |
-| **Single Field Value** | Display one field | KPI cards, gauges (single value) |
-| **Custom JSON Query** | Complex aggregations | Charts requiring BFF API queries |
+**Perfect for Finance** because:
+- ✅ SpendSnapshotGenerationJobHandler already writes summary metrics to **denormalized fields** on `sprk_matter` and `sprk_project`
+- ✅ No BFF API needed - data is on the current form record
+- ✅ No additional queries needed - reads fields from record already loaded by form
+- ✅ Fast - no HTTP calls, no Redis cache, instant display
 
-### Integration Architecture
+### Denormalized Fields on Matter/Project
+
+After SpendSnapshotGenerationJobHandler runs, these fields are updated:
+
+| Field | Purpose | Example Value |
+|-------|---------|---------------|
+| `sprk_budget` | Sum of all Budget records | $100,000 |
+| `sprk_currentspend` | Lifetime invoiced amount | $45,250 |
+| `sprk_budgetvariance` | Budget - Spend | $54,750 |
+| `sprk_budgetutilizationpct` | (Spend / Budget) × 100 | 45.25% |
+| `sprk_velocitypct` | MoM growth rate | 12.5% |
+| `sprk_lastfinanceupdatedate` | Snapshot generation timestamp | 2026-02-11T14:30:00Z |
+
+### Integration Architecture (Field Pivot)
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  Matter Form (Dataverse Model-Driven App)               │
 │                                                          │
+│  Current Record: sprk_matter                            │
+│  Fields loaded: sprk_budget, sprk_currentspend, etc.    │
+│                                                          │
 │  ┌────────────────────────────────────────────────┐    │
-│  │  VisualHost PCF Control (Fluent UI v2 Charts)  │    │
+│  │  VisualHost PCF Control                        │    │
 │  │                                                 │    │
-│  │  [Config: customJsonQuery]                     │    │
-│  │  endpoint: /api/finance/matters/{id}/spend-trend │  │
+│  │  [Config: fieldPivot]                          │    │
+│  │  Reads 5 fields from current Matter record     │    │
+│  │  Displays each as a MetricCard                 │    │
 │  └────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────┘
-                        │
-                        │ HTTP GET
-                        ↓
-┌─────────────────────────────────────────────────────────┐
-│  BFF API (.NET 8 Minimal API)                           │
 │                                                          │
-│  GET /api/finance/matters/{id}/spend-trend              │
-│  ↓                                                       │
-│  FinanceSnapshotQueryService                            │
-│  ├─ Query SpendSnapshot WHERE sprk_matter = {id}       │
-│  ├─ Filter by periodtype = Month                        │
-│  ├─ Order by periodkey DESC                             │
-│  └─ Transform to chart-ready JSON                       │
+│  Result: 5 KPI cards (Budget, Spend, Variance, etc.)    │
 └─────────────────────────────────────────────────────────┘
+                        ↑
+                        │ (No HTTP calls)
+                        │ Reads fields via context.webAPI.retrieveRecord()
                         │
-                        │ Dataverse SDK
-                        ↓
-┌─────────────────────────────────────────────────────────┐
-│  Dataverse (sprk_spendsnapshot table)                   │
-│                                                          │
-│  [Pre-aggregated spend snapshot records]                │
-└─────────────────────────────────────────────────────────┘
+                Uses existing PCF Dataverse WebAPI
+                Record is current form record (already loaded)
 ```
 
-### VisualHost Configuration Examples
+### VisualHost Configuration for Finance KPI Cards
 
-#### Example 1: KPI Card (Single Field Value)
+#### Field Pivot Configuration (Matter Form)
 
-**Scenario**: Display "Total Budget" on Matter page
+**Chart Definition Record** (`sprk_chartdefinition`):
 
-**VisualHost Config**:
+| Field | Value |
+|-------|-------|
+| `sprk_name` | "Matter Financial Summary" |
+| `sprk_visualtype` | ReportCardMetric (100000010) |
+| `sprk_entitylogicalname` | `sprk_matter` |
+| `sprk_configurationjson` | See below |
+
+**Configuration JSON**:
 ```json
 {
-  "dataSource": {
-    "type": "singleFieldValue",
-    "entity": "sprk_spendsnapshot",
-    "filter": "sprk_matter eq @CurrentRecord AND sprk_periodtype eq 100000003",
-    "field": "sprk_budgetamount",
-    "aggregation": "latest"
+  "fieldPivot": {
+    "fields": [
+      { "field": "sprk_budget", "label": "Total Budget", "sortOrder": 1 },
+      { "field": "sprk_currentspend", "label": "Total Spend", "sortOrder": 2 },
+      { "field": "sprk_budgetvariance", "label": "Remaining Budget", "sortOrder": 3 },
+      { "field": "sprk_budgetutilizationpct", "label": "Utilization %", "sortOrder": 4 },
+      { "field": "sprk_velocitypct", "label": "MoM Velocity", "sortOrder": 5 }
+    ]
   },
-  "chartType": "kpiCard",
-  "options": {
-    "title": "Total Budget",
-    "format": "currency",
-    "icon": "Money",
-    "colors": {
-      "primary": "#0078D4"
-    }
-  }
+  "columns": 5
 }
 ```
 
-**Rendered Output**:
+**What This Does**:
+1. VisualHost reads the current Matter record via `context.webAPI.retrieveRecord()`
+2. Extracts values from 5 denormalized fields
+3. Creates 5 `IAggregatedDataPoint` objects (one per field)
+4. Renders 5 MetricCards in a responsive grid
+
+**Rendered Output** (on Matter form):
 ```
-┌───────────────┐
-│ 💰 Total Budget
-│   $100,000    │
-└───────────────┘
+┌─────────────┬─────────────┬─────────────┬─────────────┬─────────────┐
+│ Total Budget│ Total Spend │ Remaining   │ Utilization │ MoM Velocity│
+│  $100,000   │   $45,250   │   $54,750   │    45.3%    │    +12.5%   │
+└─────────────┴─────────────┴─────────────┴─────────────┴─────────────┘
+```
+
+**No BFF API needed** - all data is on the current record.
+
+---
+
+#### Project Form Configuration (Identical Pattern)
+
+Create second `sprk_chartdefinition` for Project entity:
+
+| Field | Value |
+|-------|-------|
+| `sprk_name` | "Project Financial Summary" |
+| `sprk_entitylogicalname` | `sprk_project` |
+| `sprk_configurationjson` | Same fieldPivot config as Matter |
+
+---
+
+### Trend Charts and Dashboards: React Custom Page
+
+**For visualizations requiring historical data** (monthly trends, organization-wide aggregations), use **React Custom Page** instead of VisualHost:
+
+**Why React Custom Page?**
+- Queries `sprk_spendsnapshot` directly (no BFF API needed)
+- More flexible than VisualHost for complex dashboards
+- Can use modern charting libraries (Recharts, Chart.js, Fluent UI Charts)
+- No VisualHost enhancement needed
+
+**Example Queries in React Custom Page**:
+
+```typescript
+// Monthly Spend Trend (last 12 months)
+const snapshots = await dataverse.retrieveMultipleRecords(
+  "sprk_spendsnapshot",
+  "?$filter=_sprk_matter_value eq {matterId} and sprk_periodtype eq 100000000&$orderby=sprk_periodkey asc&$top=12"
+);
+
+// Map to chart data
+const chartData = snapshots.entities.map(s => ({
+  month: s.sprk_periodkey,
+  spend: s.sprk_invoicedamount
+}));
 ```
 
 ---
 
-#### Example 2: Line Chart (Custom JSON Query)
+## Data Access Strategy
 
-**Scenario**: Monthly spend trend on Matter page
+### No BFF API Endpoints Needed for KPI Cards
 
-**VisualHost Config**:
-```json
-{
-  "dataSource": {
-    "type": "customJsonQuery",
-    "endpoint": "/api/finance/matters/{{CurrentRecord.Id}}/spend-trend",
-    "parameters": {
-      "months": 12
-    },
-    "refreshInterval": 60000
-  },
-  "chartType": "lineChart",
-  "options": {
-    "title": "Monthly Spend Trend (Last 12 Months)",
-    "xAxisLabel": "Month",
-    "yAxisLabel": "Spend ($)",
-    "colors": ["#0078D4"],
-    "showDataLabels": true,
-    "showLegend": false
-  }
-}
-```
+**Field Pivot eliminates the need for BFF API endpoints** because:
+- KPI metrics are **denormalized** on `sprk_matter` and `sprk_project` by SpendSnapshotGenerationJobHandler
+- VisualHost reads these fields directly from the current form record via Dataverse WebAPI
+- No HTTP calls, no caching, no API authorization logic needed
 
-**BFF API Response** (`GET /api/finance/matters/{id}/spend-trend?months=12`):
-```json
-{
-  "labels": ["2025-03", "2025-04", "2025-05", "2025-06", "2025-07", "2025-08",
-             "2025-09", "2025-10", "2025-11", "2025-12", "2026-01", "2026-02"],
-  "datasets": [
-    {
-      "label": "Monthly Spend",
-      "data": [8500, 9200, 12000, 11500, 13000, 10800,
-               9500, 11200, 10500, 12800, 11000, 12500]
-    }
-  ]
-}
-```
+**Denormalized fields updated by SpendSnapshotGenerationJobHandler**:
+- `sprk_budget` (sum of all Budget records)
+- `sprk_currentspend` (lifetime invoiced amount)
+- `sprk_budgetvariance` (budget - spend)
+- `sprk_budgetutilizationpct` ((spend / budget) × 100)
+- `sprk_velocitypct` (MoM growth rate)
+- `sprk_lastfinanceupdatedate` (snapshot generation timestamp)
 
-**Rendered Output**: Line chart showing spend trend over 12 months
+### React Custom Page for Trend Charts and Dashboards
 
----
+**For historical trends and organization-wide dashboards**, Finance will use **React Custom Page** that queries `sprk_spendsnapshot` directly:
 
-#### Example 3: Bar Chart (Dashboard - Top Spenders)
+| Visualization | Data Source | Query Method |
+|---------------|-------------|--------------|
+| **KPI Cards** (Matter/Project form) | Denormalized fields on current record | VisualHost Field Pivot |
+| **Monthly Trend Chart** | `sprk_spendsnapshot` (Month snapshots) | React Custom Page → Dataverse WebAPI |
+| **Top Spenders** (Dashboard) | `sprk_spendsnapshot` (aggregate by Matter) | React Custom Page → Dataverse WebAPI |
+| **Budget Alerts** (Dashboard) | `sprk_spendsnapshot` (filter variance < 0) | React Custom Page → Dataverse WebAPI |
 
-**Scenario**: Finance dashboard showing top 10 matters by spend
+**Example: React Custom Page Query for Monthly Trend**:
+```typescript
+// Query Month snapshots for last 12 months
+const result = await Xrm.WebApi.retrieveMultipleRecords(
+  "sprk_spendsnapshot",
+  "?$filter=_sprk_matter_value eq " + matterId +
+  " and sprk_periodtype eq 100000000" +
+  "&$orderby=sprk_periodkey asc&$top=12"
+);
 
-**VisualHost Config**:
-```json
-{
-  "dataSource": {
-    "type": "customJsonQuery",
-    "endpoint": "/api/finance/dashboard/top-spenders",
-    "parameters": {
-      "month": "2026-02",
-      "limit": 10
-    },
-    "refreshInterval": 300000
-  },
-  "chartType": "barChart",
-  "options": {
-    "title": "Top 10 Matters by Spend (February 2026)",
-    "orientation": "horizontal",
-    "xAxisLabel": "Spend ($)",
-    "yAxisLabel": "Matter",
-    "colors": ["#107C10"],
-    "showDataLabels": true
-  }
-}
-```
+const trendData = result.entities.map(snapshot => ({
+  month: snapshot.sprk_periodkey,
+  spend: snapshot.sprk_invoicedamount,
+  budget: snapshot.sprk_budgetamount
+}));
 
-**BFF API Response** (`GET /api/finance/dashboard/top-spenders?month=2026-02&limit=10`):
-```json
-{
-  "labels": ["Matter ABC-123", "Matter XYZ-456", "Matter DEF-789",
-             "Matter GHI-012", "Matter JKL-345", "Matter MNO-678",
-             "Matter PQR-901", "Matter STU-234", "Matter VWX-567", "Matter YZA-890"],
-  "datasets": [
-    {
-      "label": "Spend",
-      "data": [45000, 32000, 28000, 22000, 19500, 18000,
-               16500, 15000, 14200, 13800]
-    }
-  ]
-}
+// Render with Recharts, Chart.js, or Fluent UI Charts
 ```
 
 ---
 
-#### Example 4: Data Grid with Conditional Formatting (Budget Alerts)
-
-**Scenario**: Dashboard showing matters over budget
-
-**VisualHost Config**:
-```json
-{
-  "dataSource": {
-    "type": "customJsonQuery",
-    "endpoint": "/api/finance/dashboard/budget-alerts",
-    "parameters": {
-      "month": "2026-02"
-    },
-    "refreshInterval": 300000
-  },
-  "chartType": "dataGrid",
-  "columns": [
-    {
-      "field": "matterName",
-      "header": "Matter",
-      "width": "200px"
-    },
-    {
-      "field": "spend",
-      "header": "Spend",
-      "format": "currency",
-      "width": "120px"
-    },
-    {
-      "field": "budget",
-      "header": "Budget",
-      "format": "currency",
-      "width": "120px"
-    },
-    {
-      "field": "variance",
-      "header": "Variance",
-      "format": "currency",
-      "width": "120px",
-      "conditionalFormatting": {
-        "field": "variancePct",
-        "rules": [
-          { "condition": "< -20", "backgroundColor": "#C50F1F", "color": "#FFFFFF" },
-          { "condition": "< -10", "backgroundColor": "#FFB900", "color": "#000000" }
-        ]
-      }
-    },
-    {
-      "field": "variancePct",
-      "header": "Variance %",
-      "format": "percent",
-      "width": "100px"
-    }
-  ],
-  "options": {
-    "title": "Matters Over Budget (February 2026)",
-    "sortable": true,
-    "filterable": true
-  }
-}
-```
-
-**BFF API Response** (`GET /api/finance/dashboard/budget-alerts?month=2026-02`):
-```json
-{
-  "rows": [
-    {
-      "matterId": "guid-1",
-      "matterName": "Matter ABC-123",
-      "spend": 115000,
-      "budget": 100000,
-      "variance": -15000,
-      "variancePct": -15.0
-    },
-    {
-      "matterId": "guid-2",
-      "matterName": "Matter DEF-456",
-      "spend": 88000,
-      "budget": 80000,
-      "variance": -8000,
-      "variancePct": -10.0
-    },
-    {
-      "matterId": "guid-3",
-      "matterName": "Matter GHI-789",
-      "spend": 62000,
-      "budget": 50000,
-      "variance": -12000,
-      "variancePct": -24.0
-    }
-  ]
-}
-```
-
----
-
-## BFF API Endpoints Required
+## ~~BFF API Endpoints Required~~ (Obsolete - Field Pivot Used Instead)
 
 ### Endpoints for Matter-Level Visualizations
 
@@ -831,139 +747,81 @@ All Matter endpoints have Project equivalents:
 
 ---
 
-## VisualHost Enhancements Needed
+## VisualHost Field Pivot Implementation
 
-### Current Gap Analysis
+### How Field Pivot Works
 
-| Feature | Current Support | Needed For | Priority |
-|---------|----------------|------------|----------|
-| **Custom JSON Query** | ❓ Unknown | All chart scenarios | 🔴 Critical |
-| **Dynamic Parameters** ({{CurrentRecord.Id}}) | ❓ Unknown | Matter/Project page charts | 🔴 Critical |
-| **Chart Types: Line, Bar, Pie** | ✅ Likely supported | Trend charts, top spenders | ✅ Assumed OK |
-| **Chart Type: Gauge** | ❓ Unknown | Budget utilization indicator | 🟡 Nice to have |
-| **Chart Type: Treemap** | ❌ Likely missing | Portfolio view | 🟢 Future |
-| **Conditional Formatting (Grid)** | ❓ Unknown | Budget alerts (red/yellow rows) | 🟡 Important |
-| **Data Refresh Interval** | ❓ Unknown | Auto-refresh dashboards | 🟢 Nice to have |
+**Field Pivot** reads multiple fields from a single Dataverse record and creates a card for each field. This is exactly what Finance needs for KPI cards on Matter/Project forms.
 
-### Recommended Enhancements
+**Architecture**:
+```
+Current Matter Record (already loaded by form)
+  ├─ sprk_budget: $100,000
+  ├─ sprk_currentspend: $45,250
+  ├─ sprk_budgetvariance: $54,750
+  ├─ sprk_budgetutilizationpct: 45.25
+  └─ sprk_velocitypct: 12.5
 
-#### Enhancement 1: Custom JSON Query Support (CRITICAL)
+          ↓ (Field Pivot reads these fields)
 
-**Requirement**: VisualHost must support calling BFF API endpoints and consuming JSON responses
+VisualHost FieldPivotService.fetchAndPivot()
+  ├─ context.webAPI.retrieveRecord("sprk_matter", matterId, "sprk_budget,sprk_currentspend,...")
+  ├─ For each field in fieldPivot.fields[]:
+  │    → Create IAggregatedDataPoint { label, value, fieldValue }
+  └─ Return IChartData with 5 dataPoints[]
 
-**Implementation**:
-```typescript
-// VisualHost PCF - Add CustomJsonQueryDataSource
-interface CustomJsonQueryConfig {
-  endpoint: string;           // "/api/finance/matters/{id}/spend-trend"
-  parameters?: Record<string, any>;  // { months: 12 }
-  refreshInterval?: number;   // Auto-refresh in ms
-  headers?: Record<string, string>;  // Auth headers
-}
+          ↓
 
-async function fetchCustomJsonData(config: CustomJsonQueryConfig): Promise<any> {
-  // Replace {{CurrentRecord.Id}} with actual value
-  const url = interpolateParameters(config.endpoint, config.parameters);
-
-  // Fetch from BFF API
-  const response = await fetch(url, {
-    headers: config.headers
-  });
-
-  return await response.json();
-}
+MetricCardMatrix renders 5 cards
+  [Total Budget] [Total Spend] [Remaining] [Utilization %] [MoM Velocity]
+     $100,000      $45,250      $54,750        45.3%           +12.5%
 ```
 
----
+### Implementation Status
 
-#### Enhancement 2: Dynamic Parameter Interpolation (CRITICAL)
+**Matter Performance KPI Project** owns the Field Pivot enhancement (~3 hours development):
+- Add `IFieldPivotConfig` interface to VisualHost
+- Create `FieldPivotService.ts` (fetch record + map fields to data points)
+- Wire into `VisualHostRoot.tsx` (detect `fieldPivot` in config)
 
-**Requirement**: Support `{{CurrentRecord.Id}}`, `{{CurrentUser.Id}}`, `{{Today}}` in endpoint URLs
+**Finance Benefits** from this enhancement without additional work:
+- Once deployed, Finance configures one `sprk_chartdefinition` record
+- Add VisualHost PCF to Matter/Project forms pointing to chart definition
+- KPI cards render automatically
 
-**Implementation**:
-```typescript
-function interpolateParameters(endpoint: string, params: Record<string, any>): string {
-  let url = endpoint;
+### Configuration for Finance
 
-  // Replace CurrentRecord tokens
-  url = url.replace(/\{\{CurrentRecord\.Id\}\}/g, getCurrentRecordId());
-  url = url.replace(/\{\{CurrentUser\.Id\}\}/g, getCurrentUserId());
-  url = url.replace(/\{\{Today\}\}/g, new Date().toISOString().split('T')[0]);
-
-  // Replace explicit parameters
-  for (const [key, value] of Object.entries(params)) {
-    url = url.replace(new RegExp(`\\{${key}\\}`, 'g'), encodeURIComponent(String(value)));
-  }
-
-  return url;
-}
-```
-
----
-
-#### Enhancement 3: Gauge Chart Type (IMPORTANT)
-
-**Requirement**: Render gauge chart for budget utilization %
-
-**Use Case**:
+**Chart Definition** (`sprk_chartdefinition` record):
 ```json
 {
-  "chartType": "gauge",
-  "options": {
-    "minValue": 0,
-    "maxValue": 100,
-    "value": 45.25,
-    "ranges": [
-      { "min": 0, "max": 70, "color": "#107C10" },    // Green: Under budget
-      { "min": 70, "max": 90, "color": "#FFB900" },   // Yellow: Approaching limit
-      { "min": 90, "max": 100, "color": "#C50F1F" }   // Red: Over budget
+  "fieldPivot": {
+    "fields": [
+      { "field": "sprk_budget", "label": "Total Budget", "sortOrder": 1 },
+      { "field": "sprk_currentspend", "label": "Total Spend", "sortOrder": 2 },
+      { "field": "sprk_budgetvariance", "label": "Remaining Budget", "sortOrder": 3 },
+      { "field": "sprk_budgetutilizationpct", "label": "Utilization %", "sortOrder": 4 },
+      { "field": "sprk_velocitypct", "label": "MoM Velocity", "sortOrder": 5 }
     ]
-  }
+  },
+  "columns": 5
 }
 ```
 
----
+**Form Setup**:
+1. Add VisualHost PCF to Matter form (full-width section)
+2. Configure control property: `chartDefinitionId` = (GUID of chart definition)
+3. VisualHost renders 5 cards in responsive grid
 
-#### Enhancement 4: Conditional Formatting (Data Grid) (IMPORTANT)
+### No Additional Development Needed
 
-**Requirement**: Apply background color to grid rows based on field values
+| Component | Status | Owner |
+|-----------|--------|-------|
+| ✅ Denormalized fields on Matter/Project | Complete | Finance (SpendSnapshotGenerationJobHandler) |
+| 🚧 Field Pivot enhancement to VisualHost | ~3 hours dev | Matter Performance KPI |
+| ⏳ Chart Definition configuration | 30 min | Finance (after Field Pivot deployed) |
+| ⏳ Add PCF to Matter/Project forms | 30 min | Finance (after Field Pivot deployed) |
 
-**Use Case**:
-```json
-{
-  "chartType": "dataGrid",
-  "columns": [
-    {
-      "field": "variance",
-      "header": "Variance",
-      "conditionalFormatting": {
-        "field": "variancePct",
-        "rules": [
-          { "condition": "< -20", "backgroundColor": "#C50F1F", "color": "#FFFFFF" },
-          { "condition": "< -10", "backgroundColor": "#FFB900", "color": "#000000" },
-          { "condition": ">= 0", "backgroundColor": "#DFF6DD", "color": "#000000" }
-        ]
-      }
-    }
-  ]
-}
-```
-
----
-
-#### Enhancement 5: Auto-Refresh (Nice to Have)
-
-**Requirement**: Automatically refresh chart data at specified interval
-
-**Implementation**:
-```typescript
-if (config.refreshInterval) {
-  setInterval(async () => {
-    const data = await fetchCustomJsonData(config);
-    updateChart(data);
-  }, config.refreshInterval);
-}
-```
+**Total Finance Effort**: ~1 hour (configuration only, after Matter Performance deploys Field Pivot)
 
 ---
 
@@ -972,134 +830,147 @@ if (config.refreshInterval) {
 ### Phase 1: Foundation (Complete ✅)
 
 - [x] Spend Snapshot schema defined
-- [x] SpendSnapshotService implementation (Matter-level)
+- [x] SpendSnapshotService implementation (Matter + Project support)
 - [x] Snapshot generation integrated into invoice processing workflow
-- [x] FinancialCalculationToolHandler (Matter + Project support)
+- [x] Denormalized fields on Matter/Project updated by SpendSnapshotGenerationJobHandler
+- [x] Budget variance, MoM velocity, utilization % calculated and stored
 
-### Phase 2: BFF API Query Endpoints (NEXT)
-
-**Priority**: 🔴 Critical
-**Estimated Effort**: 2-3 days
-
-**Tasks**:
-1. Create `FinanceSnapshotQueryService` (query Spend Snapshots from Dataverse)
-2. Implement Matter endpoints:
-   - `GET /api/finance/matters/{id}/summary`
-   - `GET /api/finance/matters/{id}/spend-trend`
-   - `GET /api/finance/matters/{id}/velocity`
-3. Implement Dashboard endpoints:
-   - `GET /api/finance/dashboard/top-spenders`
-   - `GET /api/finance/dashboard/budget-alerts`
-   - `GET /api/finance/dashboard/org-trend`
-4. Add authorization filters (ensure user has access to matter)
-5. Add unit tests for query service
-
-**Acceptance Criteria**:
-- All endpoints return chart-ready JSON
-- Endpoints respond in < 500ms (querying pre-aggregated snapshots)
-- Authorization enforced (user must have access to matter)
-- Unit tests cover query logic and edge cases
+**Status**: ✅ Complete - All backend work done
 
 ---
 
-### Phase 3: VisualHost Enhancements (PARALLEL with Phase 2)
+### Phase 2: VisualHost Field Pivot Enhancement (Matter Performance KPI Owns)
 
-**Priority**: 🔴 Critical
-**Estimated Effort**: 3-5 days
+**Priority**: 🔴 Critical (blocks Finance KPI cards)
+**Estimated Effort**: ~3 hours
+**Owner**: Matter Performance KPI project
 
 **Tasks**:
-1. Add Custom JSON Query data source mode
-2. Implement dynamic parameter interpolation (`{{CurrentRecord.Id}}`)
-3. Test with sample BFF API endpoints (can use mock data initially)
-4. Add gauge chart type (if needed)
-5. Add conditional formatting for data grids (if needed)
-6. Update VisualHost documentation with examples
+1. Add `IFieldPivotConfig` interface to VisualHost types
+2. Create `FieldPivotService.ts` (fetch record, map fields to data points)
+3. Wire into `VisualHostRoot.tsx` (detect `fieldPivot` config)
+4. Version bump to 1.2.41
+5. Build, package, deploy to Dataverse
 
 **Acceptance Criteria**:
-- VisualHost can call BFF API endpoints
-- Dynamic parameters work correctly
-- Charts render with real Spend Snapshot data
-- Performance is acceptable (<2 second initial load)
+- Field Pivot mode works for any entity with multiple numeric fields
+- Reads fields via `context.webAPI.retrieveRecord()`
+- Returns `IAggregatedDataPoint[]` (same interface as existing modes)
+- MetricCardMatrix renders cards correctly
+
+**Finance Dependency**: Finance cannot configure KPI cards until this deploys.
+
+**Reference**: See [`C:\code_files\spaarke-wt-matter-performance-KPI-r1\docs\architecture\visualhost-field-pivot-enhancement.md`](../../../spaarke-wt-matter-performance-KPI-r1/docs/architecture/visualhost-field-pivot-enhancement.md)
 
 ---
 
-### Phase 4: Matter Page Visualizations (AFTER Phase 2 + 3)
+### Phase 3: Finance KPI Cards Configuration (AFTER Phase 2)
 
 **Priority**: 🟡 High
-**Estimated Effort**: 2-3 days
+**Estimated Effort**: ~1 hour
+**Owner**: Finance
 
 **Tasks**:
-1. Add VisualHost instances to Matter form
-   - KPI summary cards (4 cards)
-   - Monthly spend trend chart
-   - Budget utilization gauge
-   - Velocity indicator
-2. Configure each VisualHost with appropriate endpoints
-3. Test with real Matter data in DEV
-4. Adjust styling/layout for optimal UX
+1. Create `sprk_chartdefinition` record for "Matter Financial Summary"
+   - Set `fieldPivot` configuration (5 fields)
+   - Set `columns: 5` for responsive grid
+2. Add VisualHost PCF to Matter form
+   - Full-width section
+   - Point to chart definition GUID
+3. Create `sprk_chartdefinition` record for "Project Financial Summary"
+4. Add VisualHost PCF to Project form
 
 **Acceptance Criteria**:
-- All 4 visualizations render on Matter page
-- Data loads in < 1 second
-- Charts update when Matter data changes
-- Mobile-responsive layout
+- 5 KPI cards render on Matter form (Budget, Spend, Variance, Utilization %, Velocity)
+- 5 KPI cards render on Project form (same metrics)
+- Cards load instantly (<100ms - data is on current record)
+- Values update after SpendSnapshotGenerationJobHandler runs
 
 ---
 
-### Phase 5: Finance Dashboard (AFTER Phase 4)
+### Phase 4: React Custom Page for Dashboards and Trends (AFTER Phase 3)
 
 **Priority**: 🟡 High
 **Estimated Effort**: 3-4 days
+**Owner**: Finance
 
 **Tasks**:
-1. Create custom page for Finance Dashboard
-2. Add VisualHost instances:
-   - Top spenders bar chart
-   - Budget alerts grid
-   - Organization trend line chart
-   - Portfolio status treemap (or defer to future)
-3. Add filters (month selector, matter type filter)
-4. Test with multi-matter data
-5. User acceptance testing
+1. Create React Custom Page for Finance Dashboard
+2. Query `sprk_spendsnapshot` directly via Dataverse WebAPI
+3. Implement visualizations:
+   - Monthly spend trend (LineChart - last 12 months)
+   - Top 10 spenders (BarChart - current month)
+   - Budget alerts grid (DataGrid - matters over budget)
+   - Organization-wide trend (LineChart - aggregated)
+4. Add filters (month selector, matter type)
+5. Style with Fluent UI v9 components
+6. Test with multi-matter data
 
 **Acceptance Criteria**:
 - Dashboard loads in < 2 seconds
-- All charts interactive (click to drill down to Matter)
-- Filters work correctly
-- Dashboard accessible from navigation
+- Charts render correctly with Spend Snapshot data
+- Filters work (month, matter type)
+- Mobile-responsive layout
+- Dark mode support (ADR-021 compliance)
+
+**Data Queries**:
+```typescript
+// Example: Monthly trend for specific Matter
+const result = await Xrm.WebApi.retrieveMultipleRecords(
+  "sprk_spendsnapshot",
+  "?$filter=_sprk_matter_value eq " + matterId +
+  " and sprk_periodtype eq 100000000&$orderby=sprk_periodkey asc&$top=12"
+);
+```
 
 ---
 
-### Phase 6: Project-Level Support (AFTER Phase 5)
+### Phase 5: Project-Level Support (AFTER Phase 4)
 
 **Priority**: 🟢 Medium
-**Estimated Effort**: 2-3 days
+**Estimated Effort**: ~30 minutes
+**Owner**: Finance
 
 **Tasks**:
-1. Complete SpendSnapshotService.GenerateForProjectAsync implementation
-2. Create Project equivalents of BFF API endpoints
-3. Add Project page visualizations (same as Matter)
-4. Update Finance Dashboard to include Projects
+1. Configure Project form KPI cards (already done in Phase 3)
+2. Update React Custom Page to support Project filtering
+3. Test with Project data
 
 **Acceptance Criteria**:
-- Project snapshots generate correctly
-- Project visualizations work same as Matter
-- Dashboard shows combined Matter + Project data
+- Project KPI cards work same as Matter
+- Dashboard supports filtering by Matter OR Project
+- Combined portfolio view shows both
+
+**Note**: Most work already done - Phase 3 creates Project chart definition, Phase 4 dashboard just needs filter logic.
 
 ---
 
-### Phase 7: Enhancements (FUTURE)
+### Phase 6: Enhancements (FUTURE)
 
 **Priority**: 🟢 Low
 **Estimated Effort**: TBD
 
 **Possible Enhancements**:
-- Quarter and Year period types
-- Budget category breakdown (not just "TOTAL")
-- Forecasting/predictive analytics
-- Export to Excel functionality
-- Scheduled email reports
-- Mobile app views
+- Quarter and Year period types (expand PeriodType choice set)
+- Budget category breakdown (expand BucketKey beyond "TOTAL")
+- Forecasting/predictive analytics (ML models)
+- Export to Excel functionality (Power Automate integration)
+- Scheduled email reports (Power Automate scheduled flows)
+- Mobile app native views (Power Apps mobile optimization)
+
+---
+
+## Summary of Simplified Approach
+
+| Component | Solution | Effort | Status |
+|-----------|----------|--------|--------|
+| **Backend (Spend Snapshots)** | SpendSnapshotService + denormalized fields | Complete | ✅ Done |
+| **KPI Cards on Forms** | VisualHost Field Pivot | ~3 hours (Matter Perf) + 1 hour (Finance config) | ⏳ Pending Field Pivot |
+| **Trend Charts / Dashboards** | React Custom Page | ~3-4 days | ⏳ After Field Pivot |
+
+**Total Finance Development**: ~4-5 days (after Field Pivot deploys)
+
+**Key Decision**: No BFF API endpoints needed - Field Pivot reads denormalized fields, React Custom Page queries `sprk_spendsnapshot` directly.
 
 ---
 
@@ -1258,34 +1129,48 @@ if (config.refreshInterval) {
 
 ## Summary
 
-### What We Built
+### What We Built (Complete ✅)
 
-✅ **Spend Snapshot** - Pre-aggregated financial metrics table for fast dashboard queries
-✅ **Snapshot Generation** - Automated via invoice processing workflow
+✅ **Spend Snapshot** - Pre-aggregated financial metrics table for fast queries
+✅ **Snapshot Generation** - Automated via invoice processing workflow (SpendSnapshotGenerationJobHandler)
 ✅ **Matter + Project Support** - Financial calculations work for both entity types
+✅ **Denormalized Fields** - Budget, Spend, Variance, Utilization %, Velocity written to Matter/Project records
 
 ### What We Need to Build
 
-🔴 **BFF API Query Endpoints** - REST endpoints to serve Spend Snapshot data to VisualHost
-🔴 **VisualHost Enhancements** - Custom JSON Query support, dynamic parameters, conditional formatting
-🟡 **Matter Page Visualizations** - Integrate VisualHost instances into Matter form
-🟡 **Finance Dashboard** - Organization-wide executive dashboard with multiple charts
-🟢 **Project-Level Visualizations** - Same as Matter but for Projects
+🔴 **VisualHost Field Pivot** - Enhancement to VisualHost PCF (~3 hours, Matter Performance KPI owns)
+🟡 **Finance KPI Cards** - Configure chart definitions and add to forms (~1 hour, Finance owns)
+🟡 **React Custom Page** - Dashboard for trends and org-wide analytics (~3-4 days, Finance owns)
 
-### Key Decisions Made
+### Key Architecture Decisions
 
-1. **Use Custom JSON Query mode in VisualHost** for all chart scenarios (not Reporting Views)
-2. **BFF API serves chart-ready JSON** - VisualHost just renders, minimal transformation
-3. **Query Spend Snapshot table** - Fast (<500ms) vs. aggregating raw BillingEvents (3-5 seconds)
-4. **MVP focuses on Month + ToDate periods** - Quarter and Year deferred to future
-5. **1:1 Invoice→Matter/Project model for MVP** - Line-item-level tracking deferred to future
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| **KPI Cards Data Source** | VisualHost Field Pivot (reads denormalized fields) | Data already on current record, no API needed, instant display |
+| **Trend Charts / Dashboards** | React Custom Page (queries `sprk_spendsnapshot`) | More flexible than VisualHost, no API orchestration layer needed |
+| **BFF API Endpoints** | None required | Field Pivot reads fields directly, React queries Dataverse directly |
+| **Caching Strategy** | Denormalized fields on Matter/Project | SpendSnapshotGenerationJobHandler updates fields, no Redis cache needed |
+| **Period Types (MVP)** | Month + ToDate | Quarter and Year deferred to future |
+| **Bucket Keys (MVP)** | "TOTAL" only | Category breakdowns deferred to future |
+
+### Why This Approach is Simple
+
+**Field Pivot eliminates complexity**:
+- ❌ No BFF API development needed (was estimated 2-3 days)
+- ❌ No Redis caching infrastructure needed
+- ❌ No API authorization logic needed
+- ❌ No HTTP call overhead
+- ❌ No cache invalidation complexity
+- ✅ Finance already solved the hard problem (pre-aggregation in SpendSnapshotService)
+- ✅ Data is where it needs to be (denormalized on Matter/Project)
+- ✅ Total Finance effort: ~4-5 days (vs. 14+ days with BFF API orchestration)
 
 ---
 
-**Document Status**: ✅ Complete - Ready for implementation
+**Document Status**: ✅ Complete - Reflects Field Pivot approach
 
 **Next Steps**:
-1. Implement Phase 2 (BFF API endpoints)
-2. Enhance VisualHost (Phase 3 in parallel)
-3. Deploy visualizations to Matter pages (Phase 4)
+1. Wait for Matter Performance to deploy Field Pivot enhancement (~3 hours dev)
+2. Configure Finance chart definitions (1 hour)
+3. Build React Custom Page for dashboards (3-4 days)
 
