@@ -186,7 +186,8 @@ Patterns show **how** - constraints define **what**:
 | caching/ | `.claude/constraints/data.md` |
 | ai/ | `.claude/constraints/ai.md` |
 | testing/ | `.claude/constraints/testing.md` |
+| webresource/ | `.claude/constraints/webresource.md` |
 
 ---
 
-**Lines**: ~160
+**Lines**: ~165

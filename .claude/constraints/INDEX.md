@@ -26,6 +26,7 @@ This directory contains actionable constraints (rules, requirements, limits) org
 | Jobs/Workers | [jobs.md](jobs.md) | ADR-001, 004, 017 | ~100 |
 | Configuration | [config.md](config.md) | ADR-018, 020 | ~115 |
 | Testing | [testing.md](testing.md) | ADR-022 | ~115 |
+| Web Resources | [webresource.md](webresource.md) | ADR-006, ADR-008 | ~140 |
 
 ---
 
@@ -43,6 +44,8 @@ This directory contains actionable constraints (rules, requirements, limits) org
 | AI features | `ai.md` |
 | Configuration/flags | `config.md` |
 | Writing tests | `testing.md` |
+| Web resource (form events, ribbon) | `webresource.md` |
+| API called from web resource | `webresource.md` + `api.md` |
 
 This provides focused, actionable rules without loading full ADR context.
 
@@ -61,6 +64,7 @@ Constraints define **what** - patterns show **how**:
 | data.md | `.claude/patterns/caching/` |
 | ai.md | `.claude/patterns/ai/` |
 | Testing | `.claude/patterns/testing/` |
+| webresource.md | `.claude/patterns/webresource/` |
 
 ---
 
