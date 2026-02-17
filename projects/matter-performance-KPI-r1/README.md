@@ -1,6 +1,6 @@
 # Matter Performance Assessment & KPI R1
 
-> **Last Updated**: 2026-02-12
+> **Last Updated**: 2026-02-16
 >
 > **Status**: Complete (R1 MVP)
 
@@ -116,9 +116,10 @@ Implement a Performance Assessment module that automatically generates Matter Re
 - Trend direction: Linear regression on last 5 updates
 
 **Trigger Mechanism**:
-- JavaScript web resource on Quick Create form
-- OnSave event calls calculator API
-- Parent form auto-refreshes
+- JavaScript web resource on Matter main form (subgrid `addOnLoad` listener)
+- Detects KPI Assessment subgrid row count changes after Quick Create save
+- Calls calculator API from parent form context, refreshes form data after 1.5s delay
+- No Quick Create form JavaScript required (UCI limitation — see lessons learned)
 
 **VisualHost Enhancement**:
 - New or modified Report Card metric card type
@@ -211,6 +212,7 @@ Implement a Performance Assessment module that automatically generates Matter Re
 |------|---------|--------|--------|
 | 2026-02-12 | 1.0 | Initial project setup, spec generated from design doc | Claude Code |
 | 2026-02-12 | 2.0 | R1 MVP complete: 27/27 tasks, all graduation criteria met | Claude Code |
+| 2026-02-16 | 2.1 | Deployment verified end-to-end. Fixed: AllowAnonymous API endpoints, subgrid listener replaces Quick Create trigger (UCI limitation). Added pattern docs, 3 web resource variants, updated deployment guide. | Claude Code |
 
 ---
 

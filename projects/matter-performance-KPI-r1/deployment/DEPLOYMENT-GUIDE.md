@@ -1,6 +1,7 @@
 # Matter Performance KPI R1 - Deployment Guide
 
 > **Generated**: 2026-02-12
+> **Updated**: 2026-02-16 (corrected web resource approach — subgrid listener replaces Quick Create trigger)
 > **Project**: matter-performance-KPI-r1
 
 ---
@@ -27,11 +28,14 @@
 3. Upload `publish.zip`
 4. Verify health check: `GET https://spe-api-dev-67e2xz.azurewebsites.net/healthz`
 
-### New Endpoint Added
+### Endpoints Added
 
 ```
-POST /api/matters/{matterId:guid}/recalculate-grades
+POST /api/matters/{matterId:guid}/recalculate-grades   (AllowAnonymous + RateLimited)
+POST /api/projects/{projectId:guid}/recalculate-grades  (AllowAnonymous + RateLimited)
 ```
+
+> **Note**: Endpoints use `.AllowAnonymous()` because Dataverse web resources cannot acquire Azure AD tokens. `RequireRateLimiting("dataverse-query")` provides abuse protection. TODO: Replace with API key or service-to-service auth for production.
 
 **Files added to API**:
 - `Services/ScorecardCalculatorService.cs` - Grade calculation logic
@@ -73,25 +77,49 @@ Should show version 1.2.30.
 
 ## 3. Web Resources (Manual Upload)
 
-Two JavaScript web resources must be uploaded to Dataverse BEFORE the ribbon customization.
+JavaScript web resources must be uploaded to Dataverse BEFORE the ribbon customization.
 
-### 3a. KPI Assessment Quick Create Trigger
+> **IMPORTANT**: The original design used a Quick Create form trigger (`sprk_kpiassessment_quickcreate.js`). This does NOT work in UCI — Quick Create flyouts cannot refresh the parent form. The correct approach is a **subgrid listener on the parent main form**.
+
+### 3a. Matter KPI Refresh (Main Form Subgrid Listener) — REQUIRED
 
 | Field | Value |
 |-------|-------|
-| **Name** | `sprk_/scripts/kpiassessment_quickcreate.js` |
-| **Display Name** | KPI Assessment Quick Create |
+| **Name** | `sprk_/scripts/matter_kpi_refresh.js` |
+| **Display Name** | Matter KPI Refresh |
 | **Type** | JavaScript (JScript) |
-| **Source File** | `src/solutions/webresources/sprk_kpiassessment_quickcreate.js` |
+| **Source File** | `src/solutions/webresources/sprk_matter_kpi_refresh.js` |
 
-**Registration on Quick Create form**:
-- Entity: `sprk_kpiassessment`
-- Form: Quick Create
+**Registration on Matter main form**:
+- Entity: `sprk_matter`
+- Form: Main form
 - Event: OnLoad
-- Function: `Spaarke.KpiAssessment.onLoad`
+- Function: `Spaarke.MatterKpi.onLoad`
 - Pass execution context: Yes
+- Parameters: (none)
 
-### 3b. KPI Ribbon Actions
+**How it works**: Attaches a listener to the `subgrid_kpiassessments` subgrid. When a Quick Create save adds/removes a row, the subgrid's `addOnLoad` fires. The listener detects the row count change, calls the calculator API, waits 1.5s for Dataverse to commit, then refreshes form data.
+
+### 3b. KPI Subgrid Refresh (For Project Form) — OPTIONAL
+
+| Field | Value |
+|-------|-------|
+| **Name** | `sprk_/scripts/kpi_subgrid_refresh.js` |
+| **Display Name** | KPI Subgrid Refresh |
+| **Type** | JavaScript (JScript) |
+| **Source File** | `src/solutions/webresources/sprk_kpi_subgrid_refresh.js` |
+
+**Registration on Project main form** (when needed):
+- Entity: `sprk_project`
+- Form: Main form
+- Event: OnLoad
+- Function: `Spaarke.KpiSubgrid.onLoad`
+- Pass execution context: Yes
+- Parameters: (none)
+
+> Auto-detects entity type (Matter vs Project) and routes to the correct API endpoint.
+
+### 3c. KPI Ribbon Actions
 
 | Field | Value |
 |-------|-------|
@@ -269,10 +297,7 @@ Configure the Quick Create form for `sprk_kpiassessment` with the following fiel
 - Grade (required)
 - Notes
 
-Register the OnLoad event handler:
-- Library: `sprk_/scripts/kpiassessment_quickcreate.js`
-- Function: `Spaarke.KpiAssessment.onLoad`
-- Pass execution context: Yes
+> **No OnLoad event handler needed on the Quick Create form.** The API call and form refresh are handled by the Matter main form's subgrid listener (Step 3a). The original Quick Create trigger approach (`sprk_kpiassessment_quickcreate.js`) was abandoned because UCI Quick Create flyouts cannot refresh the parent form.
 
 ### 5d. Report Card Tab on Matter Form
 
@@ -295,17 +320,31 @@ Each configured with the appropriate `chartDefinitionId` pointing to a `sprk_cha
 
 ## Deployment Verification Checklist
 
-- [ ] API health check passes (`/healthz`)
-- [ ] `POST /api/matters/{id}/recalculate-grades` endpoint responds
-- [ ] VisualHost solution version shows 1.2.30 (`pac solution list`)
-- [ ] Web resources published (`sprk_/scripts/kpiassessment_quickcreate.js`, `sprk_/scripts/kpi_ribbon_actions.js`)
-- [ ] "+ Add KPI" button appears on KPI Assessments subgrid
-- [ ] Quick Create form opens with pre-populated Matter lookup
-- [ ] After saving KPI assessment, grades recalculate on Matter form
-- [ ] Grade metric cards display on Matter main tab
-- [ ] Trend cards display on Report Card tab
-- [ ] Dark mode works (no hard-coded colors)
+- [x] API health check passes (`/healthz`) — verified 2026-02-16
+- [x] `POST /api/matters/{id}/recalculate-grades` endpoint responds (AllowAnonymous) — verified 2026-02-16
+- [x] VisualHost solution imported to Dataverse
+- [x] Web resource `sprk_/scripts/matter_kpi_refresh.js` published and registered on Matter main form OnLoad — verified 2026-02-16
+- [x] Web resource `sprk_/scripts/kpi_ribbon_actions.js` published
+- [x] "+ Add KPI" button appears on KPI Assessments subgrid
+- [x] Quick Create form opens with pre-populated Matter lookup
+- [x] After saving KPI assessment, grades auto-recalculate on Matter form — **verified working 2026-02-16**
+- [ ] Grade metric cards display on Matter main tab (VisualHost configuration)
+- [ ] Trend cards display on Report Card tab (VisualHost configuration)
+- [ ] Dark mode works (no hard-coded colors) — code audited, PCF tested
+- [ ] Project form: `sprk_/scripts/kpi_subgrid_refresh.js` deployed (when needed)
+
+### Console Output (Expected on Matter Form)
+
+When adding a KPI assessment via Quick Create:
+```
+[Matter KPI] v1.0.0 loaded. API: https://spe-api-dev-67e2xz.azurewebsites.net
+[Matter KPI] Subgrid listener attached. Initial rows: N
+[Matter KPI] Subgrid row count changed: N → N+1
+[Matter KPI] Calling calculator API: POST https://spe-api-dev-67e2xz.azurewebsites.net/api/matters/{id}/recalculate-grades
+[Matter KPI] Calculator API succeeded. Refreshing form in 1500ms...
+[Matter KPI] Form data refreshed successfully.
+```
 
 ---
 
-*Generated by Claude Code for matter-performance-KPI-r1 project.*
+*Generated by Claude Code for matter-performance-KPI-r1 project. Updated: 2026-02-16.*
