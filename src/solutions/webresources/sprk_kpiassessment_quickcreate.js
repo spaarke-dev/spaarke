@@ -242,7 +242,7 @@ Spaarke.KpiAssessment._callCalculatorApi = async function (entityType, entityId)
                 console.log("[KPI Assessment] Calculator API succeeded for " + entityType + ": " + entityId);
 
                 // Refresh the parent form to show updated grades
-                Spaarke.KpiAssessment._refreshParentForm();
+                Spaarke.KpiAssessment._refreshParentForm(entityType, entityId);
                 return;
             }
 
@@ -318,34 +318,72 @@ Spaarke.KpiAssessment._showErrorDialog = function (matterId) {
 // =============================================================================
 
 /**
- * Refresh the parent form (Matter or Project) to display updated grade values.
- * The Quick Create form runs inside an iframe, so we access the parent
- * window's Xrm context to trigger a data refresh.
- *
- * This is a best-effort operation - if the parent form is not accessible
- * (e.g., cross-origin restrictions, parent already closed), we log and return.
+ * Delay in milliseconds after API success before refreshing the parent form.
+ * Gives Dataverse time to commit the updated field values.
  */
-Spaarke.KpiAssessment._refreshParentForm = function () {
+Spaarke.KpiAssessment._refreshDelayMs = 1500;
+
+/**
+ * Refresh the parent form (Matter or Project) to display updated grade values.
+ * Waits briefly for Dataverse to commit the API-written values, then attempts
+ * multiple refresh strategies in order of reliability.
+ *
+ * Strategies tried (in order):
+ * 1. parent.Xrm.Page.data.refresh - legacy but widely supported in UCI
+ * 2. top.Xrm.Page.data.refresh - fallback for nested iframes
+ * 3. Xrm.Navigation.openForm re-open - last resort full form reload
+ *
+ * This is a best-effort operation - failures are logged, never thrown.
+ *
+ * @param {string} entityType - "matter" or "project" (for fallback reload)
+ * @param {string} entityId - The record GUID (for fallback reload)
+ */
+Spaarke.KpiAssessment._refreshParentForm = function (entityType, entityId) {
+    // Wait for Dataverse to commit the updated values before refreshing
+    setTimeout(function () {
+        Spaarke.KpiAssessment._doRefresh(entityType, entityId);
+    }, Spaarke.KpiAssessment._refreshDelayMs);
+};
+
+/**
+ * Internal: Execute the parent form refresh using available strategies.
+ */
+Spaarke.KpiAssessment._doRefresh = function (entityType, entityId) {
     try {
-        // Attempt to refresh via parent window's Xrm.Page (legacy but widely supported)
+        // Strategy 1: parent window's Xrm.Page (legacy but widely supported in UCI)
         if (window.parent && window.parent.Xrm && window.parent.Xrm.Page &&
             window.parent.Xrm.Page.data) {
             window.parent.Xrm.Page.data.refresh(false);
-            console.log("[KPI Assessment] Parent form refreshed successfully.");
+            console.log("[KPI Assessment] Parent form refreshed via parent.Xrm.Page.");
             return;
         }
 
-        // Fallback: try top-level window
+        // Strategy 2: top-level window (nested iframe scenarios)
         if (window.top && window.top !== window && window.top.Xrm &&
             window.top.Xrm.Page && window.top.Xrm.Page.data) {
             window.top.Xrm.Page.data.refresh(false);
-            console.log("[KPI Assessment] Parent form refreshed via top window.");
+            console.log("[KPI Assessment] Parent form refreshed via top.Xrm.Page.");
+            return;
+        }
+
+        // Strategy 3: Use Xrm.Navigation.openForm to reload the parent record
+        // This is a heavier approach but works when parent Xrm context is inaccessible
+        var entityName = entityType === "project" ? "sprk_project" : "sprk_matter";
+        var xrmContext = window.parent && window.parent.Xrm ? window.parent.Xrm :
+                        (window.top && window.top.Xrm ? window.top.Xrm : null);
+        if (xrmContext && xrmContext.Navigation) {
+            xrmContext.Navigation.openForm({
+                entityName: entityName,
+                entityId: entityId,
+                openInNewWindow: false
+            });
+            console.log("[KPI Assessment] Parent form reloaded via Xrm.Navigation.openForm.");
             return;
         }
 
         console.warn(
             "[KPI Assessment] Could not refresh parent form. " +
-            "Parent Xrm context not accessible. User may need to manually refresh."
+            "No Xrm context accessible. User may need to manually refresh."
         );
     } catch (error) {
         // Cross-origin or other access error - log but do not throw

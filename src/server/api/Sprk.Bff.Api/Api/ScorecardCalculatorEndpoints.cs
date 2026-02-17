@@ -20,12 +20,15 @@ public static class ScorecardCalculatorEndpoints
     public static void MapScorecardCalculatorEndpoints(this WebApplication app)
     {
         // Matter scorecard endpoints
+        // NOTE: AllowAnonymous used because Dataverse web resources cannot acquire
+        // Azure AD tokens for the BFF API. Rate limiting provides abuse protection.
+        // TODO: Replace with API key or service-to-service auth for production.
         var matterGroup = app.MapGroup("/api/matters")
             .WithTags("Scorecard")
-            .RequireRateLimiting("dataverse-query")
-            .RequireAuthorization();
+            .RequireRateLimiting("dataverse-query");
 
         matterGroup.MapPost("/{matterId:guid}/recalculate-grades", RecalculateMatterGradesAsync)
+            .AllowAnonymous()
             .WithName("RecalculateMatterGrades")
             .WithSummary("Recalculate performance scorecard grades for a matter")
             .WithDescription(
@@ -37,12 +40,13 @@ public static class ScorecardCalculatorEndpoints
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         // Project scorecard endpoints
+        // NOTE: Same anonymous access pattern as matter endpoints above.
         var projectGroup = app.MapGroup("/api/projects")
             .WithTags("Scorecard")
-            .RequireRateLimiting("dataverse-query")
-            .RequireAuthorization();
+            .RequireRateLimiting("dataverse-query");
 
         projectGroup.MapPost("/{projectId:guid}/recalculate-grades", RecalculateProjectGradesAsync)
+            .AllowAnonymous()
             .WithName("RecalculateProjectGrades")
             .WithSummary("Recalculate performance scorecard grades for a project")
             .WithDescription(

@@ -151,6 +151,7 @@ patterns/
 | Pattern | File | Source ADRs |
 |---------|------|-------------|
 | Custom Dialogs in Dataverse | [custom-dialogs-in-dataverse.md](webresource/custom-dialogs-in-dataverse.md) | ADR-006, ADR-023 |
+| Subgrid Parent Rollup | [subgrid-parent-rollup.md](webresource/subgrid-parent-rollup.md) | ADR-001, ADR-006 |
 
 ---
 
@@ -168,6 +169,7 @@ patterns/
 | Writing tests | `testing/unit-test-structure.md` + `testing/mocking-patterns.md` |
 | Background jobs | `api/background-workers.md` + `auth/service-principal.md` |
 | Custom dialogs in web resources | `webresource/custom-dialogs-in-dataverse.md` |
+| Subgrid → parent rollup | `webresource/subgrid-parent-rollup.md` |
 
 ---
 
