@@ -1,7 +1,7 @@
 # SDAP BFF API Patterns
 
 > **Source**: SDAP-ARCHITECTURE-GUIDE.md (BFF API section)
-> **Last Updated**: January 13, 2026
+> **Last Updated**: February 17, 2026
 > **Applies To**: Backend API development, endpoint changes, service layer
 
 ---
@@ -19,6 +19,165 @@ ASP.NET Core 8.0 Minimal APIs. Key services: `GraphClientFactory` (OBO token exc
 - Understanding Graph/Dataverse integration
 - Debugging server-side issues
 - Working with caching layer
+
+---
+
+## Document Upload Architecture
+
+### SPE Container Model
+
+**Each environment has a single default SPE container.** There are no per-entity (per-Matter, per-Project) containers. All documents across all entity types are stored in the same container.
+
+```
+┌─────────────────────────────────────────────────────┐
+│  SPE Container (one per environment)                │
+│  ID: b!yLRdWEOAdka... (Drive ID format)             │
+│                                                     │
+│  /emails/2026-02-17_Subject.eml                     │
+│  /emails/attachments/{docId}/report.pdf             │
+│  /documents/contract-v2.docx                        │
+│  /documents/engagement-letter.pdf                   │
+│  ...all documents stored flat (ADR-005)             │
+└─────────────────────────────────────────────────────┘
+         ↑                        ↑
+         │                        │
+  sprk_graphdriveid        sprk_graphitemid
+         │                        │
+┌─────────────────────────────────────────────────────┐
+│  Dataverse (metadata + relationships)               │
+│                                                     │
+│  sprk_document → sprk_matter (via parent lookup)    │
+│  sprk_document → sprk_project (via parent lookup)   │
+│  sprk_document → sprk_event (via parent lookup)     │
+└─────────────────────────────────────────────────────┘
+```
+
+**Container ID** is stored on parent entities (`sprk_matter.sprk_containerid`, `sprk_project.sprk_containerid`) but all currently point to the **same environment-level container**. This field exists to support potential future multi-container scenarios but is NOT used for per-entity isolation today.
+
+### Container Resolution Strategy
+
+| Upload Flow | Container ID Source | Code Reference |
+|-------------|-------------------|----------------|
+| **PCF upload** (UniversalQuickCreate) | Read from parent entity's `sprk_containerid` field via form context | PCF `EntityDocumentConfig.containerIdField` |
+| **Email-to-Document** (background job) | `EmailProcessingOptions.DefaultContainerId` from config | `EmailToDocumentJobHandler.cs:201` |
+| **Office Add-in** (save/upload) | Request `ContainerId` ?? fallback to `DefaultContainerId` | `OfficeService.cs:261` |
+| **Email endpoints** | Request `ContainerId` ?? fallback to `DefaultContainerId` | `EmailEndpoints.cs:454` |
+| **Upload without parent** (e.g., Create New Matter) | `DefaultContainerId` from config (no parent entity exists yet) | Same pattern as email-to-document |
+
+**Configuration**:
+```json
+{
+  "EmailProcessing": {
+    "DefaultContainerId": "b!yLRdWEOAdka..."
+  }
+}
+```
+
+> **Important**: `DefaultContainerId` must be in **Drive ID format** (base64-encoded), not a raw GUID.
+> - ❌ `"58dd5db4-8043-4676-..."` (raw GUID — will fail)
+> - ✅ `"b!yLRdWEOAdkaWXskuRfByIRiz..."` (Drive ID format)
+
+### "SPE First, Dataverse Second" Pattern (MANDATORY)
+
+All document upload flows MUST follow the **SPE First, Dataverse Second** ordering:
+
+1. **Upload file to SPE** → get `driveId` + `itemId` + `webUrl` back
+2. **Create `sprk_document` in Dataverse** → use SPE result to populate `sprk_graphdriveid`, `sprk_graphitemid`, `sprk_filepath`
+
+This ordering is mandatory because:
+- SPE upload returns the `graphItemId` and `graphDriveId` needed by the Dataverse record
+- Creating the Dataverse record first would result in an orphan record if SPE upload fails
+- The document GUID cannot be predicted before SPE upload completes
+
+**Rationale**: If the Dataverse record is created first but the SPE upload fails, we have an orphan `sprk_document` record with no file backing it. The "SPE first" pattern ensures files exist in SPE before metadata is committed to Dataverse.
+
+#### Flow Variant A: PCF Upload (with parent entity)
+
+Standard upload from a form where the parent entity already exists (e.g., uploading a document to an existing Matter).
+
+```
+User attaches file in PCF
+    │
+    ├─ 1. PCF reads parent entity's sprk_containerid
+    │
+    ├─ 2. PCF calls BFF: PUT /api/containers/{containerId}/files/{path}
+    │     → SPE returns: { id, name, webUrl }    ← driveItemId + URL
+    │
+    ├─ 3. PCF creates sprk_document via Xrm.WebApi.createRecord()
+    │     payload: {
+    │       sprk_graphitemid: driveItem.id,
+    │       sprk_graphdriveid: containerId,
+    │       sprk_filepath: driveItem.webUrl,
+    │       sprk_filename: file.name,
+    │       sprk_filesize: file.size,
+    │       "sprk_Matter@odata.bind": "/sprk_matters({matterId})"
+    │     }
+    │
+    └─ 4. (Optional) Queue AI profile + RAG indexing via BFF
+```
+
+#### Flow Variant B: Background Job Upload (without parent entity)
+
+Used by email-to-document, Office add-in finalization, and future flows where the parent entity may not exist at upload time.
+
+```
+Background job receives work item
+    │
+    ├─ 1. Resolve container: DefaultContainerId from config
+    │
+    ├─ 2. Resolve drive: SpeFileStore.ResolveDriveIdAsync(containerId)
+    │
+    ├─ 3. Upload to SPE: SpeFileStore.UploadSmallAsync(driveId, path, stream)
+    │     → Returns FileHandleDto { Id, Name, Size, WebUrl }
+    │
+    ├─ 4. Create sprk_document in Dataverse:
+    │     IDataverseService.CreateDocumentAsync(request)
+    │     → Parent lookup set if parent exists, NULL if orphan allowed
+    │
+    ├─ 5. Update sprk_document with SPE metadata:
+    │     IDataverseService.UpdateDocumentAsync(documentId, {
+    │       GraphItemId = fileHandle.Id,
+    │       GraphDriveId = driveId,
+    │       FilePath = fileHandle.WebUrl,
+    │       FileName, FileSize, MimeType
+    │     })
+    │
+    └─ 6. Mark job as processed (idempotency key)
+```
+
+#### Flow Variant C: Upload Without Parent Entity (Create New Entity)
+
+Used when files are uploaded before the parent entity is created (e.g., Create New Matter dialog where user attaches files before the Matter record exists).
+
+```
+User fills form + attaches files in dialog
+    │
+    ├─ 1. Upload files to SPE using DefaultContainerId
+    │     → Files now exist in SPE (no Dataverse records yet)
+    │     → Store SPE results (driveId, itemId, webUrl) in client state
+    │
+    ├─ 2. Create parent entity (e.g., sprk_matter) in Dataverse
+    │     → Returns new Matter ID
+    │
+    ├─ 3. Create sprk_document records linking files to new parent:
+    │     → sprk_graphitemid = stored driveItem.id
+    │     → sprk_graphdriveid = DefaultContainerId
+    │     → sprk_filepath = stored driveItem.webUrl
+    │     → "sprk_Matter@odata.bind" = "/sprk_matters({newMatterId})"
+    │
+    └─ 4. Queue AI text extraction + profile + RAG indexing via BFF
+```
+
+**Key point**: No file moves are needed. Files stay in the same container permanently. The `sprk_document` record's parent lookup is what associates files with the entity — not the container location.
+
+### All Upload Flows Summary
+
+| Flow | Trigger | Auth | Container Source | Parent Entity | Dataverse Timing |
+|------|---------|------|-----------------|---------------|------------------|
+| **PCF upload** | User action (form) | OBO (user token) | Parent's `sprk_containerid` | Exists | Synchronous |
+| **Email-to-document** | Webhook → job queue | App-only (client credentials) | `DefaultContainerId` config | Optional | Asynchronous (background) |
+| **Office Add-in** | User save action | OBO (user token) | Request ?? `DefaultContainerId` | Optional | Asynchronous (Service Bus worker) |
+| **Create New Entity** | Dialog submit | OBO (user token) | `DefaultContainerId` config | Created after upload | Synchronous (two-phase) |
 
 ---
 

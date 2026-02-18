@@ -2,7 +2,8 @@
 
 > **Domain**: Data Access, Storage, Caching
 > **Source ADRs**: ADR-005, ADR-007, ADR-009
-> **Last Updated**: 2025-12-18
+> **See Also**: [Document Upload Architecture](../../docs/architecture/sdap-bff-api-patterns.md#document-upload-architecture)
+> **Last Updated**: 2026-02-17
 
 ---
 
@@ -24,6 +25,13 @@ Load when:
 - ✅ **MUST** maintain hierarchy/relationships in Dataverse metadata
 - ✅ **MUST** use Dataverse lookups for folder-like navigation
 - ✅ **MUST** version documents via SPE versioning (not folder-based)
+
+### SPE Container & Upload Ordering
+
+- ✅ **MUST** follow "SPE First, Dataverse Second" ordering for all document uploads — upload file to SPE before creating `sprk_document` record in Dataverse
+- ✅ **MUST** use the environment's single default container (`DefaultContainerId`) for uploads without a parent entity (background jobs, create-new-entity flows)
+- ✅ **MUST** populate `sprk_graphitemid`, `sprk_graphdriveid`, and `sprk_filepath` from SPE upload result — never hardcode or guess these values
+- ✅ **MUST** use Drive ID format for `DefaultContainerId` (base64-encoded `b!...`), not raw GUIDs
 
 ### SpeFileStore Facade (ADR-007)
 
@@ -48,6 +56,12 @@ Load when:
 - ❌ **MUST NOT** create nested folder structures in SPE
 - ❌ **MUST NOT** rely on SPE folder paths for navigation
 - ❌ **MUST NOT** store folder hierarchy in SPE metadata
+
+### SPE Container & Upload Ordering
+
+- ❌ **MUST NOT** create Dataverse `sprk_document` records before the SPE upload completes (causes orphan records if upload fails)
+- ❌ **MUST NOT** assume per-entity containers — each environment has ONE default container; all entities share it
+- ❌ **MUST NOT** attempt to move files between SPE containers — association is via Dataverse parent lookup, not container location
 
 ### SpeFileStore Facade (ADR-007)
 

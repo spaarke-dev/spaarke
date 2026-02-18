@@ -174,13 +174,17 @@ const payload = {
 };
 ```
 
-### 3. Container ID Inheritance
+### 3. Container Architecture (Single Container Per Environment)
 
-Parent entities own containers, documents inherit:
-- Matter has `sprk_containerid` field
-- When uploading, read parent's container ID
-- File stored in that container
-- Document record links to same container
+Each environment has **one default SPE container**. There are no per-entity (per-Matter, per-Project) containers. All documents are stored in the same container regardless of parent entity.
+
+- Parent entities (Matter, Project) have `sprk_containerid` field — all currently point to the **same environment container**
+- PCF uploads read the parent's `sprk_containerid` to pass to BFF API
+- Background jobs (email-to-document, Office add-in) use `DefaultContainerId` from config
+- **Uploads without a parent entity** (e.g., Create New Matter) also use `DefaultContainerId`
+- File-to-entity association is via Dataverse parent lookup (`@odata.bind`), NOT container location
+
+**See**: [Document Upload Architecture](sdap-bff-api-patterns.md#document-upload-architecture) for upload flow variants and "SPE First, Dataverse Second" pattern
 
 ---
 
