@@ -82,10 +82,10 @@ public static class WorkspaceEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
-        // GET /api/workspace/events/{id}/scores — Single-event scoring for the AI Summary dialog.
-        // Client supplies the event ID and pre-assembled scoring inputs as query parameters or
+        // POST /api/workspace/events/{id}/scores — Single-event scoring for the AI Summary dialog.
+        // Client supplies the event ID in the route and pre-assembled scoring inputs in the
         // request body. Returns full priority + effort breakdown for that event.
-        group.MapGet("/events/{id:guid}/scores", GetEventScores)
+        group.MapPost("/events/{id:guid}/scores", GetEventScores)
             .AddEndpointFilter<WorkspaceAuthorizationFilter>()
             .WithName("GetEventScores")
             .WithSummary("Calculate priority and effort scores for a single event")
@@ -394,7 +394,7 @@ public static class WorkspaceEndpoints
 
     /// <summary>
     /// Single-event scoring endpoint — returns priority and effort scores with full breakdowns.
-    /// GET /api/workspace/events/{id}/scores
+    /// POST /api/workspace/events/{id}/scores
     /// </summary>
     /// <remarks>
     /// The scoring engines are purely deterministic (same inputs → same outputs), so the

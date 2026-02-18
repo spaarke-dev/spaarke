@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 
@@ -125,20 +126,27 @@ public sealed class TodoGenerationService : BackgroundService
     // Fields
     // ──────────────────────────────────────────────────────────────────────────
 
-    private readonly IDataverseService _dataverse;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<TodoGenerationService> _logger;
     private readonly TodoGenerationOptions _options;
+
+    // Lazily resolved to avoid forcing Dataverse connection at host startup.
+    // DataverseServiceClientImpl connects eagerly in its constructor — if that
+    // connection fails (transient auth, Key Vault cold start, etc.) it throws,
+    // which crashes the host with HTTP 500.30 because BackgroundService
+    // resolution happens during IHost.StartAsync().
+    private IDataverseService? _dataverse;
 
     // ──────────────────────────────────────────────────────────────────────────
     // Constructor
     // ──────────────────────────────────────────────────────────────────────────
 
     public TodoGenerationService(
-        IDataverseService dataverse,
+        IServiceProvider serviceProvider,
         ILogger<TodoGenerationService> logger,
         Microsoft.Extensions.Options.IOptions<TodoGenerationOptions> options)
     {
-        _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
     }
@@ -174,6 +182,20 @@ public sealed class TodoGenerationService : BackgroundService
             }
         }
 
+        // Lazily resolve IDataverseService here (after the initial delay) rather than
+        // in the constructor to avoid forcing a Dataverse connection during host startup.
+        try
+        {
+            _dataverse = _serviceProvider.GetRequiredService<IDataverseService>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "TodoGenerationService failed to resolve IDataverseService. " +
+                "Service will not run. This does not affect app startup.");
+            return;
+        }
+
         using var timer = new PeriodicTimer(TimeSpan.FromHours(_options.IntervalHours));
 
         // Run immediately for the first tick, then on the periodic interval.
@@ -207,6 +229,12 @@ public sealed class TodoGenerationService : BackgroundService
     /// </summary>
     internal async Task RunGenerationPassAsync(CancellationToken ct)
     {
+        if (_dataverse is null)
+        {
+            _logger.LogWarning("TodoGenerationService: IDataverseService not available, skipping pass");
+            return;
+        }
+
         _logger.LogInformation("TodoGenerationService: starting generation pass");
 
         var today = DateTime.UtcNow.Date;
@@ -281,7 +309,7 @@ public sealed class TodoGenerationService : BackgroundService
             // TODO: Replace with a more targeted Dataverse query that adds
             //   $filter=sprk_todoflag ne true and sprk_duedate lt {today:yyyy-MM-dd}
             // once the interface exposes a generic query path.
-            var (items, _) = await _dataverse.QueryEventsAsync(
+            var (items, _) = await _dataverse!.QueryEventsAsync(
                 dueDateTo: today.AddDays(-1), // duedate < today
                 top: 100,
                 ct: ct);
@@ -421,7 +449,7 @@ public sealed class TodoGenerationService : BackgroundService
         IEnumerable<EventEntity> upcomingEvents;
         try
         {
-            var (items, _) = await _dataverse.QueryEventsAsync(
+            var (items, _) = await _dataverse!.QueryEventsAsync(
                 dueDateFrom: today,
                 dueDateTo: windowEnd,
                 top: 100,
@@ -636,7 +664,7 @@ public sealed class TodoGenerationService : BackgroundService
         // We use a narrow duedate window (no filter) and top=100 per rule.
         // The title is unique enough (includes entity name) that duplicates
         // within the first 100 results will always be caught.
-        var (items, _) = await _dataverse.QueryEventsAsync(top: 100, ct: ct);
+        var (items, _) = await _dataverse!.QueryEventsAsync(top: 100, ct: ct);
 
         return items.Any(e =>
             string.Equals(e.Name, title, StringComparison.OrdinalIgnoreCase));
@@ -687,7 +715,7 @@ public sealed class TodoGenerationService : BackgroundService
         if (regardingInvoiceId.HasValue)
             entity["sprk_regardinginvoice@odata.bind"] = $"/sprk_invoices({regardingInvoiceId.Value})";
 
-        return await _dataverse.CreateAsync(entity, ct);
+        return await _dataverse!.CreateAsync(entity, ct);
     }
 
     // ──────────────────────────────────────────────────────────────────────────

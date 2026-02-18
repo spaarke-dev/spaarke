@@ -3,7 +3,7 @@
  *
  * Responsibilities:
  *   1. Track dialog open/closed state per to-do event (keyed on eventId).
- *   2. Call BFF scoring endpoint: GET /api/workspace/events/{id}/scores
+ *   2. Call BFF scoring endpoint: POST /api/workspace/events/{id}/scores
  *   3. Fall back to deterministic mock data when the BFF is unavailable (NFR-06).
  *   4. Expose loading, result, error, and retry state to the dialog component.
  *
@@ -223,7 +223,7 @@ export function useTodoScoring(options: IUseTodoScoringOptions = {}): IUseTodoSc
         return;
       }
 
-      // --- BFF path: GET scoring endpoint ---
+      // --- BFF path: POST scoring endpoint ---
       if (abortRef.current) {
         abortRef.current.abort();
       }
@@ -236,7 +236,7 @@ export function useTodoScoring(options: IUseTodoScoringOptions = {}): IUseTodoSc
         headers['Authorization'] = `Bearer ${accessToken}`;
       }
 
-      fetch(url, { method: 'GET', headers, signal: controller.signal })
+      fetch(url, { method: 'POST', headers, signal: controller.signal })
         .then(async (response) => {
           if (!response.ok) {
             let message = `Scoring data unavailable (HTTP ${response.status})`;

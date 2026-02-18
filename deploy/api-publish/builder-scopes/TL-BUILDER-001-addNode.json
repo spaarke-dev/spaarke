@@ -1,0 +1,67 @@
+{
+  "id": "c1d2e3f4-a5b6-4c5d-8e9f-001001001001",
+  "name": "SYS-TL-BUILDER-001-addNode",
+  "displayName": "Add Node",
+  "description": "Add a new node to the playbook canvas. Creates a node of the specified type at the given position with initial configuration.",
+  "scopeType": "Tool",
+  "ownerType": 1,
+  "isImmutable": true,
+  "configuration": {
+    "handlerType": "CanvasOperationHandler",
+    "operation": "addNode",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "nodeType": {
+          "type": "string",
+          "enum": ["aiAnalysis", "condition", "assemble", "deliver", "loop", "transform", "humanReview", "externalApi"],
+          "description": "Type of node to create"
+        },
+        "label": {
+          "type": "string",
+          "description": "Display label for the node"
+        },
+        "position": {
+          "type": "object",
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" }
+          },
+          "description": "Canvas position (optional, auto-calculated if not provided)"
+        },
+        "config": {
+          "type": "object",
+          "description": "Node-specific configuration"
+        }
+      },
+      "required": ["nodeType", "label"]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "type": "string",
+          "description": "Generated ID of the new node"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      }
+    },
+    "validationRules": [
+      {
+        "rule": "nodeType must be valid enum value",
+        "errorMessage": "Invalid node type specified"
+      },
+      {
+        "rule": "label must not be empty",
+        "errorMessage": "Node label is required"
+      }
+    ]
+  },
+  "metadata": {
+    "tags": ["builder", "tool", "canvas", "node"],
+    "version": "1.0.0",
+    "category": "builder-canvas-ops"
+  }
+}

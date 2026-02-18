@@ -80,7 +80,8 @@ public static class WorkspaceModule
         }
 
         // TodoGenerationService: BackgroundService with 24-hour PeriodicTimer (ADR-001 mandate).
-        // Singleton lifetime is safe — IDataverseService is also a Singleton.
+        // Uses IServiceProvider to lazily resolve IDataverseService after host startup
+        // (avoids 500.30 if Dataverse connection fails during cold start).
         // Concrete registration per ADR-010 (no interface seam needed).
         services.AddHostedService<TodoGenerationService>();
 

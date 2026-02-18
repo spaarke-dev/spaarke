@@ -1,0 +1,17 @@
+{
+  "id": "b1c2d3e4-f5a6-4b5c-9d8e-001001001001",
+  "name": "SYS-SKL-BUILDER-001-LeaseAnalysisPattern",
+  "displayName": "Lease Analysis Pattern",
+  "description": "Domain expertise for building lease analysis playbooks. Provides guidance on lease document structure, key terms to extract, common provisions, and risk factors.",
+  "scopeType": "Skill",
+  "ownerType": 1,
+  "isImmutable": true,
+  "promptFragment": "## Lease Analysis Playbook Expertise\n\nWhen building playbooks for lease document analysis, apply this domain knowledge:\n\n### Key Lease Components to Extract\n\n1. **Parties & Dates**\n   - Landlord/Lessor identification\n   - Tenant/Lessee identification\n   - Guarantors (if any)\n   - Lease commencement date\n   - Lease termination date\n   - Rent commencement date\n\n2. **Financial Terms**\n   - Base rent amount and payment schedule\n   - Security deposit amount\n   - Operating expense pass-throughs (CAM, taxes, insurance)\n   - Rent escalation provisions (fixed, CPI, percentage)\n   - Late payment penalties\n   - Tenant improvement allowances\n\n3. **Property Details**\n   - Property address and legal description\n   - Rentable vs. usable square footage\n   - Common area factor/load factor\n   - Parking allocations\n   - Signage rights\n\n4. **Key Provisions**\n   - Use restrictions and permitted uses\n   - Assignment and subletting rights\n   - Renewal options (terms, notice requirements)\n   - Expansion rights (ROFO, ROFR)\n   - Termination rights and conditions\n   - Default provisions and cure periods\n\n5. **Compliance & Risk Areas**\n   - Insurance requirements (types, limits)\n   - Environmental provisions\n   - ADA compliance obligations\n   - Maintenance responsibilities (landlord vs. tenant)\n   - Indemnification provisions\n   - Casualty and condemnation clauses\n\n### Recommended Node Sequence for Lease Playbooks\n\n1. **TL;DR Summary** - Executive overview of key terms\n2. **Party Extraction** - Identify all parties and roles\n3. **Financial Terms Analysis** - Extract all monetary provisions\n4. **Key Dates Extraction** - Timeline and important dates\n5. **Provision Analysis** - Rights, restrictions, obligations\n6. **Risk Assessment** - Compliance and risk factors\n7. **Assemble** - Combine into structured output\n8. **Deliver** - Format and deliver results\n\n### Common Lease Types\n\n- Gross Lease (landlord pays expenses)\n- Net Lease (N, NN, NNN variants)\n- Modified Gross Lease\n- Percentage Lease (retail)\n- Ground Lease\n\n### Risk Indicators to Flag\n\n- Missing or ambiguous termination clauses\n- Unlimited liability provisions\n- Onerous personal guarantee requirements\n- Broad default definitions\n- One-sided indemnification\n- Unclear expense allocation",
+  "metadata": {
+    "tags": ["builder", "skill", "lease", "real-estate", "pattern"],
+    "applicableDocTypes": ["LEASE", "SUBLEASE", "AMENDMENT"],
+    "expertiseArea": "real-estate",
+    "version": "1.0.0",
+    "category": "builder-domain"
+  }
+}
