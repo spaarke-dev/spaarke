@@ -194,6 +194,17 @@ public static class FinanceModule
         // No downstream job enqueues - end of analytics chain
         services.AddScoped<IJobHandler, SpendSnapshotGenerationJobHandler>();
 
+        // ============================================================================
+        // Finance Rollup Service (denormalized field write-back to Matter/Project)
+        // ============================================================================
+        // Scoped: recalculates 9 financial fields on parent Matter/Project records
+        // Called by: FinanceRollupEndpoints (subgrid parent rollup web resource)
+        //            SpendSnapshotGenerationJobHandler (after background invoice processing)
+        // Fields: TotalSpendToDate, InvoiceCount, MonthlySpendCurrent, TotalBudget,
+        //         RemainingBudget, BudgetUtilizationPercent, MonthOverMonthVelocity,
+        //         AverageInvoiceAmount, MonthlySpendTimeline
+        services.AddScoped<FinanceRollupService>();
+
         return services;
     }
 }

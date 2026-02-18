@@ -20,6 +20,7 @@ public class SpendSnapshotGenerationJobHandler : IJobHandler
 {
     private readonly ISpendSnapshotService _snapshotService;
     private readonly ISignalEvaluationService _signalService;
+    private readonly FinanceRollupService _financeRollupService;
     private readonly FinanceTelemetry _telemetry;
     private readonly ILogger<SpendSnapshotGenerationJobHandler> _logger;
 
@@ -31,11 +32,13 @@ public class SpendSnapshotGenerationJobHandler : IJobHandler
     public SpendSnapshotGenerationJobHandler(
         ISpendSnapshotService snapshotService,
         ISignalEvaluationService signalService,
+        FinanceRollupService financeRollupService,
         FinanceTelemetry telemetry,
         ILogger<SpendSnapshotGenerationJobHandler> logger)
     {
         _snapshotService = snapshotService ?? throw new ArgumentNullException(nameof(snapshotService));
         _signalService = signalService ?? throw new ArgumentNullException(nameof(signalService));
+        _financeRollupService = financeRollupService ?? throw new ArgumentNullException(nameof(financeRollupService));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -85,7 +88,15 @@ public class SpendSnapshotGenerationJobHandler : IJobHandler
                 "Signal evaluation completed for matter {MatterId}. Signals triggered: {SignalCount}",
                 matterId, signalsTriggered);
 
-            // No downstream job enqueues - this is the end of the analytics chain
+            // Step 3: Rollup denormalized financial fields to parent Matter record
+            // Updates 9 fields: TotalSpendToDate, InvoiceCount, MonthlySpendCurrent,
+            // TotalBudget, RemainingBudget, BudgetUtilizationPercent,
+            // MonthOverMonthVelocity, AverageInvoiceAmount, MonthlySpendTimeline
+            await _financeRollupService.RecalculateMatterAsync(matterId, ct);
+
+            _logger.LogInformation(
+                "Finance rollup completed for matter {MatterId}",
+                matterId);
 
             stopwatch.Stop();
 

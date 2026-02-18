@@ -1750,6 +1750,9 @@ app.MapBuilderScopeAdminEndpoints();
 // Finance Intelligence endpoints (Financial Intelligence Module R1)
 app.MapFinanceEndpoints();
 
+// Finance Rollup endpoints (subgrid parent rollup - AllowAnonymous for web resources)
+app.MapFinanceRollupEndpoints();
+
 app.Run();
 
 // Health check endpoint handlers
