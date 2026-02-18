@@ -648,6 +648,7 @@ builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.
 // Uses AppOnlyAnalysisService with Document Profile playbook, queues indexing on success
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.ProfileSummaryJobHandler>();
 
+
 // Bulk RAG indexing job handler - for admin-initiated and scheduled bulk document indexing
 // Queries documents from Dataverse, processes with bounded concurrency, tracks progress via BatchJobStatusStore
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.BulkRagIndexingJobHandler>();
@@ -684,6 +685,7 @@ builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexin
 // Reindexing options - controls check-in triggered re-indexing
 builder.Services.Configure<Sprk.Bff.Api.Configuration.ReindexingOptions>(
     builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.ReindexingOptions.SectionName));
+
 
 builder.Logging.AddConsole();
 Console.WriteLine("✓ Job processing configured with Service Bus (queue: sdap-jobs)");

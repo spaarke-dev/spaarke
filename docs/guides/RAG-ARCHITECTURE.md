@@ -1,10 +1,10 @@
 # RAG Architecture Guide
 
-> **Version**: 1.5
+> **Version**: 1.3
 > **Created**: 2025-12-29
-> **Updated**: 2026-01-23
-> **Project**: AI Document Intelligence R3 + RAG Pipeline R1 + Semantic Search UI R2
-> **Status**: R3 Phases 1-5 Complete, RAG Pipeline Phase 1 Complete, Semantic Search R1 Complete, Semantic Search UI R2 In Progress
+> **Updated**: 2026-01-19
+> **Project**: AI Document Intelligence R3 + RAG Pipeline R1
+> **Status**: R3 Phases 1-5 Complete, RAG Pipeline Phase 1 Complete (Architecture Consolidated)
 
 ---
 
@@ -15,15 +15,13 @@
 3. [File Indexing Pipeline](#file-indexing-pipeline)
 4. [Deployment Models](#deployment-models)
 5. [Hybrid Search Pipeline](#hybrid-search-pipeline)
-6. [Semantic Search API](#semantic-search-api) *(R1)*
-7. [Semantic Search UI](#semantic-search-ui) *(R2 - NEW)*
-8. [Index Schema](#index-schema)
-9. [Service Architecture](#service-architecture)
-10. [Job Processing](#job-processing)
-11. [Embedding Cache](#embedding-cache)
-12. [Security and Isolation](#security-and-isolation)
-13. [Performance Characteristics](#performance-characteristics)
-14. [Integration Points](#integration-points)
+6. [Index Schema](#index-schema)
+7. [Service Architecture](#service-architecture)
+8. [Job Processing](#job-processing)
+9. [Embedding Cache](#embedding-cache)
+10. [Security and Isolation](#security-and-isolation)
+11. [Performance Characteristics](#performance-characteristics)
+12. [Integration Points](#integration-points)
 
 ---
 
@@ -54,19 +52,12 @@ The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retri
 │                        BFF API Layer                            │
 ├─────────────────────────────────────────────────────────────────┤
 │  RagEndpoints.cs                                                │
-│  ├── POST /api/ai/rag/search        → Hybrid search             │
-│  ├── POST /api/ai/rag/index         → Index document            │
-│  ├── POST /api/ai/rag/index/batch   → Batch index               │
-│  ├── DELETE /api/ai/rag/{id}        → Delete document           │
+│  ├── POST /api/ai/rag/search      → Hybrid search               │
+│  ├── POST /api/ai/rag/index       → Index document              │
+│  ├── POST /api/ai/rag/index/batch → Batch index                 │
+│  ├── DELETE /api/ai/rag/{id}      → Delete document             │
 │  ├── DELETE /api/ai/rag/source/{id} → Delete by source          │
-│  ├── POST /api/ai/rag/embedding     → Generate embedding        │
-│  ├── POST /api/ai/rag/index-file    → Index file (OBO)          │
-│  ├── POST /api/ai/rag/send-to-index → Ribbon button indexing    │
-│  ├── POST /api/ai/rag/enqueue-indexing → Queue for async index  │
-│  │                                                               │
-│  Admin Endpoints (SystemAdmin required):                         │
-│  ├── POST /api/ai/rag/admin/bulk-index → Submit bulk job        │
-│  └── GET /api/ai/rag/admin/bulk-index/{jobId}/status → Job status│
+│  └── POST /api/ai/rag/embedding   → Generate embedding          │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -123,10 +114,8 @@ The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retri
 | `IKnowledgeDeploymentService` | Tenant config, SearchClient routing | Singleton |
 | `IEmbeddingCache` | Redis-based embedding caching | Singleton |
 | `IOpenAiClient` | Azure OpenAI API calls (embeddings + chat) | Singleton |
-| `RagIndexingJobHandler` | Async single-file job processing with idempotency | Scoped |
-| `BulkRagIndexingJobHandler` | Async bulk document indexing with progress tracking | Scoped |
+| `RagIndexingJobHandler` | Async job processing with idempotency | Scoped |
 | `IIdempotencyService` | Duplicate detection and processing locks | Singleton |
-| `IDataverseService` | Document and entity lookup from Dataverse | Scoped |
 
 ---
 
@@ -417,470 +406,6 @@ User Query: "What are the payment terms for contracts?"
 
 ---
 
-## Semantic Search API
-
-> **Added in**: Semantic Search Foundation R1 (2026-01-20)
-
-The Semantic Search API provides a **general-purpose search capability** for searching documents across entity scopes (Matter, Project, Invoice, Account, Contact). It builds on the RAG hybrid search pipeline but exposes a simplified, entity-aware API.
-
-### Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Semantic Search Endpoints                     │
-├─────────────────────────────────────────────────────────────────┤
-│  SemanticSearchEndpoints.cs                                      │
-│  ├── POST /api/ai/search        → Hybrid semantic search         │
-│  └── POST /api/ai/search/count  → Document count (pagination)    │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    SemanticSearchService                         │
-├─────────────────────────────────────────────────────────────────┤
-│  ISemanticSearchService (SemanticSearchService.cs)               │
-│  ├── SearchAsync()      → Execute hybrid search                  │
-│  ├── CountAsync()       → Count matching documents               │
-│  ├── BuildFilters()     → Construct OData filters                │
-│  └── BuildSearchQuery() → Build Azure AI Search query            │
-│                                                                  │
-│  Extensibility Hooks (R1: no-op implementations):               │
-│  ├── IQueryPreprocessor  → Future query expansion                │
-│  └── IResultPostprocessor → Future result enrichment            │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Shared Infrastructure                         │
-├─────────────────────────────────────────────────────────────────┤
-│  IEmbeddingService      → Generate query embeddings              │
-│  IKnowledgeDeploymentService → Route to correct index           │
-│  IAiSearchClientFactory → Get SearchClient for tenant           │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/ai/search` | POST | Execute hybrid semantic search |
-| `/api/ai/search/count` | POST | Get count of matching documents |
-
-### Scoping Models
-
-Semantic Search supports two scoping models for R1:
-
-| Scope | Description | Required Fields |
-|-------|-------------|-----------------|
-| `entity` | Search within a parent entity (Matter, Project, etc.) | `entityType`, `entityId` |
-| `documentIds` | Search specific documents by ID list | `documentIds[]` (max 100) |
-
-**Note**: `scope=all` is NOT supported in R1 and returns HTTP 400.
-
-### Hybrid Search Modes
-
-The API supports three search modes via `options.hybridMode`:
-
-| Mode | Description | When to Use |
-|------|-------------|-------------|
-| `rrf` (default) | Reciprocal Rank Fusion (vector + keyword) | Best overall relevance |
-| `vector` | Vector search only | When semantic similarity is priority |
-| `keyword` | Keyword search only | When exact term matching is needed |
-
-### Request Schema
-
-```json
-{
-  "query": "search terms",
-  "scope": "entity",
-  "entityType": "matter",
-  "entityId": "guid-of-matter",
-  "options": {
-    "hybridMode": "rrf",
-    "top": 10,
-    "skip": 0,
-    "minRelevanceScore": 0.5,
-    "documentTypes": ["contract", "invoice"],
-    "fileTypes": [".pdf", ".docx"],
-    "tags": ["legal"],
-    "dateRange": {
-      "from": "2024-01-01",
-      "to": "2024-12-31"
-    },
-    "includeContent": true
-  }
-}
-```
-
-### Response Schema
-
-```json
-{
-  "results": [
-    {
-      "documentId": "chunk-id",
-      "speFileId": "spe-file-id",
-      "fileName": "Contract.pdf",
-      "documentType": "contract",
-      "content": "Chunk content...",
-      "combinedScore": 0.85,
-      "parentEntityType": "matter",
-      "parentEntityId": "matter-guid",
-      "parentEntityName": "Smith vs. Jones",
-      "highlights": ["<em>payment</em> terms..."]
-    }
-  ],
-  "metadata": {
-    "totalResults": 42,
-    "returnedResults": 10,
-    "searchDurationMs": 245,
-    "searchMode": "rrf",
-    "embeddingGenerated": true
-  }
-}
-```
-
-### Authorization
-
-Semantic Search uses `SemanticSearchAuthorizationFilter` for security trimming:
-
-1. **Entity Scope**: Validates user has access to the parent entity via Dataverse permissions
-2. **DocumentIds Scope**: Validates user has access to each specified document
-
-### AI Tool Integration
-
-The `SemanticSearchToolHandler` integrates semantic search with the AI Tool Framework for Copilot integration:
-
-```csharp
-// Tool definition
-{
-  "name": "search_documents",
-  "description": "Search documents using natural language",
-  "parameters": {
-    "query": "string - search query",
-    "scope": "string - entity or documentIds",
-    "entityType": "string - matter, project, etc.",
-    "entityId": "string - entity GUID"
-  }
-}
-```
-
-### Graceful Degradation
-
-If embedding generation fails:
-1. Log warning with error details
-2. Fall back to keyword-only search
-3. Return results with `metadata.embeddingGenerated = false`
-
-### Performance Targets
-
-| Metric | Target | Notes |
-|--------|--------|-------|
-| Search P50 | < 500ms | End-to-end including embedding |
-| Search P95 | < 1000ms | With cold embedding cache |
-| Count P50 | < 200ms | No embedding required |
-
----
-
-## Semantic Search UI
-
-> **Added in**: Semantic Search UI R2 (2026-01-23)
-
-The Semantic Search UI provides **user-facing components** for searching and indexing documents within Dataverse model-driven apps. It consists of a PCF control for search display and Dataverse ribbon buttons for indexing operations.
-
-### Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Dataverse UI Layer                           │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  SemanticSearchControl (PCF v1.0.15)                           │
-│  ├── React + Fluent UI v9                                       │
-│  ├── Hybrid search UI with filters                              │
-│  ├── Result cards with similarity scoring                       │
-│  └── MSAL authentication for BFF API                            │
-│                                                                 │
-│  "Send to Index" Ribbon Buttons                                 │
-│  ├── Grid (multi-select)                                        │
-│  ├── Form (single document)                                     │
-│  └── Subgrid (multi-select)                                     │
-│                                                                 │
-│  sprk_DocumentOperations.js (v1.26.0)                          │
-│  └── sendToIndex() → POST /api/ai/rag/send-to-index            │
-│  └── 10-record limit per selection                             │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        BFF API Layer                            │
-├─────────────────────────────────────────────────────────────────┤
-│  POST /api/ai/rag/send-to-index                                 │
-│  ├── 1. Fetch document details from Dataverse                   │
-│  ├── 2. Extract parent entity context (Matter/Project/Invoice)  │
-│  ├── 3. Index file via OBO authentication                       │
-│  └── 4. Update Dataverse tracking fields                        │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### PCF Control: SemanticSearchControl
-
-The `SemanticSearchControl` is a PowerApps Component Framework (PCF) control that provides semantic document search within Dataverse forms and dashboards.
-
-**Location**: `src/client/pcf/SemanticSearchControl/`
-
-**Current Version**: 1.0.15
-
-#### Components
-
-| Component | File | Description |
-|-----------|------|-------------|
-| `SemanticSearchControl` | `SemanticSearchControl.tsx` | Main PCF entry point |
-| `SearchInput` | `components/SearchInput.tsx` | Query input with debouncing |
-| `FilterPanel` | `components/FilterPanel.tsx` | File type, date range, entity filters |
-| `FilterDropdown` | `components/FilterDropdown.tsx` | Individual filter dropdown |
-| `DateRangeFilter` | `components/DateRangeFilter.tsx` | Date range picker |
-| `ResultsList` | `components/ResultsList.tsx` | Scrollable results container |
-| `ResultCard` | `components/ResultCard.tsx` | Individual search result display |
-| `SimilarityBadge` | `components/SimilarityBadge.tsx` | Relevance score indicator |
-| `HighlightedSnippet` | `components/HighlightedSnippet.tsx` | Content with query highlights |
-| `EmptyState` | `components/EmptyState.tsx` | No results message |
-| `ErrorState` | `components/ErrorState.tsx` | Error display |
-| `LoadingState` | `components/LoadingState.tsx` | Loading spinner |
-
-#### Hooks
-
-| Hook | File | Description |
-|------|------|-------------|
-| `useSemanticSearch` | `hooks/useSemanticSearch.ts` | Search state management, API calls |
-| `useFilters` | `hooks/useFilters.ts` | Filter state management |
-| `useFilterOptions` | `hooks/useFilterOptions.ts` | Dynamic filter option loading |
-| `useInfiniteScroll` | `hooks/useInfiniteScroll.ts` | Pagination with infinite scroll |
-
-#### Services
-
-| Service | File | Description |
-|---------|------|-------------|
-| `SemanticSearchApiService` | `services/SemanticSearchApiService.ts` | BFF API client |
-| `DataverseMetadataService` | `services/DataverseMetadataService.ts` | Entity metadata retrieval |
-| `NavigationService` | `services/NavigationService.ts` | Document/entity navigation |
-| `ThemeService` | `services/ThemeService.ts` | Dark mode support (ADR-021) |
-| `MsalAuthProvider` | `services/auth/MsalAuthProvider.ts` | MSAL token acquisition |
-
-#### Control Manifest Properties
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `entityType` | string | Yes | Parent entity logical name (matter, project, etc.) |
-| `entityId` | string | Yes | Parent entity GUID (bound to record) |
-| `bffApiUrl` | string | Yes | BFF API base URL |
-| `tenantId` | string | Yes | Dataverse tenant ID |
-
-### Send to Index Ribbon Buttons
-
-Ribbon buttons enable users to manually index documents for semantic search directly from the Dataverse UI.
-
-**Solution**: `DocumentRibbons` (v1.4.0.0)
-**Location**: `infrastructure/dataverse/ribbon/DocumentRibbons/`
-
-#### Button Configurations
-
-| Button | Location | Selection | Description |
-|--------|----------|-----------|-------------|
-| Grid Button | Document grid command bar | Multi-select (max 10) | Index selected documents |
-| Form Button | Document form command bar | Single | Index current document |
-| Subgrid Button | Related documents subgrid | Multi-select (max 10) | Index from subgrid |
-
-> **⚠️ 10-Record Limit**: Manual "Send to Index" is limited to 10 documents per operation to ensure responsive UI and prevent timeout issues. For bulk indexing needs, use the Admin Bulk Index endpoints.
-
-#### JavaScript Web Resource
-
-**File**: `sprk_DocumentOperations.js` (v1.26.0)
-**Location**: `infrastructure/dataverse/webresources/sprk_DocumentOperations.js`
-
-**Key Functions**:
-
-```javascript
-// Entry point for ribbon button
-Sprk.Document.sendToIndex(primaryControl, selectedRecordIds?)
-
-// Calls BFF API
-POST /api/ai/rag/send-to-index
-{
-  "documentIds": ["guid1", "guid2", ...],
-  "tenantId": "{organizationId}"
-}
-```
-
-#### Dataverse Fields Updated
-
-When a document is successfully indexed, these fields are updated:
-
-| Field | Type | Value |
-|-------|------|-------|
-| `sprk_searchindexed` | Boolean | `true` |
-| `sprk_searchindexname` | String | Index name (e.g., `spaarke-knowledge-index-v2`) |
-| `sprk_searchindexedon` | DateTime | UTC timestamp of indexing |
-
-### Send to Index Endpoint
-
-The `/api/ai/rag/send-to-index` endpoint orchestrates document indexing from Dataverse.
-
-**Request**:
-```json
-{
-  "documentIds": ["guid1", "guid2"],
-  "tenantId": "organization-guid"
-}
-```
-
-**Response**:
-```json
-{
-  "totalRequested": 2,
-  "successCount": 2,
-  "failedCount": 0,
-  "results": [
-    {
-      "documentId": "guid1",
-      "success": true,
-      "chunksIndexed": 5,
-      "indexName": "spaarke-knowledge-index-v2",
-      "parentEntityType": "matter",
-      "parentEntityId": "matter-guid"
-    },
-    {
-      "documentId": "guid2",
-      "success": true,
-      "chunksIndexed": 3,
-      "indexName": "spaarke-knowledge-index-v2",
-      "parentEntityType": "project",
-      "parentEntityId": "project-guid"
-    }
-  ]
-}
-```
-
-**Processing Flow**:
-
-1. **Fetch Document**: Retrieve document record from Dataverse including lookups
-2. **Validate File**: Ensure document has `GraphDriveId` and `GraphItemId`
-3. **Extract Parent Entity**: Determine Matter, Project, or Invoice association
-4. **Index File**: Call `IFileIndexingService.IndexFileAsync()` with OBO auth
-5. **Update Dataverse**: Set `sprk_searchindexed`, `sprk_searchindexname`, `sprk_searchindexedon`
-6. **Return Results**: Per-document success/failure with chunk counts
-
-### Authorization
-
-| Component | Authorization Method |
-|-----------|---------------------|
-| SemanticSearchControl | MSAL OBO token → BFF API |
-| Ribbon Button | Dataverse session → BFF API (OBO) |
-| Send to Index Endpoint | JWT + TenantAuthorizationFilter |
-
-### Automatic Re-indexing on Check-in
-
-> **Added in**: Semantic Search UI R2 (v1.26.0)
-
-Documents are **automatically re-indexed** when users check them in after editing. This ensures the search index stays current without requiring manual "Send to Index" actions.
-
-#### Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Document Check-in Flow                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  User edits document in Office Online                            │
-│        │                                                         │
-│        ▼                                                         │
-│  POST /api/documents/{id}/checkin                                │
-│        │                                                         │
-│        ├─► 1. Release SharePoint lock (Graph API)               │
-│        │                                                         │
-│        ├─► 2. Create new version                                 │
-│        │                                                         │
-│        └─► 3. Enqueue re-index job (fire-and-forget)            │
-│                    │                                             │
-│                    ▼                                             │
-│            JobSubmissionService                                  │
-│                    │                                             │
-│                    ▼                                             │
-│            sdap-jobs queue (RagIndexing job)                     │
-│                    │                                             │
-│                    ▼                                             │
-│            RagIndexingJobHandler                                 │
-│            └── IndexFileAppOnlyAsync()                           │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-#### Configuration
-
-Automatic re-indexing is controlled via `ReindexingOptions` in `appsettings.json`:
-
-```json
-{
-  "Reindexing": {
-    "Enabled": true,
-    "TenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
-    "TriggerOnCheckin": true
-  }
-}
-```
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `Enabled` | `true` | Master switch for all automatic re-indexing |
-| `TenantId` | Required | **Azure AD tenant ID** for index routing. Must match PCF control and web resource tenant IDs |
-| `TriggerOnCheckin` | `true` | Whether check-in triggers re-indexing |
-
-> **⚠️ Important**: The `TenantId` must be the **Azure AD tenant ID** (e.g., `a221a95e-6abc-4434-aecc-e48338a1b2f2`), NOT the Dataverse organization ID. This ensures consistent index access across all components.
-
-#### Job Payload
-
-The check-in endpoint enqueues a `RagIndexingJobPayload`:
-
-```csharp
-new RagIndexingJobPayload
-{
-    TenantId = options.TenantId,        // Azure AD tenant ID
-    DriveId = fileInfo.DriveId,          // SharePoint Embedded drive
-    ItemId = fileInfo.ItemId,            // SharePoint Embedded item
-    FileName = fileInfo.FileName,        // For logging
-    DocumentId = documentId.ToString(),  // Dataverse document GUID
-    Source = "CheckinTrigger",           // Job source tracking
-    EnqueuedAt = DateTimeOffset.UtcNow   // Timestamp
-}
-```
-
-#### Behavior
-
-| Scenario | Behavior |
-|----------|----------|
-| Re-indexing enabled | Job enqueued after successful check-in, response includes `aiAnalysisTriggered: true` |
-| Re-indexing disabled | No job enqueued, response includes `aiAnalysisTriggered: false` |
-| TenantId not configured | Warning logged, no job enqueued |
-| Job enqueueing fails | Warning logged, check-in still succeeds (fire-and-forget) |
-
-#### Check-in Response
-
-The check-in response now includes re-indexing status:
-
-```json
-{
-  "success": true,
-  "documentId": "guid",
-  "newVersionNumber": "2.0",
-  "checkedInAt": "2026-01-23T12:00:00Z",
-  "aiAnalysisTriggered": true,
-  "correlationId": "..."
-}
-```
-
----
-
 ## Index Schema
 
 ### Field Definitions
@@ -891,25 +416,17 @@ The check-in response now includes re-indexing status:
 | `tenantId` | String | No | Yes | Tenant isolation |
 | `deploymentId` | String | No | Yes | Deployment config reference |
 | `deploymentModel` | String | No | Yes | Shared/Dedicated/CustomerOwned |
-| `knowledgeSourceId` | String | No | Yes | Source knowledge record ID *(R2)* |
-| `knowledgeSourceName` | String | Yes | No | Knowledge source display name *(R2)* |
-| `documentId` | String | No | Yes | Parent document reference (sprk_document) |
-| `speFileId` | String | No | Yes | SharePoint Embedded file ID *(R2)* |
-| `fileName` | String | Yes | No | File display name |
-| `fileType` | String | No | Yes | File extension (pdf, docx, msg, etc.) *(R2)* |
-| `documentType` | String | Yes | Yes | Classification (contract, policy, etc.) - deprecated, use fileType |
+| `documentId` | String | No | Yes | Parent document reference |
+| `documentName` | String | Yes | No | Human-readable name |
+| `documentType` | String | Yes | Yes | Classification (contract, policy, etc.) |
 | `chunkIndex` | Int32 | No | Yes | Position in document |
 | `chunkCount` | Int32 | No | No | Total chunks for document |
 | `content` | String | Yes | No | Actual text content |
-| `contentVector3072` | Vector (3072) | N/A | N/A | Chunk embedding for semantic search |
-| `documentVector3072` | Vector (3072) | N/A | N/A | Document-level embedding for similarity |
+| `contentVector3072` | Vector (3072) | N/A | N/A | Embedding for semantic search |
 | `tags` | Collection | Yes | Yes | Custom tags for filtering |
 | `metadata` | String | No | No | JSON metadata blob |
 | `createdAt` | DateTimeOffset | No | Yes | Creation timestamp |
 | `updatedAt` | DateTimeOffset | No | Yes | Last update timestamp |
-| `parentEntityType` | String | No | Yes | Parent entity type (matter, project, etc.) *(R1)* |
-| `parentEntityId` | String | No | Yes | Parent entity GUID *(R1)* |
-| `parentEntityName` | String | Yes | No | Parent entity display name *(R1)* |
 
 ### Vector Configuration
 
@@ -1022,7 +539,6 @@ The RAG pipeline supports async job processing via a single `sdap-jobs` Azure Se
 │  Entry Points                                                    │
 ├─────────────────────────────────────────────────────────────────┤
 │  PCF FileUpload  ──► POST /api/ai/rag/index-file (direct)       │
-│  Ribbon Button   ──► POST /api/ai/rag/send-to-index (direct OBO)│
 │  Email Processing ──► sdap-jobs queue (async)                   │
 │  API Endpoint    ──► POST /api/ai/rag/enqueue-indexing (async)  │
 │  Bulk Admin      ──► POST /api/ai/rag/admin/bulk-index (async)  │
@@ -1039,24 +555,20 @@ The RAG pipeline supports async job processing via a single `sdap-jobs` Azure Se
 │  - JobType: "BulkRagIndexing" → BulkRagIndexingJobHandler       │
 └─────────────────────────────────────────────────────────────────┘
                               │
-       ┌──────────────────────┼──────────────────────┐
-       ▼                                             ▼
-┌──────────────────────────────────┐  ┌──────────────────────────────────┐
-│  RagIndexingJobHandler           │  │  BulkRagIndexingJobHandler       │
-├──────────────────────────────────┤  ├──────────────────────────────────┤
-│  Job Type: "RagIndexing"         │  │  Job Type: "BulkRagIndexing"     │
-│                                  │  │                                  │
-│  Processing Flow:                │  │  Processing Flow:                │
-│  1. Check idempotency            │  │  1. Query documents (Dataverse)  │
-│  2. Acquire processing lock      │  │  2. For each document:           │
-│  3. IndexFileAppOnlyAsync()      │  │     a. Check idempotency         │
-│  4. Mark as processed            │  │     b. IndexFileAppOnlyAsync()   │
-│  5. Release lock                 │  │     c. Update progress           │
-│                                  │  │  3. Update job status            │
-│  Use: Single file async index    │  │                                  │
-└──────────────────────────────────┘  │  Use: Admin bulk operations      │
-                                      │  Progress: BatchJobStatusStore   │
-                                      └──────────────────────────────────┘
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  RagIndexingJobHandler                                           │
+├─────────────────────────────────────────────────────────────────┤
+│  Implements: IJobHandler<RagIndexingJobPayload>                  │
+│  Job Type: "RagIndexing"                                         │
+│                                                                  │
+│  Processing Flow:                                                │
+│  ├── 1. Check idempotency (already processed?)                  │
+│  ├── 2. Acquire processing lock                                  │
+│  ├── 3. Execute FileIndexingService.IndexFileAppOnlyAsync()     │
+│  ├── 4. Mark as processed (on success)                          │
+│  └── 5. Release lock (always)                                   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Idempotency
@@ -1335,8 +847,6 @@ When the circuit is open, returns `503 Service Unavailable` with error code `ai_
 ---
 
 *Document created: 2025-12-29*
-*Updated: 2026-01-23 - Automatic re-indexing on check-in, 10-record limit for Send to Index*
+*Updated: 2026-01-19 - Architecture consolidated to single sdap-jobs queue*
 *AI Document Intelligence R3 - Phases 1-5 Complete*
-*RAG Pipeline R1 - Phase 1 Complete*
-*Semantic Search Foundation R1 - Complete (hybrid search API, entity scoping, AI Tool integration)*
-*Semantic Search UI R2 - In Progress (PCF v1.0.15, Send to Index v1.26.0, automatic re-indexing on check-in)*
+*RAG Pipeline R1 - Phase 1 Complete, Phase 2 (Bulk Indexing) In Progress*

@@ -285,6 +285,7 @@ public class BulkRagIndexingJobHandler : IJobHandler
                 );
             }
 
+
             // Build the file index request
             var request = new FileIndexRequest
             {
@@ -434,6 +435,7 @@ public class BulkRagIndexingJobHandler : IJobHandler
                 {
                     matterId = lookupValue.GetString();
                 }
+
 
                 var docInfo = new DocumentInfo
                 {

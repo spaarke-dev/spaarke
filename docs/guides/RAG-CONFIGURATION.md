@@ -1,26 +1,23 @@
 # RAG Configuration Reference
 
-> **Version**: 1.4
+> **Version**: 1.2
 > **Created**: 2025-12-29
-> **Updated**: 2026-01-23
-> **Project**: AI Document Intelligence R3 + RAG Pipeline R1 + Semantic Search UI R2
+> **Updated**: 2026-01-19
+> **Project**: AI Document Intelligence R3 + RAG Pipeline R1
 
 ---
 
 ## Table of Contents
 
 1. [App Service Configuration](#app-service-configuration)
-   - [Automatic Re-indexing on Check-in](#automatic-re-indexing-on-check-in) *(NEW)*
    - [Scheduled RAG Indexing](#scheduled-rag-indexing-catch-up-service)
    - [Bulk Indexing Admin Endpoints](#bulk-indexing-admin-endpoints)
 2. [Index Configuration](#index-configuration)
 3. [Deployment Model Configuration](#deployment-model-configuration)
 4. [Embedding Cache Configuration](#embedding-cache-configuration)
 5. [Search Options](#search-options)
-6. [Semantic Search Configuration](#semantic-search-configuration) *(R1)*
-7. [Semantic Search UI Configuration](#semantic-search-ui-configuration) *(R2 - NEW)*
-8. [Environment Variables](#environment-variables)
-9. [Code Configuration Examples](#code-configuration-examples)
+6. [Environment Variables](#environment-variables)
+7. [Code Configuration Examples](#code-configuration-examples)
 
 ---
 
@@ -82,73 +79,6 @@ $env:ServiceBus__ConnectionString = "<your-connection-string>"
 ```
 ServiceBus__ConnectionString=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/servicebus-connection-string/)
 ```
-
-### Automatic Re-indexing on Check-in
-
-> **Added in**: Semantic Search UI R2 (v1.26.0)
-
-Documents are automatically re-indexed when users check them in after editing, keeping the search index current without manual intervention.
-
-| Setting | Required | Default | Description |
-|---------|----------|---------|-------------|
-| `Reindexing__Enabled` | No | `true` | Master switch for automatic re-indexing |
-| `Reindexing__TenantId` | Yes* | - | **Azure AD tenant ID** for index routing (*required if Enabled=true) |
-| `Reindexing__TriggerOnCheckin` | No | `true` | Whether check-in triggers re-indexing |
-
-**Configuration Example:**
-
-```json
-{
-  "Reindexing": {
-    "Enabled": true,
-    "TenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
-    "TriggerOnCheckin": true
-  }
-}
-```
-
-**Azure App Service Configuration:**
-
-```bash
-az webapp config appsettings set \
-  --name spe-api-dev-67e2xz \
-  --resource-group spe-infrastructure-westus2 \
-  --settings "Reindexing__Enabled=true" "Reindexing__TenantId=a221a95e-6abc-4434-aecc-e48338a1b2f2" "Reindexing__TriggerOnCheckin=true"
-```
-
-> **⚠️ Critical - Azure AD Tenant ID Required**:
-> The `Reindexing__TenantId` must be the **Azure AD tenant ID** (e.g., `a221a95e-6abc-4434-aecc-e48338a1b2f2`), NOT the Dataverse organization ID. This ID:
-> - Must match the `tenantId` used by the PCF SemanticSearchControl
-> - Must match the `tenantId` used by the `sprk_DocumentOperations.js` web resource
-> - Is used for consistent AI Search index identification across all components
->
-> The Azure AD tenant ID can be found via:
-> - Azure Portal → Azure Active Directory → Overview → Tenant ID
-> - MSAL authentication response (`tenantId` claim)
-
-**Behavior:**
-
-| Scenario | Behavior |
-|----------|----------|
-| Enabled=true, TenantId set | Re-index job enqueued after check-in |
-| Enabled=true, TenantId missing | Warning logged, no re-indexing |
-| Enabled=false | No re-indexing regardless of other settings |
-| Job enqueueing fails | Warning logged, check-in succeeds (fire-and-forget) |
-
-**Check-in Response:**
-
-When a document is checked in, the response indicates whether re-indexing was triggered:
-
-```json
-{
-  "success": true,
-  "newVersionNumber": "2.0",
-  "aiAnalysisTriggered": true,
-  "correlationId": "..."
-}
-```
-
----
 
 ### Scheduled RAG Indexing (Catch-up Service)
 
@@ -528,257 +458,6 @@ cache_hit_rate{cacheType="embedding"}
 
 ---
 
-## Semantic Search Configuration
-
-> **Added in**: Semantic Search Foundation R1 (2026-01-20)
-
-Semantic Search provides entity-scoped document search via the `/api/ai/search` endpoint.
-
-### Enabling Semantic Search
-
-Semantic Search requires both `DocumentIntelligence` and `Analysis` to be enabled:
-
-| Setting | Required | Default | Description |
-|---------|----------|---------|-------------|
-| `DocumentIntelligence__Enabled` | Yes | `false` | Enables AI Search infrastructure |
-| `Analysis__Enabled` | Yes | `true` | Enables analysis features (includes semantic search) |
-
-**Note**: Semantic Search endpoints are only mapped if BOTH settings are `true`. See [conditional endpoint mapping](#conditional-endpoint-mapping).
-
-### SemanticSearchRequest Options
-
-| Property | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `query` | string | Yes | - | Search query text |
-| `scope` | string | Yes | - | Scoping mode: `entity` or `documentIds` |
-| `entityType` | string | Conditional | - | Required when `scope=entity` (matter, project, invoice, account, contact) |
-| `entityId` | string | Conditional | - | Required when `scope=entity` |
-| `documentIds` | string[] | Conditional | - | Required when `scope=documentIds` (max 100) |
-| `options.hybridMode` | string | No | `rrf` | Search mode: `rrf`, `vector`, or `keyword` |
-| `options.top` | int | No | 10 | Maximum results (1-100) |
-| `options.skip` | int | No | 0 | Pagination offset |
-| `options.minRelevanceScore` | float | No | 0.0 | Minimum score threshold (0-1) |
-| `options.documentTypes` | string[] | No | null | Filter by document type |
-| `options.fileTypes` | string[] | No | null | Filter by file extension |
-| `options.tags` | string[] | No | null | Filter by tags |
-| `options.dateRange.from` | DateTime | No | null | Created date filter (start) |
-| `options.dateRange.to` | DateTime | No | null | Created date filter (end) |
-| `options.includeContent` | bool | No | true | Include chunk content in results |
-
-### Example Semantic Search Request
-
-```json
-{
-  "query": "What are the payment terms in the contract?",
-  "scope": "entity",
-  "entityType": "matter",
-  "entityId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "options": {
-    "hybridMode": "rrf",
-    "top": 10,
-    "minRelevanceScore": 0.5,
-    "documentTypes": ["contract"],
-    "includeContent": true
-  }
-}
-```
-
-### Example DocumentIds Scope Request
-
-```json
-{
-  "query": "payment schedule",
-  "scope": "documentIds",
-  "documentIds": [
-    "doc-id-1",
-    "doc-id-2",
-    "doc-id-3"
-  ],
-  "options": {
-    "top": 20
-  }
-}
-```
-
-### Validation Error Codes
-
-| Error Code | HTTP Status | Description |
-|------------|-------------|-------------|
-| `QUERY_TOO_LONG` | 400 | Query exceeds maximum length |
-| `INVALID_SCOPE` | 400 | Invalid scope value (must be `entity` or `documentIds`) |
-| `SCOPE_NOT_SUPPORTED` | 400 | `scope=all` is not supported in R1 |
-| `ENTITY_TYPE_REQUIRED` | 400 | Missing entityType when scope=entity |
-| `ENTITY_ID_REQUIRED` | 400 | Missing entityId when scope=entity |
-| `DOCUMENT_IDS_REQUIRED` | 400 | Missing documentIds when scope=documentIds |
-
-### Conditional Endpoint Mapping
-
-Semantic Search endpoints are only registered when both conditions are met:
-
-```csharp
-// Program.cs
-if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
-    app.Configuration.GetValue<bool>("Analysis:Enabled", true))
-{
-    app.MapSemanticSearchEndpoints();
-}
-```
-
-This prevents 500 errors when the service is disabled but endpoints are still mapped.
-
-### DI Registration
-
-Semantic Search services are registered via `AddSemanticSearch()`:
-
-```csharp
-// Registered services (Program.cs)
-services.AddSingleton<IQueryPreprocessor, NoOpQueryPreprocessor>();     // R1: no-op
-services.AddSingleton<IResultPostprocessor, NoOpResultPostprocessor>(); // R1: no-op
-services.AddScoped<ISemanticSearchService, SemanticSearchService>();
-```
-
----
-
-## Semantic Search UI Configuration
-
-> **Added in**: Semantic Search UI R2 (2026-01-23)
-
-Configuration for the PCF control and ribbon button integration.
-
-### PCF Control Configuration
-
-The SemanticSearchControl PCF requires the following configuration when added to a form:
-
-| Property | Required | Description |
-|----------|----------|-------------|
-| `entityType` | Yes | Logical name of the parent entity (e.g., `sprk_matter`, `sprk_project`) |
-| `entityId` | Yes | Bound to the record's primary key field |
-| `bffApiUrl` | Yes | BFF API base URL (from environment variable `sprk_BffApiBaseUrl`) |
-| `tenantId` | Yes | Organization ID for multi-tenant isolation |
-
-**Example Form Configuration**:
-
-```xml
-<!-- Form XML configuration for SemanticSearchControl -->
-<control id="semanticSearch" classid="{class-id}"
-         uniqueid="{unique-id}" isunbound="false">
-  <parameters>
-    <entityType>sprk_matter</entityType>
-    <entityId type="SingleLine.Text">sprk_matterid</entityId>
-    <bffApiUrl>https://spe-api-dev-67e2xz.azurewebsites.net/api</bffApiUrl>
-    <tenantId>{organizationId}</tenantId>
-  </parameters>
-</control>
-```
-
-### Send to Index Endpoint Configuration
-
-The `/api/ai/rag/send-to-index` endpoint uses existing BFF API configuration plus:
-
-| Setting | Required | Default | Description |
-|---------|----------|---------|-------------|
-| `Analysis__SharedIndexName` | No | `spaarke-knowledge-index-v2` | Index name for tracking in Dataverse |
-
-**Note**: The Send to Index endpoint uses OBO authentication from the user's session - no separate API key is required (unlike `/enqueue-indexing`).
-
-### Ribbon Button Configuration
-
-The ribbon buttons are configured in the `DocumentRibbons` solution.
-
-**Solution Details**:
-- **Name**: DocumentRibbons
-- **Version**: 1.4.0.0
-- **Publisher**: Spaarke
-- **Location**: `infrastructure/dataverse/ribbon/DocumentRibbons/`
-
-**Web Resource Configuration**:
-
-| Web Resource | Version | Description |
-|--------------|---------|-------------|
-| `sprk_/scripts/sprk_DocumentOperations.js` | 1.26.0 | Ribbon button handlers |
-
-> **⚠️ 10-Record Limit**: The "Send to Index" ribbon button limits selections to 10 documents per operation. This prevents UI timeouts and ensures responsive feedback to users. For bulk indexing, use the Admin Bulk Index endpoints.
-
-**Environment Variable Dependencies**:
-
-The JavaScript web resource reads these Dataverse environment variables:
-
-| Variable | Schema Name | Purpose |
-|----------|-------------|---------|
-| BFF API URL | `sprk_BffApiBaseUrl` | Base URL for BFF API calls |
-
-**Setting the Environment Variable**:
-
-```powershell
-# Using PAC CLI
-pac env select --environment "Dev"
-pac env variable set --name "sprk_BffApiBaseUrl" --value "https://spe-api-dev-67e2xz.azurewebsites.net/api"
-```
-
-### Dataverse Document Fields
-
-The Send to Index operation updates these fields on the `sprk_document` entity:
-
-| Field | Schema Name | Type | Description |
-|-------|-------------|------|-------------|
-| Search Indexed | `sprk_searchindexed` | Boolean | True if document is indexed |
-| Search Index Name | `sprk_searchindexname` | String | Name of the search index |
-| Search Indexed On | `sprk_searchindexedon` | DateTime | UTC timestamp of last indexing |
-
-**Creating the Fields** (if not present):
-
-```powershell
-# Using PAC CLI
-pac modelbuilder build --tableName "sprk_document" --outputDirectory "./models"
-```
-
-Or add manually via make.powerapps.com:
-1. Navigate to Tables > Document
-2. Add columns:
-   - `sprk_searchindexed` (Yes/No, default: No)
-   - `sprk_searchindexname` (Single Line Text, max 256)
-   - `sprk_searchindexedon` (Date and Time)
-
-### PCF Control Deployment
-
-The SemanticSearchControl is deployed as a managed solution.
-
-**Build and Package**:
-
-```powershell
-cd src/client/pcf/SemanticSearchControl
-npm run build
-msbuild /t:rebuild /p:Configuration=Release
-```
-
-**Deploy via PAC CLI**:
-
-```powershell
-pac pcf push --publisher-prefix sprk
-```
-
-**Or import as solution**:
-
-```powershell
-# The solution zip is in Solution/bin/
-pac solution import --path Solution/bin/SpaarkeSemanticSearch_v1.0.15.zip
-```
-
-### Version Alignment
-
-Ensure version numbers are aligned across these files:
-
-| File | Field | Current |
-|------|-------|---------|
-| `ControlManifest.Input.xml` | `version` | 1.0.15 |
-| `Solution/src/Other/Solution.xml` | `Version` | 1.0.15 |
-| `Solution/bin/ControlManifest.xml` | `version` | 1.0.15 |
-| Control UI footer | Display version | 1.0.15 |
-
-See [PCF-V9-PACKAGING.md](PCF-V9-PACKAGING.md) for version bumping procedures.
-
----
-
 ## Environment Variables
 
 ### Dataverse Environment Variables
@@ -890,8 +569,6 @@ public async Task SetupEnterpriseCustomer(string tenantId)
 ---
 
 *Document created: 2025-12-29*
-*Updated: 2026-01-23 - Automatic re-indexing configuration, 10-record limit for Send to Index*
+*Updated: 2026-01-16*
 *AI Document Intelligence R3 - Phase 1 Complete*
 *RAG Pipeline R1 - Phase 1 Complete*
-*Semantic Search Foundation R1 - Complete (configuration section added)*
-*Semantic Search UI R2 - PCF control v1.0.15, web resource v1.26.0, automatic re-indexing on check-in*
