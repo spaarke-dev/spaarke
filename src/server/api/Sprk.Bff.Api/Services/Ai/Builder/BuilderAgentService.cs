@@ -220,6 +220,7 @@ public class BuilderAgentService : IBuilderAgentService
 
     /// <summary>
     /// Build the system prompt including the scope catalog.
+    /// Uses fallback catalog when Dataverse returns empty results.
     /// </summary>
     private async Task<string> BuildSystemPromptAsync(CancellationToken cancellationToken)
     {
@@ -230,29 +231,43 @@ public class BuilderAgentService : IBuilderAgentService
         var skillsResult = await _scopeResolver.ListSkillsAsync(defaultOptions, cancellationToken);
         var knowledgeResult = await _scopeResolver.ListKnowledgeAsync(defaultOptions, cancellationToken);
 
+        // Convert Dataverse results to catalog entries
+        var dataverseActions = actionsResult.Items.Select(a => new ScopeCatalogEntry
+        {
+            Name = a.Name,
+            DisplayName = a.Name, // AnalysisAction doesn't have DisplayName, use Name
+            Description = a.Description ?? string.Empty,
+            ScopeType = "action"
+        }).ToList();
+
+        var dataverseSkills = skillsResult.Items.Select(s => new ScopeCatalogEntry
+        {
+            Name = s.Name,
+            DisplayName = s.Name, // AnalysisSkill doesn't have DisplayName, use Name
+            Description = s.Description ?? string.Empty,
+            ScopeType = "skill"
+        }).ToList();
+
+        var dataverseKnowledge = knowledgeResult.Items.Select(k => new ScopeCatalogEntry
+        {
+            Name = k.Name,
+            DisplayName = k.Name, // AnalysisKnowledge doesn't have DisplayName, use Name
+            Description = k.Description ?? string.Empty,
+            ScopeType = "knowledge"
+        }).ToList();
+
+        // Merge with fallback catalog (uses fallback when Dataverse is empty)
+        var actions = FallbackScopeCatalog.MergeWithFallback(dataverseActions, FallbackScopeCatalog.GetActions());
+        var skills = FallbackScopeCatalog.MergeWithFallback(dataverseSkills, FallbackScopeCatalog.GetSkills());
+        var knowledge = FallbackScopeCatalog.MergeWithFallback(dataverseKnowledge, FallbackScopeCatalog.GetKnowledge());
+
+        _logger.LogDebug(
+            "Building system prompt with scope catalog: {ActionCount} actions, {SkillCount} skills, {KnowledgeCount} knowledge (fallback: {UsingFallback})",
+            actions.Count, skills.Count, knowledge.Count,
+            dataverseActions.Count == 0);
+
         // Build the system prompt with scope catalog
-        return PlaybookBuilderSystemPrompt.Build(
-            actionsResult.Items.Select(a => new ScopeCatalogEntry
-            {
-                Name = a.Name,
-                DisplayName = a.Name, // AnalysisAction doesn't have DisplayName, use Name
-                Description = a.Description ?? string.Empty,
-                ScopeType = "action"
-            }).ToList(),
-            skillsResult.Items.Select(s => new ScopeCatalogEntry
-            {
-                Name = s.Name,
-                DisplayName = s.Name, // AnalysisSkill doesn't have DisplayName, use Name
-                Description = s.Description ?? string.Empty,
-                ScopeType = "skill"
-            }).ToList(),
-            knowledgeResult.Items.Select(k => new ScopeCatalogEntry
-            {
-                Name = k.Name,
-                DisplayName = k.Name, // AnalysisKnowledge doesn't have DisplayName, use Name
-                Description = k.Description ?? string.Empty,
-                ScopeType = "knowledge"
-            }).ToList());
+        return PlaybookBuilderSystemPrompt.Build(actions, skills, knowledge);
     }
 
     /// <summary>

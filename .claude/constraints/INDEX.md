@@ -27,6 +27,7 @@ This directory contains actionable constraints (rules, requirements, limits) org
 | Configuration | [config.md](config.md) | ADR-018, 020 | ~115 |
 | Testing | [testing.md](testing.md) | ADR-022 | ~115 |
 | Web Resources | [webresource.md](webresource.md) | ADR-006, ADR-008 | ~140 |
+| Azure Deployment | [azure-deployment.md](azure-deployment.md) | — | ~100 |
 
 ---
 
@@ -46,6 +47,7 @@ This directory contains actionable constraints (rules, requirements, limits) org
 | Writing tests | `testing.md` |
 | Web resource (form events, ribbon) | `webresource.md` |
 | API called from web resource | `webresource.md` + `api.md` |
+| Azure deployment | `azure-deployment.md` |
 
 This provides focused, actionable rules without loading full ADR context.
 
