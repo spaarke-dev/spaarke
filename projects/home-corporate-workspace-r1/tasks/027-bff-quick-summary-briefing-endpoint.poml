@@ -3,7 +3,7 @@
   <metadata>
     <title>BFF — Quick Summary Briefing Endpoint</title>
     <phase>Phase 3: Action Cards &amp; Dialogs</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>008, 009</dependencies>
     <blocks>none</blocks>

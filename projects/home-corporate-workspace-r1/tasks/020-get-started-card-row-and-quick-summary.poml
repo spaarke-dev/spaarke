@@ -3,7 +3,7 @@
   <metadata>
     <title>Get Started Card Row and Quick Summary Card</title>
     <phase>Phase 3: Action Cards &amp; Dialogs</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>8</estimated-hours>
     <dependencies>001, 002</dependencies>
     <blocks>021, 025</blocks>

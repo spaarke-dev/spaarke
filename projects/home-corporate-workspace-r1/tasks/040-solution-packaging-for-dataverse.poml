@@ -3,7 +3,7 @@
   <metadata>
     <title>Solution Packaging for Dataverse</title>
     <phase>Phase 5: Deployment &amp; Wrap-up</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>033, 034, 037</dependencies>
     <blocks>041</blocks>

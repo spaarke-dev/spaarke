@@ -15,6 +15,7 @@ using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Events;
 using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Finance;
+using Sprk.Bff.Api.Api.Workspace;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authorization;
@@ -260,6 +261,9 @@ builder.Services.AddWorkersModule(builder.Configuration);
 
 // Office Add-in module (Office integration endpoints)
 builder.Services.AddOfficeModule();
+
+// Legal Operations Workspace module (portfolio + scoring services + todo generation)
+builder.Services.AddWorkspaceServices(builder.Configuration);
 
 // Finance Intelligence module (configuration + telemetry)
 builder.Services.AddFinanceModule(builder.Configuration);
@@ -1746,6 +1750,11 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:RecordMatchingEnabled
 // Builder Scope Admin endpoints (ai-playbook-node-builder-r2 Phase 4)
 // Allows importing builder scope JSON files into Dataverse
 app.MapBuilderScopeAdminEndpoints();
+
+// Legal Operations Workspace endpoints (portfolio aggregation + scoring — home-corporate-workspace-r1)
+app.MapWorkspaceEndpoints();
+app.MapWorkspaceAiEndpoints();
+app.MapWorkspaceMatterEndpoints();
 
 // Finance Intelligence endpoints (Financial Intelligence Module R1)
 app.MapFinanceEndpoints();

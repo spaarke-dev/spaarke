@@ -3,7 +3,7 @@
   <metadata>
     <title>BFF - Scoring Calculation Endpoint</title>
     <phase>Phase 2: Core Feature Blocks</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>017, 018, 008</dependencies>
     <blocks>none</blocks>
