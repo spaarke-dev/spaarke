@@ -3,7 +3,7 @@
 > **Version**: 1.2
 > **Created**: 2025-12-29
 > **Updated**: 2026-01-23
-> **Project**: AI Document Intelligence R3 + Semantic Search UI R2
+> **Project**: AI Document Intelligence R3 + Semantic Search UI R2 + Semantic Search Foundation R1
 
 ---
 
