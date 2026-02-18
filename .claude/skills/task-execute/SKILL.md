@@ -994,6 +994,26 @@ When task has `deploy` tag:
 - **ui-test**: Called in Step 9.7 for PCF/frontend browser testing (requires --chrome)
 - **repo-cleanup**: Called in project wrap-up task (Task 090)
 - **project-pipeline**: Initializes current-task.md for projects
+- **merge-to-master**: Prompted after completing final project task — merges branch work into master
+
+### Final Task Merge Prompt
+
+**After completing the last task in a project** (all tasks in TASK-INDEX.md are ✅), prompt the user:
+
+```
+✅ All project tasks complete!
+
+📋 Next steps:
+  1. Run `/repo-cleanup` to validate structure
+  2. Run `/merge-to-master` to merge this branch into master
+
+⚠️  Branch work is NOT on master until explicitly merged.
+    Pushing to origin (push-to-github) ≠ merging to master.
+
+Merge now? [y/n]
+```
+
+If user says yes, invoke the `merge-to-master` skill in Single Merge mode for the current branch.
 
 ## Related Protocols
 

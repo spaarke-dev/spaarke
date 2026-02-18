@@ -86,6 +86,38 @@ WHEN TO SWITCH: After Step 3 completes and you're ready for Step 4 (branch creat
 
 ## Pipeline Steps
 
+### Step 0.5: Master Staleness Check
+
+**Purpose:** Ensure master has all completed branch work before creating a new project. Prevents new projects from starting on stale code.
+
+**Action:**
+```
+RUN merge-to-master in AUDIT mode:
+  git fetch origin
+  FOR EACH branch in origin/work/*:
+    count unmerged commits vs origin/master
+
+IF any branches have unmerged commits:
+  ⚠️  WARNING: Master may be stale!
+
+  {N} branches have {M} total unmerged commits:
+    - {branch}: {count} commits
+    - ...
+
+  New projects created from master will be missing this work.
+
+  Recommended: Run `/merge-to-master` before starting this project.
+  Continue anyway? [y/n]
+
+IF no unmerged branches:
+  ✅ Master is current — all branch work merged.
+  Proceeding with project initialization...
+```
+
+**Wait for User**: If stale, user chooses to merge first or continue anyway.
+
+---
+
 ### Step 1: Validate SPEC.md
 
 **Action:**
@@ -727,6 +759,7 @@ Agent: ✅ Project initialized up to PLAN.md
 This skill **orchestrates** by calling component skills:
 
 - **design-to-spec**: **OPTIONAL PREDECESSOR** - Transforms human design docs into AI-optimized spec.md before this skill runs
+- **merge-to-master**: **INTEGRATED** at Step 0.5 for master staleness check (audit mode) — prevents new projects from starting on stale code
 - **adr-aware**: Auto-invoked during resource discovery (Step 2) for ADR loading
 - **conflict-check**: **INTEGRATED** at Step 1.5 for PR overlap detection (parallel session awareness)
 - **project-setup**: **CALLED** at Step 2 for artifact generation (README, PLAN, CLAUDE.md, folders)

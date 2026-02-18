@@ -490,6 +490,7 @@ When user requests "merge to master" or "merge and sync":
 - `adr-check` - Validate ADR compliance before committing
 - `spaarke-conventions` - Naming and coding standards
 - `ci-cd` - Monitor CI pipeline status and troubleshoot failures
+- `merge-to-master` - Merge branch into master after push (pushing ≠ merging)
 
 ---
 
@@ -521,6 +522,7 @@ gh pr create                            # Create PR (if gh installed)
 - If CI fails, use `gh run view {id} --log` to diagnose before suggesting fixes
 - Never suggest merging until all CI checks pass
 - Reference `ci-cd` skill for detailed troubleshooting guidance
+- **After successful push, always remind**: "Branch pushed to origin. When ready to merge this work into master, run `/merge-to-master`." Pushing to origin does NOT merge to master — these are separate operations.
 
 ### Worktree-Specific Tips
 

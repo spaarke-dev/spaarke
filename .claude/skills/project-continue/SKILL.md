@@ -480,8 +480,28 @@ Output:
 | `task-execute` | Step 7 hands off to task-execute for actual work |
 | `adr-aware` | Step 5 loads ADRs using this always-apply skill |
 | `push-to-github` | Use after completing work to commit/push |
+| `merge-to-master` | Step 2 runs audit check — warns if other branches have unmerged work on master |
 | `project-pipeline` | Use if project doesn't exist yet |
 | `repo-cleanup` | Use when all tasks complete |
+
+### Master Staleness Check (During Step 2)
+
+When syncing with master in Step 2, also run a quick audit:
+
+```
+git fetch origin
+CHECK: Are there work/* branches with unmerged commits to master?
+
+IF yes:
+  ⚠️  Note: {N} branches have unmerged work not yet on master.
+  This project's branch may be missing completed work from other projects.
+  Consider running `/merge-to-master` to update master first.
+
+IF no:
+  ✅ Master is current — all branch work merged.
+```
+
+This is informational only — don't block project continuation, just warn.
 
 ---
 

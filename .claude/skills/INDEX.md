@@ -58,6 +58,7 @@
 | [ribbon-edit](ribbon-edit/SKILL.md) | Edit Dataverse ribbon via solution export/import | No | "edit ribbon", "add ribbon button" |
 | [worktree-setup](worktree-setup/SKILL.md) | Create and manage git worktrees for parallel development | No | `/worktree-setup`, "create worktree", "new project worktree" |
 | [dev-cleanup](dev-cleanup/SKILL.md) | Clean up dev environment caches (Azure CLI, NuGet, npm, Git) | No | `/dev-cleanup`, "clean up dev", "fix auth issues", "clear caches" |
+| [merge-to-master](merge-to-master/SKILL.md) | Merge completed branch work into master with safety checks | No | `/merge-to-master`, "merge to master", "check unmerged branches", "reconcile branches" |
 
 ## Skill Categories
 
@@ -100,6 +101,7 @@
 - **conflict-check** - Detect file overlap between active PRs (parallel session awareness)
 - **context-handoff** - Save working state before compaction or session end for recovery
 - **dev-cleanup** - Clean up local dev environment caches (Azure CLI, NuGet, npm, Git credentials)
+- **merge-to-master** - Merge completed branch work into master with safety checks and build verification
 
 ## Skill Flow
 
@@ -167,6 +169,13 @@ AI-Optimized Spec (spec.md)
         │  repo-cleanup    │  ← Tier 3 Operational (final step)
         │  Validate +      │     Cleanup ephemeral files
         │  cleanup         │
+        └──────────────────┘
+               │
+               ▼
+        ┌──────────────────┐
+        │  merge-to-master │  ← Tier 3 Operational (branch → master)
+        │  Merge branch    │     Ensures master stays current
+        │  work to master  │
         └──────────────────┘
 
 ─────────────────────────────────────────────────────────────────
@@ -343,10 +352,12 @@ alwaysApply: false  # Only true for universal skills like conventions
 │   └── SKILL.md
 ├── worktree-setup/             ← Git worktree management for parallel development
 │   └── SKILL.md
-└── context-handoff/            ← State preservation before compaction
+├── context-handoff/            ← State preservation before compaction
+│   └── SKILL.md
+└── merge-to-master/            ← Merge branch work into master
     └── SKILL.md
 ```
 
 ---
 
-*Last updated: January 6, 2026*
+*Last updated: February 17, 2026*

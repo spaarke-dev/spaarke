@@ -689,6 +689,7 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | "continue project", "resume project", "where was I", "pick up where I left off" | `project-continue` | Load `.claude/skills/project-continue/SKILL.md` and sync + load context |
 | "save progress", "save my state", "context handoff", "checkpoint", "checkpoint before compaction" | `context-handoff` | Load `.claude/skills/context-handoff/SKILL.md` and save state for recovery |
 | "clean up dev", "clear caches", "fix auth issues", "azure cli issues", "dev environment cleanup" | `dev-cleanup` | Load `.claude/skills/dev-cleanup/SKILL.md` and run cleanup script |
+| "merge to master", "check unmerged branches", "reconcile branches", "sync master", "audit branches" | `merge-to-master` | Load `.claude/skills/merge-to-master/SKILL.md` and follow procedure |
 
 ### Auto-Detection Rules
 
@@ -703,6 +704,8 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | Running `az` commands, deploying to Azure | Load `azure-deploy` skill first |
 | Modifying ribbon XML, `RibbonDiffXml`, or command bar | Load `ribbon-edit` skill first |
 | Resuming work on existing project (has tasks/, CLAUDE.md) | Run `project-continue` to sync and load context |
+| Starting new project from master | Run `merge-to-master` in audit mode to check for stranded branches |
+| Completing final task in a project | Prompt user to run `merge-to-master` to merge branch into master |
 
 ### Always-Apply Skills
 
@@ -739,6 +742,7 @@ Use these commands to explicitly invoke skills:
 | `/context-handoff` | Save working state before compaction for reliable recovery |
 | `/checkpoint` | Alias for `/context-handoff` - quick state save |
 | `/dev-cleanup` | Clean up local dev environment caches (Azure CLI, NuGet, npm, Git credentials) |
+| `/merge-to-master` | Merge completed branch work into master (audit, single merge, or full reconciliation) |
 
 ---
 
