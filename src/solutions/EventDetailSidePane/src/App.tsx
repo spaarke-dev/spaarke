@@ -209,7 +209,7 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
     optimistic.setOriginalEvent(loadedEvent);
 
     // Extract Event Type ID for field visibility
-    const typeId = loadedEvent._sprk_eventtype_value;
+    const typeId = loadedEvent._sprk_eventtype_ref_value;
     setEventTypeId(typeId);
 
     // Extract related event info

@@ -340,7 +340,7 @@ export const EventsDataGrid: React.FC<EventsDataGridProps> = ({
           loading={loading}
           enableColumnFilters={true}
           enableCheckboxSelection={true}
-          onRowClick={(record) => onRowClick?.(record.sprk_eventid, record._sprk_eventtype_value)}
+          onRowClick={(record) => onRowClick?.(record.sprk_eventid, record._sprk_eventtype_ref_value)}
           onSelectionChange={onSelectionChange}
         />
       </div>

@@ -333,7 +333,7 @@ export const HeaderSection: React.FC<IHeaderSectionProps> = ({
   // ─────────────────────────────────────────────────────────────────────────
 
   const eventTypeName =
-    event["_sprk_eventtype_value@OData.Community.Display.V1.FormattedValue"] ||
+    event["_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue"] ||
     "Unknown Type";
   const parentName = event.sprk_regardingrecordname;
   const parentUrl = event.sprk_regardingrecordurl;

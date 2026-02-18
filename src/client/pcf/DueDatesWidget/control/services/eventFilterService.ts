@@ -38,8 +38,8 @@ export const EventSchemaNames = {
         /** @deprecated Use eventStatus instead. */
         statusCode: "statuscode",
         priority: "sprk_priority",
-        eventType: "sprk_eventtype",
-        eventTypeName: "_sprk_eventtype_value",
+        eventType: "_sprk_eventtype_ref_value",
+        eventTypeName: "_sprk_eventtype_ref_value",
         owner: "ownerid",
         ownerName: "_ownerid_value",
         regardingRecordType: "sprk_regardingrecordtype",
@@ -111,8 +111,8 @@ export interface IEventData {
     /** @deprecated Use sprk_eventstatus instead. */
     statuscode?: number;
     sprk_priority?: number;
-    "_sprk_eventtype_value"?: string;
-    "_sprk_eventtype_value@OData.Community.Display.V1.FormattedValue"?: string;
+    "_sprk_eventtype_ref_value"?: string;
+    "_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue"?: string;
     /** Formatted value for sprk_eventstatus */
     "sprk_eventstatus@OData.Community.Display.V1.FormattedValue"?: string;
     /** @deprecated Use sprk_eventstatus formatted value instead */
@@ -356,8 +356,8 @@ export function transformEventData(rawEvent: IEventData): IEventItem | null {
         id: rawEvent.sprk_eventid,
         name: rawEvent.sprk_eventname || "(Unnamed Event)",
         dueDate,
-        eventType: rawEvent["_sprk_eventtype_value"] || "",
-        eventTypeName: rawEvent["_sprk_eventtype_value@OData.Community.Display.V1.FormattedValue"] || "Event",
+        eventType: rawEvent["_sprk_eventtype_ref_value"] || "",
+        eventTypeName: rawEvent["_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue"] || "Event",
         eventStatus,
         statusName,
         priority: rawEvent.sprk_priority,

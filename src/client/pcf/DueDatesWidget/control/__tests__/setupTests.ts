@@ -281,8 +281,8 @@ export function createMockEventData(options: MockEventDataOptions = {}): Record<
         'sprk_eventstatus@OData.Community.Display.V1.FormattedValue': statusLabel,
         statecode: status === TestEventStatus.Archived ? 1 : 0, // Inactive only when Archived
         statuscode: statusCode, // Keep for backward compat in tests
-        '_sprk_eventtype_value': eventType,
-        '_sprk_eventtype_value@OData.Community.Display.V1.FormattedValue': eventTypeName,
+        '_sprk_eventtype_ref_value': eventType,
+        '_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue': eventTypeName,
         'statuscode@OData.Community.Display.V1.FormattedValue': statusLabel,
         '_ownerid_value': 'owner-id-1',
         '_ownerid_value@OData.Community.Display.V1.FormattedValue': 'Test Owner'

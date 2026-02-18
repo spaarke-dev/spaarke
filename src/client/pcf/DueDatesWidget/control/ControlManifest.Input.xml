@@ -2,12 +2,17 @@
 <manifest>
   <control namespace="Spaarke.Controls"
            constructor="DueDatesWidget"
-           version="1.0.3"
+           version="1.0.8"
            display-name-key="Due Dates Widget"
            description-key="Displays upcoming and overdue events in card format for Matter/Project Overview tabs. Shows actionable items with event type badges and days-until-due indicators."
            control-type="standard">
 
     <external-service-usage enabled="false" />
+
+    <!-- Feature usage declarations -->
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+    </feature-usage>
 
     <!-- Parent Record ID - for filtering events related to this Matter/Project -->
     <property name="parentRecordId"
