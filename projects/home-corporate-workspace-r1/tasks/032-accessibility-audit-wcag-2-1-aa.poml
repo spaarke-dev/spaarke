@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Accessibility Audit (WCAG 2.1 AA)</title>
+    <phase>Phase 4: Integration &amp; Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>037</blocks>
+    <tags>pcf, fluent-ui, frontend, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing and validation task — accessibility audit with fixes, no new feature implementation</rigor-reason>
+    <parallel-group>pg-polish</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Audit all components in the Legal Operations Workspace for WCAG 2.1 AA compliance. Verify full keyboard
+    navigation (Tab through all interactive elements in logical order), ARIA labels on all icon-only buttons
+    (flag, AI summary, notification bell, theme toggle, dismiss), color contrast ratios meeting 4.5:1 for
+    normal text and 3:1 for large text, visible focus indicators on all focusable elements, and screen reader
+    announcements for dynamic content updates (to-do count changes, filter updates, notification badges).
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in web accessibility, WCAG 2.1 AA standards, ARIA attributes, keyboard navigation, and Fluent UI v9 accessibility features.</role>
+
+  <goal>
+    All interactive elements are keyboard-accessible in logical tab order. All icon-only buttons have
+    descriptive ARIA labels. Color contrast ratios meet WCAG 2.1 AA requirements (4.5:1 normal text, 3:1
+    large text). Focus indicators are visible on all focusable elements. Dynamic content updates are
+    announced to screen readers via ARIA live regions.
+  </goal>
+
+  <context>
+    <background>
+      WCAG 2.1 AA compliance is a non-functional requirement (NFR-03) for the Legal Operations Workspace.
+      The workspace contains many interactive elements across 7 build blocks: filter buttons, flag toggles,
+      action cards, navigation links, dialog forms, theme toggle, notification bell, and more. Each must be
+      fully keyboard-accessible with proper ARIA attributes. Fluent UI v9 components provide built-in
+      accessibility features, but custom compositions and icon-only buttons need explicit ARIA configuration.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/client/pcf/LegalWorkspace/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-03">MUST meet WCAG 2.1 AA compliance for all interactive elements</constraint>
+    <constraint source="NFR-03">All icon-only buttons MUST have aria-label attributes describing their action</constraint>
+    <constraint source="NFR-03">Color contrast ratios: 4.5:1 minimum for normal text, 3:1 for large text (18px+ or 14px+ bold)</constraint>
+    <constraint source="NFR-03">Focus indicators MUST be visible on all focusable elements — do not suppress browser default focus styles without replacement</constraint>
+    <constraint source="NFR-03">Dynamic content updates MUST use ARIA live regions for screen reader announcements</constraint>
+    <constraint source="ADR-021">Use Fluent UI v9 built-in accessibility props where available (aria-label, role, tabIndex)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-accessibility" location="src/client/pcf/AnalysisWorkspace/">Reference for Fluent v9 accessibility patterns in workspace PCF controls</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Audit keyboard navigation: Tab through entire page from top to bottom — verify all interactive elements (buttons, links, inputs, filter pills, flag toggles, action cards, dialog controls) are reachable via Tab key in logical reading order. Document any gaps.</step>
+    <step order="2">Audit ARIA labels on all icon-only buttons: flag button (aria-label="Flag as to-do" / "Unflag to-do"), AI summary button (aria-label="Generate AI summary"), notification bell (aria-label="Notifications"), theme toggle (aria-label="Switch to dark mode" / "Switch to light mode"), dismiss button (aria-label="Dismiss to-do"), and any other icon-only interactive elements.</step>
+    <step order="3">Verify focus indicators: all focusable elements must show a visible focus ring or outline when focused via keyboard. Check that no CSS resets suppress outline:none without providing an alternative. Fluent v9 provides built-in focus indicators — verify they are not overridden.</step>
+    <step order="4">Audit color contrast ratios: check all text elements against their backgrounds in light, dark, and high-contrast modes. Normal text must meet 4.5:1 ratio. Large text (18px+, or 14px+ bold) must meet 3:1. Pay attention to status badges, count labels, and secondary text.</step>
+    <step order="5">Audit screen reader announcements for dynamic content: to-do count badge updates, filter result count changes, notification badge count, form validation messages in Create Matter dialog. Add aria-live="polite" regions where dynamic content changes need to be announced.</step>
+    <step order="6">Add missing ARIA attributes: aria-label on icon-only buttons, aria-describedby for complex controls, role attributes for custom widgets, aria-expanded for expandable sections, aria-current for active filter selection.</step>
+    <step order="7">Fix keyboard navigation gaps: add tabIndex where needed, ensure logical tab order matches visual layout (left-to-right, top-to-bottom), add keyboard event handlers (Enter/Space for buttons, Escape for dialogs).</step>
+    <step order="8">Document all findings and fixes in notes/accessibility-audit.md with before/after examples and WCAG success criteria references.</step>
+    <step order="9">Update TASK-INDEX.md — mark task 032 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+    <tool name="terminal">Run shell commands for build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/ (all .tsx files — accessibility fixes)</output>
+    <output type="documentation">projects/home-corporate-workspace-r1/notes/accessibility-audit.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All interactive elements are reachable via Tab key in logical reading order</criterion>
+    <criterion testable="true">All icon-only buttons have descriptive aria-label attributes</criterion>
+    <criterion testable="true">Focus indicators are visible on all focusable elements in light, dark, and high-contrast modes</criterion>
+    <criterion testable="true">Color contrast ratios meet WCAG 2.1 AA: 4.5:1 for normal text, 3:1 for large text</criterion>
+    <criterion testable="true">Dynamic content updates (to-do counts, filter counts, notification badges) are announced via ARIA live regions</criterion>
+    <criterion testable="true">Escape key closes all dialogs and returns focus to triggering element</criterion>
+    <criterion testable="true">Enter and Space keys activate all button-like elements</criterion>
+    <criterion testable="true">PCF control builds without TypeScript or webpack errors after all fixes</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Fluent UI v9 components have built-in accessibility — check that custom compositions don't break it
+    - Icon-only buttons: use Fluent Button with icon prop and explicit aria-label (don't rely on tooltip alone)
+    - Common WCAG 2.1 AA success criteria: 1.3.1 (Info and Relationships), 1.4.3 (Contrast), 2.1.1 (Keyboard), 2.4.7 (Focus Visible), 4.1.2 (Name, Role, Value)
+    - For dynamic content: use aria-live="polite" for non-urgent updates, aria-live="assertive" for errors
+    - Filter bar: active filter should have aria-current="true" or aria-pressed="true"
+    - To-do list count badge: wrap in aria-live region so screen readers announce "3 to-do items" when count changes
+    - Create Matter wizard: each step should announce step number ("Step 2 of 5: Matter Details")
+    - This task can run in parallel with task 031 (Dark Mode Audit) — they modify different attributes of the same files
+    - Use browser DevTools accessibility panel to inspect computed ARIA tree
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 7.</protocol>
+  </execution>
+</task>

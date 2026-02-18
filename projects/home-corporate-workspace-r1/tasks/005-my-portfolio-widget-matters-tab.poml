@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Block 5 — My Portfolio Widget (Matters Tab)</title>
+    <phase>Phase 1: Foundation &amp; Independent Blocks</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>002, 003</dependencies>
+    <blocks>006</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag with code implementation — complex component with status derivation logic, grade pill system, and tab infrastructure</rigor-reason>
+    <parallel-group>pg-phase1-ui</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build Block 5 — My Portfolio Widget with the Matters tab. Create a tabbed sidebar widget with
+    Matters/Projects/Documents tabs (with count badges). Implement the Matters tab showing matter items with
+    computed status (Critical/Warning/On Track), grade pills (A-F with colors), overdue indicator, matter type,
+    organization, and practice area. Max 5 items displayed with a "View All Matters" footer link that navigates
+    to the MDA entity view via postMessage. The Projects and Documents tabs will be added in task 006.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 TabList/Tab components, React state management, data-driven status derivation, and Dataverse entity display patterns.</role>
+
+  <goal>
+    A fully functional My Portfolio sidebar widget with tabbed navigation (Matters tab active, Projects and
+    Documents tabs as stubs), matter items displaying correct computed status, grade pills with color coding,
+    overdue indicators, and "View All Matters" footer navigation via postMessage to parent MDA frame.
+  </goal>
+
+  <context>
+    <background>
+      The My Portfolio widget sits in the right column of the workspace layout. It provides legal operations
+      managers with a quick view of their assigned matters, projects, and documents. The Matters tab is the
+      primary view, showing up to 5 matters with rich status information derived from Dataverse data:
+
+      - Status is computed (not stored): Critical if overdueeventcount > 0 OR utilization > 85%, Warning if
+        utilization > 65%, else On Track
+      - Grade pills show A-F ratings for budgetcontrols, guidelinescompliance, and outcomessuccess
+      - Each grade letter has a color: A=green, B=teal, C=yellow, D=orange, F=red
+
+      Data comes from Xrm.WebApi (client-side) via the DataverseService from task 003.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/my-portfolio-matter-list_1.jpg</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/my-portfolio-projects-list_2.jpg</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/my-portfolio-documents-list_3.jpg</file>
+      <file>src/client/pcf/LegalWorkspace/types/</file>
+      <file>src/client/pcf/LegalWorkspace/services/DataverseService.ts</file>
+      <file>src/client/pcf/LegalWorkspace/utils/navigation.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">All UI MUST use Fluent UI v9 — TabList/Tab for navigation, Badge for counts, makeStyles for all styling</constraint>
+    <constraint source="ADR-021">MUST use semantic color tokens for grade pill colors — no hardcoded hex values</constraint>
+    <constraint source="ADR-021">MUST support light, dark, and high-contrast themes</constraint>
+    <constraint source="ADR-021">MUST use @fluentui/react-icons for all icons</constraint>
+    <constraint source="spec">Status derivation: Critical if overdueeventcount &gt; 0 OR utilization &gt; 85%; Warning if utilization &gt; 65%; else On Track</constraint>
+    <constraint source="spec">Max 5 items displayed with "View All Matters" footer navigation</constraint>
+    <constraint source="spec">Grade pills: A=green, B=teal, C=yellow, D=orange, F=red (use Fluent palette tokens)</constraint>
+    <constraint source="spec">Data from Xrm.WebApi — use DataverseService from task 003</constraint>
+    <constraint source="ADR-012">Import from @spaarke/ui-components where reusable components exist</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="theme-management" location=".claude/patterns/pcf/theme-management.md">Fluent theme tokens, dark mode, semantic color usage</pattern>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Xrm.WebApi query patterns for entity data</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create MyPortfolio component directory at src/client/pcf/LegalWorkspace/components/MyPortfolio/</step>
+    <step order="2">Create tab container component (MyPortfolioWidget.tsx) using Fluent UI v9 TabList and Tab components — three tabs: "Matters" (with count badge), "Projects" (with count badge), "Documents" (with count badge). Matters tab active by default. Projects and Documents tabs render placeholder content ("Coming in task 006").</step>
+    <step order="3">Create MatterItem component (MatterItem.tsx) displaying: matter name (bold, clickable to open MDA form), computed status badge (Critical=red, Warning=orange, On Track=green using Badge component), matter type and organization name on second line, practice area and "last activity" relative timestamp on third line, 3 grade pills (Budget Controls, Guidelines Compliance, Outcomes Success — each A-F), overdue count indicator (if overdueeventcount &gt; 0, show red badge with count).</step>
+    <step order="4">Implement status derivation logic as a pure utility function deriveMatterStatus(matter: IMatter): MatterStatus — Critical if matter.overdueeventcount &gt; 0 OR matter.utilizationpercent &gt; 85; Warning if matter.utilizationpercent &gt; 65; else OnTrack. Create in src/client/pcf/LegalWorkspace/utils/statusDerivation.ts.</step>
+    <step order="5">Create GradePill component (GradePill.tsx) — small badge displaying a letter grade (A-F) with color coding: A → colorPaletteGreenForeground1, B → colorPaletteTealForeground1, C → colorPaletteMarigoldForeground1, D → colorPalettePumpkinForeground1, F → colorPaletteCranberryForeground1. Use Fluent Badge component with makeStyles applying the correct token-based background color.</step>
+    <step order="6">Create "View All Matters" footer component with link-style button that calls navigation.postMessage to parent MDA with entity view navigation for sprk_matter entity. Style as a subtle link at the bottom of the matter list.</step>
+    <step order="7">Create a useMattersList hook that fetches matters via DataverseService.getMattersByUser() — returns { matters: IMatter[], isLoading: boolean, error: string | null, totalCount: number }. Total count is used for the tab badge. List is limited to top 5.</step>
+    <step order="8">Wire MyPortfolioWidget into the workspace shell — position in the right column of the workspace grid per workspace-main-page.jpg. Connect to DataverseService via useDataverseService hook.</step>
+    <step order="9">Verify dark mode rendering — confirm grade pills, status badges, and all text use semantic tokens correctly across light/dark/high-contrast themes.</step>
+    <step order="10">Update TASK-INDEX.md — mark task 005 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/components/MyPortfolio/MyPortfolioWidget.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/MyPortfolio/MatterItem.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/MyPortfolio/GradePill.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/MyPortfolio/index.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/utils/statusDerivation.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/hooks/useMattersList.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">My Portfolio widget renders with 3 tabs (Matters/Projects/Documents) with count badges showing loaded record counts</criterion>
+    <criterion testable="true">Matters tab displays up to 5 matter items with name, status badge, type, organization, practice area, and last activity</criterion>
+    <criterion testable="true">Status derivation correctly computes: Critical when overdueeventcount &gt; 0 OR utilization &gt; 85%, Warning when utilization 65-85%, On Track otherwise</criterion>
+    <criterion testable="true">3 grade pills display per matter (Budget Controls, Guidelines Compliance, Outcomes Success) with correct A-F color coding</criterion>
+    <criterion testable="true">Grade pill colors: A=green, B=teal, C=yellow, D=orange, F=red using Fluent semantic palette tokens</criterion>
+    <criterion testable="true">Overdue indicator shows red badge with count when overdueeventcount &gt; 0</criterion>
+    <criterion testable="true">"View All Matters" footer button sends postMessage to parent MDA frame for entity view navigation</criterion>
+    <criterion testable="true">Dark mode renders all elements correctly — no hardcoded color values</criterion>
+    <criterion testable="true">Loading state shows while DataverseService query is in flight</criterion>
+    <criterion testable="true">Matter name is clickable and navigates to MDA matter form via postMessage</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Reference screenshots/my-portfolio-matter-list_1.jpg for exact layout and visual design of matter items
+    - Reference screenshots/my-portfolio-projects-list_2.jpg and my-portfolio-documents-list_3.jpg for tab structure
+    - Fluent UI v9 Tab/TabList: import { Tab, TabList } from "@fluentui/react-components"
+    - Grade pill Fluent palette tokens: colorPaletteGreenForeground1, colorPaletteTealForeground1, colorPaletteMarigoldForeground1, colorPalettePumpkinForeground1, colorPaletteCranberryForeground1
+    - Status badge uses similar palette tokens: green for OnTrack, orange for Warning, red for Critical
+    - The "View All" navigation uses the navigation contract from task 001 (navigation.ts)
+    - Projects and Documents tabs will be implemented in task 006 — leave placeholder content with clear label
+    - Last activity timestamp should be formatted as relative time (e.g., "2 hours ago", "3 days ago")
+    - Consider extracting a RelativeTime utility if not already in @spaarke/ui-components
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 5 and 8.</protocol>
+  </execution>
+</task>

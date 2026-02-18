@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Block 4D - AI Summary Dialog with Scoring Grid</title>
+    <phase>Phase 2: Core Feature Blocks</phase>
+    <status>not-started</status>
+    <estimated-hours>7</estimated-hours>
+    <dependencies>014</dependencies>
+    <blocks>none</blocks>
+    <tags>pcf, react, fluent-ui, frontend, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag with AI integration via BFF (ADR-013), complex scoring grid layout with factor breakdowns, and complexity multiplier checklist display</rigor-reason>
+    <parallel-group>pg-phase2-todo</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the AI Summary dialog for to-do items (Block 4D) showing a Priority x Effort scoring grid.
+    The dialog displays: Priority score card with numeric score, level (Critical/High/Medium/Low), and a
+    factor breakdown table showing contributing factors and their point values. Effort score card with
+    numeric score, level (High/Med/Low), and a complexity multiplier checklist (1.3x multiple parties,
+    1.2x cross-jurisdiction, 1.1x regulatory, 1.2x high value, 1.3x time-sensitive — checkmarks for
+    applied multipliers). Both score cards side by side in a grid layout. Below: Analysis text section
+    and Suggested Actions list. Wire to BFF scoring endpoint (stub with mock data until available).
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 Dialog and Card components, React 18, complex grid layouts, scoring/analytics display, and BFF API integration.</role>
+
+  <goal>
+    TodoAISummaryDialog component that shows Priority and Effort scores in a side-by-side grid layout with
+    detailed factor breakdowns. Priority card shows score value, level, and factor contribution table. Effort
+    card shows score value, level, and complexity multiplier checklist. Below the grid: analysis text and
+    suggested actions. Wired to BFF scoring endpoint with mock data fallback. Dark mode supported.
+  </goal>
+
+  <context>
+    <background>
+      The to-do AI Summary dialog (Block 4D) provides transparency into how priority and effort scores are
+      calculated. Unlike the feed AI Summary (Block 3E) which focuses on event analysis, this dialog emphasizes
+      the Priority x Effort scoring system that determines to-do item ordering and urgency. The scoring grid
+      shows exact factor contributions for priority (overdue days, budget utilization, grades, deadline proximity,
+      matter value, pending invoices) and complexity multipliers for effort (multiple parties, cross-jurisdiction,
+      regulatory, high value, time-sensitive). This transparency helps legal operations managers understand why
+      items are prioritized the way they are and adjust their workflow accordingly. The scoring data comes from
+      the BFF scoring endpoint (tasks 017-019).
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/screenshots/to-do-list-ai-summary_2.jpg</file>
+      <file>src/client/pcf/LegalWorkspace/components/SmartToDo/TodoItem.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/components/ActivityFeed/AISummaryDialog.tsx</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">AI and scoring calls MUST go through BFF API — NEVER calculate scores client-side or call AI directly from client</constraint>
+    <constraint source="ADR-021">MUST use Fluent UI v9 Dialog component — no custom modal implementations</constraint>
+    <constraint source="ADR-021">MUST use makeStyles (Griffel) for all custom styling with Fluent tokens</constraint>
+    <constraint source="ADR-021">MUST support light mode, dark mode, and high-contrast mode</constraint>
+    <constraint source="ADR-021">MUST use @fluentui/react-icons for all icons (sparkle, checkmark, etc.)</constraint>
+    <constraint source="NFR-06">Scoring display MUST work with mock data when BFF endpoint is unavailable</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="theme-management" location=".claude/patterns/pcf/theme-management.md">Dark mode, semantic token usage for scoring cards and badges</pattern>
+      <pattern name="scoring-visual-reference" location="projects/home-corporate-workspace-r1/screenshots/to-do-list-ai-summary_2.jpg">Visual reference for scoring grid layout, factor table, multiplier checklist</pattern>
+      <pattern name="scoring-tables" location="projects/home-corporate-workspace-r1/spec.md">Priority factor tables and effort multiplier definitions</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create TodoAISummaryDialog.tsx component in src/client/pcf/LegalWorkspace/components/SmartToDo/ using Fluent v9 Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions. Add sparkle icon header similar to Block 3E dialog.</step>
+    <step order="2">Create PriorityScoreCard component — displays: large score value (e.g., "85"), priority level label with color (Critical/High/Medium/Low), and a factor breakdown table. Table rows show factor name, factor value, and contribution points. Factors: Overdue days (0-30pts), Budget utilization (0-20pts), Grades below C (0-15pts), Deadline proximity (0-15pts), Matter value tier (0-10pts), Pending invoices (0-10pts). Use Fluent v9 Table or custom grid.</step>
+    <step order="3">Create EffortScoreCard component — displays: large score value (e.g., "94"), effort level label with color (High/Med/Low), base effort value, and a complexity multiplier checklist. Each multiplier shows: checkmark icon if applied, multiplier label, and multiplier value. Multipliers: Multiple parties (1.3x), Cross-jurisdiction (1.2x), Regulatory (1.1x), High value (1.2x), Time-sensitive (1.3x). Use CheckmarkCircleRegular for applied, CircleRegular for not applied.</step>
+    <step order="4">Create scoring grid layout — Priority and Effort score cards side by side in a 2-column CSS Grid. Cards should be equal height. On narrow screens, stack vertically. Use makeStyles with Fluent tokens for the grid container.</step>
+    <step order="5">Add Analysis text section below the scoring grid — display AI-generated analysis text (same pattern as Block 3E AISummaryDialog). Use Fluent v9 Card with subtle appearance.</step>
+    <step order="6">Add Suggested Actions list below analysis — render actionable items (e.g., "Escalate priority", "Reassign task", "Review budget") as clickable list items with icons. Similar pattern to Block 3E suggested actions.</step>
+    <step order="7">Wire to BFF scoring endpoint — create useTodoScoring hook that calls GET /api/workspace/events/{id}/scores. Falls back to mock data with realistic scoring values when endpoint is unavailable. Include loading state (Spinner) and error state.</step>
+    <step order="8">Verify dark mode — all scoring cards, badges, factor tables, and multiplier checklists use semantic tokens. Test high-contrast mode.</step>
+    <step order="9">Update TASK-INDEX.md — mark task 016 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+    <tool name="terminal">Run shell commands for build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/components/SmartToDo/TodoAISummaryDialog.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/SmartToDo/PriorityScoreCard.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/SmartToDo/EffortScoreCard.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/hooks/useTodoScoring.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">TodoAISummaryDialog opens from a button on TodoItem</criterion>
+    <criterion testable="true">Dialog header shows sparkle icon with "AI Summary" title</criterion>
+    <criterion testable="true">PriorityScoreCard displays numeric score, priority level with correct color, and factor breakdown table with 6 factors</criterion>
+    <criterion testable="true">Factor breakdown table shows factor name, value, and contribution points for each priority factor</criterion>
+    <criterion testable="true">EffortScoreCard displays numeric score, effort level with correct color, base effort value, and complexity multiplier checklist</criterion>
+    <criterion testable="true">Complexity multiplier checklist shows 5 multipliers with checkmark (applied) or empty circle (not applied) indicators</criterion>
+    <criterion testable="true">Priority and Effort score cards render side by side in a grid layout, stacking vertically on narrow screens</criterion>
+    <criterion testable="true">Analysis text section displays below the scoring grid</criterion>
+    <criterion testable="true">Suggested Actions list renders clickable items below analysis</criterion>
+    <criterion testable="true">Dialog works with mock data when BFF endpoint is unavailable (NFR-06 fallback)</criterion>
+    <criterion testable="true">Dark mode renders correctly with zero hardcoded color values</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Reference screenshots/to-do-list-ai-summary_2.jpg for scoring grid layout — Priority card left, Effort card right, analysis below
+    - The screenshot shows Priority=105 (exceeds cap) — in implementation, scores are capped at 100. Mock data should use realistic capped values.
+    - Factor breakdown table format: | Factor | Value | Points | — e.g., "Overdue days | 12 days | 20 pts"
+    - Multiplier checklist format: [x] Multiple parties (1.3x) / [ ] Regulatory (1.1x) — checkmark for applied
+    - Consider reusing the analysis text and suggested actions pattern from AISummaryDialog (Block 3E task 013)
+    - Score value should be displayed prominently (large font size) with the level label below it
+    - Priority level colors match the badge colors from task 014 (Critical=red, High=orange, Medium=blue, Low=gray)
+    - Effort level colors match task 014 (High=red, Med=yellow, Low=green)
+    - The scoring grid is the unique differentiator from the feed AI Summary — it provides full scoring transparency
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 7.</protocol>
+  </execution>
+</task>

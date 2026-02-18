@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Block 3E - AI Summary Dialog</title>
+    <phase>Phase 2: Core Feature Blocks</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>none</blocks>
+    <tags>pcf, react, fluent-ui, frontend, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag with AI integration via BFF (ADR-013), complex dialog component with loading states, analysis display, and suggested actions</rigor-reason>
+    <parallel-group>pg-phase2-feed</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the AI Summary dialog for feed items (Block 3E). When a user clicks the AI Summary button (sparkle icon)
+    on a FeedItemCard, a Fluent v9 Dialog opens showing: sparkle icon header with "AI Summary" title, a loading
+    spinner during BFF API analysis, an Analysis card with AI-generated text once complete, a Suggested Actions list
+    (Reply, Create task, Open matter — clickable items), and an "Add to To Do" footer button that reuses the
+    flag-as-todo logic from Block 3D. Wire the dialog to the BFF AI Summary endpoint; use mock/stub data until
+    the endpoint is available. The dialog must support dark mode.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 Dialog component, React 18, AI integration patterns via BFF API, loading states, and accessible modal dialogs.</role>
+
+  <goal>
+    AISummaryDialog component that opens from the AI Summary button on FeedItemCard. Dialog displays a sparkle
+    icon header, loading spinner during analysis, AI-generated analysis text in a card, suggested actions as
+    clickable list items (Reply, Create task, Open matter), and an "Add to To Do" footer button. Wired to BFF
+    AI Summary endpoint with graceful fallback to mock data. Dark mode and high-contrast mode supported.
+  </goal>
+
+  <context>
+    <background>
+      The AI Summary dialog (Block 3E) provides AI-powered analysis of individual feed items. When a user wants
+      more context about an event (email, document, invoice, etc.), they click the sparkle icon on the feed card
+      to get an AI-generated summary with suggested next actions. This follows the AI Tool Framework architecture
+      (ADR-013) where AI calls are routed through the BFF API to the AI Playbook service. The dialog shows a
+      loading state during analysis and presents results in a structured format. The "Add to To Do" button in the
+      footer reuses the flag-as-todo mechanism from Block 3D. For R1, the BFF endpoint may not yet be available,
+      so the dialog must work with mock/stub data for development and testing.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/screenshots/updates-list-ai-summary_2.jpg</file>
+      <file>src/client/pcf/LegalWorkspace/components/ActivityFeed/FeedItemCard.tsx</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">AI calls MUST go through BFF API to AI Playbook service — NEVER call Azure AI services directly from client</constraint>
+    <constraint source="ADR-021">MUST use Fluent UI v9 Dialog component — no custom modal implementations</constraint>
+    <constraint source="ADR-021">MUST use makeStyles (Griffel) for all custom styling with Fluent tokens</constraint>
+    <constraint source="ADR-021">MUST support light mode, dark mode, and high-contrast mode</constraint>
+    <constraint source="ADR-021">MUST use @fluentui/react-icons for sparkle icon and action icons</constraint>
+    <constraint source="NFR-06">AI features MUST have deterministic fallback — every AI-enhanced feature works without AI</constraint>
+    <constraint source="spec">Do NOT expose API keys to client — all AI authentication handled server-side in BFF</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="ai-architecture" location="docs/guides/SPAARKE-AI-ARCHITECTURE.md">AI Tool Framework patterns — BFF endpoints for AI calls, streaming responses</pattern>
+      <pattern name="theme-management" location=".claude/patterns/pcf/theme-management.md">Dark mode, semantic token usage in dialogs</pattern>
+      <pattern name="ai-summary-visual" location="projects/home-corporate-workspace-r1/screenshots/updates-list-ai-summary_2.jpg">Visual reference for AI Summary dialog layout, sparkle header, analysis card, suggested actions</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create AISummaryDialog.tsx component in src/client/pcf/LegalWorkspace/components/ActivityFeed/ using Fluent v9 Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions components</step>
+    <step order="2">Add sparkle icon header — use SparkleRegular from @fluentui/react-icons in the DialogTitle area with "AI Summary" text. Style with brand color token.</step>
+    <step order="3">Implement loading state — show Fluent v9 Spinner component centered in the dialog body during the BFF API call. Include a brief "Analyzing..." text label below the spinner.</step>
+    <step order="4">Create Analysis card section — display AI-generated analysis text in a styled card container within DialogContent. Use Fluent v9 Card component with subtle appearance. Text should wrap naturally with appropriate line height.</step>
+    <step order="5">Create Suggested Actions list — render a list of clickable action items (Reply, Create task, Open matter) below the analysis card. Each action has an icon and label. Use Fluent v9 Button with subtle appearance or MenuItem pattern. Actions are interactive stubs for now.</step>
+    <step order="6">Add "Add to To Do" footer button in DialogActions — this button reuses the flag-as-todo logic from FeedTodoSyncContext (task 012). On click: flag the current event as to-do and close the dialog. Show confirmation feedback.</step>
+    <step order="7">Create useAISummary hook — manages dialog state (open/closed, loading, result, error). Calls BFF AI Summary endpoint via fetch. Falls back to mock data when endpoint unavailable (NFR-06 deterministic fallback).</step>
+    <step order="8">Wire to BFF AI Summary endpoint — use fetch to POST to /api/workspace/ai-summary with event context. Stub with mock data that returns after a 1.5s simulated delay until the BFF endpoint is built. Include error handling with user-friendly error message in dialog.</step>
+    <step order="9">Verify dark mode — all dialog elements use semantic tokens. Test high-contrast mode. Reference screenshot for spacing.</step>
+    <step order="10">Update TASK-INDEX.md — mark task 013 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+    <tool name="terminal">Run shell commands for build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/components/ActivityFeed/AISummaryDialog.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/hooks/useAISummary.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AISummaryDialog opens when AI Summary button is clicked on a FeedItemCard</criterion>
+    <criterion testable="true">Dialog header shows sparkle icon with "AI Summary" title text</criterion>
+    <criterion testable="true">Loading state displays Spinner with "Analyzing..." text during BFF call</criterion>
+    <criterion testable="true">Analysis card displays AI-generated text in a styled card container</criterion>
+    <criterion testable="true">Suggested Actions list renders clickable items (Reply, Create task, Open matter) with icons</criterion>
+    <criterion testable="true">"Add to To Do" footer button flags the event as to-do (reuses FeedTodoSyncContext) and closes dialog</criterion>
+    <criterion testable="true">Dialog works with mock/stub data when BFF endpoint is unavailable (NFR-06 fallback)</criterion>
+    <criterion testable="true">Dialog closes correctly via close button, Escape key, and backdrop click</criterion>
+    <criterion testable="true">Dark mode renders correctly with zero hardcoded color values</criterion>
+    <criterion testable="true">PCF control builds without TypeScript or webpack errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Reference screenshots/updates-list-ai-summary_2.jpg for dialog layout — sparkle header, analysis card, suggested actions, footer button
+    - The mock data should simulate realistic AI analysis text for different event types (email summary, document analysis, invoice review, etc.)
+    - Suggested actions should be context-aware: "Reply" for emails, "Review" for documents, "Approve" for invoices — map action set by event type
+    - The "Add to To Do" button should use the same flag-as-todo mechanism from task 012 (FeedTodoSyncContext.toggleFlag)
+    - Consider lazy loading the dialog content to reduce initial bundle impact (React.lazy or dynamic import)
+    - Error state should show a friendly message with a "Retry" button
+    - The BFF endpoint URL pattern follows the existing API structure: POST /api/workspace/ai-summary
+    - MSAL token acquisition for BFF calls should follow the pattern established in task 001's auth setup
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 7.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Dark Mode Audit</title>
+    <phase>Phase 4: Integration &amp; Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>037</blocks>
+    <tags>pcf, fluent-ui, frontend, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing and validation task with explicit ADR-021 constraint — no new code implementation, audit and fix existing components</rigor-reason>
+    <parallel-group>pg-polish</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Audit ALL components in the Legal Operations Workspace for dark mode compliance per ADR-021. Search for and
+    eliminate every hardcoded hex, rgb, hsl, and named color value in .tsx and .ts files. All colors must use
+    Fluent UI v9 semantic tokens via makeStyles. Verify that light, dark, and high-contrast modes render correctly
+    for every block. Pay special attention to color-coded threshold indicators (Portfolio Health red/orange/green
+    grades, priority/effort badge colors) which must use a semantic token approach.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 theming, Griffel makeStyles, semantic color tokens, and accessibility compliance.</role>
+
+  <goal>
+    Zero hardcoded color values (hex, rgb, hsl, named colors) across all workspace components. Every color uses
+    Fluent UI v9 semantic tokens. Light mode, dark mode, and high-contrast mode render correctly for all 7 build
+    blocks. Color-coded thresholds (health grades, priority badges) use theme-aware semantic approach.
+  </goal>
+
+  <context>
+    <background>
+      ADR-021 mandates that all UI must use Fluent UI v9 semantic tokens for colors — zero hardcoded values.
+      This is critical for dark mode and high-contrast mode support. After building all 7 blocks individually,
+      this audit task systematically checks every component for compliance. Color-coded elements like Portfolio
+      Health grades (A/B/C/D/F with green/yellow/orange/red), priority badges, and effort indicators require
+      special attention as they often use hardcoded colors for status visualization.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/client/pcf/LegalWorkspace/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">ZERO hardcoded hex/rgb/hsl/named color values permitted — ALL colors must use Fluent UI v9 semantic tokens</constraint>
+    <constraint source="ADR-021">MUST use makeStyles (Griffel) for all custom styling with Fluent tokens</constraint>
+    <constraint source="ADR-021">MUST support light mode, dark mode, and high-contrast mode via FluentProvider theme switching</constraint>
+    <constraint source="ADR-021">MUST use semantic color tokens from @fluentui/react-components tokens</constraint>
+    <constraint source="ADR-021">Color-coded status indicators (grades, badges) must adapt to theme — use colorPaletteGreen*, colorPaletteRed*, etc.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+    <patterns>
+      <pattern name="theme-management" location=".claude/patterns/pcf/theme-management.md">FluentProvider theme setup, dark mode detection, semantic token usage for all color references</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Search all .tsx and .ts files in src/client/pcf/LegalWorkspace/ for hardcoded color values: hex (#xxx, #xxxxxx, #xxxxxxxx), rgb/rgba, hsl/hsla, and CSS named colors (red, green, blue, white, black, gray, orange, yellow, etc.)</step>
+    <step order="2">Replace any hardcoded color values found with appropriate Fluent UI v9 semantic tokens — use tokens.colorNeutral*, tokens.colorBrand*, tokens.colorPalette* from @fluentui/react-components</step>
+    <step order="3">Verify each component renders correctly in light mode — check text readability, background contrast, border visibility, and interactive element states (hover, focus, active)</step>
+    <step order="4">Verify each component renders correctly in dark mode — check text readability against dark backgrounds, icon visibility, badge colors, and interactive states</step>
+    <step order="5">Verify each component renders correctly in high-contrast mode — check that all interactive elements have visible borders, focus indicators are prominent, and text meets high-contrast requirements</step>
+    <step order="6">Audit color-coded threshold indicators: Portfolio Health grades (A=green, B=yellow, C=orange, D/F=red) must use tokens.colorPaletteGreenForeground1, tokens.colorPaletteYellowForeground1, etc. — verify they remain distinguishable in all three modes</step>
+    <step order="7">Audit priority and effort badge colors — verify they use semantic status tokens (tokens.colorStatusSuccess*, tokens.colorStatusWarning*, tokens.colorStatusDanger*) and remain distinguishable in dark and high-contrast modes</step>
+    <step order="8">Document all fixes made with before/after examples in notes/dark-mode-audit.md</step>
+    <step order="9">Update TASK-INDEX.md — mark task 031 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+    <tool name="terminal">Run shell commands for grep searches and build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/ (all .tsx/.ts files — color fixes)</output>
+    <output type="documentation">projects/home-corporate-workspace-r1/notes/dark-mode-audit.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero hardcoded hex color values (#xxx, #xxxxxx) found in any .tsx or .ts file</criterion>
+    <criterion testable="true">Zero hardcoded rgb/rgba/hsl/hsla values found in any .tsx or .ts file</criterion>
+    <criterion testable="true">Zero CSS named color values (red, green, blue, white, black, gray) found in styling code</criterion>
+    <criterion testable="true">All components render correctly in light mode with proper text contrast and readability</criterion>
+    <criterion testable="true">All components render correctly in dark mode with proper text contrast and readability</criterion>
+    <criterion testable="true">All components render correctly in high-contrast mode with visible borders and focus indicators</criterion>
+    <criterion testable="true">Portfolio Health grade colors adapt to theme using semantic palette tokens</criterion>
+    <criterion testable="true">Priority and effort badge colors adapt to theme using semantic status tokens</criterion>
+    <criterion testable="true">PCF control builds without TypeScript or webpack errors after all fixes</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Use grep/ripgrep to systematically search for color patterns: #[0-9a-fA-F]{3,8}, rgb\(, rgba\(, hsl\(, hsla\(
+    - Also search for CSS named colors in makeStyles blocks: 'red', 'green', 'blue', 'white', 'black', 'gray', 'orange', 'yellow'
+    - Fluent v9 semantic token mapping: tokens.colorNeutralForeground1 (primary text), tokens.colorNeutralBackground1 (page bg), tokens.colorBrandForeground1 (brand/accent)
+    - For status colors use: tokens.colorPaletteGreenForeground1 (success/A grade), tokens.colorPaletteYellowForeground1 (warning/B grade), tokens.colorPaletteRedForeground1 (danger/D-F grade)
+    - Priority badge mapping: Critical → colorStatusDangerForeground1, High → colorStatusWarningForeground1, Medium → colorStatusSuccessForeground1, Low → colorNeutralForeground2
+    - This task can run in parallel with task 032 (Accessibility Audit) since they modify different aspects of the same files
+    - Reference .claude/patterns/pcf/theme-management.md for the complete token usage guide
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 2 and 7.</protocol>
+  </execution>
+</task>

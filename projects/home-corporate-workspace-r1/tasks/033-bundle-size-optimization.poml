@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Bundle Size Optimization</title>
+    <phase>Phase 4: Integration &amp; Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>040</blocks>
+    <tags>pcf, frontend, typescript</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Optimization task with explicit NFR-02 constraint — modifies build configuration and import patterns, no new features</rigor-reason>
+    <parallel-group>pg-polish</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Optimize the Legal Operations Workspace PCF bundle to ensure it stays under the 5MB size limit (NFR-02).
+    Analyze the bundle with source map explorer, identify the largest dependencies, implement React.lazy() for
+    dialog components (Create Matter, AI Summary, Briefing, Notification Panel), apply code splitting by block
+    where possible, tree-shake unused Fluent UI components by ensuring named imports only, and verify that
+    platform-library declarations correctly exclude React and Fluent UI from the bundle.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in PCF bundle optimization, webpack configuration, React code splitting, tree shaking, and Fluent UI v9 import optimization.</role>
+
+  <goal>
+    PCF bundle size is under 5MB after optimization. Dialog components are lazy-loaded via React.lazy().
+    All Fluent UI imports use named imports (no barrel imports). Platform-library declarations exclude React
+    and Fluent UI from the bundle. Source map analysis shows no unexpected large dependencies.
+  </goal>
+
+  <context>
+    <background>
+      PCF controls deployed to Dataverse have practical bundle size limits. Large bundles cause slow initial
+      page loads and poor user experience. The Legal Operations Workspace is a complex Custom Page with 7
+      build blocks, multiple dialogs, and Fluent UI v9 dependencies. Key optimization strategies: (1) exclude
+      React and Fluent UI via platform-library declarations (they're provided by the platform runtime),
+      (2) lazy-load dialog components that aren't visible on initial render, (3) tree-shake unused Fluent
+      components via named imports, (4) code-split independent blocks if the bundler supports it.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/client/pcf/LegalWorkspace/ControlManifest.Input.xml</file>
+      <file>src/client/pcf/LegalWorkspace/package.json</file>
+      <file>src/client/pcf/LegalWorkspace/tsconfig.json</file>
+      <file>src/client/pcf/LegalWorkspace/LegalWorkspaceApp.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/components/</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-02">PCF bundle size MUST be under 5MB after optimization</constraint>
+    <constraint source="ADR-022">Declare platform-library in ControlManifest.Input.xml for React and Fluent UI — do NOT bundle these libraries</constraint>
+    <constraint source="ADR-022">Use named imports from @fluentui/react-components — NEVER import entire barrel (import { Button } from '@fluentui/react-components' is correct)</constraint>
+    <constraint source="ADR-006">Build as PCF control — output must be valid PCF artifact</constraint>
+    <constraint source="spec">Dialog components (Create Matter, AI Summary, Briefing, Notification Panel) are not visible on initial load — candidates for lazy loading</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+      <file>.claude/adr/ADR-006.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+    </files>
+    <patterns>
+      <pattern name="pcf-packaging" location="docs/guides/PCF-V9-PACKAGING.md">PCF v9 packaging guide with platform-library declarations and bundle optimization</pattern>
+      <pattern name="existing-pcf-bundle" location="src/client/pcf/AnalysisWorkspace/">Reference for bundle optimization patterns in production PCF controls</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build the PCF control (npm run build) and measure current bundle size — record the total output size of the bundle.js artifact</step>
+    <step order="2">Analyze bundle composition with source-map-explorer or webpack-bundle-analyzer — identify the top 10 largest dependencies by size and any unexpected inclusions</step>
+    <step order="3">Verify platform-library declarations in ControlManifest.Input.xml — confirm React, ReactDOM, and @fluentui/react-components are declared as platform libraries and NOT included in the bundle output</step>
+    <step order="4">Audit all import statements for barrel imports — search for 'import * from' or 'import { ... } from "@fluentui/react-components"' with excessive named imports. Ensure each file imports only the specific components it uses.</step>
+    <step order="5">Implement React.lazy() with Suspense for dialog components: CreateMatterDialog, AiSummaryDialog, BriefingPanel, NotificationPanel — these are only rendered when user triggers them</step>
+    <step order="6">Evaluate code-splitting opportunities by block — if webpack supports dynamic import() in the PCF build, split independent blocks into separate chunks loaded on demand</step>
+    <step order="7">Tree-shake unused Fluent UI components and icons — verify @fluentui/react-icons imports are specific (import { AlertRegular } not import * as Icons)</step>
+    <step order="8">Rebuild and re-measure bundle size — compare before and after, document the size reduction for each optimization applied</step>
+    <step order="9">Document optimization results in notes/bundle-optimization.md with before/after sizes, optimizations applied, and remaining opportunities</step>
+    <step order="10">Update TASK-INDEX.md — mark task 033 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects, install source-map-explorer, run analysis</tool>
+    <tool name="terminal">Run shell commands for build and analysis</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/ControlManifest.Input.xml (verified platform-library declarations)</output>
+    <output type="code">src/client/pcf/LegalWorkspace/LegalWorkspaceApp.tsx (React.lazy imports for dialogs)</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/ (optimized imports across all files)</output>
+    <output type="documentation">projects/home-corporate-workspace-r1/notes/bundle-optimization.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PCF bundle size is under 5MB after all optimizations</criterion>
+    <criterion testable="true">React and Fluent UI are excluded from bundle via platform-library declarations</criterion>
+    <criterion testable="true">Dialog components (CreateMatterDialog, AiSummaryDialog, BriefingPanel, NotificationPanel) use React.lazy()</criterion>
+    <criterion testable="true">All Fluent UI imports use named imports — no barrel imports or wildcard imports</criterion>
+    <criterion testable="true">All @fluentui/react-icons imports are specific named icon imports</criterion>
+    <criterion testable="true">PCF control builds without errors and functions correctly after optimization</criterion>
+    <criterion testable="true">Bundle analysis shows no unexpected large dependencies remaining</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Run 'npm run build' then check the output bundle.js file size — PCF build output is typically in the out/ directory
+    - Install source-map-explorer as a dev dependency if not present: npm install --save-dev source-map-explorer
+    - Platform-library declarations in ControlManifest.Input.xml prevent React/Fluent from being bundled — verify this first
+    - React.lazy() requires Suspense boundary — add fallback loading spinners using Fluent Spinner component
+    - Code splitting in PCF webpack config may require custom webpack configuration — check if pcf-scripts supports it
+    - If code splitting is not feasible in PCF build, focus on tree-shaking and lazy-loading dialogs instead
+    - Common large dependencies to check: @fluentui/react-components, @fluentui/react-icons, react-window (if used for virtualization)
+    - Fluent icon imports: 'import { AlertRegular } from "@fluentui/react-icons/lib/AlertRegular"' is more tree-shakeable than importing from barrel
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 8.</protocol>
+  </execution>
+</task>

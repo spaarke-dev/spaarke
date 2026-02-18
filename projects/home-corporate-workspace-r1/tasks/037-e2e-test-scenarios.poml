@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>E2E Test Scenarios</title>
+    <phase>Phase 4: Integration &amp; Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>030, 031, 032</dependencies>
+    <blocks>040</blocks>
+    <tags>testing, e2e-test, pcf, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing tag — E2E test plan documentation and manual verification of all critical user flows</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Document and manually verify end-to-end test scenarios for all critical user flows in the Legal Operations
+    Workspace deployed to the dev environment. Create a structured E2E test plan covering: full page load in
+    Custom Page within MDA, theme toggle across all blocks, all 8 feed filter categories, flag-to-do round-trip,
+    Create New Matter wizard complete flow, all 6 action card launches, My Portfolio "View All" navigation,
+    and keyboard navigation through the entire page. Execute each scenario and document pass/fail results.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in end-to-end testing, test plan creation, Power Apps Custom Page testing, and manual verification procedures.</role>
+
+  <goal>
+    A comprehensive E2E test plan document with all critical user flows defined, each scenario manually executed
+    in the dev environment, and pass/fail results documented with evidence. All critical flows passing.
+  </goal>
+
+  <context>
+    <background>
+      The Legal Operations Workspace is a Power Apps Custom Page embedded in a Model-Driven App. E2E testing
+      requires running the full application in a Dataverse environment with real data. This task creates and
+      executes a structured test plan that verifies all critical user flows work correctly from the user's
+      perspective. The test plan serves as both a verification tool and a regression baseline for future
+      deployments.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/client/pcf/LegalWorkspace/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">All 7 build blocks must be functional in the deployed Custom Page</constraint>
+    <constraint source="NFR-01">Page initial load must be under 3 seconds</constraint>
+    <constraint source="NFR-03">Keyboard navigation must work for all interactive elements (WCAG 2.1 AA)</constraint>
+    <constraint source="ADR-021">Theme toggle must switch all blocks between light, dark, and high-contrast modes</constraint>
+    <constraint source="spec">Flag-to-do round-trip: flag in feed creates to-do, unflag removes it</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="spec-success-criteria" location="projects/home-corporate-workspace-r1/spec.md">Success criteria from spec.md that define the 16 acceptance criteria for the project</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create E2E test plan document at projects/home-corporate-workspace-r1/notes/e2e-test-results.md with structured format: Test ID, Scenario Name, Preconditions, Steps, Expected Result, Actual Result, Status (Pass/Fail/Blocked), Notes</step>
+    <step order="2">Test E2E-001: Full page load in Custom Page — open the MDA, navigate to the Legal Operations Workspace page, verify all 7 blocks render (Get Started cards, Portfolio Health, Updates Feed, Smart To Do, My Portfolio, Quick Summary, Notification Bell). Measure load time against 3-second threshold.</step>
+    <step order="3">Test E2E-002: Theme toggle — click theme toggle button in header, verify all 7 blocks switch from light to dark mode. Toggle back to light. Toggle to high-contrast. Verify no visual artifacts, broken layouts, or unreadable text in any mode.</step>
+    <step order="4">Test E2E-003: Feed filter categories — test each of the 8 filter pills (All, High Priority, Overdue, Alerts, Emails, Documents, Invoices, Tasks). Verify count badges update, feed items filter correctly, and empty state shows when no items match.</step>
+    <step order="5">Test E2E-004: Flag-to-do round-trip — flag an event in the Updates Feed, verify it appears in the Smart To Do list. Navigate to Smart To Do, verify the flagged item shows with correct priority/effort badges. Unflag from feed, verify it disappears from Smart To Do.</step>
+    <step order="6">Test E2E-005: Create New Matter wizard — click "Create New Matter" action card, verify 5-step wizard opens. Complete all 5 steps with test data. Submit and verify the matter is created in Dataverse. Verify pre-fill suggestions from AI if available.</step>
+    <step order="7">Test E2E-006: Action cards launch Analysis Builder — test each of the 6 remaining action cards (other than Create New Matter). Verify each launches the AI Playbook Analysis Builder with correct pre-configured context/intent parameters.</step>
+    <step order="8">Test E2E-007: My Portfolio "View All" — verify the My Portfolio block shows top 5 matters. Click "View All" link. Verify navigation to the full matter list view in the MDA.</step>
+    <step order="9">Test E2E-008: Keyboard navigation — Tab through the entire page from header to footer. Verify all interactive elements are reachable. Verify Enter/Space activates buttons. Verify Escape closes dialogs. Document the complete tab order.</step>
+    <step order="10">Document all results with pass/fail status, any screenshots of failures, and notes on issues found. Update notes/e2e-test-results.md with final results.</step>
+    <step order="11">Update TASK-INDEX.md — mark task 037 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run shell commands as needed</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">projects/home-corporate-workspace-r1/notes/e2e-test-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">E2E test plan document exists with all 8+ test scenarios defined</criterion>
+    <criterion testable="true">Full page load test passes — all 7 blocks render within 3 seconds</criterion>
+    <criterion testable="true">Theme toggle test passes — all blocks render correctly in light, dark, and high-contrast modes</criterion>
+    <criterion testable="true">Feed filter test passes — all 8 filter categories work correctly with dynamic counts</criterion>
+    <criterion testable="true">Flag-to-do round-trip test passes — flag creates to-do, unflag removes it</criterion>
+    <criterion testable="true">Create New Matter wizard test passes — 5-step flow completes and creates record</criterion>
+    <criterion testable="true">Action cards test passes — all 6 cards launch Analysis Builder correctly</criterion>
+    <criterion testable="true">Keyboard navigation test passes — all interactive elements reachable via Tab</criterion>
+    <criterion testable="true">All critical user flows documented with pass/fail results</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - This is a sequential task — depends on cross-block sync (030), dark mode audit (031), and accessibility audit (032)
+    - E2E tests require the Custom Page to be deployed to the dev Dataverse environment
+    - If the Custom Page is not yet deployed, create the test plan document and mark tests as "Blocked - awaiting deployment"
+    - For Create New Matter wizard, ensure test data can be cleaned up after testing
+    - Action card launch verification: check that Analysis Builder receives the correct context parameters via postMessage or URL parameters
+    - Keep the test plan document as a living document — future deployments can re-run the same scenarios
+    - If any tests fail, document the failure with details and create follow-up fix tasks if needed
+    - Load time measurement: use browser DevTools Network tab for accurate timing
+    - Keyboard navigation: document the complete tab order for reference
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 5 and 9.</protocol>
+  </execution>
+</task>

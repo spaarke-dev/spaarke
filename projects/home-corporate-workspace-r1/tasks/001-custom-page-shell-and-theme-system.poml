@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Custom Page Shell and Theme System</title>
+    <phase>Phase 1: Foundation &amp; Independent Blocks</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 003, 004, 005, 006, 007</blocks>
+    <tags>pcf, react, typescript, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag with code implementation — foundational component that all subsequent UI tasks depend on</rigor-reason>
+    <parallel-group>pg-foundation</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the Custom Page shell component for the Legal Operations Workspace. This is the foundational component
+    that provides the FluentProvider wrapper (light/dark/high-contrast themes), responsive 50/50 grid layout that
+    stacks to a single column below 1024px, a page header with notification bell and theme toggle button, and
+    localStorage persistence for theme preference with system preference detection on first load. This is a
+    Power Apps Custom Page (React 18 exception) — you CAN use createRoot and modern React 18 APIs.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in PCF control development, Fluent UI v9 theming, React 18, and Power Apps Custom Pages.</role>
+
+  <goal>
+    A fully renderable Custom Page shell with FluentProvider wrapping all content, theme toggle that persists to
+    localStorage and detects system preference on first load, responsive grid layout (50/50 at 1024px+, single
+    column below), and a page header with notification bell icon button and theme toggle. The component must
+    support light, dark, and high-contrast themes using only Fluent UI v9 semantic tokens.
+  </goal>
+
+  <context>
+    <background>
+      The Legal Operations Workspace is a single-page dashboard embedded as a Power Apps Custom Page in a
+      Model-Driven App (MDA). It provides legal operations managers with portfolio health metrics, an activity
+      feed, a smart to-do list, a portfolio browser, quick-action cards, and AI-powered summaries. This task
+      creates the foundational shell that all 7 build blocks will render within. The Custom Page runs in its
+      own iframe context, enabling React 18 APIs (createRoot, concurrent features) — this is an approved
+      exception to ADR-022's React 16 constraint.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/plan.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/workspace-main-page.jpg</file>
+      <file>src/client/pcf/AnalysisWorkspace/</file>
+      <file>src/client/pcf/DueDatesWidget/</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">All UI MUST use Fluent UI v9 (@fluentui/react-components) exclusively — no v8, no third-party UI libraries</constraint>
+    <constraint source="ADR-021">MUST use makeStyles (Griffel) for all custom styling with Fluent tokens — NEVER hardcode hex/rgb/hsl color values</constraint>
+    <constraint source="ADR-021">MUST support light mode, dark mode, and high-contrast mode via FluentProvider theme switching</constraint>
+    <constraint source="ADR-021">MUST use semantic color tokens from @fluentui/react-components tokens</constraint>
+    <constraint source="ADR-021">MUST use @fluentui/react-icons for all icons (notification bell, theme toggle, etc.)</constraint>
+    <constraint source="ADR-022">Declare platform-library in ControlManifest for React and Fluent UI — do NOT bundle React in the PCF artifact</constraint>
+    <constraint source="ADR-022">Exception: This is a Custom Page (React 18 permitted). CAN use createRoot, concurrent features, modern hooks.</constraint>
+    <constraint source="ADR-006">Build as PCF control — no legacy JS webresources</constraint>
+    <constraint source="ADR-012">Import shared UI components from @spaarke/ui-components where available</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+      <file>.claude/adr/ADR-006.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+    </files>
+    <patterns>
+      <pattern name="control-initialization" location=".claude/patterns/pcf/control-initialization.md">PCF control scaffolding: ControlManifest.Input.xml, index.ts entry point, React root mounting</pattern>
+      <pattern name="theme-management" location=".claude/patterns/pcf/theme-management.md">FluentProvider theme setup, dark mode detection, theme switching with tokens</pattern>
+      <pattern name="workspace-pcf-reference" location="src/client/pcf/AnalysisWorkspace/">Canonical multi-panel workspace PCF with theme handling and MSAL auth — follow this structure</pattern>
+      <pattern name="clean-pcf-template" location="src/client/pcf/DueDatesWidget/">Cleanest React PCF template for file structure reference</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Scaffold PCF control directory at src/client/pcf/LegalWorkspace/ — create ControlManifest.Input.xml with platform-library declarations for React 18 and Fluent UI v9, index.ts entry point with createRoot (React 18 API), package.json with dependencies, tsconfig.json</step>
+    <step order="2">Create FluentProvider wrapper component (LegalWorkspaceApp.tsx) that wraps all child content — configure with webLightTheme, webDarkTheme, and teamsHighContrastTheme from @fluentui/react-components</step>
+    <step order="3">Implement theme system: ThemeContext with useTheme hook, ThemeToggle component, localStorage persistence (key: 'spaarke-workspace-theme'), system preference detection via window.matchMedia('(prefers-color-scheme: dark)') on first load when no localStorage value exists</step>
+    <step order="4">Create responsive grid layout component (WorkspaceGrid.tsx) using makeStyles with Fluent tokens — 50/50 two-column grid at 1024px and above, stacking to single column below 1024px using CSS Grid with @media queries</step>
+    <step order="5">Create page header component (PageHeader.tsx) with workspace title, notification bell icon button (AlertRegular from @fluentui/react-icons) with unread badge, and theme toggle button (WeatherMoonRegular/WeatherSunnyRegular)</step>
+    <step order="6">Create navigation contract utility (navigation.ts) — postMessage to parent MDA frame for entity view/form navigation with typed message interface (INavigationMessage with action, entityName, entityId, viewId fields)</step>
+    <step order="7">Build the PCF control (npm run build) and verify it compiles without errors. Verify the shell renders FluentProvider, header, and responsive grid placeholder content.</step>
+    <step order="8">Update TASK-INDEX.md — mark task 001 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects, install dependencies</tool>
+    <tool name="pcf-cli">PCF control scaffolding reference</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/ControlManifest.Input.xml</output>
+    <output type="code">src/client/pcf/LegalWorkspace/index.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/package.json</output>
+    <output type="code">src/client/pcf/LegalWorkspace/tsconfig.json</output>
+    <output type="code">src/client/pcf/LegalWorkspace/LegalWorkspaceApp.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/Shell/WorkspaceGrid.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/Shell/PageHeader.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/hooks/useTheme.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/Shell/ThemeToggle.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/utils/navigation.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Custom Page shell renders inside FluentProvider with correct Fluent v9 theme (light by default)</criterion>
+    <criterion testable="true">Theme toggle switches between light, dark, and high-contrast modes with visual change across all semantic tokens</criterion>
+    <criterion testable="true">Theme preference persists to localStorage (key: 'spaarke-workspace-theme') and survives page reload</criterion>
+    <criterion testable="true">On first load with no localStorage value, system preference (prefers-color-scheme) is detected and applied</criterion>
+    <criterion testable="true">Responsive layout renders 50/50 two-column grid at 1024px+ and stacks to single column below 1024px</criterion>
+    <criterion testable="true">Page header renders with notification bell icon and theme toggle button</criterion>
+    <criterion testable="true">Navigation contract sends correctly typed postMessage to parent frame</criterion>
+    <criterion testable="true">PCF control builds without TypeScript or webpack errors</criterion>
+    <criterion testable="true">Zero hardcoded color values (hex, rgb, hsl) — all colors use Fluent semantic tokens</criterion>
+    <criterion testable="true">Responsive layout works correctly at 1024px, 1280px, and 1920px viewport widths</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Reference screenshots/workspace-main-page.jpg for overall page composition and header layout
+    - Follow AnalysisWorkspace PCF structure for multi-panel workspace patterns (src/client/pcf/AnalysisWorkspace/)
+    - The notification bell will later connect to Block 7 (Notification Panel Drawer) — for now, add onClick stub
+    - React 18 createRoot is permitted (Custom Page exception) — do NOT use ReactDOM.render (React 16 API)
+    - Use CSS Grid (not Flexbox) for the main 50/50 layout to simplify responsive stacking
+    - Left column: Get Started cards (Block 1), Portfolio Health (Block 2), Updates Feed (Block 3), Smart To Do (Block 4)
+    - Right column: My Portfolio (Block 5) — stacks below left column on narrow screens
+    - High-contrast theme uses teamsHighContrastTheme from @fluentui/react-components
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 3 and 6.</protocol>
+  </execution>
+</task>

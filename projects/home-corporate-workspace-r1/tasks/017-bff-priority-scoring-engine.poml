@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>BFF - Priority Scoring Engine</title>
+    <phase>Phase 2: Core Feature Blocks</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>019</blocks>
+    <tags>bff-api, api, backend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag with complex business logic — deterministic scoring engine with 6 factor tables, comprehensive unit tests, and transparent reason strings</rigor-reason>
+    <parallel-group>pg-scoring</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create a deterministic priority scoring engine for the Legal Operations Workspace BFF API. The engine calculates
+    a priority score on a 0-100 scale based on 6 weighted factors: overdue days (0-30pts), budget utilization
+    (0-20pts), grades below C (0-15pts), deadline proximity (0-15pts), matter value tier (0-10pts), and pending
+    invoices (0-10pts). Each factor has a defined scoring table with thresholds. The engine produces a final score
+    (sum of all factors, capped at 100), a priority level (Critical/High/Medium/Low based on score ranges), and
+    transparent reason strings listing all contributing factors. Add comprehensive unit tests with known
+    input/output scenarios to verify scoring correctness.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET 8 Minimal API services, business rule engines, deterministic scoring algorithms, unit testing with xUnit, and DI-minimalist service design.</role>
+
+  <goal>
+    PriorityScoringService class that accepts event/matter context data and returns a PriorityScoreResult
+    containing: numeric score (0-100, capped), priority level (Critical/High/Medium/Low), individual factor
+    scores with explanations, and a transparent reason string listing all contributing factors. Unit tests
+    cover all scoring thresholds, edge cases, boundary conditions, and the cap at 100.
+  </goal>
+
+  <context>
+    <background>
+      Priority scoring is a core feature of the Legal Operations Workspace. It determines the order of items in
+      the Smart To Do list and the priority badges displayed on feed items and to-do cards. The scoring must be
+      deterministic (same inputs always produce same outputs) so that legal operations managers can trust and
+      understand the prioritization. The scoring engine runs server-side in the BFF API because it requires
+      multi-entity context (event data, matter data, financial data) that would be expensive to assemble
+      client-side. The transparent reason strings are critical — they appear in the AI Summary dialog (Block 4D)
+      to explain why an item has a particular priority score. The scoring pattern follows the existing
+      ScorecardCalculatorEndpoints.cs pattern in the BFF API.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Scorecard/ScorecardCalculatorEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API pattern — service registered as concrete type, no controller classes</constraint>
+    <constraint source="ADR-010">DI minimalism — register as concrete type (not interface) unless a seam is specifically required. Total BFF DI registrations must remain ≤15 non-framework lines.</constraint>
+    <constraint source="spec">Scoring MUST be deterministic — same inputs always produce same outputs</constraint>
+    <constraint source="spec">Score MUST be capped at 100 — sum of all factors cannot exceed 100</constraint>
+    <constraint source="spec">Priority levels: Critical (80-100), High (60-79), Medium (30-59), Low (0-29)</constraint>
+    <constraint source="FR-19">Priority scoring calculates correct score based on deterministic factors — score matches formula for all test cases</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="scoring-pattern" location="src/server/api/Sprk.Bff.Api/Api/Scorecard/ScorecardCalculatorEndpoints.cs">Canonical scoring endpoint pattern — follow this structure for score calculation and response</pattern>
+      <pattern name="service-registration" location=".claude/patterns/api/service-registration.md">DI module pattern for service registration — concrete types, module grouping</pattern>
+      <pattern name="di-module" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs">DI module pattern reference — follow for WorkspaceModule registration</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create PriorityScoringService.cs at src/server/api/Sprk.Bff.Api/Services/Workspace/PriorityScoringService.cs — define the service class with a CalculatePriorityScore method. Define PriorityScoreResult record (Score, Level, Factors list, ReasonString).</step>
+    <step order="2">Define PriorityFactor enum and PriorityFactorResult record — enum values: OverdueDays, BudgetUtilization, GradesBelowC, DeadlineProximity, MatterValueTier, PendingInvoices. Result: FactorType, RawValue, Points, Explanation string.</step>
+    <step order="3">Implement overdue days scoring — 0 days overdue = 0 pts, 1-7 days = 10 pts, 8-14 days = 20 pts, 15+ days = 30 pts. Max: 30 points. Generate reason: "12 days overdue (+20 pts)".</step>
+    <step order="4">Implement budget utilization scoring — &lt;65% utilized = 0 pts, 65-85% = 10 pts, &gt;85% = 20 pts. Max: 20 points. Generate reason: "Budget at 87% utilization (+20 pts)".</step>
+    <step order="5">Implement grade scoring — count grades below C across all grading dimensions (budgetcontrols_grade, guidelinescompliance_grade, outcomessuccess_grade). Each grade below C = 5 pts, max 15 pts. Generate reason: "2 grades below C (+10 pts)".</step>
+    <step order="6">Implement deadline proximity scoring — &gt;30 days = 0 pts, 14-30 days = 5 pts, 7-14 days = 10 pts, &lt;7 days = 15 pts. Max: 15 points. Generate reason: "Deadline in 5 days (+15 pts)".</step>
+    <step order="7">Implement matter value tier scoring — Low value = 0 pts, Medium value = 5 pts, High value = 10 pts. Max: 10 points. Generate reason: "High value matter (+10 pts)".</step>
+    <step order="8">Implement pending invoice scoring — 0 pending = 0 pts, 1-2 pending = 5 pts, 3+ pending = 10 pts. Max: 10 points. Generate reason: "4 pending invoices (+10 pts)".</step>
+    <step order="9">Sum all factor scores, cap at 100. Determine priority level: Critical (80-100), High (60-79), Medium (30-59), Low (0-29). Generate composite reason string joining all non-zero factor reasons.</step>
+    <step order="10">Define PriorityScoreInput record/DTO — fields: OverdueDays (int), BudgetUtilizationPercent (decimal), GradesBelowC (int), DaysToDeadline (int?), MatterValueTier (string), PendingInvoiceCount (int). This is the input contract for the scoring method.</step>
+    <step order="11">Add comprehensive unit tests at tests/Sprk.Bff.Api.Tests/Services/Workspace/PriorityScoringServiceTests.cs — test each factor individually at all thresholds, test combined scoring, test cap at 100, test boundary conditions (exact threshold values), test zero-score scenario, test max-score scenario. Use xUnit with [Theory] and [InlineData] for threshold testing.</step>
+    <step order="12">Update TASK-INDEX.md — mark task 017 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands for build and test verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/PriorityScoringService.cs</output>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Services/Workspace/PriorityScoringServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PriorityScoringService calculates correct overdue days score: 0 days=0, 1-7 days=10, 8-14 days=20, 15+ days=30</criterion>
+    <criterion testable="true">PriorityScoringService calculates correct budget utilization score: &lt;65%=0, 65-85%=10, &gt;85%=20</criterion>
+    <criterion testable="true">PriorityScoringService calculates correct grade score: each grade below C = 5 pts, max 15</criterion>
+    <criterion testable="true">PriorityScoringService calculates correct deadline proximity score: &gt;30d=0, 14-30d=5, 7-14d=10, &lt;7d=15</criterion>
+    <criterion testable="true">PriorityScoringService calculates correct matter value tier score: Low=0, Medium=5, High=10</criterion>
+    <criterion testable="true">PriorityScoringService calculates correct pending invoice score: 0=0, 1-2=5, 3+=10</criterion>
+    <criterion testable="true">Total score is sum of all factors, capped at 100</criterion>
+    <criterion testable="true">Priority level correctly determined: Critical (80-100), High (60-79), Medium (30-59), Low (0-29)</criterion>
+    <criterion testable="true">Reason string lists all contributing factors with their point values</criterion>
+    <criterion testable="true">All unit tests pass (dotnet test succeeds)</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Follow the ScorecardCalculatorEndpoints.cs pattern for scoring service structure
+    - PriorityScoringService should be registered as a concrete type (not interface) per ADR-010
+    - The scoring is intentionally deterministic — no randomness, no AI adjustment in R1 (AI adjustment is a future enhancement)
+    - Reason strings should be human-readable: "12 days overdue (+20 pts), Budget at 87% (+20 pts), High value matter (+10 pts) = 50 pts (Medium priority)"
+    - Grade fields from sprk_matter: budgetcontrols_grade, guidelinescompliance_grade, outcomessuccess_grade — each is a letter grade (A-F)
+    - Grade below C means D or F (not C itself)
+    - Matter value tier is derived from matter budget or explicit field — Low (&lt;$50k), Medium ($50k-$500k), High (&gt;$500k)
+    - Edge cases to test: all factors at zero (score=0, level=Low), all factors at max (score=100, level=Critical), exact boundary values (e.g., exactly 7 days overdue = 10pts not 20pts)
+    - Consider using a static scoring table/dictionary for maintainability rather than deeply nested if/else
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 5 and 9.</protocol>
+  </execution>
+</task>

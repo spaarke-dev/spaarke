@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>BFF — Quick Summary Briefing Endpoint</title>
+    <phase>Phase 3: Action Cards &amp; Dialogs</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>008, 009</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, api, ai, minimal-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag with code implementation — aggregation endpoint with Redis caching, deterministic metrics, and optional AI narrative enhancement</rigor-reason>
+    <parallel-group>pg-ai-integration</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create a BFF endpoint GET /api/workspace/briefing that generates a portfolio briefing for the Quick Summary
+    card and briefing dialog. The endpoint returns both structured metrics (deterministic base) and narrative text
+    (optionally AI-enhanced). The deterministic metrics are: active matters count, total spend, total budget,
+    utilization percentage, at-risk matter count, overdue event count, top priority matter. The narrative is
+    template-based by default; when the AI Playbook is available, it generates richer contextual narrative. Cache
+    the result in Redis with a 10-minute TTL.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET 8 Minimal API, aggregation queries via Dataverse WebAPI, IDistributedCache (Redis) caching, AI Playbook integration, and ProblemDetails error handling.</role>
+
+  <goal>
+    A working BFF endpoint at GET /api/workspace/briefing that returns a BriefingResponse containing structured
+    metrics (IPortfolioHealth-equivalent) and narrative text (template-based or AI-enhanced). The response is
+    cached in Redis with a 10-minute TTL. The endpoint reuses existing portfolio aggregation logic (PortfolioService)
+    for the deterministic base, and optionally enhances with AI narrative from PlaybookService. It builds without
+    errors and handles all error scenarios with ProblemDetails.
+  </goal>
+
+  <context>
+    <background>
+      The briefing endpoint powers two frontend features: the Quick Summary card (task 020) and the briefing
+      dialog (task 021). The Quick Summary card displays compact metrics (active count, spend/budget, at-risk,
+      overdue, top priority). The briefing dialog displays the full narrative. Both call this single endpoint.
+      The deterministic base aggregates data from existing Dataverse entities (sprk_matter, sprk_event) — this
+      must always work. The AI enhancement is optional and progressive — when the AI Playbook is available, it
+      generates natural language paragraphs about portfolio health. Redis caching (10-minute TTL) prevents
+      repeated expensive aggregation queries.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Workspace/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingCache.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Infrastructure/ProblemDetailsHelper.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API pattern — MapGet with handler delegate</constraint>
+    <constraint source="ADR-008">MUST use endpoint filter for authorization</constraint>
+    <constraint source="ADR-009">MUST cache response in Redis (IDistributedCache) with 10-minute TTL</constraint>
+    <constraint source="ADR-010">DI registrations MUST count toward ≤15 non-framework limit</constraint>
+    <constraint source="ADR-013">AI narrative enhancement MUST use PlaybookService — never direct OpenAI calls</constraint>
+    <constraint source="spec">Deterministic metrics MUST always be available — AI narrative is optional enhancement</constraint>
+    <constraint source="spec">Response MUST include both structured metrics and narrative text</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-009.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="aggregation-endpoint" location="src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs">Canonical aggregation endpoint pattern — follow for multi-entity query and response structure</pattern>
+      <pattern name="redis-cache" location="src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingCache.cs">IDistributedCache pattern for Redis caching with TTL</pattern>
+      <pattern name="distributed-cache" location=".claude/patterns/caching/distributed-cache.md">Redis caching best practices — key naming, serialization, TTL configuration</pattern>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint registration</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add briefing endpoint to WorkspaceEndpoints: MapGet("/briefing", HandleBriefing) — returns BriefingResponse</step>
+    <step order="2">Create BriefingResponse record with structured metrics: activeMatters (int), totalSpend (decimal), totalBudget (decimal), utilizationPercent (double), mattersAtRisk (int), overdueEvents (int), topPriorityMatter (TopMatterSummary record), narrative (string), isAiEnhanced (bool), generatedAt (DateTimeOffset)</step>
+    <step order="3">Generate deterministic metrics — reuse or extend existing PortfolioService to query sprk_matter (counts, spend, budget, utilization) and sprk_event (overdue counts). Calculate at-risk matters (overdueeventcount > 0 OR utilization > 85%).</step>
+    <step order="4">Generate template-based narrative — build narrative paragraphs from metrics: "You manage {N} active matters with ${spend} of ${budget} budget utilized ({pct}%). {atRisk} matters are at risk. {overdue} events are overdue. Top priority: {matterName} (due {date})."</step>
+    <step order="5">Optionally enhance narrative with AI — call PlaybookService to generate richer narrative from the same metrics. Set isAiEnhanced=true in response. Fall back to template narrative on AI failure or timeout (3-second timeout).</step>
+    <step order="6">Implement Redis caching — cache BriefingResponse with key "workspace:briefing:{userId}" and 10-minute TTL using IDistributedCache. Check cache before computing; return cached response if valid.</step>
+    <step order="7">Verify dotnet build succeeds with no errors or warnings</step>
+    <step order="8">Update TASK-INDEX.md — mark task 027 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects, verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/Models/BriefingResponse.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/workspace/briefing endpoint exists and returns BriefingResponse</criterion>
+    <criterion testable="true">Response includes all structured metrics: activeMatters, totalSpend, totalBudget, utilizationPercent, mattersAtRisk, overdueEvents, topPriorityMatter</criterion>
+    <criterion testable="true">Response includes narrative text (template-based at minimum)</criterion>
+    <criterion testable="true">Template-based narrative is always available regardless of AI availability</criterion>
+    <criterion testable="true">AI-enhanced narrative replaces template when PlaybookService succeeds (isAiEnhanced=true)</criterion>
+    <criterion testable="true">Response is cached in Redis with 10-minute TTL</criterion>
+    <criterion testable="true">Cached response is returned on subsequent requests within TTL window</criterion>
+    <criterion testable="true">AI failure falls back to template narrative without error (3-second timeout)</criterion>
+    <criterion testable="true">Endpoint authorization filter is applied</criterion>
+    <criterion testable="true">Error responses use ProblemDetails format</criterion>
+    <criterion testable="true">Solution builds without errors (dotnet build)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Follow Api/Finance/FinanceEndpoints.cs as the canonical aggregation endpoint reference
+    - Follow Services/Ai/EmbeddingCache.cs for the Redis caching pattern
+    - The briefing endpoint should be fast — deterministic metrics should return within 500ms
+    - AI enhancement is fire-and-forget with a 3-second timeout — never block the response on AI
+    - Consider a two-phase response: return deterministic immediately, then update cache when AI completes
+    - The cache key should include the user ID to prevent cross-user data leakage
+    - If PortfolioService already exists from task 008/009, reuse it — do not duplicate aggregation logic
+    - The topPriorityMatter should include matter name, deadline, and reason (highest priority score)
+    - Redis serialization should use System.Text.Json for consistency with other cached responses
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 3 and 6.</protocol>
+  </execution>
+</task>

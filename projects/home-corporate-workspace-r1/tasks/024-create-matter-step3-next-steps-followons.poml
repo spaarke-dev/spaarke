@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Create Matter Step 3 — Next Steps and Follow-on Steps</title>
+    <phase>Phase 3: Action Cards &amp; Dialogs</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <dependencies>023</dependencies>
+    <blocks>none</blocks>
+    <tags>pcf, react, fluent-ui, frontend, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag with code implementation, AI integration, and Dataverse writes — complex multi-step wizard with dynamic step injection, follow-on implementations, and matter record creation</rigor-reason>
+    <parallel-group>pg-phase3-dialog</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build Step 3 of the Create New Matter wizard: Next Steps selection and all follow-on step implementations.
+    Step 3 presents 3 checkbox cards (Assign Counsel, Draft Matter Summary, Send Email to Client). Selecting
+    a card dynamically adds a corresponding follow-on step to the wizard sidebar. Implement all 3 follow-on
+    steps: Assign Counsel (counsel selection), Draft Summary (AI-generated summary card with sparkle indicator
+    and recipient email inputs), Send Email (email compose with recipient, subject, body). The Finish button
+    creates the matter record in Dataverse via Xrm.WebApi, uploads files to SPE via BFF, and executes
+    selected follow-on actions. Show a success confirmation on completion.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in PCF control development, Fluent UI v9 components, React 18 dynamic wizard patterns, Xrm.WebApi for Dataverse CRUD, SpeFileStore file upload, and AI-generated content display.</role>
+
+  <goal>
+    Step 3 renders 3 checkbox cards with selection styling. Selecting cards dynamically adds follow-on steps to
+    the wizard sidebar stepper (built in task 022). All 3 follow-on step components are implemented. The Finish
+    button executes the complete matter creation flow: create Dataverse record, upload files to SPE, execute
+    follow-on actions. A success confirmation is shown. The wizard fully supports light, dark, and high-contrast
+    themes with zero hardcoded colors.
+  </goal>
+
+  <context>
+    <background>
+      Step 3 completes the Create New Matter wizard by letting users select optional follow-on actions. This is
+      a key UX innovation — instead of forcing users through all steps, they choose which follow-ons matter for
+      their current workflow. The follow-on steps are: (1) Assign Counsel — select a counsel contact to assign
+      to the matter, (2) Draft Matter Summary — AI generates a summary from uploaded documents with sparkle
+      indicator, add recipient emails for distribution, (3) Send Email — compose and queue an email to the
+      client about the new matter. The Finish button orchestrates all actions in sequence.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/create-new-matter-dialog-wizard_3.jpg</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/create-new-matter-dialog-wizard_4.jpg</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/create-new-matter-dialog-wizard_5.jpg</file>
+      <file>src/client/pcf/LegalWorkspace/components/CreateMatter/WizardDialog.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/components/CreateMatter/WizardStepper.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/components/CreateMatter/CreateRecordStep.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/components/CreateMatter/wizardTypes.ts</file>
+      <file>src/client/pcf/LegalWorkspace/types/entities.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent v9 components: Card, Checkbox, Input, Textarea, Button from @fluentui/react-components</constraint>
+    <constraint source="ADR-021">MUST use makeStyles with semantic tokens — selected card uses colorBrandBackground2 and colorBrandStroke1</constraint>
+    <constraint source="ADR-021">MUST support light, dark, and high-contrast modes</constraint>
+    <constraint source="ADR-021">MUST use @fluentui/react-icons for card icons and sparkle indicator</constraint>
+    <constraint source="ADR-013">AI-generated summary MUST be fetched from BFF endpoint — never call AI directly from client</constraint>
+    <constraint source="ADR-007">File upload to SPE MUST route through SpeFileStore facade via BFF</constraint>
+    <constraint source="ADR-012">Import shared UI components from @spaarke/ui-components where available</constraint>
+    <constraint source="spec">Selected cards MUST dynamically add steps to the wizard sidebar</constraint>
+    <constraint source="spec">Finish button MUST create matter record in Dataverse via Xrm.WebApi</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-007.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Xrm.WebApi.createRecord for matter creation</pattern>
+      <pattern name="theme-management" location=".claude/patterns/pcf/theme-management.md">Semantic token usage for selected states and status colors</pattern>
+      <pattern name="ai-architecture" location="docs/guides/SPAARKE-AI-ARCHITECTURE.md">AI Tool Framework for summary generation</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create NextStepsStep component (NextStepsStep.tsx) — renders 3 checkbox cards in a row: Assign Counsel (PersonRegular icon), Draft Matter Summary (DocumentTextRegular icon), Send Email to Client (MailRegular icon)</step>
+    <step order="2">Add card selection styling — selected cards show brand border (colorBrandStroke1), brand background tint (colorBrandBackground2), and a filled checkbox. Unselected cards have neutral border and empty checkbox.</step>
+    <step order="3">Implement dynamic step injection — when a card is selected, add its corresponding follow-on step to the WizardStepper sidebar (modify wizard state from task 022). When deselected, remove the follow-on step. Steps appear in order: Assign Counsel, Draft Summary, Send Email.</step>
+    <step order="4">Create AssignCounselStep component (AssignCounselStep.tsx) — counsel contact search/selection using Input with search icon and a results list. Select a contact to assign as lead attorney on the matter. Uses Xrm.WebApi to query sprk_contact.</step>
+    <step order="5">Create DraftSummaryStep component (DraftSummaryStep.tsx) — AI-generated matter summary card with SparkleRegular indicator. Calls BFF AI endpoint to generate summary from uploaded files and form data. Shows loading state, then rendered summary with edit capability. Add recipient email input(s) for summary distribution.</step>
+    <step order="6">Create SendEmailStep component (SendEmailStep.tsx) — email compose form with To (email input), Subject (pre-filled with "New Matter: {matter name}"), and Body (Textarea, pre-filled with template). Queues email for sending via Xrm.WebApi email creation.</step>
+    <step order="7">Implement Finish button logic — orchestrates in sequence: (a) create sprk_matter record in Dataverse via Xrm.WebApi.createRecord, (b) upload files to SPE via BFF SpeFileStore endpoint, (c) execute selected follow-on actions (assign counsel, send summary, send email), (d) handle errors with rollback or partial success notification</step>
+    <step order="8">Wire BFF endpoint for AI summary generation — stub with mock response until task 026/028 provides real endpoint. Handle error gracefully (show "Summary unavailable" message).</step>
+    <step order="9">Handle file upload to SPE through BFF — POST files to BFF endpoint which routes to SpeFileStore. Associate uploaded files with the newly created matter record.</step>
+    <step order="10">Show success confirmation — display a success dialog with matter name, record link (opens in MDA), and summary of completed follow-on actions. Close button dismisses the entire wizard.</step>
+    <step order="11">Verify dark mode rendering — card selection states, form fields, AI summary card, and success confirmation all use semantic tokens. Zero hardcoded colors.</step>
+    <step order="12">Update TASK-INDEX.md — mark task 024 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects, verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/components/CreateMatter/NextStepsStep.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/CreateMatter/AssignCounselStep.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/CreateMatter/DraftSummaryStep.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/CreateMatter/SendEmailStep.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/CreateMatter/SuccessConfirmation.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/CreateMatter/matterService.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">3 checkbox cards render with correct icons and labels in NextStepsStep</criterion>
+    <criterion testable="true">Selected cards show brand border/background styling, unselected show neutral</criterion>
+    <criterion testable="true">Selecting a card dynamically adds its follow-on step to the wizard sidebar stepper</criterion>
+    <criterion testable="true">Deselecting a card removes its follow-on step from the sidebar</criterion>
+    <criterion testable="true">Follow-on steps maintain order: Assign Counsel, Draft Summary, Send Email regardless of selection order</criterion>
+    <criterion testable="true">AssignCounselStep allows searching and selecting a contact from Dataverse</criterion>
+    <criterion testable="true">DraftSummaryStep shows AI-generated summary with SparkleRegular indicator</criterion>
+    <criterion testable="true">DraftSummaryStep allows adding recipient emails for distribution</criterion>
+    <criterion testable="true">SendEmailStep pre-fills subject with "New Matter: {matter name}" and body with template</criterion>
+    <criterion testable="true">Finish button creates matter record in Dataverse via Xrm.WebApi.createRecord</criterion>
+    <criterion testable="true">Finish button uploads files to SPE via BFF SpeFileStore endpoint</criterion>
+    <criterion testable="true">Success confirmation displays with matter name and link to record</criterion>
+    <criterion testable="true">Full wizard flow works end-to-end: Step 1 (files) → Step 2 (form) → Step 3 (next steps) → follow-ons → Finish</criterion>
+    <criterion testable="true">All components render correctly in light, dark, and high-contrast themes</criterion>
+    <criterion testable="true">Zero hardcoded color values — all colors use Fluent semantic tokens</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Reference screenshots/create-new-matter-dialog-wizard_3.jpg for Step 3 card layout and selection styling
+    - Reference screenshots/create-new-matter-dialog-wizard_4.jpg for Draft Summary step with AI sparkle
+    - Reference screenshots/create-new-matter-dialog-wizard_5.jpg for Send Email compose step
+    - The Finish button should show a progress indicator during the creation flow
+    - Handle partial failures gracefully: if file upload fails but matter was created, show warning (not error)
+    - The counsel search in AssignCounselStep should use Xrm.WebApi.retrieveMultipleRecords with $filter
+    - Email sending creates an email activity record in Dataverse — it does not send directly via SMTP
+    - The AI summary in DraftSummaryStep is a progressive enhancement — "Summary unavailable" is acceptable
+    - This is the most complex task in Phase 3 — checkpoint frequently (after steps 3, 7, and 10)
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 3, 7, and 10 due to task complexity.</protocol>
+  </execution>
+</task>

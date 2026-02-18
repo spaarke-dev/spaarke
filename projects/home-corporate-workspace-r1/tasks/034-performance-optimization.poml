@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Performance Optimization</title>
+    <phase>Phase 4: Integration &amp; Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>040</blocks>
+    <tags>pcf, frontend, typescript</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Optimization task with explicit NFR-01 and NFR-07 constraints — profiling and performance tuning of existing code</rigor-reason>
+    <parallel-group>pg-polish</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Optimize the Legal Operations Workspace for initial page load under 3 seconds (NFR-01) and query response
+    under 2 seconds for 500 matters (NFR-07). Profile the page load in browser DevTools, identify slow data
+    fetches, parallelize independent Xrm.WebApi queries with Promise.all, add React.memo to heavy components
+    that re-render frequently, implement useMemo and useCallback for expensive sort/filter computations, and
+    add progressive loading with loading skeletons so the shell renders immediately while blocks load data
+    independently.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in React 18 performance optimization, browser profiling, data fetching strategies, memoization, and progressive loading patterns.</role>
+
+  <goal>
+    Page initial load completes in under 3 seconds. All Xrm.WebApi queries complete in under 2 seconds for
+    up to 500 matters. Independent data fetches are parallelized. Heavy components use React.memo. Expensive
+    computations use useMemo/useCallback. Loading skeletons provide immediate visual feedback while data loads.
+  </goal>
+
+  <context>
+    <background>
+      The Legal Operations Workspace loads data from multiple sources on initial render: Xrm.WebApi for
+      matters, events, projects (client-side), and BFF endpoints for portfolio health, scoring, and AI features
+      (server-side). Without optimization, sequential data fetching causes slow page loads. The optimization
+      strategy has three pillars: (1) parallelize independent data fetches, (2) memoize expensive computations
+      and prevent unnecessary re-renders, (3) progressive loading so the page shell and layout render
+      immediately while individual blocks load their data independently.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/client/pcf/LegalWorkspace/LegalWorkspaceApp.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/hooks/</file>
+      <file>src/client/pcf/LegalWorkspace/services/DataverseService.ts</file>
+      <file>src/client/pcf/LegalWorkspace/components/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-01">Page initial load MUST complete in under 3 seconds</constraint>
+    <constraint source="NFR-07">Feed/portfolio queries MUST return within 2 seconds for up to 500 matters per user</constraint>
+    <constraint source="ADR-021">Loading skeletons MUST use Fluent UI v9 Skeleton component — consistent with design system</constraint>
+    <constraint source="ADR-021">MUST support light, dark, and high-contrast modes — loading states included</constraint>
+    <constraint source="spec">Blocks should load independently — failure or slowness of one block must not block others</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="workspace-reference" location="src/client/pcf/AnalysisWorkspace/">Reference for data loading patterns in production workspace PCF controls</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Profile page load in browser DevTools Performance panel — record a full page load trace, identify the timeline of data fetches, component renders, and JavaScript execution. Document baseline load time.</step>
+    <step order="2">Identify slow or sequential data fetches — map out all Xrm.WebApi calls and BFF endpoint calls made during initial load, their durations, and dependency relationships. Identify which can be parallelized.</step>
+    <step order="3">Parallelize independent Xrm.WebApi queries using Promise.all — group independent queries (matters list, events feed, notification count) into a single Promise.all call. Keep dependent queries sequential (e.g., matter details after matter list).</step>
+    <step order="4">Add React.memo to frequently re-rendered components — identify components that re-render when parent state changes but their props haven't changed. Wrap with React.memo and provide custom comparison where needed.</step>
+    <step order="5">Add useMemo for expensive sort/filter operations — event feed sorting (priority + timestamp), filter count calculations, portfolio health aggregation, to-do list sorting. Ensure dependency arrays are correct.</step>
+    <step order="6">Add useCallback for event handlers passed as props — prevent unnecessary re-renders of child components when parent re-renders. Focus on filter change handlers, flag toggle handlers, and navigation handlers.</step>
+    <step order="7">Implement progressive loading: page shell and grid layout render immediately, each block renders its own loading skeleton (Fluent Skeleton component) while fetching data. Each block manages its own loading/error/data states independently.</step>
+    <step order="8">Re-profile page load after optimizations — record new Performance trace, compare with baseline, verify initial load is under 3 seconds and queries complete in under 2 seconds.</step>
+    <step order="9">Update TASK-INDEX.md — mark task 034 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+    <tool name="terminal">Run shell commands for build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/hooks/ (optimized data fetching hooks with Promise.all)</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/ (React.memo wrappers, loading skeletons)</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/Shell/BlockSkeleton.tsx (reusable loading skeleton)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Page initial load completes in under 3 seconds as measured by browser DevTools Performance trace</criterion>
+    <criterion testable="true">Xrm.WebApi queries complete in under 2 seconds for up to 500 matters</criterion>
+    <criterion testable="true">Independent data fetches are parallelized using Promise.all (not sequential awaits)</criterion>
+    <criterion testable="true">Heavy components (feed list items, portfolio cards, to-do items) are wrapped with React.memo</criterion>
+    <criterion testable="true">Expensive sort/filter operations use useMemo with correct dependency arrays</criterion>
+    <criterion testable="true">Event handlers passed as props use useCallback with correct dependency arrays</criterion>
+    <criterion testable="true">Each block shows a loading skeleton while its data is fetching</criterion>
+    <criterion testable="true">Page shell renders immediately — blocks load data independently without blocking each other</criterion>
+    <criterion testable="true">PCF control builds without TypeScript or webpack errors after optimization</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Profile in a realistic environment — browser DevTools with network throttling to simulate real conditions
+    - Promise.all for parallel fetches: const [matters, events, notifications] = await Promise.all([getMattersByUser(...), getEventsFeed(...), getNotificationCount(...)])
+    - React.memo top candidates: FeedItemCard (rendered 500x), MatterCard (rendered per portfolio item), ToDoItem (rendered per to-do)
+    - useMemo top candidates: sorted/filtered event list, filter count calculations, health metric aggregation
+    - Loading skeletons should match the approximate shape of the final content — use Fluent Skeleton with appropriate width/height
+    - Progressive loading pattern: shell + header renders at 0ms → block skeletons at 50ms → data populates blocks at 500-2000ms
+    - Each block's data hook should return { data, isLoading, error } for independent state management
+    - Consider adding a useParallelDataLoad custom hook that orchestrates all initial data fetches in a single Promise.all
+    - Error in one block's data fetch must not crash other blocks — use error boundaries at block level
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 3 and 7.</protocol>
+  </execution>
+</task>
