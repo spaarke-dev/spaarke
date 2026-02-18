@@ -1,0 +1,77 @@
+{
+  "chartDefinition": {
+    "name": "Monthly Spend Timeline",
+    "description": "Displays monthly spend amounts over time showing spending trends for the last 12 months",
+    "chartType": "line",
+    "entityName": "sprk_financespendsnapshot",
+    "dataSource": {
+      "primaryEntity": "sprk_financespendsnapshot",
+      "relatedTo": {
+        "entity": "sprk_matter",
+        "lookupField": "sprk_regardingid",
+        "relationshipName": "sprk_matter_financespendsnapshot"
+      },
+      "fields": [
+        {
+          "logicalName": "sprk_snapshotdate",
+          "alias": "snapshotDate",
+          "label": "Month",
+          "type": "DateTime",
+          "purpose": "xAxis",
+          "grouping": "month"
+        },
+        {
+          "logicalName": "sprk_totalspend",
+          "alias": "totalSpend",
+          "label": "Total Spend",
+          "type": "Money",
+          "purpose": "yAxis",
+          "aggregate": "sum"
+        }
+      ],
+      "filter": {
+        "type": "and",
+        "conditions": [
+          {
+            "field": "sprk_periodtype",
+            "operator": "eq",
+            "value": 100000000,
+            "comment": "Month period type"
+          },
+          {
+            "field": "sprk_snapshotdate",
+            "operator": "last-x-months",
+            "value": 12
+          }
+        ]
+      },
+      "orderBy": [
+        {
+          "field": "sprk_snapshotdate",
+          "direction": "asc"
+        }
+      ]
+    },
+    "visualConfig": {
+      "lineStyle": "smooth",
+      "showDataPoints": true,
+      "showGridLines": true,
+      "xAxisFormat": "MMM yyyy",
+      "yAxisFormat": "currency",
+      "colorScheme": "sequential",
+      "primaryColor": "#46A267",
+      "emptyStateMessage": "No spend data available"
+    },
+    "layout": {
+      "width": "full",
+      "height": 300,
+      "placement": "formSection"
+    }
+  },
+  "metadata": {
+    "version": "1.0",
+    "createdDate": "2026-02-11",
+    "task": "042",
+    "project": "financial-intelligence-module-r1"
+  }
+}

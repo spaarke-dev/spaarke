@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Define Finance C# Record Types and JSON Schemas</title>
+    <phase>1: Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>009, 010</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag; creates model types used by AI services and job handlers across the module</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Define C# record types for the Finance Intelligence Module's AI structured output: ClassificationResult, ExtractionResult, InvoiceHints, InvoiceHeader, BillingEventLine. Also define BinaryData JSON schema constants for use with GetStructuredCompletionAsync&lt;T&gt;. Place these in Services/Finance/Models/ within the BFF API project.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in C# record types, System.Text.Json serialization, and OpenAI structured output JSON schema definitions. Understands the distinction between AI output types and Dataverse entity types.
+  </role>
+
+  <goal>
+    All finance AI record types are defined with correct properties matching the playbook output schemas. BinaryData JSON schema constants are defined for use with ChatResponseFormat.CreateJsonSchemaFormat. The types compile and are ready for use by IInvoiceAnalysisService (future task).
+  </goal>
+
+  <context>
+    <background>
+      The Finance Intelligence Module uses two AI playbooks that produce structured output:
+      1. Playbook A (Classification): Returns ClassificationResult with classification enum, confidence, and invoice hints
+      2. Playbook B (Extraction): Returns ExtractionResult with invoice header, line items array, and extraction confidence
+
+      These record types represent AI output only. They are NOT Dataverse entity models — they are the typed deserialization targets for GetStructuredCompletionAsync&lt;T&gt;.
+
+      Important: ClassificationResult contains AI output only. Entity matching suggestions (matter/vendor) are populated separately by the handler's matching logic after the AI call returns. Do NOT include MatterSuggestion in ClassificationResult.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+      <file>projects/financial-intelligence-module-r1/Spaarke_Finance_Intelligence_MVP_Design 2.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">ClassificationResult contains AI output only — no MatterSuggestion property (entity matching is handler-side, not AI)</constraint>
+    <constraint source="spec">ExtractionResult must NOT include VisibilityState — set deterministically in handler code, never by LLM</constraint>
+    <constraint source="spec">JSON schemas must be compatible with OpenAI structured output (response_format with strict schema)</constraint>
+    <constraint source="ADR-013">Extend BFF, not separate service — types live in the BFF API project</constraint>
+    <constraint source="ADR-015">No document content in type definitions — these are output schemas, not input models</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/ai.md" reason="AI architecture constraints" />
+      <file path="projects/financial-intelligence-module-r1/spec.md" reason="Playbook output schema definitions" />
+      <file path="projects/financial-intelligence-module-r1/Spaarke_Finance_Intelligence_MVP_Design 2.md" reason="Detailed JSON schemas in Section 6.5" />
+    </files>
+    <patterns>
+      <pattern name="AI Structured Output" location=".claude/constraints/ai.md">
+        Follow structured output patterns for constrained JSON schema enforcement
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md Playbook A and B sections for output schema definitions</step>
+    <step order="2">Read design doc Sections 6.1 and 6.2 for complete JSON schemas including field types and nullability</step>
+    <step order="3">Create Services/Finance/Models/ directory in the BFF API project</step>
+    <step order="4">Define ClassificationResult record: Classification (enum: InvoiceCandidate/NotInvoice/Unknown), Confidence (decimal), Hints (InvoiceHints), Reasoning (string)</step>
+    <step order="5">Define InvoiceHints record: VendorName (string?), InvoiceNumber (string?), InvoiceDate (string? — YYYY-MM-DD format), TotalAmount (decimal?), Currency (string?), MatterReference (string?)</step>
+    <step order="6">Define ExtractionResult record: Header (InvoiceHeader), LineItems (BillingEventLine[]), ExtractionConfidence (decimal), Notes (string?)</step>
+    <step order="7">Define InvoiceHeader record: InvoiceNumber (string), InvoiceDate (string), TotalAmount (decimal), Currency (string), VendorName (string), VendorAddress (string?), PaymentTerms (string?)</step>
+    <step order="8">Define BillingEventLine record: LineNumber (int), Description (string), CostType (string — Fee/Expense), Amount (decimal), Currency (string), EventDate (string?), RoleClass (string?), Hours (decimal?), Rate (decimal?)</step>
+    <step order="9">Create BinaryData JSON schema constants (ClassificationResultSchema, ExtractionResultSchema) for use with ChatResponseFormat.CreateJsonSchemaFormat</step>
+    <step order="10">Run dotnet build to verify compilation</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spec and design docs for schema definitions</tool>
+    <tool name="Write">Create record type files</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/Models/ClassificationResult.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/Models/ExtractionResult.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/Models/InvoiceHints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/Models/InvoiceHeader.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/Models/BillingEventLine.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/Models/FinanceJsonSchemas.cs (BinaryData schema constants)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ClassificationResult record exists with Classification enum, Confidence decimal, Hints, and Reasoning properties</criterion>
+    <criterion testable="true">ClassificationResult does NOT contain MatterSuggestion or any entity matching properties</criterion>
+    <criterion testable="true">ExtractionResult record exists with Header, LineItems array, ExtractionConfidence, and Notes properties</criterion>
+    <criterion testable="true">ExtractionResult does NOT contain VisibilityState property</criterion>
+    <criterion testable="true">InvoiceHints record has 6 nullable properties: VendorName, InvoiceNumber, InvoiceDate, TotalAmount, Currency, MatterReference</criterion>
+    <criterion testable="true">InvoiceHeader record has 7 properties matching design doc Section 6.5 schema</criterion>
+    <criterion testable="true">BillingEventLine record has 9 properties: LineNumber, Description, CostType, Amount, Currency, EventDate, RoleClass, Hours, Rate</criterion>
+    <criterion testable="true">BinaryData JSON schema constants are defined for both ClassificationResult and ExtractionResult</criterion>
+    <criterion testable="true">All types use System.Text.Json serialization attributes</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    ClassificationResult.Classification should be a C# enum with values matching the playbook output: InvoiceCandidate, NotInvoice, Unknown. Use JsonStringEnumConverter for serialization.
+
+    The BinaryData JSON schemas must match the OpenAI structured output format. Each schema should define all properties with their types, and mark required fields. The "additionalProperties": false constraint ensures strict schema enforcement.
+
+    Dates in AI output are strings (YYYY-MM-DD format) because the AI model outputs text. Conversion to DateOnly/DateTime happens in the handler when writing to Dataverse.
+
+    CostType in BillingEventLine is a string ("Fee" or "Expense") rather than an enum to match the AI output format. Conversion to Dataverse OptionSetValue happens in the handler.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

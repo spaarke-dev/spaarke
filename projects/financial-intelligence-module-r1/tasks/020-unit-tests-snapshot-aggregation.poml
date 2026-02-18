@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Unit tests for SpendSnapshotService aggregation</title>
+    <phase>2: AI Services + Job Handlers</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>017</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, unit-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing'; creates new test files; has explicit constraints</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create comprehensive unit tests for SpendSnapshotService: monthly aggregation, ToDate
+    aggregation, budget variance (positive and negative), MoM velocity calculation, null
+    velocity when prior period is zero, idempotent upsert behavior.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in xUnit testing and financial aggregation verification.
+    Follow testing constraints for consistent test structure.
+  </role>
+
+  <goal>
+    Comprehensive unit tests for SpendSnapshotService covering all aggregation scenarios.
+    Tests verify deterministic math for monthly/ToDate aggregations, budget variance,
+    and velocity calculations including edge cases.
+  </goal>
+
+  <context>
+    <background>
+      SpendSnapshotService contains critical financial aggregation logic. Thorough unit testing
+      ensures the math is correct for all scenarios, especially edge cases like zero prior period
+      (velocity should be null, not divide-by-zero) and negative variance (over budget).
+
+      These tests are P0 priority — highest priority unit tests in the project because they
+      verify deterministic financial calculations that power the budget gauge and signals.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Finance/SpendSnapshotService.cs</file>
+      <file>tests/Sprk.Bff.Api.Tests/Services/Finance/SpendSnapshotServiceTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="testing">Use xUnit with FluentAssertions</constraint>
+    <constraint source="testing">Follow Arrange-Act-Assert pattern</constraint>
+    <constraint source="testing">Test names: Method_Scenario_ExpectedResult</constraint>
+    <constraint source="project">Mock IDataverseService for Dataverse queries and upserts</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SpendSnapshotService.cs to understand all aggregation methods and edge cases</step>
+    <step order="2">Create SpendSnapshotServiceTests.cs in tests/Sprk.Bff.Api.Tests/Services/Finance/</step>
+    <step order="3">Add test: GenerateAsync_WithBillingEvents_CreatesMonthlyAggregations — verify grouping by year-month</step>
+    <step order="4">Add test: GenerateAsync_WithBillingEvents_CreatesToDateAggregation — verify cumulative totals</step>
+    <step order="5">Add test: GenerateAsync_WithBudget_ComputesPositiveVariance — budget > spend = positive variance (under budget)</step>
+    <step order="6">Add test: GenerateAsync_OverBudget_ComputesNegativeVariance — spend > budget = negative variance</step>
+    <step order="7">Add test: GenerateAsync_WithPriorMonth_ComputesMoMVelocity — verify (current - prior) / prior * 100</step>
+    <step order="8">Add test: GenerateAsync_ZeroPriorMonth_VelocityIsNull — verify null velocity when prior is zero</step>
+    <step order="9">Add test: GenerateAsync_CalledTwice_IdempotentUpsert — verify upsert via alternate key produces same results</step>
+    <step order="10">Run tests: dotnet test --filter "SpendSnapshotService"</step>
+    <step order="11">Update TASK-INDEX.md: change task 020 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Finance/SpendSnapshotServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">At least 7 unit tests for SpendSnapshotService</criterion>
+    <criterion testable="true">Tests cover monthly aggregation correctness</criterion>
+    <criterion testable="true">Tests cover ToDate aggregation correctness</criterion>
+    <criterion testable="true">Tests cover positive budget variance (under budget)</criterion>
+    <criterion testable="true">Tests cover negative budget variance (over budget)</criterion>
+    <criterion testable="true">Tests cover MoM velocity calculation</criterion>
+    <criterion testable="true">Tests cover null velocity when prior period is zero</criterion>
+    <criterion testable="true">Tests verify idempotent upsert behavior</criterion>
+    <criterion testable="true">All tests pass: dotnet test succeeds</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    These are P0 priority tests — they verify the financial math that powers the entire
+    analytics pipeline. Test data should include:
+    - Multiple BillingEvents across different months and buckets
+    - Budget records for variance calculation
+    - Prior month snapshots for velocity calculation
+    - Edge case: zero spend in prior month (velocity must be null)
+    - Edge case: no budget record (variance should be null or zero)
+
+    Parallel-group E with task 021 (signal evaluation tests) — both test suites can
+    be developed independently.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

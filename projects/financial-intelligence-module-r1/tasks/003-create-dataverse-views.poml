@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Create Dataverse Views (Invoice Review Queue + Active Invoices)</title>
+    <phase>1: Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001, 002</dependencies>
+    <blocks>047</blocks>
+    <tags>dataverse, solution</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Configuration-only task; no code modification; creating Dataverse views from established filter criteria</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create two new Dataverse views: (1) "Invoice Review Queue" view on sprk_document, filtered by documenttype=EmailAttachment AND classification IN (InvoiceCandidate, Unknown) AND reviewstatus=ToReview; (2) "Active Invoices" view on sprk_invoice, showing the standard active records view.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse view configuration, including filter criteria, column layout, and sort order.
+  </role>
+
+  <goal>
+    Two new Dataverse views are created and available in the solution: the Invoice Review Queue showing unreviewed attachment candidates, and the Active Invoices view showing active invoice records.
+  </goal>
+
+  <context>
+    <background>
+      The Invoice Review Queue is the primary interface for human reviewers in the Finance Intelligence pipeline. It surfaces email attachment Documents that have been classified as InvoiceCandidate or Unknown and are awaiting review. Reviewers use this queue to confirm or reject invoice candidates.
+
+      The Active Invoices view provides a standard list of confirmed invoice records for administrative purposes.
+
+      For MVP, the review queue is a standard Dataverse filtered view (not a PCF control). A PCF Dataset control is a future upgrade per ADR-011.
+    </background>
+    <relevant-files>
+      <file>src/solutions/</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Invoice Review Queue filters: sprk_documenttype = 100000007 (Email Attachment) AND sprk_classification IN (InvoiceCandidate, Unknown) AND sprk_invoicereviewstatus = ToReview</constraint>
+    <constraint source="spec">Active Invoices view is a standard active records view on sprk_invoice</constraint>
+    <constraint source="ADR-011">Review queue uses Dataverse view only for R1; PCF Dataset control is future upgrade</constraint>
+    <constraint source="ADR-022">Unmanaged solutions only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Dataverse view creation patterns" />
+      <file path="projects/financial-intelligence-module-r1/spec.md" reason="View filter criteria in Entity Model Summary" />
+    </files>
+    <patterns>
+      <pattern name="Dataverse Entity Operations" location=".claude/patterns/dataverse/entity-operations.md">
+        Follow existing view creation patterns
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md for view filter criteria (Entity Model Summary, New Views section)</step>
+    <step order="2">Create "Invoice Review Queue" view on sprk_document with filter: sprk_documenttype = 100000007 AND sprk_classification IN (InvoiceCandidate, Unknown) AND sprk_invoicereviewstatus = ToReview. Include columns: document name, classification, confidence, vendor name hint, invoice number hint, total hint, matter suggestion, reviewed status</step>
+    <step order="3">Create "Active Invoices" view on sprk_invoice as standard active records view. Include columns: invoice number, vendor org, matter, invoice date, total amount, status, extraction status, currency</step>
+    <step order="4">Validate view columns match spec — ensure filter criteria are correctly applied and views return expected record sets</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spec for view definitions</tool>
+    <tool name="Write">Create view definition files in solution</tool>
+    <tool name="Edit">Modify solution files to include views</tool>
+  </tools>
+
+  <outputs>
+    <output type="configuration">"Invoice Review Queue" Dataverse view on sprk_document</output>
+    <output type="configuration">"Active Invoices" Dataverse view on sprk_invoice</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Invoice Review Queue view exists on sprk_document entity</criterion>
+    <criterion testable="true">Invoice Review Queue filters by documenttype = EmailAttachment (100000007)</criterion>
+    <criterion testable="true">Invoice Review Queue filters by classification IN (InvoiceCandidate, Unknown)</criterion>
+    <criterion testable="true">Invoice Review Queue filters by invoicereviewstatus = ToReview</criterion>
+    <criterion testable="true">Invoice Review Queue returns only unreviewed candidates/unknowns (FR-04)</criterion>
+    <criterion testable="true">Active Invoices view exists on sprk_invoice entity</criterion>
+    <criterion testable="true">Active Invoices view shows standard active invoice records</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task depends on tasks 001 and 002 because it requires both the new sprk_invoice entity (for Active Invoices view) and the new classification/review fields on sprk_document (for Invoice Review Queue view).
+
+    The Invoice Review Queue is the only review interface for R1. A PCF Dataset control (per ADR-011) would provide richer UX (inline actions, side-panel preview, bulk operations) but is explicitly out of scope for R1.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

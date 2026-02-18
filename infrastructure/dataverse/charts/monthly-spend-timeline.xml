@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<visualization>
+  <name>Monthly Spend Timeline</name>
+  <description>Displays monthly spend amounts over time as a line or column chart showing spending trends</description>
+  <primaryentitytypecode>sprk_financespendsnapshot</primaryentitytypecode>
+  <charttype>Line</charttype>
+  <isdefault>false</isdefault>
+  <presentationdescription>
+    <Chart>
+      <Series>
+        <Series ChartType="Line" IsValueShownAsLabel="False" Color="70, 162, 107" BackGradientStyle="None" BackSecondaryColor="0, 0, 0" Font="{0}, 9.5px" LabelForeColor="59, 59, 59" CustomProperties="PointWidth=0.75">
+          <SmartLabelStyle Enabled="True" />
+        </Series>
+      </Series>
+      <ChartAreas>
+        <ChartArea BorderColor="White" BorderDashStyle="Solid">
+          <AxisY LabelAutoFitMinFontSize="8" TitleForeColor="59, 59, 59" TitleFont="{0}, 10.5px" LineColor="165, 172, 181" IntervalAutoMode="VariableCount">
+            <MajorGrid LineColor="239, 242, 246" />
+            <MajorTickMark LineColor="165, 172, 181" />
+            <LabelStyle Font="{0}, 10.5px" ForeColor="59, 59, 59" Format="C" />
+          </AxisY>
+          <AxisX LabelAutoFitMinFontSize="8" TitleForeColor="59, 59, 59" TitleFont="{0}, 10.5px" LineColor="165, 172, 181">
+            <MajorGrid Enabled="False" />
+            <MajorTickMark Enabled="False" />
+            <LabelStyle Font="{0}, 10.5px" ForeColor="59, 59, 59" Angle="-45" />
+          </AxisX>
+        </ChartArea>
+      </ChartAreas>
+      <Titles>
+        <Title Alignment="BottomLeft" DockingOffset="-3" Font="{0}, 13px" ForeColor="0, 0, 0"></Title>
+      </Titles>
+    </Chart>
+  </presentationdescription>
+  <datadescription>
+    <fetch mapping="logical" aggregate="true">
+      <entity name="sprk_financespendsnapshot">
+        <attribute name="sprk_snapshotdate" alias="snapshot_date" groupby="true" dategrouping="month" />
+        <attribute name="sprk_totalspend" alias="total_spend" aggregate="sum" />
+        <attribute name="sprk_regardingid" alias="regarding_matter" groupby="true" />
+        <filter type="and">
+          <condition attribute="sprk_periodtype" operator="eq" value="100000000" /><!-- Month -->
+          <condition attribute="sprk_snapshotdate" operator="last-x-months" value="12" />
+        </filter>
+        <order attribute="sprk_snapshotdate" descending="false" />
+      </entity>
+    </fetch>
+  </datadescription>
+</visualization>

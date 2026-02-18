@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Tune Classification Confidence Thresholds with Test Documents</title>
+    <phase>4: PCF Panel + Integration + Polish</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>046</blocks>
+    <tags>ai, azure-openai</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>AI tuning task with no code implementation; adjusts configuration values based on empirical testing</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Tune the invoice classification confidence thresholds using a test document set. Run the classification pipeline (from task 011) against a variety of test documents: confirmed invoices, non-invoice documents (contracts, letters, receipts), and edge cases (partial invoices, cover pages). Analyze the confidence score distribution and adjust the InvoiceCandidate/NotInvoice/Unknown thresholds in FinanceOptions to minimize false positives and false negatives. Target: high-confidence invoice threshold >= 0.85, not-invoice threshold <= 0.30, unknown zone in between for human review.
+  </prompt>
+
+  <role>
+    SPAARKE AI engineer. Expert in classification threshold tuning, confidence calibration, and empirical model evaluation. Familiar with the Spaarke invoice classification pipeline and FinanceOptions configuration.
+  </role>
+
+  <goal>
+    Classification thresholds are empirically tuned to correctly classify invoices with minimal false positives/negatives. The thresholds are documented and configured in FinanceOptions.
+  </goal>
+
+  <context>
+    <background>
+      The invoice classification handler (task 011) uses GPT-4o-mini with structured output to classify email attachments as InvoiceCandidate, NotInvoice, or Unknown based on confidence scores. The default thresholds need empirical tuning with real document types to ensure:
+      - True invoices are classified as InvoiceCandidate (high confidence)
+      - Non-invoices are classified as NotInvoice (low confidence)
+      - Ambiguous documents land in Unknown for human review
+
+      Threshold tuning is iterative: run classification, analyze distribution, adjust, repeat.
+    </background>
+    <relevant-files>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">InvoiceCandidate threshold must minimize false positives (non-invoices classified as invoices)</constraint>
+    <constraint source="spec">NotInvoice threshold must minimize false negatives (invoices classified as not-invoices)</constraint>
+    <constraint source="ADR-015">Do not log document content during testing — log only classification results and confidence scores</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path="projects/financial-intelligence-module-r1/spec.md" reason="Classification pipeline design and threshold requirements" />
+    </files>
+    <patterns>
+      <pattern name="None" location="N/A">
+        No code patterns needed — this is an empirical tuning task
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Prepare a test document set: 5+ confirmed invoices (varying formats), 5+ non-invoices (contracts, letters, receipts, images), 3+ edge cases (partial invoices, cover pages, scanned documents)</step>
+    <step order="2">Run classification pipeline on each test document, recording confidence scores and classifications</step>
+    <step order="3">Analyze confidence score distribution: identify clustering patterns for invoices vs. non-invoices vs. ambiguous</step>
+    <step order="4">Determine optimal thresholds: InvoiceCandidate (target >= 0.85), NotInvoice (target <= 0.30), Unknown (everything in between)</step>
+    <step order="5">Update thresholds in FinanceOptions configuration</step>
+    <step order="6">Re-run classification on test set with updated thresholds and verify improved accuracy</step>
+    <step order="7">Document final threshold values and test results</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read FinanceOptions and classification handler</tool>
+    <tool name="Edit">Update threshold values in FinanceOptions</tool>
+    <tool name="Bash">Run classification tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="configuration">Updated FinanceOptions with tuned classification thresholds</output>
+    <output type="documentation">Test results summary with confidence score distributions</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All confirmed invoices in test set classified as InvoiceCandidate (no false negatives at tuned threshold)</criterion>
+    <criterion testable="true">All non-invoice documents in test set classified as NotInvoice (no false positives at tuned threshold)</criterion>
+    <criterion testable="true">Edge cases land in Unknown zone for human review</criterion>
+    <criterion testable="true">Thresholds documented in FinanceOptions with comments explaining rationale</criterion>
+    <criterion testable="true">Test results documented with confidence score distributions</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Target thresholds are starting points based on typical LLM confidence patterns:
+    - InvoiceCandidate: >= 0.85 (high confidence the document is an invoice)
+    - NotInvoice: <= 0.30 (high confidence the document is NOT an invoice)
+    - Unknown: 0.30 - 0.85 (ambiguous, needs human review)
+
+    These may shift based on empirical results. GPT-4o-mini tends to be well-calibrated but can be overconfident on certain document types.
+
+    Log confidence scores (not document content) during testing for analysis. Create a simple spreadsheet or markdown table with document type, confidence score, and classification result.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

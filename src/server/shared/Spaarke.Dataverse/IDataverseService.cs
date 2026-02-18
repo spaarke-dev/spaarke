@@ -1,3 +1,5 @@
+using Microsoft.Xrm.Sdk;
+
 namespace Spaarke.Dataverse;
 
 /// <summary>
@@ -17,6 +19,16 @@ public interface IDataverseService
     Task UpdateDocumentFieldsAsync(string documentId, Dictionary<string, object?> fields, CancellationToken ct = default);
     Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default);
     Task DeleteDocumentAsync(string id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieve a Dataverse entity by ID with specified columns.
+    /// </summary>
+    /// <param name="entityLogicalName">Entity logical name (e.g., "sprk_invoice", "sprk_matter")</param>
+    /// <param name="id">Record ID</param>
+    /// <param name="columns">Array of column names to retrieve</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Retrieved entity</returns>
+    Task<Entity> RetrieveAsync(string entityLogicalName, Guid id, string[] columns, CancellationToken ct = default);
     Task<IEnumerable<DocumentEntity>> GetDocumentsByContainerAsync(string containerId, CancellationToken ct = default);
     Task<DocumentAccessLevel> GetUserAccessAsync(string userId, string documentId, CancellationToken ct = default);
 
@@ -345,6 +357,89 @@ public interface IDataverseService
         string entityLogicalName,
         Guid recordId,
         Dictionary<string, object?> fields,
+        CancellationToken ct = default);
+
+    // ========================================
+    // Generic Entity Operations (Finance Intelligence Module R1)
+    // ========================================
+
+    /// <summary>
+    /// Create a new entity record.
+    /// </summary>
+    /// <param name="entity">Entity to create (set entity logical name and attributes)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Created entity ID</returns>
+    /// <example>
+    /// var billingEvent = new Entity("sprk_billingevent")
+    /// {
+    ///     ["sprk_invoiceid"] = new EntityReference("sprk_invoice", invoiceId),
+    ///     ["sprk_linesequence"] = lineNumber,
+    ///     ["sprk_amount"] = new Money(amount)
+    /// };
+    /// var id = await _dataverseService.CreateAsync(billingEvent, ct);
+    /// </example>
+    Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default);
+
+    /// <summary>
+    /// Update an existing entity record with field values from a dictionary.
+    /// Builds an Entity object from the dictionary and updates via ServiceClient.
+    /// </summary>
+    /// <param name="entityLogicalName">Entity logical name (e.g., "sprk_invoice")</param>
+    /// <param name="id">Record ID to update</param>
+    /// <param name="fields">Dictionary of field name to value (supports primitives, EntityReference, Money, OptionSetValue)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <example>
+    /// var fields = new Dictionary&lt;string, object&gt;
+    /// {
+    ///     ["sprk_status"] = new OptionSetValue(2),
+    ///     ["sprk_reviewedon"] = DateTime.UtcNow,
+    ///     ["sprk_matterid"] = new EntityReference("sprk_matter", matterId)
+    /// };
+    /// await _dataverseService.UpdateAsync("sprk_invoice", invoiceId, fields, ct);
+    /// </example>
+    Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default);
+
+    /// <summary>
+    /// Update multiple entity records in a single batch operation using ExecuteMultipleRequest.
+    /// Use for bulk updates to improve performance (reduces round-trips to Dataverse).
+    /// </summary>
+    /// <param name="entityLogicalName">Entity logical name for all records</param>
+    /// <param name="updates">List of (recordId, fields) tuples to update</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Task</returns>
+    /// <remarks>
+    /// Uses ExecuteMultipleRequest with ContinueOnError=false for transactional behavior.
+    /// If any update fails, the entire batch fails. For partial failure tolerance,
+    /// use individual UpdateAsync calls with try/catch.
+    /// </remarks>
+    Task BulkUpdateAsync(
+        string entityLogicalName,
+        List<(Guid id, Dictionary<string, object> fields)> updates,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieve a Dataverse entity using alternate key(s) instead of GUID.
+    /// Alternate keys provide portable logical identifiers that remain stable across environments.
+    /// </summary>
+    /// <param name="entityLogicalName">Entity logical name (e.g., "sprk_analysisplaybook")</param>
+    /// <param name="alternateKeyValues">Key-value pairs for alternate key lookup (e.g., { "sprk_playbookcode", "PB-013" })</param>
+    /// <param name="columns">Array of column names to retrieve (null = all columns)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Retrieved entity</returns>
+    /// <exception cref="InvalidOperationException">Thrown if entity not found or alternate key not indexed</exception>
+    /// <example>
+    /// // Retrieve playbook by code (portable across environments)
+    /// var keyValues = new KeyAttributeCollection { { "sprk_playbookcode", "PB-013" } };
+    /// var playbook = await _dataverseService.RetrieveByAlternateKeyAsync(
+    ///     "sprk_analysisplaybook",
+    ///     keyValues,
+    ///     new[] { "sprk_name", "sprk_configjson" },
+    ///     ct);
+    /// </example>
+    Task<Entity> RetrieveByAlternateKeyAsync(
+        string entityLogicalName,
+        KeyAttributeCollection alternateKeyValues,
+        string[]? columns = null,
         CancellationToken ct = default);
 
     // ========================================

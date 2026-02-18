@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Implement invoice review confirm endpoint</title>
+    <phase>2: AI Services + Job Handlers</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001, 009</dependencies>
+    <blocks>016</blocks>
+    <tags>bff-api, api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates API endpoint with validation, Dataverse writes, and job enqueue — tags include bff-api, api</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement InvoiceReviewService and POST /api/finance/invoice-review/confirm endpoint.
+    Validates required fields (documentId, matterId, vendorOrgId), sets
+    sprk_invoicereviewstatus=ConfirmedInvoice + reviewer fields on document, creates
+    sprk_invoice record (Status=ToReview, ExtractionStatus=NotRun), enqueues InvoiceExtraction
+    job. Returns 202 + jobId + invoiceId.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Minimal API endpoint patterns and async job enqueue.
+    Follow ADR-001 for Minimal API, ADR-008 for endpoint filters, ADR-017 for async status,
+    ADR-019 for ProblemDetails errors.
+  </role>
+
+  <goal>
+    InvoiceReviewService and confirm endpoint created following AnalysisEndpoints pattern.
+    Endpoint validates input, updates document, creates invoice record, enqueues extraction job.
+    Returns 202 with jobId and invoiceId for async tracking.
+  </goal>
+
+  <context>
+    <background>
+      After a document is classified as an invoice candidate and appears in the review queue,
+      a human reviewer confirms it by calling this endpoint. The confirm action:
+      1. Validates required fields (documentId, matterId, vendorOrgId)
+      2. Updates the document record with ConfirmedInvoice status and reviewer info
+      3. Creates a new sprk_invoice record linked to the document
+      4. Enqueues an InvoiceExtraction job to process the confirmed invoice
+
+      This is the human-in-the-loop step that bridges AI classification and AI extraction.
+      The endpoint returns 202 (Accepted) because extraction is async.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API MapGroup pattern — no controllers</constraint>
+    <constraint source="ADR-008">Apply endpoint authorization filter — no global middleware</constraint>
+    <constraint source="ADR-017">Return 202 + jobId + statusUrl for async operations</constraint>
+    <constraint source="ADR-019">Use ProblemDetails for all error responses with stable errorCode and correlationId</constraint>
+    <constraint source="project">Invoice record created with Status=ToReview, ExtractionStatus=NotRun</constraint>
+    <constraint source="project">All finance endpoints under /api/finance/ route group</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-errors.md</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint Group" location="src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs">
+        Minimal API MapGroup pattern with endpoint definitions
+      </pattern>
+      <pattern name="Auth Filter" location="src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs">
+        Endpoint authorization filter pattern
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read AnalysisEndpoints.cs to understand the Minimal API MapGroup and endpoint definition pattern</step>
+    <step order="2">Read DocumentAuthorizationFilter.cs to understand the authorization filter pattern</step>
+    <step order="3">Create FinanceEndpoints.cs in Api/Finance/ with MapGroup("/api/finance")</step>
+    <step order="4">Create InvoiceReviewService.cs in Services/Finance/ with ConfirmInvoiceAsync method</step>
+    <step order="5">Implement request validation: documentId, matterId, vendorOrgId required — return ProblemDetails on validation failure</step>
+    <step order="6">Implement document update: set sprk_invoicereviewstatus=ConfirmedInvoice, sprk_reviewedby, sprk_reviewedon</step>
+    <step order="7">Create sprk_invoice record: Status=ToReview, ExtractionStatus=NotRun, linked to document and matter</step>
+    <step order="8">Enqueue InvoiceExtraction job with invoiceId, documentId in payload</step>
+    <step order="9">Return 202 Accepted with { jobId, invoiceId, statusUrl }</step>
+    <step order="10">Wire endpoint to FinanceEndpoints group with POST route</step>
+    <step order="11">Register InvoiceReviewService in AddFinanceModule</step>
+    <step order="12">Run dotnet build to verify compilation</step>
+    <step order="13">Update TASK-INDEX.md: change task 014 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs</output>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FinanceEndpoints.cs exists with MapGroup("/api/finance")</criterion>
+    <criterion testable="true">POST /api/finance/invoice-review/confirm endpoint registered</criterion>
+    <criterion testable="true">Validates documentId, matterId, vendorOrgId — returns ProblemDetails on failure</criterion>
+    <criterion testable="true">Document updated with ConfirmedInvoice status and reviewer fields</criterion>
+    <criterion testable="true">Invoice record created with Status=ToReview, ExtractionStatus=NotRun</criterion>
+    <criterion testable="true">InvoiceExtraction job enqueued with invoiceId and documentId</criterion>
+    <criterion testable="true">Returns 202 with jobId, invoiceId, statusUrl</criterion>
+    <criterion testable="true">InvoiceReviewService registered in AddFinanceModule</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This endpoint is the human-in-the-loop bridge between classification and extraction.
+    It must be in parallel-group C with task 015 (reject endpoint) since both create
+    FinanceEndpoints.cs — they share the same endpoint group file.
+
+    The confirm endpoint creates the invoice record with initial statuses. The extraction
+    job handler (task 016) will later update these statuses after processing.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

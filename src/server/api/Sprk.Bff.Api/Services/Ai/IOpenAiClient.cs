@@ -104,4 +104,23 @@ public interface IOpenAiClient
         IEnumerable<ChatTool> tools,
         string? model = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get a structured completion that conforms to a JSON schema.
+    /// Uses constrained decoding (response_format: json_schema) to guarantee valid JSON output.
+    /// Protected by circuit breaker - throws OpenAiCircuitBrokenException when open.
+    /// </summary>
+    /// <typeparam name="T">The type to deserialize the response into.</typeparam>
+    /// <param name="messages">The conversation messages (system + user prompts).</param>
+    /// <param name="jsonSchema">The JSON schema that the response must conform to.</param>
+    /// <param name="schemaName">A name identifying the schema (e.g., "ClassificationResult").</param>
+    /// <param name="deploymentName">The Azure OpenAI deployment name (e.g., gpt-4o-mini, gpt-4o).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The deserialized response of type T.</returns>
+    Task<T> GetStructuredCompletionAsync<T>(
+        IEnumerable<ChatMessage> messages,
+        BinaryData jsonSchema,
+        string schemaName,
+        string deploymentName,
+        CancellationToken cancellationToken = default);
 }

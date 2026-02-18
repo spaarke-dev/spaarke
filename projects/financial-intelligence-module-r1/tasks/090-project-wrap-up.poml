@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Project Wrap-Up: Final Verification and Cleanup</title>
+    <phase>Wrap-Up</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>048</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation and verification task; no code implementation</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Final project wrap-up for the Finance Intelligence Module R1. (1) Verify all 13 acceptance criteria from spec.md pass (classification, review queue, extraction, billing events, spend snapshots, signals, budget plans, invoice search, finance summary endpoint, PCF panel, dark mode, cache invalidation, job chaining). (2) Update project README.md status to "Complete". (3) Update TASK-INDEX.md to reflect all tasks completed. (4) Create notes/lessons-learned.md with key decisions, challenges encountered, patterns discovered, and recommendations for R2. (5) Run /repo-cleanup to validate repository structure and clean up ephemeral files.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in project wrap-up procedures, documentation, and the Spaarke repository maintenance workflows. Familiar with the full Finance Intelligence Module R1 scope and acceptance criteria.
+  </role>
+
+  <goal>
+    Project is formally complete with all acceptance criteria verified, documentation updated, lessons learned captured, and repository cleaned up. The project is ready for handoff or R2 planning.
+  </goal>
+
+  <context>
+    <background>
+      The Finance Intelligence Module R1 has completed all implementation phases:
+      - Phase 1: Foundation (Dataverse entities, DI module, options, job types)
+      - Phase 2: Core Pipeline (classification, extraction, snapshots, signals, endpoints)
+      - Phase 3: Invoice RAG + Search (index schema, indexing handler, search service)
+      - Phase 4: PCF Panel + Integration + Polish (summary endpoint, PCF control, theming, tuning, tests)
+
+      This wrap-up task formally closes the project by verifying all acceptance criteria, updating project artifacts, capturing lessons learned, and cleaning up the repository.
+
+      The 13 acceptance criteria from spec.md cover the complete scope of the module.
+    </background>
+    <relevant-files>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+      <file>projects/financial-intelligence-module-r1/README.md</file>
+      <file>projects/financial-intelligence-module-r1/tasks/TASK-INDEX.md</file>
+      <file>projects/financial-intelligence-module-r1/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="process">All 13 acceptance criteria from spec.md must be verified before marking project complete</constraint>
+    <constraint source="process">Lessons learned must capture both successes and challenges for R2 planning</constraint>
+    <constraint source="process">Repository cleanup must pass /repo-cleanup validation</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path="projects/financial-intelligence-module-r1/spec.md" reason="Acceptance criteria to verify" />
+      <file path="projects/financial-intelligence-module-r1/README.md" reason="Update project status" />
+      <file path="projects/financial-intelligence-module-r1/tasks/TASK-INDEX.md" reason="Update all task statuses" />
+    </files>
+    <patterns>
+      <pattern name="None" location="N/A">
+        No code patterns — project closure procedure
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md to identify all 13 acceptance criteria for the Finance Intelligence Module R1</step>
+    <step order="2">Verify acceptance criterion 1: Invoice classification correctly identifies invoices from email attachments using GPT-4o-mini structured output</step>
+    <step order="3">Verify acceptance criterion 2: Invoice review queue view shows ToReview invoices in Dataverse</step>
+    <step order="4">Verify acceptance criterion 3: Invoice extraction creates billing events with correct alternate keys</step>
+    <step order="5">Verify acceptance criterion 4: Billing events have accurate line items, role classes, and amounts</step>
+    <step order="6">Verify acceptance criterion 5: Spend snapshots computed with correct aggregations (Month + ToDate)</step>
+    <step order="7">Verify acceptance criterion 6: Spend signals fire on budget threshold breaches (80% warning, 100% exceeded)</step>
+    <step order="8">Verify acceptance criterion 7: Budget plans support Draft/Active/Closed lifecycle</step>
+    <step order="9">Verify acceptance criterion 8: Invoice search endpoint supports hybrid search with filters</step>
+    <step order="10">Verify acceptance criterion 9: Finance summary endpoint returns cached data with Redis</step>
+    <step order="11">Verify acceptance criterion 10: PCF panel displays budget gauge, spend timeline, signals, and invoice history</step>
+    <step order="12">Verify acceptance criterion 11: PCF panel supports dark mode and high contrast</step>
+    <step order="13">Verify acceptance criterion 12: Cache invalidation works (explicit delete after snapshot write)</step>
+    <step order="14">Verify acceptance criterion 13: Full job chain executes: classification → review → extraction → snapshot → signal → indexing</step>
+    <step order="15">Update README.md project status to "Complete" with completion date</step>
+    <step order="16">Update TASK-INDEX.md: mark all tasks as completed (checkmark status)</step>
+    <step order="17">Create notes/lessons-learned.md with sections: Key Decisions, Challenges Encountered, Patterns Discovered, Recommendations for R2</step>
+    <step order="18">Run /repo-cleanup to validate repository structure and clean up ephemeral files</step>
+    <step order="19">Update CLAUDE.md project status to "Complete"</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spec.md, README.md, TASK-INDEX.md for verification</tool>
+    <tool name="Edit">Update README.md status, TASK-INDEX.md statuses, CLAUDE.md status</tool>
+    <tool name="Write">Create notes/lessons-learned.md</tool>
+    <tool name="Skill">Run /repo-cleanup for repository validation</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">Updated README.md with Complete status</output>
+    <output type="documentation">Updated TASK-INDEX.md with all tasks marked complete</output>
+    <output type="documentation">notes/lessons-learned.md with project retrospective</output>
+    <output type="documentation">Updated CLAUDE.md with Complete status</output>
+    <output type="verification">All 13 acceptance criteria verified</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 13 spec.md acceptance criteria verified and documented</criterion>
+    <criterion testable="true">README.md status updated to "Complete" with completion date</criterion>
+    <criterion testable="true">TASK-INDEX.md shows all tasks with completed status</criterion>
+    <criterion testable="true">notes/lessons-learned.md created with Key Decisions, Challenges, Patterns, R2 Recommendations sections</criterion>
+    <criterion testable="true">CLAUDE.md project status updated to "Complete"</criterion>
+    <criterion testable="true">/repo-cleanup passes with no critical issues</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The lessons-learned.md should capture:
+
+    Key Decisions:
+    - BillingEvent alternate key choice (invoiceId + lineSequence, not correlationId)
+    - Contextual metadata enrichment for invoice indexing
+    - Separate InvoiceIndexing job type (not reusing generic RagIndexing)
+    - Dataverse view for review queue (not PCF Dataset control)
+
+    Recommendations for R2:
+    - Quarter/Year period types for snapshots
+    - QoQ/YoY velocity calculations
+    - PCF Dataset control for review queue
+    - Multi-currency support improvements
+    - Automated BudgetPlan lifecycle transitions
+    - Anomaly detection with historical baselines
+
+    This is the final task in the Finance Intelligence Module R1 project. After completion, the project branch can be merged to master via PR.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

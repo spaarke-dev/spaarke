@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Create FinanceOptions Configuration and AddFinanceModule() DI Registration</title>
+    <phase>1: Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>006</dependencies>
+    <blocks>010, 011, 014, 016, 017, 019</blocks>
+    <tags>bff-api, config, di</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag; modifies Program.cs; creates DI module that all subsequent finance services register through</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create FinanceOptions configuration class with finance-specific settings (classification confidence threshold, budget warning percentage, velocity spike threshold, etc.) and the AddFinanceModule() DI extension method in Infrastructure/DI/FinanceModule.cs. Register the module with a single line in Program.cs: builder.Services.AddFinanceModule(builder.Configuration). Initially register only FinanceOptions and FinanceTelemetry — add service registrations as they are implemented in later tasks.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Options pattern, DI module organization, and the Spaarke DI conventions per ADR-010. Follow the existing SpaarkeCore.cs and DocumentsModule.cs patterns.
+  </role>
+
+  <goal>
+    FinanceOptions class is defined with all configurable thresholds. AddFinanceModule() extension method is created following the existing DI module pattern. Program.cs has a single AddFinanceModule() call. The module initially registers only FinanceOptions (bound to configuration section) and FinanceTelemetry. The solution compiles.
+  </goal>
+
+  <context>
+    <background>
+      The Finance Intelligence Module follows ADR-010 which requires all DI registrations for a feature module to be contained in a single AddXxxModule() extension method with a maximum of 15 registrations. The FinanceModule will grow over subsequent tasks to include:
+      - FinanceOptions (configuration)
+      - FinanceTelemetry (ActivitySource + Meter)
+      - IInvoiceAnalysisService (classification + extraction)
+      - IInvoiceReviewService (confirm/reject)
+      - ISpendSnapshotService (aggregation)
+      - ISignalEvaluationService (threshold detection)
+      - IInvoiceSearchService (search)
+      - Job handlers (4 handlers)
+
+      This task creates the skeleton module with Options and Telemetry only. Later tasks will add service registrations incrementally.
+
+      FinanceOptions contains configurable thresholds from spec.md:
+      - ClassificationConfidenceThreshold (default: 0.5 — below this, classify as Unknown)
+      - BudgetWarningPercentage (default: 80 — fire BudgetWarning at 80% of budget)
+      - VelocitySpikePct (default: 50 — fire VelocitySpike at 50% increase)
+      - AutoClassifyAttachments feature flag is on EmailProcessingOptions, not here
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/SpaarkeCore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/DocumentsModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/WorkersModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Maximum 15 non-framework DI registrations per feature module</constraint>
+    <constraint source="ADR-010">All finance services MUST be registered in AddFinanceModule() — no inline registrations in Program.cs</constraint>
+    <constraint source="spec">Initially register only FinanceOptions + FinanceTelemetry; add service registrations incrementally in later tasks</constraint>
+    <constraint source="project">Must not break existing Program.cs registrations or startup</constraint>
+    <constraint source="project">Program.cs may need rebase after PR #143 merges — only add 1 line</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="API constraints including DI patterns" />
+      <file path=".claude/patterns/api/service-registration.md" reason="DI module extension method pattern" />
+      <file path="src/server/api/Sprk.Bff.Api/Infrastructure/DI/SpaarkeCore.cs" reason="Reference DI module pattern" />
+      <file path="src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs" reason="Reference Options pattern" />
+      <file path="src/server/api/Sprk.Bff.Api/Program.cs" reason="Add module registration call" />
+    </files>
+    <patterns>
+      <pattern name="Service Registration" location=".claude/patterns/api/service-registration.md">
+        Follow existing AddXxxModule() extension method pattern from SpaarkeCore.cs, DocumentsModule.cs, WorkersModule.cs
+      </pattern>
+      <pattern name="Options Pattern" location="src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs">
+        Follow existing Options class pattern with IOptions&lt;T&gt; binding and validation
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing DI modules (SpaarkeCore.cs, DocumentsModule.cs, WorkersModule.cs) to understand the extension method pattern</step>
+    <step order="2">Read existing Options classes (EmailProcessingOptions.cs) to understand the Options pattern with configuration binding and validation</step>
+    <step order="3">Create FinanceOptions.cs in Configuration/ with properties:
+      - ClassificationConfidenceThreshold (decimal, default: 0.5)
+      - BudgetWarningPercentage (decimal, default: 80)
+      - VelocitySpikePct (decimal, default: 50)
+      - FinanceSummaryCacheTtlMinutes (int, default: 5)
+      - ClassificationDeploymentName (string, default: "gpt-4o-mini")
+      - ExtractionDeploymentName (string, default: "gpt-4o")
+      Add [Required] or validation attributes following existing Options pattern</step>
+    <step order="4">Create FinanceModule.cs in Infrastructure/DI/ with static AddFinanceModule(this IServiceCollection services, IConfiguration configuration) method. Initially register:
+      - services.Configure&lt;FinanceOptions&gt;(configuration.GetSection("Finance"))
+      - FinanceTelemetry singleton (ActivitySource + Meter for finance operations)</step>
+    <step order="5">Add builder.Services.AddFinanceModule(builder.Configuration) to Program.cs (single line, placed near other AddXxxModule calls)</step>
+    <step order="6">Run dotnet build to verify compilation succeeds</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing DI modules and Options classes</tool>
+    <tool name="Write">Create FinanceOptions.cs and FinanceModule.cs</tool>
+    <tool name="Edit">Add AddFinanceModule() call to Program.cs</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/FinanceOptions.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified — 1 line added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FinanceOptions class exists in Configuration/ with all configurable thresholds</criterion>
+    <criterion testable="true">FinanceOptions has ClassificationConfidenceThreshold (default 0.5), BudgetWarningPercentage (default 80), VelocitySpikePct (default 50)</criterion>
+    <criterion testable="true">FinanceOptions has deployment name properties for classification and extraction models</criterion>
+    <criterion testable="true">AddFinanceModule() extension method exists in Infrastructure/DI/FinanceModule.cs</criterion>
+    <criterion testable="true">AddFinanceModule() registers FinanceOptions via configuration binding</criterion>
+    <criterion testable="true">AddFinanceModule() registers FinanceTelemetry as singleton</criterion>
+    <criterion testable="true">Program.cs contains exactly one AddFinanceModule() call</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+    <criterion testable="true">No existing DI registrations are affected</criterion>
+    <criterion testable="true">Total registrations in FinanceModule is 2 or fewer initially (will grow to ~12 in later tasks)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The AutoClassifyAttachments feature flag belongs on EmailProcessingOptions (not FinanceOptions) because it gates behavior in EmailToDocumentJobHandler, which is part of the existing email pipeline — not the finance module.
+
+    Program.cs may conflict with PR #143 (playbook node builder) which also touches Program.cs. The conflict is trivial — only 1 line added. Rebase after PR merge if needed.
+
+    The FinanceModule will grow incrementally:
+    - Task 009 (this): FinanceOptions + FinanceTelemetry (2 registrations)
+    - Task 010-011: IInvoiceAnalysisService, job handlers
+    - Task 014: IInvoiceReviewService, endpoints
+    - Task 016-019: ISpendSnapshotService, ISignalEvaluationService, IInvoiceSearchService
+    - Final count: ~12 registrations (well within ADR-010's 15 limit)
+
+    See spec.md Section 14.2 for the full module registration plan.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Implement AttachmentClassificationJobHandler</title>
+    <phase>2: AI Services + Job Handlers</phase>
+    <status>completed</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>001, 002, 010</dependencies>
+    <blocks>012, 013</blocks>
+    <tags>bff-api, worker, job, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates job handler with idempotency, AI calls, and Dataverse writes — tags include bff-api, worker, job</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement AttachmentClassificationJobHandler: download attachment from SPE, extract text
+    via TextExtractorService, call IInvoiceAnalysisService.ClassifyAttachmentAsync, write
+    classification + confidence + hints to sprk_document, set reviewstatus=ToReview for
+    candidates/unknowns. Handle text extraction failures (classify as Unknown, confidence=0).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in background job processing and the job contract pattern.
+    Follow ADR-004 for job patterns, ADR-015 for data governance, ADR-016 for bounded concurrency.
+  </role>
+
+  <goal>
+    AttachmentClassificationJobHandler created following the EmailToDocumentJobHandler pattern.
+    Handler downloads attachment, extracts text, classifies via AI, writes results to Dataverse.
+    Text extraction failures handled gracefully (Unknown, confidence=0).
+    Never creates Invoice or BillingEvent records — classification only.
+  </goal>
+
+  <context>
+    <background>
+      This handler is the first step in the finance intelligence pipeline. When an email attachment
+      is created in SPE, this job classifies it as Invoice/NotInvoice/Unknown using AI. The handler
+      downloads the file from SPE, extracts text, calls the InvoiceAnalysisService for classification,
+      then writes the results back to the sprk_document record. Documents classified as candidates
+      or unknowns get reviewstatus=ToReview so they appear in the review queue.
+
+      The handler MUST be idempotent — safe under message replays. It must NOT create Invoice or
+      BillingEvent records; those are created only after human review confirmation.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/IJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/JobContract.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Implement IJobHandler interface; use Job Contract schema; handler must be idempotent</constraint>
+    <constraint source="ADR-004">Propagate CorrelationId from job to all downstream calls</constraint>
+    <constraint source="ADR-015">Never log document content, extracted text, or AI prompts — log only IDs, sizes, timings</constraint>
+    <constraint source="ADR-015">Job payload contains only IDs (documentId, driveId, itemId) — no document bytes</constraint>
+    <constraint source="ADR-016">Respect bounded concurrency for AI calls</constraint>
+    <constraint source="project">Never create Invoice or BillingEvent records in this handler — classification only</constraint>
+    <constraint source="project">IdempotencyKey pattern: classify-{documentId}-attachment</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Job Handler" location="src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs">
+        Reference implementation for job handler with enqueue chaining and idempotency
+      </pattern>
+      <pattern name="Job Interface" location="src/server/api/Sprk.Bff.Api/Services/Jobs/IJobHandler.cs">
+        IJobHandler interface definition
+      </pattern>
+      <pattern name="Text Extraction" location="src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs">
+        Text extraction from documents via Document Intelligence
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EmailToDocumentJobHandler.cs to understand the handler pattern (payload parsing, idempotency, enqueue chaining)</step>
+    <step order="2">Read IJobHandler.cs interface definition</step>
+    <step order="3">Read JobContract.cs model for standard job envelope</step>
+    <step order="4">Read TextExtractorService.cs to understand text extraction API</step>
+    <step order="5">Create AttachmentClassificationJobHandler.cs in Services/Jobs/Handlers/ with constructor dependencies (IInvoiceAnalysisService, ISpeFileOperations, TextExtractorService, IDataverseService, ILogger)</step>
+    <step order="6">Implement ProcessAsync: parse payload (documentId, driveId, itemId), check idempotency key classify-{documentId}-attachment</step>
+    <step order="7">Download attachment from SPE via ISpeFileOperations, extract text via TextExtractorService</step>
+    <step order="8">Handle text extraction failure: classify as Unknown with confidence=0, write to Dataverse, return Success</step>
+    <step order="9">Call IInvoiceAnalysisService.ClassifyAttachmentAsync with extracted text</step>
+    <step order="10">Write classification results to sprk_document: sprk_invoiceclassification, sprk_classificationconfidence, sprk_invoicehintsjson</step>
+    <step order="11">Set sprk_invoicereviewstatus=ToReview for Invoice candidates and Unknown classifications</step>
+    <step order="12">Register handler in AddFinanceModule</step>
+    <step order="13">Run dotnet build to verify compilation</step>
+    <step order="14">Update TASK-INDEX.md: change task 011 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AttachmentClassificationJobHandler.cs</output>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AttachmentClassificationJobHandler.cs exists in Services/Jobs/Handlers/</criterion>
+    <criterion testable="true">Handler implements IJobHandler interface</criterion>
+    <criterion testable="true">JobType constant is "AttachmentClassification"</criterion>
+    <criterion testable="true">Idempotency key follows pattern: classify-{documentId}-attachment</criterion>
+    <criterion testable="true">Handler downloads attachment from SPE via ISpeFileOperations</criterion>
+    <criterion testable="true">Handler extracts text via TextExtractorService</criterion>
+    <criterion testable="true">Text extraction failure results in Unknown classification with confidence=0</criterion>
+    <criterion testable="true">Handler calls IInvoiceAnalysisService.ClassifyAttachmentAsync</criterion>
+    <criterion testable="true">Classification, confidence, and hints written to sprk_document</criterion>
+    <criterion testable="true">Review status set to ToReview for candidates/unknowns</criterion>
+    <criterion testable="true">No Invoice or BillingEvent records created</criterion>
+    <criterion testable="true">No document content in log statements</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Job payload: { documentId, driveId, itemId }
+    IdempotencyKey: classify-{documentId}-attachment
+
+    CRITICAL: This handler must NEVER create Invoice or BillingEvent records.
+    Those are created only after human review via the confirm endpoint (task 014/016).
+
+    Text extraction failures are NOT errors — they are gracefully handled by classifying
+    the document as Unknown with confidence=0 and setting reviewstatus=ToReview.
+    This allows humans to manually review documents that cannot be machine-read.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

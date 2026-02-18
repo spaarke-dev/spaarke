@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Deploy Invoice AI Search Index to Azure</title>
+    <phase>3: Invoice RAG + Search</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>032, 033</blocks>
+    <tags>deploy, azure, azure-search, infrastructure</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Deployment and configuration task; no code implementation</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy the invoice AI Search index to Azure AI Search service (spaarke-search-dev). The index name pattern is spaarke-invoices-{tenantId}. Use the existing SearchIndexClient from the BFF API to create the index programmatically, or deploy using the schema JSON from task 030. Verify the index is created with correct field types, vector search configuration (HNSW, 3072 dimensions), and semantic configuration (invoice-semantic).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure AI Search deployment and the Spaarke Azure infrastructure. Familiar with SearchIndexClient usage patterns and Azure CLI operations.
+  </role>
+
+  <goal>
+    The invoice search index is deployed to Azure AI Search (dev environment) with all fields, vector search config, and semantic config matching the schema definition from task 030.
+  </goal>
+
+  <context>
+    <background>
+      Task 030 produced the index schema JSON definition. This task deploys that schema to the Azure AI Search service. The Spaarke platform uses SearchIndexClient for programmatic index management. The dev environment AI Search service is spaarke-search-dev (https://spaarke-search-dev.search.windows.net/).
+    </background>
+    <relevant-files>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+      <file>docs/guides/RAG-CONFIGURATION.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Index name: spaarke-invoices-{tenantId}</constraint>
+    <constraint source="infrastructure">Target: spaarke-search-dev (https://spaarke-search-dev.search.windows.net/)</constraint>
+    <constraint source="spec">Must verify HNSW vector config with 3072 dimensions after deployment</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path="docs/guides/RAG-CONFIGURATION.md" reason="RAG deployment and configuration patterns" />
+      <file path=".claude/skills/azure-deploy/SKILL.md" reason="Azure deployment skill procedures" />
+    </files>
+    <patterns>
+      <pattern name="Azure Deployment" location=".claude/skills/azure-deploy/SKILL.md">
+        Follow Azure deployment skill for infrastructure operations
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load the index schema JSON from task 030 output</step>
+    <step order="2">Deploy index to Azure AI Search using SearchIndexClient or Azure CLI</step>
+    <step order="3">Verify index exists on spaarke-search-dev with correct name pattern</step>
+    <step order="4">Validate field types match schema — check all 17 fields are present with correct types</step>
+    <step order="5">Validate vector search configuration: HNSW algorithm, cosine metric, 3072 dimensions</step>
+    <step order="6">Validate semantic configuration: "invoice-semantic" is present and configured</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Deploy index using Azure CLI or SearchIndexClient</tool>
+    <tool name="Read">Read schema JSON from task 030</tool>
+  </tools>
+
+  <outputs>
+    <output type="infrastructure">Deployed invoice search index on spaarke-search-dev</output>
+    <output type="verification">Validation output confirming field types and configurations</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Index spaarke-invoices-{tenantId} exists on spaarke-search-dev</criterion>
+    <criterion testable="true">All 17 fields are present with correct types matching schema from task 030</criterion>
+    <criterion testable="true">Vector search profile uses HNSW algorithm with cosine metric and 3072 dimensions</criterion>
+    <criterion testable="true">Semantic configuration "invoice-semantic" is present and active</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The index deployment may need to be repeated per-tenant in production. For dev, a single tenant index is sufficient.
+
+    If using SearchIndexClient programmatically, consider adding an index initialization method that can be called from application startup or a management endpoint.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+      Use azure-deploy skill for deployment operations.
+    </protocol>
+  </execution>
+</task>

@@ -216,6 +216,106 @@
         "Attachment contents are concatenated with section headers",
         "Output fields updated on both email entity and associated documents"
       ]
+    },
+    {
+      "id": "PB-013",
+      "sprk_name": "Finance Invoice Processing",
+      "sprk_description": "AI-powered invoice processing for legal matters. Extracts invoice header and line item data, generates AI summary, and updates Matter financials with total spend tracking. Designed for Finance Intelligence Module R1 MVP.",
+      "sprk_ispublic": true,
+      "estimatedTime": "~45 seconds",
+      "complexity": "Medium",
+      "isSystemPlaybook": true,
+      "triggerContext": "finance-invoice-processing",
+      "scopes": {
+        "skills": ["SKL-002"],
+        "actions": ["ACT-001", "ACT-008"],
+        "knowledge": [],
+        "tools": ["TL-009", "TL-011"]
+      },
+      "scopeDescriptions": {
+        "skills": {
+          "SKL-002": "Invoice Processing - Extract and validate invoice data systematically"
+        },
+        "actions": {
+          "ACT-001": "Extract Entities - Named entity extraction for vendor, amounts, dates",
+          "ACT-008": "Calculate Values - Validate monetary amounts and line item calculations"
+        },
+        "knowledge": {},
+        "tools": {
+          "TL-009": "Invoice Extraction Tool - AI-powered invoice data extraction with structured output",
+          "TL-011": "Financial Calculation Tool - Calculate matter-level financial aggregations"
+        }
+      },
+      "workflow": {
+        "description": "Extract invoice data → Calculate matter totals → Apply outputMapping to update records",
+        "steps": [
+          {
+            "order": 1,
+            "tool": "TL-009",
+            "description": "Extract invoice header and line items using AI",
+            "outputVariable": "extraction"
+          },
+          {
+            "order": 2,
+            "tool": "TL-011",
+            "description": "Calculate matter financial totals",
+            "inputVariables": {
+              "invoiceAmount": "${extraction.totalAmount}",
+              "matterId": "${context.matterId}"
+            },
+            "outputVariable": "calculation"
+          }
+        ],
+        "notes": "OutputOrchestrator applies outputMapping after tools complete"
+      },
+      "outputMapping": {
+        "updates": [
+          {
+            "entityType": "sprk_invoice",
+            "recordIdSource": "${context.invoiceId}",
+            "fields": {
+              "sprk_aisummary": "${extraction.aiSummary}",
+              "sprk_extractedjson": "${extraction.extractedJson}",
+              "sprk_totalamount": {
+                "type": "Money",
+                "value": "${extraction.totalAmount}",
+                "currency": "USD"
+              },
+              "sprk_invoicenumber": "${extraction.invoiceNumber}",
+              "sprk_invoicedate": "${extraction.invoiceDate}",
+              "sprk_extractionstatus": 100000001
+            }
+          },
+          {
+            "entityType": "sprk_matter",
+            "recordIdSource": "${context.matterId}",
+            "fields": {
+              "sprk_totalspendtodate": {
+                "type": "Money",
+                "value": "${calculation.totalSpend}"
+              },
+              "sprk_invoicecount": "${calculation.invoiceCount}",
+              "sprk_remainingbudget": {
+                "type": "Money",
+                "value": "${calculation.remainingBudget}"
+              }
+            },
+            "concurrencyMode": "optimistic",
+            "retryOnConflict": true,
+            "maxRetries": 3
+          }
+        ]
+      },
+      "notes": [
+        "MVP implementation uses simplified architecture - no BillingEvents or SpendSnapshots",
+        "Invoice data stored as JSON on invoice record (sprk_extractedjson)",
+        "Matter totals denormalized and stored on matter record",
+        "OutputMapping processed by OutputOrchestratorService - enables BA configuration without code deployment",
+        "Matter updates use optimistic concurrency to prevent lost updates from concurrent invoices",
+        "Variable resolution: context.* (job payload), extraction.* (TL-009 output), calculation.* (TL-011 output)",
+        "Supports 3 UI scenarios: Matter Overview metrics, Invoice tab list, Invoice tab metrics",
+        "Tool handlers registered in FinanceModule.cs DI configuration"
+      ]
     }
   ],
 
@@ -241,8 +341,9 @@
     {
       "id": "PB-006",
       "sprk_name": "Invoice Processing",
-      "sprk_description": "Invoice data extraction and validation",
-      "priority": 3
+      "sprk_description": "Invoice data extraction and validation (superseded by PB-013 Finance Invoice Processing for Finance Module R1 MVP)",
+      "priority": 3,
+      "status": "Superseded by PB-013"
     },
     {
       "id": "PB-007",

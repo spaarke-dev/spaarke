@@ -20,6 +20,13 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     private readonly ILogger<DataverseServiceClientImpl> _logger;
     private bool _disposed = false;
 
+    /// <summary>
+    /// Exposes the underlying ServiceClient for direct SDK operations (QueryExpression, UpsertRequest, etc.)
+    /// Used by domain services (e.g., SpendSnapshotService) that need generic entity operations
+    /// beyond what IDataverseService provides.
+    /// </summary>
+    public ServiceClient OrganizationService => _serviceClient;
+
     public DataverseServiceClientImpl(
         IConfiguration configuration,
         ILogger<DataverseServiceClientImpl> logger)
@@ -236,6 +243,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         await _serviceClient.UpdateAsync(document, ct);
         _logger.LogInformation("[DATAVERSE] Updated document {DocumentId} with {FieldCount} fields", documentId, fields.Count);
+    }
+
+    public async Task<Entity> RetrieveAsync(string entityLogicalName, Guid id, string[] columns, CancellationToken ct = default)
+    {
+        var columnSet = new ColumnSet(columns);
+        var entity = await _serviceClient.RetrieveAsync(entityLogicalName, id, columnSet, ct);
+        _logger.LogDebug("[DATAVERSE] Retrieved {EntityType} {RecordId} with {ColumnCount} columns",
+            entityLogicalName, id, columns.Length);
+        return entity;
     }
 
     public async Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default)
@@ -1468,6 +1484,223 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         await _serviceClient.UpdateAsync(entity, ct);
         _logger.LogInformation("Updated {Entity}({Id}) with {FieldCount} fields", entityLogicalName, recordId, fields.Count);
+    }
+
+    // ========================================
+    // Generic Entity Operations (Finance Intelligence Module R1)
+    // ========================================
+
+    public async Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default)
+    {
+        if (entity == null)
+            throw new ArgumentNullException(nameof(entity));
+
+        if (string.IsNullOrEmpty(entity.LogicalName))
+            throw new ArgumentException("Entity logical name must be set", nameof(entity));
+
+        try
+        {
+            var entityId = await _serviceClient.CreateAsync(entity, ct);
+
+            _logger.LogInformation(
+                "[DATAVERSE] Created {EntityLogicalName} record with ID: {EntityId}",
+                entity.LogicalName,
+                entityId);
+
+            return entityId;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                exception: ex,
+                message: "[DATAVERSE] Error creating {EntityLogicalName} record. Attributes: {AttributeCount}",
+                entity.LogicalName,
+                entity.Attributes.Count);
+
+            throw new InvalidOperationException(
+                $"Failed to create {entity.LogicalName} record: {ex.Message}", ex);
+        }
+    }
+
+    public async Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(entityLogicalName))
+            throw new ArgumentNullException(nameof(entityLogicalName));
+
+        if (id == Guid.Empty)
+            throw new ArgumentException("Entity ID cannot be empty", nameof(id));
+
+        if (fields == null || fields.Count == 0)
+            throw new ArgumentException("Fields dictionary cannot be null or empty", nameof(fields));
+
+        try
+        {
+            var entity = new Entity(entityLogicalName, id);
+
+            foreach (var field in fields)
+            {
+                if (field.Value != null)
+                {
+                    entity[field.Key] = field.Value;
+                }
+            }
+
+            await _serviceClient.UpdateAsync(entity, ct);
+
+            _logger.LogInformation(
+                "[DATAVERSE] Updated {EntityLogicalName} record {EntityId} with {FieldCount} fields",
+                entityLogicalName,
+                id,
+                fields.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                exception: ex,
+                message: "[DATAVERSE] Error updating {EntityLogicalName} record {EntityId}. Fields: {FieldCount}",
+                entityLogicalName,
+                id,
+                fields.Count);
+
+            throw new InvalidOperationException(
+                $"Failed to update {entityLogicalName} record {id}: {ex.Message}", ex);
+        }
+    }
+
+    public async Task BulkUpdateAsync(
+        string entityLogicalName,
+        List<(Guid id, Dictionary<string, object> fields)> updates,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(entityLogicalName))
+            throw new ArgumentNullException(nameof(entityLogicalName));
+
+        if (updates == null || updates.Count == 0)
+            throw new ArgumentException("Updates list cannot be null or empty", nameof(updates));
+
+        try
+        {
+            // Use ExecuteMultipleRequest for batch operations
+            var executeMultipleRequest = new Microsoft.Xrm.Sdk.Messages.ExecuteMultipleRequest
+            {
+                Settings = new Microsoft.Xrm.Sdk.ExecuteMultipleSettings
+                {
+                    ContinueOnError = false, // Stop on first error for transactional behavior
+                    ReturnResponses = false  // Don't need individual responses for updates
+                },
+                Requests = new Microsoft.Xrm.Sdk.OrganizationRequestCollection()
+            };
+
+            // Build update requests
+            foreach (var (id, fields) in updates)
+            {
+                var entity = new Entity(entityLogicalName, id);
+
+                foreach (var field in fields)
+                {
+                    if (field.Value != null)
+                    {
+                        entity[field.Key] = field.Value;
+                    }
+                }
+
+                var updateRequest = new Microsoft.Xrm.Sdk.Messages.UpdateRequest
+                {
+                    Target = entity
+                };
+
+                executeMultipleRequest.Requests.Add(updateRequest);
+            }
+
+            // Execute batch
+            var response = (Microsoft.Xrm.Sdk.Messages.ExecuteMultipleResponse)
+                await Task.Run(() => _serviceClient.Execute(executeMultipleRequest), ct);
+
+            _logger.LogInformation(
+                "[DATAVERSE] Bulk updated {RecordCount} {EntityLogicalName} records",
+                updates.Count,
+                entityLogicalName);
+
+            // Check for errors if ContinueOnError was true (currently false)
+            if (response.Responses.Any(r => r.Fault != null))
+            {
+                var faultCount = response.Responses.Count(r => r.Fault != null);
+                _logger.LogError(
+                    "[DATAVERSE] Bulk update had {FaultCount} failures out of {TotalCount} requests",
+                    faultCount,
+                    updates.Count);
+
+                var firstFault = response.Responses.First(r => r.Fault != null).Fault;
+                throw new InvalidOperationException(
+                    $"Bulk update failed: {firstFault.Message}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                exception: ex,
+                message: "[DATAVERSE] Error in bulk update for {EntityLogicalName}. RecordCount: {RecordCount}",
+                entityLogicalName,
+                updates.Count);
+
+            throw new InvalidOperationException(
+                $"Failed to bulk update {entityLogicalName} records: {ex.Message}", ex);
+        }
+    }
+
+    public async Task<Entity> RetrieveByAlternateKeyAsync(
+        string entityLogicalName,
+        KeyAttributeCollection alternateKeyValues,
+        string[]? columns = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            _logger.LogDebug(
+                "[DATAVERSE] Retrieving {EntityType} by alternate key with {KeyCount} keys",
+                entityLogicalName,
+                alternateKeyValues.Count);
+
+            // Build column set (null = all columns)
+            var columnSet = columns != null && columns.Length > 0
+                ? new ColumnSet(columns)
+                : new ColumnSet(true);
+
+            // Use RetrieveRequest with KeyAttributes for alternate key lookup
+            var retrieveRequest = new Microsoft.Xrm.Sdk.Messages.RetrieveRequest
+            {
+                Target = new EntityReference(entityLogicalName, alternateKeyValues),
+                ColumnSet = columnSet
+            };
+
+            var response = await Task.Run(() =>
+                (Microsoft.Xrm.Sdk.Messages.RetrieveResponse)_serviceClient.Execute(retrieveRequest),
+                ct);
+
+            if (response?.Entity == null)
+            {
+                throw new InvalidOperationException(
+                    $"Entity {entityLogicalName} not found with provided alternate key values");
+            }
+
+            _logger.LogDebug(
+                "[DATAVERSE] Retrieved {EntityType} by alternate key. Record ID: {RecordId}",
+                entityLogicalName,
+                response.Entity.Id);
+
+            return response.Entity;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                exception: ex,
+                message: "[DATAVERSE] Error retrieving {EntityType} by alternate key. Keys: {AlternateKeys}",
+                entityLogicalName,
+                string.Join(", ", alternateKeyValues.Select(k => $"{k.Key}={k.Value}")));
+
+            throw new InvalidOperationException(
+                $"Failed to retrieve {entityLogicalName} by alternate key: {ex.Message}", ex);
+        }
     }
 
     // ========================================

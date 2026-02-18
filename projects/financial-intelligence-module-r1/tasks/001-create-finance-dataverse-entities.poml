@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Create Finance Dataverse Entities (6 new entities)</title>
+    <phase>1: Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>010, 011, 014, 016, 017, 019</blocks>
+    <tags>dataverse, solution, fields</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New file creation with Dataverse schema definitions; no code modification</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create 6 new Dataverse entities for the Finance Intelligence Module: sprk_invoice (13 fields + alternate key on sprk_documentid), sprk_billingevent (13 fields + alternate key on sprk_invoiceid + sprk_linesequence), sprk_budgetplan (5 fields), sprk_budgetbucket (6 fields), sprk_spendsnapshot (16 fields + alternate key on 5-field composite: sprk_matterid + sprk_periodtype + sprk_periodkey + sprk_bucketkey + sprk_visibilityfilter), and sprk_spendsignal (10 fields). Define all relationships, choice fields, and alternate keys per the spec.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse entity schema design, solution management, and the Spaarke entity naming conventions. Familiar with alternate key patterns for idempotent upsert operations.
+  </role>
+
+  <goal>
+    All 6 new Dataverse entities are defined in the solution with correct field types, relationships, choice fields, and alternate keys. The schema matches the spec.md Entity Model Summary exactly.
+  </goal>
+
+  <context>
+    <background>
+      The Finance Intelligence Module requires 6 new Dataverse entities to support the invoice classification, extraction, spend analytics, and signal detection pipeline. These entities form the data foundation for all subsequent phases. The entities must support idempotent upsert via alternate keys (ADR-004 requirement for job handler idempotency).
+
+      Entity summary:
+      - sprk_invoice: Lightweight confirmed invoice artifact (created when reviewer confirms attachment)
+      - sprk_billingevent: Canonical financial fact (one per extractable line item from invoice)
+      - sprk_budgetplan: Budget plan header (Draft/Active/Closed lifecycle, manual transitions for MVP)
+      - sprk_budgetbucket: Budget allocation by bucket and period
+      - sprk_spendsnapshot: Pre-computed spend aggregations with velocity metrics
+      - sprk_spendsignal: Threshold-based alerts (budget exceeded, warning, velocity spike, anomaly)
+    </background>
+    <relevant-files>
+      <file>src/solutions/</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+      <file>projects/financial-intelligence-module-r1/Spaarke_Finance_Intelligence_MVP_Design 2.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">BillingEvent alternate key must be sprk_invoiceid + sprk_linesequence (NOT correlationId) for idempotent upsert supporting re-extraction</constraint>
+    <constraint source="ADR-004">SpendSnapshot alternate key must be 5-field composite: sprk_matterid + sprk_periodtype + sprk_periodkey + sprk_bucketkey + sprk_visibilityfilter</constraint>
+    <constraint source="spec">sprk_invoice alternate key is sprk_documentid (one invoice per confirmed document)</constraint>
+    <constraint source="spec">BillingEvent.sprk_correlationid is a traceability field only — excluded from alternate key to support idempotent re-extraction with new correlation IDs</constraint>
+    <constraint source="spec">BudgetPlan.sprk_status (Draft/Active/Closed) is transitioned manually for MVP — no automated transitions</constraint>
+    <constraint source="ADR-022">Unmanaged solutions only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Dataverse entity CRUD patterns and late-bound operations" />
+      <file path=".claude/constraints/data.md" reason="Data access and entity constraints" />
+      <file path="projects/financial-intelligence-module-r1/spec.md" reason="Entity Model Summary with complete field definitions" />
+    </files>
+    <patterns>
+      <pattern name="Dataverse Entity Operations" location=".claude/patterns/dataverse/entity-operations.md">
+        Follow existing entity patterns for field types, relationships, and naming conventions
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md Entity Model Summary (Sections 5.4-5.7 of design doc) for complete field definitions of all 6 entities</step>
+    <step order="2">Read design doc Section 5 for full field specs including types, required flags, choice values, and relationships</step>
+    <step order="3">Create sprk_invoice entity: 13 fields (sprk_invoiceid PK, sprk_documentid lookup, sprk_recordtype choice, sprk_matterid lookup, sprk_projectid lookup, sprk_vendororgid lookup, sprk_invoicenumber text, sprk_invoicedate date, sprk_currency text, sprk_totalamount money, sprk_status choice [ToReview/Reviewed], sprk_visibilitystate choice, sprk_extractionstatus choice [NotRun/Extracted/Failed], sprk_correlationid text) + alternate key on sprk_documentid</step>
+    <step order="4">Create sprk_billingevent entity: 13 fields (sprk_billingeventid PK, sprk_eventdate date, sprk_matterid lookup, sprk_projectid lookup, sprk_vendororgid lookup, sprk_costtype choice [Fee/Expense], sprk_amount money, sprk_currency text, sprk_roleclass text, sprk_visibilitystate choice, sprk_invoiceid lookup, sprk_description multiline text, sprk_linesequence int32, sprk_correlationid text) + alternate key on sprk_invoiceid + sprk_linesequence</step>
+    <step order="5">Create sprk_budgetplan entity: 5 fields (sprk_budgetplanid PK, sprk_matterid/sprk_projectid lookups, sprk_totalbudget money, sprk_currency text, sprk_status choice [Draft/Active/Closed])</step>
+    <step order="6">Create sprk_budgetbucket entity: 6 fields (sprk_budgetbucketid PK, sprk_budgetplanid lookup, sprk_bucketkey text, sprk_periodstart date, sprk_periodend date, sprk_amount money)</step>
+    <step order="7">Create sprk_spendsnapshot entity: 16 fields (sprk_spendsnapshotid PK, sprk_matterid/sprk_projectid lookups, sprk_periodtype choice [Month/Quarter/Year/ToDate], sprk_periodkey text, sprk_bucketkey text, sprk_visibilityfilter text, sprk_invoicedamount money, sprk_budgetamount money, sprk_budgetvariance money, sprk_budgetvariancepct decimal, sprk_velocitypct decimal, sprk_priorperiodamount money, sprk_priorperiodkey text, sprk_generatedat datetime, sprk_correlationid text) + 5-field composite alternate key</step>
+    <step order="8">Create sprk_spendsignal entity: 10 fields (sprk_spendsignalid PK, sprk_matterid/sprk_projectid lookups, sprk_signaltype choice [BudgetExceeded/BudgetWarning/VelocitySpike/AnomalyDetected], sprk_severity choice [Info/Warning/Critical], sprk_message text, sprk_snapshotid lookup, sprk_isactive boolean, sprk_generatedat datetime)</step>
+    <step order="9">Add all lookup relationships between entities (invoice→document, billingevent→invoice, budgetbucket→budgetplan, spendsignal→spendsnapshot, etc.)</step>
+    <step order="10">Validate schema against spec.md — verify all field counts match (invoice=13, billingevent=13, budgetplan=5, budgetbucket=6, spendsnapshot=16, spendsignal=10)</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spec.md and design doc for entity definitions</tool>
+    <tool name="Write">Create entity definition files in solution</tool>
+    <tool name="Edit">Modify solution files to include new entities</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">sprk_invoice entity with 13 fields + alternate key (sprk_documentid)</output>
+    <output type="schema">sprk_billingevent entity with 13 fields + alternate key (sprk_invoiceid + sprk_linesequence)</output>
+    <output type="schema">sprk_budgetplan entity with 5 fields</output>
+    <output type="schema">sprk_budgetbucket entity with 6 fields</output>
+    <output type="schema">sprk_spendsnapshot entity with 16 fields + alternate key (5-field composite)</output>
+    <output type="schema">sprk_spendsignal entity with 10 fields</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_invoice entity has exactly 13 fields with alternate key on sprk_documentid</criterion>
+    <criterion testable="true">sprk_billingevent entity has exactly 13 fields with alternate key on sprk_invoiceid + sprk_linesequence</criterion>
+    <criterion testable="true">sprk_budgetplan entity has exactly 5 fields with status choice (Draft/Active/Closed)</criterion>
+    <criterion testable="true">sprk_budgetbucket entity has exactly 6 fields with lookup to sprk_budgetplan</criterion>
+    <criterion testable="true">sprk_spendsnapshot entity has exactly 16 fields with 5-field composite alternate key</criterion>
+    <criterion testable="true">sprk_spendsignal entity has exactly 10 fields with lookup to sprk_spendsnapshot</criterion>
+    <criterion testable="true">All choice fields have correct option values (VisibilityState, CostType, PeriodType, SignalType, Severity, Status, ExtractionStatus, RecordType)</criterion>
+    <criterion testable="true">All lookup relationships are properly defined between entities</criterion>
+    <criterion testable="true">Field types match spec exactly (Money for amounts, Decimal for percentages, DateTime for timestamps, Int32 for linesequence)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    BillingEvent alternate key intentionally excludes sprk_correlationid. This supports the re-extraction scenario: when extraction is re-run with a new correlation ID, existing BillingEvents are updated (upserted) rather than duplicated. The correlationId is kept as a traceability field only.
+
+    SpendSnapshot alternate key (5-field composite) enables idempotent upsert on snapshot re-generation when budget allocations change or new BillingEvents are created.
+
+    BudgetPlan.sprk_status is manually transitioned for MVP (Draft → Active → Closed). No automated lifecycle.
+
+    VisibilityState choice values include Invoiced (MVP), InternalWIP, PreBill, Paid, WrittenOff (future). Only Invoiced is used in MVP.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

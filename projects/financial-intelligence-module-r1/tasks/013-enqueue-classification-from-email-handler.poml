@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Enqueue classification from EmailToDocumentJobHandler</title>
+    <phase>2: AI Services + Job Handlers</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, worker, job</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies production-critical EmailToDocumentJobHandler — tags include bff-api, worker; modifies .cs files</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Modify EmailToDocumentJobHandler.ProcessSingleAttachmentAsync to enqueue an
+    AttachmentClassification job after existing enqueues. Add AutoClassifyAttachments
+    feature flag to EmailProcessingOptions (default: false) for safe rollout.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in email-to-document pipeline and feature flag patterns.
+    Follow ADR-004 for job contract, handle modifications to production-critical code carefully.
+  </role>
+
+  <goal>
+    EmailToDocumentJobHandler enqueues AttachmentClassification job after attachment creation.
+    Feature flag AutoClassifyAttachments on EmailProcessingOptions controls activation (default: false).
+    Existing email pipeline behavior unchanged when flag is off.
+  </goal>
+
+  <context>
+    <background>
+      The EmailToDocumentJobHandler is the existing production handler that processes email
+      attachments into SPE documents. After creating the document record and enqueuing other
+      jobs (RAG indexing, document analysis), it needs to also enqueue the new
+      AttachmentClassification job — but only when the AutoClassifyAttachments feature flag
+      is enabled. This flag defaults to false for safe rollout.
+
+      This is a MODIFICATION to a production-critical handler. Changes must be minimal and
+      additive — no refactoring of existing logic. The new enqueue goes AFTER all existing
+      enqueues to ensure the document is fully set up before classification begins.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Use standard JobContract envelope for the enqueued job</constraint>
+    <constraint source="ADR-004">Propagate CorrelationId from current job to enqueued classification job</constraint>
+    <constraint source="project">Feature flag AutoClassifyAttachments defaults to false — safe rollout</constraint>
+    <constraint source="project">Enqueue AFTER all existing enqueues — document must be fully created first</constraint>
+    <constraint source="project">Minimal changes to production handler — additive only, no refactoring</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Email Handler" location="src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs">
+        Production handler to modify — follow existing enqueue chaining pattern
+      </pattern>
+      <pattern name="Options Class" location="src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs">
+        Options class to extend with new feature flag
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EmailToDocumentJobHandler.cs ProcessSingleAttachmentAsync to understand existing enqueue chain</step>
+    <step order="2">Read EmailProcessingOptions.cs to understand existing configuration structure</step>
+    <step order="3">Add AutoClassifyAttachments property to EmailProcessingOptions (bool, default: false)</step>
+    <step order="4">Add private method EnqueueAttachmentClassificationJobAsync to EmailToDocumentJobHandler</step>
+    <step order="5">Call EnqueueAttachmentClassificationJobAsync after existing enqueues in ProcessSingleAttachmentAsync, guarded by feature flag check</step>
+    <step order="6">Ensure CorrelationId propagation from current job context to new classification job</step>
+    <step order="7">Run dotnet build to verify compilation</step>
+    <step order="8">Run existing email handler tests to verify no regressions: dotnet test --filter "EmailToDocument"</step>
+    <step order="9">Update TASK-INDEX.md: change task 013 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs</output>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">EmailProcessingOptions has AutoClassifyAttachments property (default: false)</criterion>
+    <criterion testable="true">EmailToDocumentJobHandler has EnqueueAttachmentClassificationJobAsync method</criterion>
+    <criterion testable="true">Classification job enqueued AFTER existing enqueues</criterion>
+    <criterion testable="true">Enqueue guarded by AutoClassifyAttachments feature flag</criterion>
+    <criterion testable="true">CorrelationId propagated to classification job</criterion>
+    <criterion testable="true">Job payload contains documentId, driveId, itemId</criterion>
+    <criterion testable="true">Existing email handler tests still pass</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a production-critical modification. Key principles:
+    1. Feature flag defaults to FALSE — classification is opt-in
+    2. Changes are purely additive — no refactoring of existing logic
+    3. Classification enqueue happens AFTER all existing enqueues
+    4. If enqueue fails, it should NOT fail the entire email processing job
+       (classification is a non-critical enhancement — log warning and continue)
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

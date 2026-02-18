@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Implement SpendSnapshotGenerationJobHandler</title>
+    <phase>2: AI Services + Job Handlers</phase>
+    <status>not-started</status>
+    <estimated-hours>2.5</estimated-hours>
+    <dependencies>017, 018</dependencies>
+    <blocks>048</blocks>
+    <tags>bff-api, worker, job, cache</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates job handler with service orchestration and Redis cache invalidation — tags include bff-api, worker, job</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement SpendSnapshotGenerationJobHandler: calls SpendSnapshotService for aggregation,
+    SignalEvaluationService for signal detection, invalidates Redis cache key
+    matter:{matterId}:finance-summary. Follows standard job handler pattern.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in background job processing, service orchestration,
+    and Redis caching. Follow ADR-004 for job patterns, ADR-009 for Redis cache invalidation.
+  </role>
+
+  <goal>
+    SpendSnapshotGenerationJobHandler created that orchestrates snapshot generation and signal
+    evaluation. Invalidates Redis finance summary cache after writes. Handler is idempotent —
+    safe to replay (services use upsert patterns).
+  </goal>
+
+  <context>
+    <background>
+      This handler is enqueued by the InvoiceExtractionJobHandler (task 016) after creating
+      BillingEvent records. It orchestrates two services:
+      1. SpendSnapshotService.GenerateAsync — aggregates BillingEvents into SpendSnapshots
+      2. SignalEvaluationService.EvaluateAsync — evaluates snapshots against threshold rules
+
+      After both services complete, it invalidates the Redis cache so the Finance PCF panel
+      gets fresh data on next request.
+
+      The handler is idempotent because both services use upsert patterns. Replaying the
+      handler will regenerate the same snapshots and signals without duplicates.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Finance/SpendSnapshotService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Finance/SignalEvaluationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingCache.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Implement IJobHandler interface; idempotent — services use upsert patterns</constraint>
+    <constraint source="ADR-004">Propagate CorrelationId from job to service calls</constraint>
+    <constraint source="ADR-009">Explicit Redis cache invalidation after snapshot writes — TTL is safety net only</constraint>
+    <constraint source="project">Cache key: matter:{matterId}:finance-summary (sdap: prefix added automatically by StackExchangeRedisCache)</constraint>
+    <constraint source="project">Use IDistributedCache for Redis operations</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-009-redis-first-caching.md</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Redis Cache" location="src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingCache.cs">
+        IDistributedCache pattern for Redis operations
+      </pattern>
+      <pattern name="Distributed Cache" location=".claude/patterns/caching/distributed-cache.md">
+        Redis cache key patterns, TTL, invalidation strategies
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read background-workers.md and ADR-004 for handler pattern</step>
+    <step order="2">Read distributed-cache.md for Redis invalidation pattern</step>
+    <step order="3">Create SpendSnapshotGenerationJobHandler.cs in Services/Jobs/Handlers/</step>
+    <step order="4">Implement ProcessAsync: parse payload (matterId), propagate CorrelationId</step>
+    <step order="5">Call SpendSnapshotService.GenerateAsync(matterId)</step>
+    <step order="6">Call SignalEvaluationService.EvaluateAsync(matterId)</step>
+    <step order="7">Invalidate Redis cache key matter:{matterId}:finance-summary via IDistributedCache.RemoveAsync</step>
+    <step order="8">Register handler in AddFinanceModule</step>
+    <step order="9">Run dotnet build to verify compilation</step>
+    <step order="10">Update TASK-INDEX.md: change task 019 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/SpendSnapshotGenerationJobHandler.cs</output>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SpendSnapshotGenerationJobHandler.cs exists in Services/Jobs/Handlers/</criterion>
+    <criterion testable="true">Handler implements IJobHandler with JobType "SpendSnapshotGeneration"</criterion>
+    <criterion testable="true">Handler calls SpendSnapshotService.GenerateAsync</criterion>
+    <criterion testable="true">Handler calls SignalEvaluationService.EvaluateAsync</criterion>
+    <criterion testable="true">Redis cache key matter:{matterId}:finance-summary invalidated after writes</criterion>
+    <criterion testable="true">Handler registered in AddFinanceModule</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a relatively simple orchestration handler — the complexity lives in the
+    SpendSnapshotService and SignalEvaluationService. The handler's job is to:
+    1. Call both services in sequence (generate snapshots first, then evaluate signals)
+    2. Invalidate the Redis cache so the UI gets fresh data
+    3. Be idempotent (both services use upsert, so replaying is safe)
+
+    Cache key format: matter:{matterId}:finance-summary
+    The sdap: prefix is added automatically by StackExchangeRedisCache — do NOT include it
+    in the key string passed to IDistributedCache.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

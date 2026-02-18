@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Extend IDataverseService for Finance Entities</title>
+    <phase>4: VisualHost Configuration + Integration + Polish</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>016, 019, 032</blocks>
+    <tags>bff-api, dataverse, finance, api, services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>API tag triggers FULL protocol; addresses deployment BLOCKERS; modifies service interfaces</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Extend IDataverseService with methods to support finance entity operations needed by AttachmentClassificationJobHandler, InvoiceExtractionJobHandler, SpendSnapshotGenerationJobHandler, and InvoiceIndexingJobHandler. Add CreateAsync&lt;T&gt;, UpdateAsync (entity + fields), and BulkUpdateAsync methods to enable BillingEvent creation, invoice reviewer corrections, parent entity field updates, and batch operations. Implement in DataverseServiceClientImpl with proper error handling, telemetry, and retries.
+  </prompt>
+
+  <role>
+    SPAARKE backend developer. Expert in .NET 8, Dataverse SDK (Microsoft.PowerPlatform.Dataverse.Client), service layer design, and API patterns. Familiar with existing IDataverseService interface and implementations.
+  </role>
+
+  <goal>
+    IDataverseService extended with generic CreateAsync, UpdateAsync, and BulkUpdateAsync methods that support finance entity operations. Addresses 2 deployment BLOCKERS and unblocks job handler implementations.
+  </goal>
+
+  <context>
+    <background>
+      The existing IDataverseService provides basic CRUD operations but lacks methods needed by finance job handlers:
+
+      **BLOCKER 1: BillingEvent Creation**
+      - AttachmentClassificationJobHandler needs to create sprk_billingevent records
+      - Current workaround: TODOs in code flagged as deployment blockers
+      - Required: Generic CreateAsync&lt;T&gt;(Entity entity) method
+
+      **BLOCKER 2: Invoice Reviewer Corrections**
+      - InvoiceExtractionJobHandler needs to update invoices with reviewer corrections
+      - Current workaround: TODOs in code flagged as deployment blockers
+      - Required: UpdateAsync(string entityName, Guid id, Dictionary&lt;string, object&gt; fields)
+
+      **Enhancement: Parent Entity Field Updates**
+      - SpendSnapshotGenerationJobHandler needs to update Matter/Project finance fields (architectural pivot)
+      - Required: UpdateAsync method (same as BLOCKER 2)
+
+      **Enhancement: Batch Operations**
+      - InvoiceIndexingJobHandler may need batch updates for search metadata
+      - Required: BulkUpdateAsync for performance
+
+      The goal is to add these methods to IDataverseService interface and implement them in DataverseServiceClientImpl with proper error handling, telemetry, and retries consistent with existing patterns.
+    </background>
+    <relevant-files>
+      <file>src/server/shared/Spaarke.Dataverse/IDataverseService.cs</file>
+      <file>src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AttachmentClassificationJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/SpendSnapshotGenerationJobHandler.cs</file>
+      <file>projects/financial-intelligence-module-r1/notes/DEPLOYMENT-READINESS-CHECKLIST.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — only add methods that are actually needed by multiple consumers</constraint>
+    <constraint source="spec">Service methods must handle Dataverse SDK exceptions and convert to application-specific exceptions</constraint>
+    <constraint source="spec">All service methods must emit telemetry (Activity/ILogger) for tracing</constraint>
+    <constraint source="spec">Retries should use existing Dataverse SDK retry policies (don't implement custom retry logic)</constraint>
+    <constraint source="deployment">This task addresses 2 BLOCKER items — must be completed before production deployment</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="BFF API constraints and patterns" />
+      <file path=".claude/constraints/data.md" reason="Dataverse and data access patterns" />
+      <file path=".claude/adr/ADR-010-di-minimalism.md" reason="Dependency injection principles" />
+    </files>
+    <patterns>
+      <pattern name="Service Layer Error Handling" location=".claude/patterns/api/service-error-handling.md">
+        Convert SDK exceptions to application exceptions with context
+      </pattern>
+      <pattern name="Telemetry for Services" location=".claude/patterns/telemetry/service-telemetry.md">
+        Activity and ILogger usage in service methods
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing IDataverseService interface to understand current method signatures and patterns</step>
+    <step order="2">Read existing DataverseServiceClientImpl to understand error handling, telemetry, and retry patterns</step>
+    <step order="3">Review deployment readiness checklist to understand specific usage scenarios</step>
+    <step order="4">Review job handler files to identify specific entity operations needed (CreateAsync, UpdateAsync usage patterns)</step>
+    <step order="5">Design IDataverseService method signatures:
+      - CreateAsync&lt;T&gt;(Entity entity) → returns created entity ID
+      - UpdateAsync(string entityName, Guid id, Dictionary&lt;string, object&gt; fields) → void or boolean
+      - BulkUpdateAsync(string entityName, List&lt;(Guid id, Dictionary&lt;string, object&gt; fields)&gt; updates) → void
+    </step>
+    <step order="6">Add new method signatures to IDataverseService interface with XML docs explaining purpose and usage</step>
+    <step order="7">Implement CreateAsync&lt;T&gt; in DataverseServiceClientImpl:
+      - Use ServiceClient.Create(Entity)
+      - Add telemetry (Activity.Current tags, ILogger)
+      - Handle exceptions (convert to application-specific exceptions)
+      - Return created entity ID
+    </step>
+    <step order="8">Implement UpdateAsync in DataverseServiceClientImpl:
+      - Build Entity object from dictionary
+      - Use ServiceClient.Update(Entity)
+      - Add telemetry and error handling
+    </step>
+    <step order="9">Implement BulkUpdateAsync in DataverseServiceClientImpl:
+      - Use ExecuteMultipleRequest for batch operations
+      - Handle partial failures appropriately
+      - Add telemetry for batch metrics
+    </step>
+    <step order="10">Build solution to verify no compilation errors</step>
+    <step order="11">Update deployment readiness checklist to mark BLOCKER items as resolved</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing IDataverseService and implementation files</tool>
+    <tool name="Edit">Add methods to IDataverseService interface</tool>
+    <tool name="Edit">Implement new methods in DataverseServiceClientImpl</tool>
+    <tool name="Edit">Update deployment readiness checklist</tool>
+    <tool name="Bash">Build solution and verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Modified src/server/shared/Spaarke.Dataverse/IDataverseService.cs with new method signatures</output>
+    <output type="code">Modified src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs with implementations</output>
+    <output type="documentation">Updated projects/financial-intelligence-module-r1/notes/DEPLOYMENT-READINESS-CHECKLIST.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">IDataverseService interface includes CreateAsync&lt;T&gt;(Entity entity) method</criterion>
+    <criterion testable="true">IDataverseService interface includes UpdateAsync(string entityName, Guid id, Dictionary&lt;string, object&gt; fields) method</criterion>
+    <criterion testable="true">IDataverseService interface includes BulkUpdateAsync method for batch operations</criterion>
+    <criterion testable="true">DataverseServiceClientImpl implements all new methods with error handling</criterion>
+    <criterion testable="true">All new methods emit telemetry (Activity tags and ILogger calls)</criterion>
+    <criterion testable="true">All new methods handle Dataverse SDK exceptions and convert to application exceptions</criterion>
+    <criterion testable="true">Solution builds successfully with no compilation errors</criterion>
+    <criterion testable="true">Deployment readiness checklist updated with BLOCKER items marked as resolved</criterion>
+    <criterion testable="true">XML documentation added to all new interface methods explaining purpose and usage</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The CreateAsync&lt;T&gt; method should accept an Entity object (not a generic T) because Dataverse SDK uses Entity class. The generic parameter T can be used for type safety in calling code but should resolve to Entity.
+
+    For UpdateAsync, consider whether to return void or a boolean indicating success. Void is simpler and consistent with Dataverse SDK Update method, but boolean provides feedback to callers.
+
+    BulkUpdateAsync should use ExecuteMultipleRequest from Dataverse SDK for optimal performance. Consider settings for ContinueOnError and ReturnResponses based on use case.
+
+    This task unblocks:
+    - Task 016: InvoiceExtractionJobHandler (needs UpdateAsync for reviewer corrections)
+    - Task 019: SpendSnapshotGenerationJobHandler (needs UpdateAsync for parent entity fields)
+    - Task 032: InvoiceIndexingJobHandler (may need BulkUpdateAsync for metadata)
+
+    Consider adding unit tests in a follow-up task to verify method behavior with mocked ServiceClient.
+  </notes>
+
+  <completion-notes>
+    <completed-on>2026-02-11</completed-on>
+    <summary>
+      Successfully extended IDataverseService with three generic entity operation methods:
+      1. CreateAsync(Entity entity) - Generic entity creation, returns Guid
+      2. UpdateAsync(string entityName, Guid id, Dictionary fields) - Generic entity update with field dictionary
+      3. BulkUpdateAsync(string entityName, List updates) - Batch update using ExecuteMultipleRequest
+
+      All methods implemented in DataverseServiceClientImpl with:
+      - Proper error handling (try/catch, InvalidOperationException wrapping)
+      - Telemetry (ILogger.LogInformation success, ILogger.LogError failures)
+      - Argument validation (null checks, empty Guid checks)
+      - XML documentation with examples
+
+      Stub implementations added to DataverseWebApiService for interface compliance.
+
+      Build verification: ✅ 0 errors, 0 warnings
+
+      Deployment readiness impact:
+      - ✅ TODO-001 (BLOCKER): BillingEvent creation - resolved via CreateAsync
+      - ✅ TODO-002 (BLOCKER): Invoice reviewer corrections - resolved via UpdateAsync
+      - Enables architectural pivot: parent entity field updates (Matter/Project finance fields)
+    </summary>
+    <files-modified>
+      - src/server/shared/Spaarke.Dataverse/IDataverseService.cs (added 3 methods + XML docs)
+      - src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs (implemented 3 methods ~150 lines)
+      - src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs (added 3 stub methods)
+      - projects/financial-intelligence-module-r1/notes/DEPLOYMENT-READINESS-CHECKLIST.md (marked TODO-001, TODO-002 resolved)
+    </files-modified>
+    <quality-gates>
+      - Build: ✅ Passed (0 errors, 0 warnings)
+      - Code review: Deferred (user requested continuous execution)
+      - ADR check: Deferred (user requested continuous execution)
+    </quality-gates>
+  </completion-notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+      This is a FULL rigor task — all 11 protocol steps are mandatory.
+    </protocol>
+  </execution>
+</task>

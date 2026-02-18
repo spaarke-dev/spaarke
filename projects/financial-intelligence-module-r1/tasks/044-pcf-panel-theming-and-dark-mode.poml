@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>PCF Panel Theming Audit: Dark Mode and High Contrast Compliance</title>
+    <phase>4: PCF Panel + Integration + Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>043</dependencies>
+    <blocks>none</blocks>
+    <tags>pcf, react, fluent-ui, e2e-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag triggers FULL protocol; modifies .tsx files; enforces ADR-021 dark mode compliance</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Audit and ensure the Finance Intelligence PCF panel fully supports dark mode, high contrast, and uses only Fluent UI v9 semantic tokens. (1) Audit all components (BudgetGauge, SpendTimeline, SignalsList, InvoiceHistory, FluentProviderWrapper, FinanceIntelligencePanel) for any hard-coded colors, font sizes, borders, or shadows. (2) Replace any hard-coded values with Fluent v9 semantic tokens. (3) Test dark mode rendering — verify all text is readable, charts are visible, gauge colors are correct. (4) Test high contrast mode — verify sufficient contrast ratios, focus indicators visible. (5) Verify final bundle size is under 5MB. (6) Build and run UI validation.
+  </prompt>
+
+  <role>
+    SPAARKE frontend developer. Expert in Fluent UI v9 theming, accessibility compliance, dark mode implementation, and PCF control packaging. Familiar with semantic token systems and WCAG contrast requirements.
+  </role>
+
+  <goal>
+    All Finance Intelligence PCF panel components pass dark mode and high contrast audit with zero hard-coded color values, proper semantic token usage throughout, and bundle size under 5MB.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 041-043 built the Finance Intelligence PCF panel with BudgetGauge, SpendTimeline, SignalsList, and InvoiceHistory components. This task performs a theming audit to ensure all components comply with ADR-021 (Fluent UI v9 design system) requirements for dark mode and high contrast support.
+
+      ADR-021 mandates:
+      - No hard-coded colors anywhere in PCF controls
+      - All colors must use Fluent v9 semantic tokens
+      - Dark mode must render correctly with readable text and visible data
+      - High contrast mode must meet WCAG AA contrast ratios
+      - Bundle size must stay under 5MB
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/FinanceIntelligencePanel/</file>
+      <file>src/client/pcf/FinanceIntelligencePanel/components/</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">ZERO hard-coded colors allowed — all colors via Fluent v9 semantic tokens</constraint>
+    <constraint source="ADR-021">Dark mode must render correctly — all text readable, all data visible</constraint>
+    <constraint source="ADR-021">High contrast mode must meet WCAG AA contrast ratios</constraint>
+    <constraint source="ADR-021">No hard-coded font sizes — use Fluent typography tokens</constraint>
+    <constraint source="spec">Bundle size under 5MB</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/pcf.md" reason="PCF control development constraints" />
+      <file path=".claude/patterns/pcf/theme-management.md" reason="Fluent v9 theme management patterns" />
+      <file path=".claude/adr/ADR-021-fluent-ui-v9-design-system.md" reason="Full ADR-021 requirements" />
+      <file path="src/client/pcf/CLAUDE.md" reason="PCF-specific development guidance" />
+      <file path="docs/guides/PCF-V9-PACKAGING.md" reason="Bundle size and packaging requirements" />
+    </files>
+    <patterns>
+      <pattern name="Theme Management" location=".claude/patterns/pcf/theme-management.md">
+        Follow theme management pattern for token usage and theme switching
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read all FinanceIntelligencePanel component files and audit for hard-coded colors, font sizes, borders, shadows, and backgrounds</step>
+    <step order="2">Audit BudgetGauge.tsx: verify gauge colors use semantic tokens (colorStatusSuccess, colorStatusWarning, colorStatusDanger), no hard-coded hex/rgb values</step>
+    <step order="3">Audit SpendTimeline.tsx: verify bar chart colors use semantic tokens, axis labels use typography tokens, backgrounds use surface tokens</step>
+    <step order="4">Audit SignalsList.tsx: verify severity Badge colors use semantic tokens, text uses Fluent typography</step>
+    <step order="5">Audit InvoiceHistory.tsx: verify table/DataGrid uses Fluent defaults (inherently themed), no custom color overrides</step>
+    <step order="6">Audit FluentProviderWrapper.tsx: verify theme detection handles light, dark, and high-contrast modes correctly</step>
+    <step order="7">Replace any hard-coded values found with appropriate Fluent v9 semantic tokens</step>
+    <step order="8">Verify makeStyles usage follows Fluent v9 patterns with token references (not literal values)</step>
+    <step order="9">Build control in production mode and verify bundle size under 5MB</step>
+    <step order="10">Document any theming decisions or token choices in component comments</step>
+  </steps>
+
+  <ui-tests>
+    <test name="dark-mode-compliance">
+      <description>Verify all Finance Intelligence PCF panel components render correctly in dark mode</description>
+      <checks>
+        <check>BudgetGauge text is readable on dark background</check>
+        <check>BudgetGauge progress bar colors are visible in dark mode</check>
+        <check>SpendTimeline bars are visible and distinguishable in dark mode</check>
+        <check>SpendTimeline axis labels are readable in dark mode</check>
+        <check>SignalsList severity badges render with correct colors in dark mode</check>
+        <check>InvoiceHistory table rows are readable with sufficient contrast in dark mode</check>
+        <check>All section headers and dividers are visible in dark mode</check>
+        <check>No white-on-white or black-on-black text anywhere</check>
+      </checks>
+    </test>
+    <test name="high-contrast-compliance">
+      <description>Verify all components meet WCAG AA contrast requirements in high contrast mode</description>
+      <checks>
+        <check>All text meets minimum 4.5:1 contrast ratio</check>
+        <check>Focus indicators are visible on all interactive elements</check>
+        <check>Chart data is distinguishable without relying solely on color</check>
+        <check>Status badges have text labels (not color-only indicators)</check>
+      </checks>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="Read">Read all component files for theming audit</tool>
+    <tool name="Edit">Replace hard-coded values with semantic tokens</tool>
+    <tool name="Bash">Build control and check bundle size</tool>
+    <tool name="Grep">Search for hard-coded color patterns (hex, rgb, hsl)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Updated component files with all hard-coded values replaced by semantic tokens</output>
+    <output type="verification">Bundle size verification (under 5MB)</output>
+    <output type="audit">Dark mode and high contrast compliance audit results</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero hard-coded color values (hex, rgb, hsl) in any component file</criterion>
+    <criterion testable="true">All colors use Fluent v9 semantic tokens (tokens.colorXxx)</criterion>
+    <criterion testable="true">All font sizes use Fluent v9 typography tokens (tokens.fontSizeXxx)</criterion>
+    <criterion testable="true">FluentProvider correctly detects and applies dark mode theme</criterion>
+    <criterion testable="true">FluentProvider correctly detects and applies high contrast theme</criterion>
+    <criterion testable="true">BudgetGauge renders correctly in dark mode with readable text and visible gauge</criterion>
+    <criterion testable="true">SpendTimeline renders correctly in dark mode with visible bars and labels</criterion>
+    <criterion testable="true">SignalsList renders correctly in dark mode with visible severity indicators</criterion>
+    <criterion testable="true">InvoiceHistory renders correctly in dark mode with readable table content</criterion>
+    <criterion testable="true">Bundle size under 5MB in production build</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Common hard-coded value patterns to search for:
+    - Hex colors: #fff, #000, #333, etc.
+    - RGB: rgb(0,0,0), rgba(255,255,255,0.5)
+    - Named colors: 'white', 'black', 'gray'
+    - Pixel font sizes: '14px', '16px' (should be token references)
+    - Box shadows with literal values
+
+    Fluent v9 semantic token categories:
+    - colorNeutralXxx: Backgrounds, borders, text
+    - colorBrandXxx: Accent/brand colors
+    - colorStatusXxx: Success, warning, danger
+    - fontSizeXxx: Typography sizing
+    - spacingXxx: Layout spacing
+
+    The high contrast test verifies accessibility compliance. Chart data should use patterns or labels in addition to color to be distinguishable by users with color vision deficiencies.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+      This is a FULL rigor task — all 11 protocol steps are mandatory.
+    </protocol>
+  </execution>
+</task>

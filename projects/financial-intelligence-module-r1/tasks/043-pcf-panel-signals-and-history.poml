@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Implement Signals List and Invoice History Components</title>
+    <phase>4: PCF Panel + Integration + Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>042</dependencies>
+    <blocks>044</blocks>
+    <tags>pcf, react, typescript, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag triggers FULL protocol; creates .tsx files; composes final panel layout</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement two remaining components for the Finance Intelligence PCF panel: (1) SignalsList component — displays active spend signals with severity-based styling (Info=blue, Warning=yellow, Critical=red using Fluent semantic tokens), signal type icon, message text, and generated timestamp. Handle empty state ("No active signals"). (2) InvoiceHistory component — displays recent invoices for the matter with invoice number, vendor name, date, amount, and status. Use Fluent v9 DataGrid or Table for tabular display. Handle empty state ("No invoices found"). Compose the full panel layout: BudgetGauge at top, SpendTimeline below, SignalsList and InvoiceHistory in lower sections.
+  </prompt>
+
+  <role>
+    SPAARKE frontend developer. Expert in React 16 component development, Fluent UI v9 data display components (DataGrid, Table, Badge), and accessible list patterns. Familiar with composing multi-section panel layouts.
+  </role>
+
+  <goal>
+    Two polished components (SignalsList and InvoiceHistory) integrated into the full Finance Intelligence panel layout with all four sections (Budget, Timeline, Signals, History) properly composed.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 041-042 created the PCF control scaffold, data fetching hook, BudgetGauge, and SpendTimeline. This task adds the remaining two components (SignalsList and InvoiceHistory) and composes the final panel layout.
+
+      The SignalsList shows active spend signals (budget warnings, velocity spikes, anomalies) with severity-based visual treatment. The InvoiceHistory shows recent invoices in a compact table format.
+
+      After this task, the panel has all four sections and is functionally complete (theming polish in task 044).
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/FinanceIntelligencePanel/</file>
+      <file>src/client/pcf/FinanceIntelligencePanel/components/</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 exclusively — use Badge, DataGrid/Table, semantic tokens</constraint>
+    <constraint source="ADR-021">No hard-coded colors — severity colors via semantic tokens (colorStatusSuccess, colorStatusWarning, colorStatusDanger, colorBrandForeground1)</constraint>
+    <constraint source="ADR-021">Dark mode and high contrast support required</constraint>
+    <constraint source="ADR-012">Import shared components from @spaarke/ui-components where available</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/pcf.md" reason="PCF control development constraints" />
+      <file path=".claude/adr/ADR-021-fluent-ui-v9-design-system.md" reason="Fluent UI v9 component and token requirements" />
+    </files>
+    <patterns>
+      <pattern name="Fluent UI v9 Components" location=".claude/patterns/pcf/control-initialization.md">
+        Use Fluent v9 DataGrid, Badge, and layout components
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing FinanceIntelligencePanel components (BudgetGauge, SpendTimeline) and data hook to understand data shapes</step>
+    <step order="2">Create components/SignalsList.tsx: list of active signals with severity Badge (Info/Warning/Critical), signal type, message, and timestamp</step>
+    <step order="3">Implement severity-based styling in SignalsList using Fluent semantic tokens: Info → colorBrandForeground1, Warning → colorStatusWarning, Critical → colorStatusDanger</step>
+    <step order="4">Handle SignalsList empty state: "No active signals" message with success icon</step>
+    <step order="5">Create components/InvoiceHistory.tsx: compact table/DataGrid showing recent invoices with columns: Invoice #, Vendor, Date, Amount, Status</step>
+    <step order="6">Implement currency formatting (Intl.NumberFormat) and date formatting in InvoiceHistory</step>
+    <step order="7">Handle InvoiceHistory empty state: "No invoices found" message</step>
+    <step order="8">Add loading states (Fluent Skeleton) for both components</step>
+    <step order="9">Compose full panel layout in FinanceIntelligencePanel.tsx: BudgetGauge (top), SpendTimeline (middle), SignalsList (lower-left or full-width), InvoiceHistory (bottom)</step>
+    <step order="10">Add section headers/dividers between panel sections using Fluent Divider component</step>
+    <step order="11">Build the control and verify no TypeScript compilation errors</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing components and Fluent UI patterns</tool>
+    <tool name="Write">Create SignalsList and InvoiceHistory components</tool>
+    <tool name="Edit">Update FinanceIntelligencePanel.tsx to compose full layout</tool>
+    <tool name="Bash">Build and verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/FinanceIntelligencePanel/components/SignalsList.tsx</output>
+    <output type="code">src/client/pcf/FinanceIntelligencePanel/components/InvoiceHistory.tsx</output>
+    <output type="code">Modified FinanceIntelligencePanel.tsx with full 4-section layout</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SignalsList displays active signals with severity Badge (Info, Warning, Critical)</criterion>
+    <criterion testable="true">SignalsList severity colors use Fluent semantic tokens (not hard-coded)</criterion>
+    <criterion testable="true">SignalsList displays "No active signals" when activeSignals is empty</criterion>
+    <criterion testable="true">InvoiceHistory displays invoices in table format with columns: Invoice #, Vendor, Date, Amount, Status</criterion>
+    <criterion testable="true">InvoiceHistory uses locale-aware currency and date formatting</criterion>
+    <criterion testable="true">InvoiceHistory displays "No invoices found" when data is empty</criterion>
+    <criterion testable="true">Both components show loading skeleton while data is fetching</criterion>
+    <criterion testable="true">Full panel layout composes all 4 sections: BudgetGauge, SpendTimeline, SignalsList, InvoiceHistory</criterion>
+    <criterion testable="true">No hard-coded color values in any component</criterion>
+    <criterion testable="true">TypeScript compilation succeeds with no errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The panel layout should be responsive within the PCF control container. Use Fluent v9 flex layout utilities for responsive arrangement.
+
+    For the InvoiceHistory table, consider using Fluent DataGrid if available in the platform-library version, or a simple Table component. Keep it lightweight — this is a summary view, not a full invoice management grid.
+
+    Signal types map to user-friendly labels:
+    - BudgetExceeded → "Budget Exceeded"
+    - BudgetWarning → "Budget Warning"
+    - VelocitySpike → "Spending Spike"
+    - AnomalyDetected → "Anomaly Detected"
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+      This is a FULL rigor task — all 11 protocol steps are mandatory.
+    </protocol>
+  </execution>
+</task>

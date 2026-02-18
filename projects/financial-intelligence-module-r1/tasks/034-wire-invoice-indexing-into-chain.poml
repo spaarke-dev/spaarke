@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Wire InvoiceIndexing Job into Extraction Handler Chain</title>
+    <phase>3: Invoice RAG + Search</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>016, 032</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, worker, job</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Wiring change to existing handler; not new implementation but modifies code with job constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Wire InvoiceIndexing job enqueue into the InvoiceExtractionJobHandler. After successful extraction (billing events created, invoice status set to Reviewed), enqueue an InvoiceIndexing job alongside the existing SpendSnapshotGeneration job enqueue. The InvoiceIndexing job payload must include invoiceId and documentId (IDs only per ADR-015). Both downstream jobs (SpendSnapshotGeneration and InvoiceIndexing) should be enqueued independently — failure of one should not prevent the other.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the Spaarke job chaining pattern, background worker lifecycle, and idempotent job design. Familiar with the InvoiceExtractionJobHandler created in task 016.
+  </role>
+
+  <goal>
+    After successful invoice extraction, both SpendSnapshotGeneration and InvoiceIndexing jobs are enqueued, completing the extraction → analytics + indexing pipeline chain.
+  </goal>
+
+  <context>
+    <background>
+      The invoice processing pipeline chains jobs: Classification → Review → Extraction → [SnapshotGeneration + InvoiceIndexing]. Task 016 created the InvoiceExtractionJobHandler which already enqueues SpendSnapshotGeneration on success. This task adds InvoiceIndexing as a second downstream job.
+
+      The two downstream jobs are independent — SpendSnapshotGeneration computes spend analytics while InvoiceIndexing adds the invoice to the search index. They should be enqueued independently so failure of one doesn't block the other.
+
+      Job chaining pattern: After handler completes its work, it enqueues downstream jobs via the job service. Each enqueue call creates a new job with its own correlationId propagated from the parent.
+    </background>
+    <relevant-files>
+      <file>Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs</file>
+      <file>Services/Jobs/Handlers/EmailToDocumentJobHandler.cs</file>
+      <file>Services/Jobs/JobContract.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Job enqueue must propagate correlationId from parent job</constraint>
+    <constraint source="ADR-015">InvoiceIndexing job payload must contain IDs only (invoiceId, documentId) — no document content</constraint>
+    <constraint source="spec">Both downstream jobs (SpendSnapshotGeneration and InvoiceIndexing) enqueued independently — failure of one must not prevent the other</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/jobs.md" reason="Job handler constraints and chaining patterns" />
+      <file path=".claude/patterns/api/background-workers.md" reason="Background worker and job chaining patterns" />
+    </files>
+    <patterns>
+      <pattern name="Job Chaining" location="Services/Jobs/Handlers/EmailToDocumentJobHandler.cs">
+        Follow existing job chaining pattern for enqueuing downstream jobs after handler success
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read InvoiceExtractionJobHandler.cs to understand current downstream job enqueue (SpendSnapshotGeneration)</step>
+    <step order="2">Read EmailToDocumentJobHandler.cs for the canonical job chaining pattern</step>
+    <step order="3">Add InvoiceIndexing job enqueue after successful extraction, alongside SpendSnapshotGeneration</step>
+    <step order="4">Ensure both enqueue calls are independent (try/catch each, or enqueue both before awaiting)</step>
+    <step order="5">Ensure InvoiceIndexing job payload contains only invoiceId and documentId</step>
+    <step order="6">Ensure correlationId is propagated from parent job to InvoiceIndexing job</step>
+    <step order="7">Build solution and verify no compilation errors</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read InvoiceExtractionJobHandler and chaining patterns</tool>
+    <tool name="Edit">Add InvoiceIndexing enqueue to InvoiceExtractionJobHandler</tool>
+    <tool name="Bash">Build and verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Modified InvoiceExtractionJobHandler.cs with InvoiceIndexing enqueue</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">InvoiceExtractionJobHandler enqueues InvoiceIndexing job after successful extraction</criterion>
+    <criterion testable="true">InvoiceIndexing job payload contains invoiceId and documentId (IDs only)</criterion>
+    <criterion testable="true">CorrelationId is propagated from parent extraction job to InvoiceIndexing job</criterion>
+    <criterion testable="true">SpendSnapshotGeneration enqueue is still present and functional</criterion>
+    <criterion testable="true">Failure of InvoiceIndexing enqueue does not prevent SpendSnapshotGeneration enqueue (and vice versa)</criterion>
+    <criterion testable="true">Solution builds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The two downstream jobs are intentionally independent. In production, invoice indexing might fail (e.g., AI Search service unavailable) while spend snapshot generation succeeds. The pipeline should be resilient to partial downstream failures.
+
+    The job chaining follows the existing pattern in EmailToDocumentJobHandler where downstream jobs are enqueued after the handler's primary work is complete.
+
+    Consider wrapping each enqueue in its own try/catch to ensure independence, logging a warning (without content) if one fails while allowing the other to proceed.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

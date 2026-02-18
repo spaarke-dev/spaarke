@@ -1,0 +1,82 @@
+{
+  "chartDefinition": {
+    "name": "Budget Utilization Gauge",
+    "description": "Displays budget total, current spend, and variance as a gauge chart with color-coded status indicators",
+    "chartType": "gauge",
+    "entityName": "sprk_matter",
+    "dataSource": {
+      "primaryEntity": "sprk_matter",
+      "fields": [
+        {
+          "logicalName": "sprk_budget",
+          "alias": "budgetTotal",
+          "label": "Total Budget",
+          "type": "Money",
+          "purpose": "max"
+        },
+        {
+          "logicalName": "sprk_currentspend",
+          "alias": "currentSpend",
+          "label": "Current Spend",
+          "type": "Money",
+          "purpose": "value"
+        },
+        {
+          "logicalName": "sprk_budgetvariance",
+          "alias": "variance",
+          "label": "Budget Variance",
+          "type": "Money",
+          "purpose": "label"
+        },
+        {
+          "logicalName": "sprk_budgetutilizationpct",
+          "alias": "utilizationPct",
+          "label": "Utilization %",
+          "type": "Decimal",
+          "purpose": "percentage"
+        }
+      ],
+      "filter": null
+    },
+    "visualConfig": {
+      "gaugeType": "radial",
+      "showPercentage": true,
+      "showLabels": true,
+      "colorRanges": [
+        {
+          "min": 0,
+          "max": 79.99,
+          "color": "#46A267",
+          "label": "Under Budget",
+          "semanticToken": "colorStatusSuccess"
+        },
+        {
+          "min": 80,
+          "max": 100,
+          "color": "#F7B500",
+          "label": "Warning",
+          "semanticToken": "colorStatusWarning"
+        },
+        {
+          "min": 100.01,
+          "max": 999,
+          "color": "#D13438",
+          "label": "Over Budget",
+          "semanticToken": "colorStatusDanger"
+        }
+      ],
+      "emptyStateMessage": "No budget configured"
+    },
+    "layout": {
+      "width": "full",
+      "height": 250,
+      "placement": "formSection"
+    }
+  },
+  "metadata": {
+    "version": "1.0",
+    "createdDate": "2026-02-11",
+    "task": "042",
+    "project": "financial-intelligence-module-r1"
+  }
+}

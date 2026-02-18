@@ -6,6 +6,7 @@ using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Xrm.Sdk;
 
 namespace Spaarke.Dataverse;
 
@@ -350,6 +351,12 @@ public class DataverseWebApiService : IDataverseService
         response.EnsureSuccessStatusCode();
 
         _logger.LogInformation("[DATAVERSE-API] Updated document {DocumentId} with {FieldCount} fields", documentId, fields.Count);
+    }
+
+    public Task<Entity> RetrieveAsync(string entityLogicalName, Guid id, string[] columns, CancellationToken ct = default)
+    {
+        // Not implemented in Web API version - use DataverseServiceClientImpl
+        throw new NotImplementedException("RetrieveAsync is not implemented in Web API version. Use DataverseServiceClientImpl for this operation.");
     }
 
     public async Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default)
@@ -1772,5 +1779,45 @@ public class DataverseWebApiService : IDataverseService
 
         [JsonPropertyName("@odata.count")]
         public int Count { get; set; }
+    }
+
+    // ========================================
+    // Generic Entity Operations (Finance Intelligence Module R1)
+    // Stubs - Use DataverseServiceClientImpl for these operations
+    // ========================================
+
+    public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "CreateAsync is implemented in DataverseServiceClientImpl. " +
+            "Configure DI to use ServiceClient implementation for finance entity operations.");
+    }
+
+    public Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "UpdateAsync is implemented in DataverseServiceClientImpl. " +
+            "Configure DI to use ServiceClient implementation for finance entity operations.");
+    }
+
+    public Task BulkUpdateAsync(
+        string entityLogicalName,
+        List<(Guid id, Dictionary<string, object> fields)> updates,
+        CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "BulkUpdateAsync is implemented in DataverseServiceClientImpl. " +
+            "Configure DI to use ServiceClient implementation for finance entity operations.");
+    }
+
+    public Task<Entity> RetrieveByAlternateKeyAsync(
+        string entityLogicalName,
+        KeyAttributeCollection alternateKeyValues,
+        string[]? columns = null,
+        CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "RetrieveByAlternateKeyAsync is implemented in DataverseServiceClientImpl. " +
+            "Configure DI to use ServiceClient implementation for alternate key lookups.");
     }
 }

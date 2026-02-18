@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Implement InvoiceIndexingJobHandler with Contextual Metadata Enrichment</title>
+    <phase>3: Invoice RAG + Search</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>016, 031</dependencies>
+    <blocks>034</blocks>
+    <tags>bff-api, worker, job, azure-search, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation of job handler with AI integration, multiple service dependencies, and contextual metadata enrichment logic</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement InvoiceIndexingJobHandler that processes confirmed invoices for search indexing. The handler must: (1) load invoice record from Dataverse, (2) load associated billing events, (3) load the document record, (4) look up vendor org and matter for metadata enrichment, (5) download document from SPE via SpeFileStore, (6) extract text using TextExtractorService, (7) chunk text into indexable segments, (8) PREPEND CONTEXTUAL METADATA HEADER to each chunk before vectorization (format: "Firm: {vendor} | Matter: {matter} ({number}) | Invoice: {invoiceNum} | Date: {date} | Total: {currency} {amount}\n---\n{chunk text}"), (9) generate embeddings on enriched chunks using text-embedding-3-large, (10) build index documents with typed metadata fields (invoiceId, matterId, vendorOrgId, vendorName, invoiceNumber, invoiceDate, totalAmount, currency, documentType, tenantId), (11) upsert into spaarke-invoices-{tenantId} index. Must handle metadata lookup failures gracefully (fallback to raw chunk without enrichment header).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in background job handler implementation, Azure AI Search indexing, text extraction, embedding generation, and the Spaarke job handler patterns. Familiar with contextual metadata enrichment for RAG systems.
+  </role>
+
+  <goal>
+    A fully functional InvoiceIndexingJobHandler that indexes confirmed invoices with contextual metadata enrichment, enabling high-quality hybrid search results for financial queries. The handler follows existing patterns (RagIndexingJobHandler) and is idempotent via document-level upsert.
+  </goal>
+
+  <context>
+    <background>
+      After invoice extraction (task 016), invoices need to be indexed for search. The indexing handler chunks document text and enriches each chunk with contextual metadata (vendor, matter, invoice details) BEFORE vectorization. This enrichment significantly improves semantic search quality for financial queries because the embedding captures the relationship between chunk content and its invoice context.
+
+      The handler follows the existing RagIndexingJobHandler pattern but with invoice-specific metadata fields and the mandatory contextual enrichment step. The index was defined in task 030 and deployed in task 031.
+
+      Enrichment pattern example:
+      "Firm: Acme Legal LLP | Matter: Smith v. Jones (MAT-2024-001) | Invoice: INV-2024-0523 | Date: 2024-03-15 | Total: USD 15,750.00\n---\nProfessional services rendered for document review and analysis of contract provisions..."
+    </background>
+    <relevant-files>
+      <file>Services/Jobs/Handlers/RagIndexingJobHandler.cs</file>
+      <file>Services/Ai/TextExtractorService.cs</file>
+      <file>Services/Ai/EmbeddingCache.cs</file>
+      <file>Services/Jobs/JobContract.cs</file>
+      <file>Services/Jobs/IJobHandler.cs</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Handler MUST be idempotent — use upsert with document-level keys (invoiceId + chunkIndex)</constraint>
+    <constraint source="ADR-015">MUST NOT log document content, extracted text, chunk text, or enriched text</constraint>
+    <constraint source="ADR-015">MUST NOT place document bytes in job payloads — download from SPE in handler</constraint>
+    <constraint source="spec">Contextual metadata enrichment is MANDATORY — prepend vendor/matter/invoice header to each chunk BEFORE vectorization</constraint>
+    <constraint source="spec">Graceful fallback: if metadata lookup fails (vendor or matter not found), fall back to raw chunk without enrichment header</constraint>
+    <constraint source="spec">Use text-embedding-3-large model (3072 dimensions) for embedding generation</constraint>
+    <constraint source="ADR-010">Register in AddFinanceModule extension method</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/jobs.md" reason="Job handler constraints and patterns" />
+      <file path=".claude/constraints/ai.md" reason="AI service constraints including embedding model" />
+      <file path=".claude/patterns/api/background-workers.md" reason="Background worker and job handler patterns" />
+      <file path=".claude/adr/ADR-004-async-job-contract.md" reason="Idempotent job handler requirements" />
+      <file path=".claude/adr/ADR-015-ai-data-governance.md" reason="Data governance — no content in logs or payloads" />
+      <file path="docs/guides/RAG-ARCHITECTURE.md" reason="RAG indexing architecture and chunking patterns" />
+    </files>
+    <patterns>
+      <pattern name="RAG Indexing Job Handler" location="Services/Jobs/Handlers/RagIndexingJobHandler.cs">
+        Follow existing RagIndexingJobHandler for download → extract → chunk → embed → upsert pipeline
+      </pattern>
+      <pattern name="Background Workers" location=".claude/patterns/api/background-workers.md">
+        Job handler registration and lifecycle patterns
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read RagIndexingJobHandler.cs for the existing indexing pipeline pattern (download → extract → chunk → embed → upsert)</step>
+    <step order="2">Read TextExtractorService.cs and EmbeddingCache.cs for text extraction and embedding generation APIs</step>
+    <step order="3">Read spec.md Invoice Indexing Strategy for complete enrichment requirements and field mappings</step>
+    <step order="4">Create InvoiceIndexingJobHandler.cs implementing IJobHandler</step>
+    <step order="5">Implement invoice loading from Dataverse (load sprk_invoice record by invoiceId from job payload)</step>
+    <step order="6">Implement billing events loading (query sprk_billingevent records for the invoice)</step>
+    <step order="7">Implement document loading from Dataverse and download from SPE via SpeFileStore</step>
+    <step order="8">Implement vendor org and matter lookup for metadata enrichment (with graceful fallback on failure)</step>
+    <step order="9">Extract text from downloaded document using TextExtractorService</step>
+    <step order="10">Chunk extracted text into indexable segments following existing chunking strategy</step>
+    <step order="11">Prepend contextual metadata header to each chunk: "Firm: {vendor} | Matter: {matter} ({number}) | Invoice: {invoiceNum} | Date: {date} | Total: {currency} {amount}\n---\n{chunk text}"</step>
+    <step order="12">Generate embeddings on enriched chunks using text-embedding-3-large via EmbeddingCache</step>
+    <step order="13">Build index documents with all typed metadata fields (invoiceId, documentId, matterId, projectId, vendorOrgId, vendorName, invoiceNumber, invoiceDate, totalAmount, currency, documentType, tenantId, indexedAt)</step>
+    <step order="14">Upsert index documents into spaarke-invoices-{tenantId} using SearchClient</step>
+    <step order="15">Register InvoiceIndexingJobHandler in AddFinanceModule DI extension method</step>
+    <step order="16">Build solution and verify no compilation errors</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing handlers, services, and spec for patterns</tool>
+    <tool name="Write">Create InvoiceIndexingJobHandler.cs</tool>
+    <tool name="Edit">Register handler in AddFinanceModule</tool>
+    <tool name="Bash">Build and verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs</output>
+    <output type="registration">Handler registered in AddFinanceModule extension method</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">InvoiceIndexingJobHandler implements IJobHandler and handles InvoiceIndexing job type</criterion>
+    <criterion testable="true">Handler loads invoice, billing events, and document from Dataverse</criterion>
+    <criterion testable="true">Handler downloads document from SPE via SpeFileStore (not from job payload)</criterion>
+    <criterion testable="true">Handler extracts text using TextExtractorService</criterion>
+    <criterion testable="true">Each chunk has contextual metadata header prepended BEFORE embedding generation</criterion>
+    <criterion testable="true">Enrichment header format: "Firm: {vendor} | Matter: {matter} ({number}) | Invoice: {invoiceNum} | Date: {date} | Total: {currency} {amount}\n---\n{chunk text}"</criterion>
+    <criterion testable="true">If metadata lookup fails, handler falls back to raw chunk without header (no exception thrown)</criterion>
+    <criterion testable="true">Embeddings generated using text-embedding-3-large (3072 dimensions)</criterion>
+    <criterion testable="true">Index documents include all typed metadata fields (invoiceId, documentId, matterId, projectId, vendorOrgId, vendorName, invoiceNumber, invoiceDate, totalAmount, currency, documentType, tenantId, indexedAt)</criterion>
+    <criterion testable="true">Documents upserted into spaarke-invoices-{tenantId} index</criterion>
+    <criterion testable="true">Handler is idempotent — re-running produces same result</criterion>
+    <criterion testable="true">No document content, extracted text, or enriched text appears in logs</criterion>
+    <criterion testable="true">Handler registered in AddFinanceModule</criterion>
+    <criterion testable="true">Solution builds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Enrichment pattern: "Firm: {vendor} | Matter: {matter} ({number}) | Invoice: {invoiceNum} | Date: {date} | Total: {currency} {amount}\n---\n{chunk text}". This format is intentionally concise to minimize token waste while providing sufficient context for the embedding model to understand the financial relationship.
+
+    Fallback strategy: If vendor org lookup fails → omit "Firm:" line. If matter lookup fails → omit "Matter:" line. If both fail → use raw chunk without any header. Log a warning (without content) when fallback is triggered.
+
+    The handler creates a NEW InvoiceIndexing job type rather than reusing the generic RagIndexing type. This allows invoice-specific metadata enrichment and index targeting.
+
+    Idempotency: The handler uses invoiceId + chunkIndex as the document key in the search index. Re-indexing the same invoice overwrites existing chunks.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+      This is a FULL rigor task — all 11 protocol steps are mandatory.
+    </protocol>
+  </execution>
+</task>

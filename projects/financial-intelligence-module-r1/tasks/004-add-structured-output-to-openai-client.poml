@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Add GetStructuredCompletionAsync&lt;T&gt; to IOpenAiClient</title>
+    <phase>1: Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>005, 006, 010</blocks>
+    <tags>bff-api, ai, azure-openai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies core AI infrastructure code (bff-api tag, ai tag); extends IOpenAiClient interface used across the platform</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add a new GetStructuredCompletionAsync&lt;T&gt; method to the IOpenAiClient interface and OpenAiClient implementation. This method uses ChatResponseFormat.CreateJsonSchemaFormat with strictSchemaEnabled:true to enforce structured JSON output from Azure OpenAI. The method inherits the existing circuit breaker, retry, and rate limiting patterns already in OpenAiClient. This is a platform capability that will be used by the Finance Intelligence Module's classification and extraction playbooks, and is reusable by future modules.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure OpenAI SDK, structured output (JSON schema enforcement via response_format), and the existing IOpenAiClient circuit breaker patterns. Follow ADR-013 for AI architecture and ADR-016 for rate limiting.
+  </role>
+
+  <goal>
+    IOpenAiClient has a new GetStructuredCompletionAsync&lt;T&gt; method that accepts chat messages and a BinaryData JSON schema, calls Azure OpenAI with ChatResponseFormat.CreateJsonSchemaFormat(strictSchemaEnabled: true), deserializes the response to type T, and inherits all existing resilience patterns (circuit breaker, retry, timeout). The method compiles and is ready for use by downstream services.
+  </goal>
+
+  <context>
+    <background>
+      The existing IOpenAiClient provides methods for chat completions and embeddings, with a built-in Polly circuit breaker for resilience. The Finance Intelligence Module requires a new structured output method that enforces JSON schema conformance via OpenAI's response_format parameter. This is a two-layer architecture:
+      - Layer 1 (this task): Platform capability — GetStructuredCompletionAsync&lt;T&gt; on IOpenAiClient
+      - Layer 2 (future tasks): Domain services — IInvoiceAnalysisService uses Layer 1 for classification and extraction
+
+      The structured output approach uses constrained decoding (not prompt engineering) to guarantee the response matches the schema. This eliminates parsing errors and enables typed deserialization.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IOpenAiClient.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Extend BFF, not separate service; structured output via IOpenAiClient</constraint>
+    <constraint source="ADR-016">Rate limiting — AI endpoints bounded; explicit timeouts</constraint>
+    <constraint source="ADR-015">No document content in logs; log only identifiers, sizes, timings</constraint>
+    <constraint source="spec">MUST use ChatResponseFormat.CreateJsonSchemaFormat with strictSchemaEnabled:true</constraint>
+    <constraint source="spec">Method must inherit existing circuit breaker (Polly) from OpenAiClient</constraint>
+    <constraint source="project">Must not break existing IOpenAiClient methods or callers</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/ai.md" reason="AI architecture constraints and patterns" />
+      <file path=".claude/patterns/ai/streaming-endpoints.md" reason="AI endpoint patterns including circuit breaker" />
+      <file path=".claude/adr/ADR-013-ai-architecture.md" reason="AI architecture decision — extend BFF" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/IOpenAiClient.cs" reason="Existing interface to extend" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs" reason="Existing implementation with circuit breaker" />
+    </files>
+    <patterns>
+      <pattern name="AI Streaming Endpoints" location=".claude/patterns/ai/streaming-endpoints.md">
+        Follow existing OpenAiClient patterns for resilience and circuit breaker integration
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing IOpenAiClient.cs to understand current interface methods and patterns</step>
+    <step order="2">Read existing OpenAiClient.cs to understand circuit breaker implementation, retry policies, and how existing methods are structured</step>
+    <step order="3">Add GetStructuredCompletionAsync&lt;T&gt; method signature to IOpenAiClient interface: Task&lt;T&gt; GetStructuredCompletionAsync&lt;T&gt;(IEnumerable&lt;ChatMessage&gt; messages, BinaryData jsonSchema, string schemaName, string deploymentName, CancellationToken cancellationToken = default)</step>
+    <step order="4">Implement GetStructuredCompletionAsync&lt;T&gt; in OpenAiClient: create ChatCompletionOptions with ResponseFormat = ChatResponseFormat.CreateJsonSchemaFormat(schemaName, jsonSchema, strictSchemaEnabled: true), call CompleteChatAsync using existing circuit breaker pipeline, deserialize response content to T using System.Text.Json</step>
+    <step order="5">Run dotnet build to verify compilation succeeds with no errors</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing IOpenAiClient and OpenAiClient source</tool>
+    <tool name="Edit">Add new method to interface and implementation</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/IOpenAiClient.cs (extended with GetStructuredCompletionAsync&lt;T&gt;)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs (implementation of GetStructuredCompletionAsync&lt;T&gt;)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">IOpenAiClient interface has GetStructuredCompletionAsync&lt;T&gt; method signature</criterion>
+    <criterion testable="true">OpenAiClient implementation uses ChatResponseFormat.CreateJsonSchemaFormat with strictSchemaEnabled:true</criterion>
+    <criterion testable="true">Method deserializes response to generic type T</criterion>
+    <criterion testable="true">Method inherits existing Polly circuit breaker pipeline</criterion>
+    <criterion testable="true">Method propagates CancellationToken</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+    <criterion testable="true">Existing IOpenAiClient methods and callers are unaffected</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a platform capability (Layer 1 of the Two-Layer Architecture). See spec.md Section 14.3.
+
+    The method accepts BinaryData jsonSchema (not a C# type parameter) because the JSON schema is defined as a constant alongside the record type definitions (task 006). This separates schema definition from deserialization target.
+
+    The deploymentName parameter allows callers to specify which Azure OpenAI deployment to use (gpt-4o-mini for classification, gpt-4o for extraction).
+
+    Error handling should cover: empty response content, JSON deserialization failure, circuit breaker open state, and HTTP 429/503 from Azure OpenAI. All error paths should return ProblemDetails-compatible exceptions per ADR-019.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

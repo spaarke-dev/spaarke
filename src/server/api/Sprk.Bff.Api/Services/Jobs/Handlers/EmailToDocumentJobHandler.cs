@@ -321,6 +321,7 @@ public class EmailToDocumentJobHandler : IJobHandler
                     containerId,
                     emailId,
                     metadata.ConversationIndex, // Copy to attachments for same_thread queries
+                    job.CorrelationId ?? Activity.Current?.Id ?? Guid.NewGuid().ToString(),
                     ct);
 
                 // Mark as processed
@@ -569,6 +570,7 @@ public class EmailToDocumentJobHandler : IJobHandler
         string containerId,
         Guid emailId,
         string? conversationIndex,
+        string correlationId,
         CancellationToken ct)
     {
         var result = new AttachmentProcessingResult();
@@ -641,6 +643,7 @@ public class EmailToDocumentJobHandler : IJobHandler
                         containerId,
                         emailId,
                         conversationIndex,
+                        correlationId,
                         ct);
 
                     result.UploadedCount++;
@@ -689,6 +692,7 @@ public class EmailToDocumentJobHandler : IJobHandler
         string containerId,
         Guid emailId,
         string? conversationIndex,
+        string correlationId,
         CancellationToken ct)
     {
         if (attachment.Content == null || attachment.Content.Length == 0)
@@ -775,6 +779,17 @@ public class EmailToDocumentJobHandler : IJobHandler
 
         // Enqueue RAG indexing for attachment document (if enabled via AutoIndexToRag)
         await EnqueueRagIndexingJobAsync(driveId, fileHandle.Id, childDocumentId, attachment.FileName, ct);
+
+        // Enqueue attachment classification (if enabled via AutoClassifyAttachments)
+        if (_options.AutoClassifyAttachments)
+        {
+            await EnqueueAttachmentClassificationJobAsync(
+                childDocumentId,
+                driveId,
+                fileHandle.Id,
+                correlationId,
+                ct);
+        }
     }
 
     /// <summary>
@@ -902,6 +917,59 @@ public class EmailToDocumentJobHandler : IJobHandler
 
             _logger.LogWarning(ex,
                 "Failed to enqueue RAG indexing job for document {DocumentId}: {Error}. Email processing will continue.",
+                documentId, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Enqueues an attachment classification job for a document if AutoClassifyAttachments is enabled.
+    /// Uses try/catch to ensure enqueueing failures don't fail the main processing.
+    /// Classification is optional - failures are logged but do not fail email processing.
+    /// </summary>
+    /// <param name="documentId">The document ID to classify</param>
+    /// <param name="driveId">The SPE drive ID where the file is stored</param>
+    /// <param name="itemId">The SPE item ID of the file</param>
+    /// <param name="correlationId">Correlation ID from parent job for tracing</param>
+    /// <param name="ct">Cancellation token</param>
+    private async Task EnqueueAttachmentClassificationJobAsync(
+        Guid documentId,
+        string driveId,
+        string itemId,
+        string correlationId,
+        CancellationToken ct)
+    {
+        try
+        {
+            var classificationJob = new JobContract
+            {
+                JobId = Guid.NewGuid(),
+                JobType = "AttachmentClassification",
+                SubjectId = documentId.ToString(),
+                CorrelationId = correlationId,
+                IdempotencyKey = $"classify-{documentId}",
+                Attempt = 1,
+                MaxAttempts = 3,
+                CreatedAt = DateTimeOffset.UtcNow,
+                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new
+                {
+                    DocumentId = documentId,
+                    DriveId = driveId,
+                    ItemId = itemId,
+                    EnqueuedAt = DateTimeOffset.UtcNow
+                }))
+            };
+
+            await _jobSubmissionService.SubmitJobAsync(classificationJob, ct);
+
+            _logger.LogInformation(
+                "Enqueued attachment classification job {JobId} for document {DocumentId} (CorrelationId: {CorrelationId})",
+                classificationJob.JobId, documentId, correlationId);
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail - classification is non-critical
+            _logger.LogWarning(ex,
+                "Failed to enqueue attachment classification job for document {DocumentId}: {Error}. Email processing will continue.",
                 documentId, ex.Message);
         }
     }

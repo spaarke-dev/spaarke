@@ -98,6 +98,27 @@ public record PlaybookResponse
     public bool IsTemplate { get; init; }
 
     /// <summary>
+    /// Playbook code (alternate key) - portable identifier across environments.
+    /// Example: "PB-013" for Invoice Analysis playbook.
+    /// </summary>
+    public string PlaybookCode { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Playbook configuration JSON (tools, workflow, outputMapping).
+    /// </summary>
+    public string ConfigJson { get; init; } = "{}";
+
+    /// <summary>
+    /// Whether the playbook is active (statecode == 0).
+    /// </summary>
+    public bool IsActive { get; init; }
+
+    /// <summary>
+    /// Status code (statuscode field from Dataverse).
+    /// </summary>
+    public int StatusCode { get; init; }
+
+    /// <summary>
     /// Owner user ID.
     /// </summary>
     public Guid OwnerId { get; init; }

@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Implement SpendSnapshotService</title>
+    <phase>2: AI Services + Job Handlers</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>019, 020</blocks>
+    <tags>bff-api, backend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates service with deterministic aggregation math, Dataverse upserts — tags include bff-api; modifies .cs files; 10 steps</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement SpendSnapshotService: query BillingEvents for a matter (VisibilityState=Invoiced),
+    aggregate by period (Month + ToDate), compute budget variance (Budget - Invoiced), compute
+    MoM velocity (% change vs prior month, null when prior=0). Upsert SpendSnapshot records via
+    alternate key.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in financial aggregation logic and Dataverse entity operations.
+    Follow deterministic computation patterns — no AI involved in this service.
+  </role>
+
+  <goal>
+    SpendSnapshotService created with GenerateAsync method. Queries BillingEvents for a matter,
+    computes monthly and ToDate aggregations, calculates budget variance and MoM velocity,
+    upserts SpendSnapshot records via alternate key for idempotency.
+  </goal>
+
+  <context>
+    <background>
+      The SpendSnapshotService is the analytics aggregation engine. After BillingEvents are created
+      by the extraction handler, this service computes spend snapshots that power the Finance PCF
+      panel's budget gauge, spend timeline, and signal detection.
+
+      Aggregation rules (MVP):
+      - Period types: Month and ToDate only (Quarter/Year are post-MVP)
+      - Velocity: MoM only (QoQ/YoY post-MVP)
+      - VelocityPct = (current - prior) / prior * 100; null when prior month has zero spend
+      - Budget variance = Budget amount - Invoiced amount (positive = under budget)
+      - SpendSnapshot alternate key: matterId + periodType + periodKey + bucketKey + visibilityFilter
+
+      This is purely deterministic math — no AI involved.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingCache.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MVP periods: Month + ToDate only — Quarter and Year are post-MVP</constraint>
+    <constraint source="project">MVP velocity: MoM only — QoQ/YoY added when Quarter/Year periods exist</constraint>
+    <constraint source="project">VelocityPct = (current - prior) / prior * 100; null when prior month is zero</constraint>
+    <constraint source="project">SpendSnapshot alternate key: sprk_matterid + sprk_periodtype + sprk_periodkey + sprk_bucketkey + sprk_visibilityfilter</constraint>
+    <constraint source="project">Upsert via alternate key for idempotent re-generation</constraint>
+    <constraint source="project">Query only BillingEvents with VisibilityState=Invoiced</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Entity Operations" location=".claude/patterns/dataverse/entity-operations.md">
+        Dataverse late-bound CRUD, alternate key upsert, OptionSetValue patterns
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md spend snapshot requirements and alternate key definition</step>
+    <step order="2">Read entity-operations.md for Dataverse upsert via alternate key pattern</step>
+    <step order="3">Create SpendSnapshotService.cs in Services/Finance/</step>
+    <step order="4">Implement GenerateAsync(Guid matterId) method</step>
+    <step order="5">Query BillingEvents for matter where VisibilityState=Invoiced</step>
+    <step order="6">Aggregate by Month periods — group by year-month, sum amounts per bucket</step>
+    <step order="7">Compute ToDate aggregation — cumulative sum across all months per bucket</step>
+    <step order="8">Look up BudgetBucket records for the matter to compute variance (Budget - Invoiced)</step>
+    <step order="9">Load prior month snapshot to compute MoM velocity — handle null/zero prior gracefully</step>
+    <step order="10">Compute VelocityPct: (current - prior) / prior * 100; set null when prior is zero</step>
+    <step order="11">Upsert SpendSnapshot records via alternate key (5-field composite)</step>
+    <step order="12">Register SpendSnapshotService in AddFinanceModule</step>
+    <step order="13">Run dotnet build to verify compilation</step>
+    <step order="14">Update TASK-INDEX.md: change task 017 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/SpendSnapshotService.cs</output>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SpendSnapshotService.cs exists in Services/Finance/</criterion>
+    <criterion testable="true">GenerateAsync method queries BillingEvents with VisibilityState=Invoiced</criterion>
+    <criterion testable="true">Monthly aggregation groups by year-month and sums per bucket</criterion>
+    <criterion testable="true">ToDate aggregation computes cumulative totals</criterion>
+    <criterion testable="true">Budget variance computed as Budget - Invoiced</criterion>
+    <criterion testable="true">MoM velocity computed as (current - prior) / prior * 100</criterion>
+    <criterion testable="true">Velocity is null when prior month has zero spend</criterion>
+    <criterion testable="true">SpendSnapshot records upserted via 5-field alternate key</criterion>
+    <criterion testable="true">Service registered in AddFinanceModule</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This service contains purely deterministic math — no AI involved.
+    It is critical that the aggregation logic is correct and testable.
+    Task 020 will add comprehensive unit tests for this service.
+
+    Parallel-group D with task 018 (SignalEvaluationService) — both can be
+    developed independently since they have no code dependencies on each other.
+    They are connected only at the handler level (task 019).
+
+    Budget variance: positive means under budget, negative means over budget.
+    This matches financial convention where variance = budget - actual.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="financial-intelligence-module-r1">
+  <metadata>
+    <title>Write "Invoice Extraction" Playbook Prompt Template</title>
+    <phase>1: Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>ai, azure-openai</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Content authoring task; no code modification; writing prompt templates for review before Dataverse deployment</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Write the system prompt and user prompt template for the "Invoice Extraction" playbook (Playbook B). This extracts structured billing facts from confirmed invoice documents: invoice header (number, date, total, currency, vendor), line items with cost type (Fee vs Expense), amounts, role class, and dates. Model: gpt-4o. The prompt must include extraction taxonomy, role class categorization, single-line fallback guidance, and explicit guardrail instructions.
+  </prompt>
+
+  <role>
+    SPAARKE AI prompt engineer. Expert in designing structured extraction prompts for Azure OpenAI, billing taxonomy (Fee vs Expense), legal billing role classes, and robust extraction from varied invoice formats. Understands the Spaarke playbook system per ADR-014.
+  </role>
+
+  <goal>
+    Complete system prompt and user prompt template for the "Invoice Extraction" playbook, saved to the project notes/prompts/ directory for review before Dataverse deployment. The prompts reliably extract structured billing facts from confirmed invoices with correct cost type classification, role assignment, and amount parsing.
+  </goal>
+
+  <context>
+    <background>
+      The Invoice Extraction playbook is triggered after a human reviewer confirms an attachment as an invoice. It receives the extracted text from the confirmed invoice plus reviewer-corrected hints (invoice number, date, total, vendor) and must:
+      1. Extract the invoice header (number, date, total, currency, vendor name, vendor address, payment terms)
+      2. Extract line items with: description, cost type (Fee or Expense), amount, currency, event date, role class, hours, rate
+      3. Classify each line as Fee (professional services, time-based) or Expense (disbursements, costs)
+      4. Extract role class: Partner, Associate, Paralegal, Other, Unknown
+      5. Provide an extraction confidence score
+
+      Single-line fallback: When no individual line items are extractable, create a single line with the total amount as a "Fee" line.
+
+      Important guardrails:
+      - The prompt must NOT output VisibilityState
+      - The prompt must NOT assign matter/vendor lookups
+      - Reviewer-corrected hints override AI extraction for invoice header fields
+    </background>
+    <relevant-files>
+      <file>projects/financial-intelligence-module-r1/spec.md</file>
+      <file>projects/financial-intelligence-module-r1/Spaarke_Finance_Intelligence_MVP_Design 2.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Explicit instruction: "Do NOT output VisibilityState. Do NOT assign matter/vendor lookups."</constraint>
+    <constraint source="spec">Model: gpt-4o (high accuracy for complex extraction; cost justified by low volume — confirmed invoices only)</constraint>
+    <constraint source="ADR-014">Prompts versioned in Dataverse sprk_playbook table; this task writes the initial version for review</constraint>
+    <constraint source="ADR-015">Prompt must not instruct AI to log or retain document content</constraint>
+    <constraint source="spec">Single-line fallback: if no line items extractable, create one BillingEvent with total amount as Fee</constraint>
+    <constraint source="spec">Date fallback chain: line date → invoice date → current date</constraint>
+    <constraint source="spec">Role class extraction: Partner, Associate, Paralegal, Other, Unknown</constraint>
+    <constraint source="spec">Cost type taxonomy: Fee (professional services, time-based) vs Expense (disbursements, costs)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/ai.md" reason="AI architecture constraints and prompt guidelines" />
+      <file path="docs/guides/HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md" reason="Playbook creation and versioning patterns" />
+      <file path="projects/financial-intelligence-module-r1/spec.md" reason="Playbook B specification and output schema" />
+    </files>
+    <patterns>
+      <pattern name="Playbook Creation" location="docs/guides/HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md">
+        Follow playbook creation and prompt versioning patterns
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md Playbook B section for extraction taxonomy, output schema, and guardrails</step>
+    <step order="2">Read design doc Section 6.5 for detailed extraction prompt design principles, role class definitions, and cost type taxonomy</step>
+    <step order="3">Write system prompt defining:
+      - Role: legal billing extraction specialist
+      - Extraction taxonomy: Fee (professional services — time-based legal work, consultations, court appearances) vs Expense (disbursements — filing fees, travel, photocopying, expert witness fees, court costs)
+      - Role class categorization: Partner (senior attorneys, equity partners), Associate (junior attorneys), Paralegal (paralegals, legal assistants), Other (named roles that don't fit), Unknown (no role information)
+      - Line item extraction guidance: extract each identifiable billing line as a separate item
+      - Single-line fallback: when invoice has no line detail, create one line with total amount as "Fee" type
+      - Date handling: use line-specific date if available, fall back to invoice date
+      - Guardrails: "Do NOT output VisibilityState. Do NOT assign matter/vendor lookups."
+      - Handling of ambiguous line items</step>
+    <step order="4">Write user prompt template with placeholders:
+      - {{documentText}} placeholder for extracted text content
+      - {{reviewerHints}} placeholder for reviewer-corrected hints (invoice number, date, total, vendor)
+      - Instructions: "The reviewer has confirmed this as an invoice. Extract billing facts. Use reviewer hints as ground truth overrides when they conflict with document text."</step>
+    <step order="5">Save system prompt and user prompt template to projects/financial-intelligence-module-r1/notes/prompts/extraction-prompt.md for review before Dataverse deployment</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spec and design docs for prompt requirements</tool>
+    <tool name="Write">Create prompt template files</tool>
+  </tools>
+
+  <outputs>
+    <output type="content">projects/financial-intelligence-module-r1/notes/prompts/extraction-prompt.md (system prompt + user prompt template)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">System prompt defines extraction taxonomy: Fee (professional services) vs Expense (disbursements)</criterion>
+    <criterion testable="true">System prompt defines role class categorization: Partner, Associate, Paralegal, Other, Unknown</criterion>
+    <criterion testable="true">System prompt includes single-line fallback guidance for invoices without line detail</criterion>
+    <criterion testable="true">System prompt contains explicit guardrail: "Do NOT output VisibilityState. Do NOT assign matter/vendor lookups."</criterion>
+    <criterion testable="true">User prompt template has {{documentText}} and {{reviewerHints}} placeholders</criterion>
+    <criterion testable="true">User prompt instructs to use reviewer hints as ground truth overrides</criterion>
+    <criterion testable="true">Prompt addresses date fallback chain: line date → invoice date</criterion>
+    <criterion testable="true">Prompt file saved to notes/prompts/ directory for review</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Prompts are NOT stored in source code for production. They are Dataverse sprk_playbook records deployed via solution import. This task writes the initial prompt content for human review. Deployment to Dataverse is a separate step.
+
+    The extraction prompt must work with gpt-4o, which has strong extraction capabilities. The prompt should focus on disambiguation of Fee vs Expense categories and accurate role class assignment.
+
+    Reviewer-corrected hints are injected into the user prompt at runtime by the InvoiceExtractionJobHandler. The handler reads corrections from the sprk_invoice and sprk_document records (not from job payload, per ADR-015).
+
+    The structured output JSON schema (defined in task 006) handles format enforcement. The prompt should focus on extraction accuracy and cost type classification, not on JSON formatting.
+
+    Prompt tuning with real invoice samples happens in Phase 4. This task creates the initial baseline prompt.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

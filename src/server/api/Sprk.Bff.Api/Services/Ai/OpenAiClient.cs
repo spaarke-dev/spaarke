@@ -1,5 +1,6 @@
 using System.ClientModel;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Azure;
 using Azure.AI.OpenAI;
 using Microsoft.Extensions.Options;
@@ -578,6 +579,104 @@ public class OpenAiClient : IOpenAiClient
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get chat completion with tools. Model={Model}", deploymentName);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// JSON serializer options for deserializing structured completion responses.
+    /// Uses Web defaults: camelCase property names, case-insensitive matching.
+    /// </summary>
+    private static readonly JsonSerializerOptions s_structuredJsonOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// Get a structured completion that conforms to a JSON schema.
+    /// Uses constrained decoding (response_format: json_schema) to guarantee valid JSON output.
+    /// Temperature is set to 0 for deterministic classification/extraction results.
+    /// Protected by circuit breaker - throws OpenAiCircuitBrokenException when open.
+    /// </summary>
+    /// <typeparam name="T">The type to deserialize the response into.</typeparam>
+    /// <param name="messages">The conversation messages (system + user prompts).</param>
+    /// <param name="jsonSchema">The JSON schema that the response must conform to.</param>
+    /// <param name="schemaName">A name identifying the schema (e.g., "ClassificationResult").</param>
+    /// <param name="deploymentName">The Azure OpenAI deployment name (e.g., gpt-4o-mini, gpt-4o).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The deserialized response of type T.</returns>
+    /// <exception cref="OpenAiCircuitBrokenException">Thrown when circuit breaker is open.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when response is empty or deserialization fails.</exception>
+    public async Task<T> GetStructuredCompletionAsync<T>(
+        IEnumerable<ChatMessage> messages,
+        BinaryData jsonSchema,
+        string schemaName,
+        string deploymentName,
+        CancellationToken cancellationToken = default)
+    {
+        var chatClient = _client.GetChatClient(deploymentName);
+
+        var chatOptions = new ChatCompletionOptions
+        {
+            ResponseFormat = ChatResponseFormat.CreateJsonSchemaFormat(
+                schemaName,
+                jsonSchema,
+                jsonSchemaIsStrict: true),
+            Temperature = 0f
+        };
+
+        var messageList = messages.ToList();
+
+        _logger.LogDebug(
+            "Starting structured completion. Model={Model}, Schema={Schema}, MessageCount={MessageCount}",
+            deploymentName, schemaName, messageList.Count);
+
+        try
+        {
+            var response = await _circuitBreaker.ExecuteAsync(async ct =>
+            {
+                return await chatClient.CompleteChatAsync(messageList, chatOptions, ct);
+            }, cancellationToken);
+
+            var content = response.Value.Content.FirstOrDefault()?.Text;
+
+            if (string.IsNullOrEmpty(content))
+            {
+                throw new InvalidOperationException(
+                    $"Structured completion returned empty content for schema '{schemaName}'.");
+            }
+
+            _logger.LogDebug(
+                "Structured completion finished. Model={Model}, Schema={Schema}, ResponseLength={Length}",
+                deploymentName, schemaName, content.Length);
+
+            return JsonSerializer.Deserialize<T>(content, s_structuredJsonOptions)
+                ?? throw new InvalidOperationException(
+                    $"Structured completion deserialized to null for schema '{schemaName}'.");
+        }
+        catch (BrokenCircuitException)
+        {
+            _logger.LogWarning("OpenAI circuit breaker is open. Rejecting structured completion request.");
+            throw new OpenAiCircuitBrokenException(BreakDuration);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex,
+                "Failed to deserialize structured completion response. Schema={Schema}",
+                schemaName);
+            throw new InvalidOperationException(
+                $"Failed to deserialize structured completion response for schema '{schemaName}'.", ex);
+        }
+        catch (OpenAiCircuitBrokenException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to get structured completion. Model={Model}, Schema={Schema}",
+                deploymentName, schemaName);
             throw;
         }
     }
