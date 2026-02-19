@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Post-Deployment Verification</title>
+    <phase>Phase 5: Deployment &amp; Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>041, 042</dependencies>
+    <blocks>090</blocks>
+    <tags>testing, e2e-test, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification task — runs the 16 success criteria from spec.md against the deployed environment, no new code</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Run all 16 success criteria from spec.md against the fully deployed Legal Operations Workspace in the dev
+    environment. Both the Custom Page (task 041) and BFF endpoints (task 042) must be deployed. Systematically
+    verify each criterion, document pass/fail results with evidence, fix any failures, and re-test until all
+    16 criteria pass. This is the final quality gate before project wrap-up.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in deployment verification, acceptance testing, quality assurance, and Dataverse environment testing.</role>
+
+  <goal>
+    All 16 success criteria from spec.md pass in the deployed dev environment. Each criterion is documented
+    with pass/fail status and evidence (screenshots, response data, timing measurements). Any failures are
+    fixed and re-verified. Final sign-off documented.
+  </goal>
+
+  <context>
+    <background>
+      The Legal Operations Workspace spec.md defines 16 success criteria that must all pass for the project
+      to be considered complete. This verification task runs after both the Custom Page (Dataverse) and BFF
+      endpoints (Azure) are deployed. The verification must be performed in the actual deployed dev environment,
+      not in local development. This is the final quality gate — any failures must be fixed before the project
+      can proceed to wrap-up.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">All 16 success criteria must pass — no partial completion accepted</constraint>
+    <constraint source="spec">Verification must be in the deployed dev environment (https://spaarkedev1.crm.dynamics.com)</constraint>
+    <constraint source="NFR-01">Page load time must be measured and verified under 3 seconds</constraint>
+    <constraint source="NFR-02">Bundle size must be verified under 5MB</constraint>
+    <constraint source="NFR-03">WCAG 2.1 AA compliance must be verified</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="spec-success-criteria" location="projects/home-corporate-workspace-r1/spec.md">The 16 success criteria that define project completion</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create verification checklist document at projects/home-corporate-workspace-r1/notes/deployment-verification.md — extract all 16 success criteria from spec.md into a structured verification table with columns: Criterion ID, Description, Expected Result, Actual Result, Status, Evidence, Tester Notes.</step>
+    <step order="2">Verify criteria related to page layout and rendering: Custom Page loads in MDA, all 7 blocks render, responsive layout works at 1024px/1280px/1920px, theme toggle switches between light/dark/high-contrast modes.</step>
+    <step order="3">Verify criteria related to Updates Feed: 8 filter categories work, dynamic count badges update, feed items sorted by priority then timestamp, virtualized scrolling handles 500+ items.</step>
+    <step order="4">Verify criteria related to Smart To Do: flag-to-do round-trip works, priority and effort badges display, to-do CRUD operations (create, complete, dismiss), AI summary generation.</step>
+    <step order="5">Verify criteria related to action cards and dialogs: all 7 action cards function (1 Create Matter dialog, 6 Analysis Builder launches), Create Matter wizard completes all 5 steps.</step>
+    <step order="6">Verify criteria related to data and BFF: Portfolio Health metrics display, Quick Summary aggregation, BFF endpoint response times under 2 seconds, Redis caching works.</step>
+    <step order="7">Verify NFR criteria: page load under 3 seconds (measure with DevTools), bundle size under 5MB, keyboard navigation works (WCAG 2.1 AA), ARIA labels present on all icon-only buttons.</step>
+    <step order="8">Fix any failures — for each failing criterion, identify the root cause, apply the fix, re-deploy if necessary, and re-test. Document the fix applied.</step>
+    <step order="9">Re-test any fixed criteria until all 16 pass. Update the verification document with final results.</step>
+    <step order="10">Sign off on deployment — add final summary to deployment-verification.md with: all 16 criteria pass, deployment date, environment URL, tester name, any notes for production deployment.</step>
+    <step order="11">Update TASK-INDEX.md — mark task 043 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run shell commands as needed for verification</tool>
+    <tool name="dotnet">Build and deploy fixes if needed</tool>
+    <tool name="npm">Build PCF fixes if needed</tool>
+    <tool name="pac">Re-deploy solution fixes if needed</tool>
+    <tool name="az">Re-deploy API fixes if needed</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">projects/home-corporate-workspace-r1/notes/deployment-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 16 success criteria from spec.md pass in the deployed dev environment</criterion>
+    <criterion testable="true">Verification document exists with structured results for each criterion</criterion>
+    <criterion testable="true">Each criterion has documented evidence (measurement, screenshot reference, or observation)</criterion>
+    <criterion testable="true">Any failures have documented fixes and successful re-test results</criterion>
+    <criterion testable="true">Final sign-off is documented with deployment date and environment URL</criterion>
+    <criterion testable="true">Page load time measured at under 3 seconds</criterion>
+    <criterion testable="true">Bundle size verified at under 5MB</criterion>
+    <criterion testable="true">WCAG 2.1 AA compliance verified for all interactive elements</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Dev environment: https://spaarkedev1.crm.dynamics.com
+    - BFF API: https://spe-api-dev-67e2xz.azurewebsites.net
+    - Use browser DevTools Performance panel for load time measurement — record a fresh page load
+    - Use browser DevTools Network tab to verify BFF endpoint response times
+    - The 16 success criteria are defined in spec.md under "Success Criteria" section — extract them verbatim
+    - If a criterion fails, determine if it's a PCF issue (re-deploy solution) or BFF issue (re-deploy API)
+    - Some criteria may require specific test data in Dataverse — ensure at least 5 matters with various statuses exist
+    - For AI-dependent criteria (AI summary, briefing), verify Azure OpenAI connectivity in the deployed environment
+    - This task is sequential — both Custom Page (041) and BFF (042) must be deployed before verification
+    - If multiple criteria fail, prioritize fixes by impact: blocking issues first, then polish issues
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 8.</protocol>
+  </execution>
+</task>

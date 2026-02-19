@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Block 7 — Notification Panel</title>
+    <phase>Phase 1: Foundation &amp; Independent Blocks</phase>
+    <status>completed</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>none</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag with new component — Fluent UI Drawer component integration, filter system, connection to page header</rigor-reason>
+    <parallel-group>pg-phase1-ui</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build Block 7 — Notification Panel: a slide-out Drawer component (Fluent UI v9 OverlayDrawer) triggered by
+    the notification bell icon in the page header (from task 001). The panel shows an activity list with avatar,
+    type badge (Documents, Invoices, Status, Analysis), message text, and relative timestamp. Filter toggle
+    buttons allow filtering by notification category. Include an empty state when no notifications match filters.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 Drawer component, React state management, and notification UI patterns.</role>
+
+  <goal>
+    A fully functional Notification Panel using Fluent UI v9 OverlayDrawer that opens from the right side when
+    the page header bell icon is clicked, displays a filterable list of notification items with type badges and
+    timestamps, supports category filtering via toggle buttons, and handles empty states gracefully. Fully
+    theme-aware with light/dark/high-contrast support.
+  </goal>
+
+  <context>
+    <background>
+      The Notification Panel is the last of the three independent blocks in Phase 1 (alongside Portfolio Health
+      and My Portfolio). It provides legal operations managers with a centralized view of recent activity across
+      their matters — document updates, invoice approvals, status changes, and AI analysis completions. The
+      panel opens as a slide-out drawer from the right side of the workspace, triggered by the bell icon in the
+      page header (created in task 001). Notification data can come from sprk_event records or a dedicated
+      notification mechanism. For R1, notifications use a polling/manual refresh approach (no real-time SignalR).
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/client/pcf/LegalWorkspace/types/</file>
+      <file>src/client/pcf/LegalWorkspace/components/Shell/PageHeader.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/LegalWorkspaceApp.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent UI v9 OverlayDrawer component — no custom slide-out implementations</constraint>
+    <constraint source="ADR-021">MUST use makeStyles with semantic tokens for all styling — no hardcoded colors</constraint>
+    <constraint source="ADR-021">MUST support light, dark, and high-contrast themes</constraint>
+    <constraint source="ADR-021">MUST use @fluentui/react-icons for all icons (notification types, avatars, close button)</constraint>
+    <constraint source="spec">Filter categories: Documents, Invoices, Status, Analysis — toggle buttons</constraint>
+    <constraint source="spec">No real-time SignalR for R1 — polling or manual refresh approach</constraint>
+    <constraint source="ADR-012">Import from @spaarke/ui-components where reusable components exist</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="theme-management" location=".claude/patterns/pcf/theme-management.md">Fluent theme tokens, dark mode patterns for Drawer overlays</pattern>
+      <pattern name="drawer-usage" location="@fluentui/react-components">OverlayDrawer, DrawerHeader, DrawerBody from Fluent UI v9</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create NotificationPanel component directory at src/client/pcf/LegalWorkspace/components/NotificationPanel/</step>
+    <step order="2">Implement NotificationPanel component (NotificationPanel.tsx) using Fluent UI v9 OverlayDrawer — opens from right side (position="end"), controlled by isOpen prop. Include DrawerHeader with "Notifications" title and close button (DismissRegular icon), DrawerBody with filter bar and notification list.</step>
+    <step order="3">Create NotificationItem component (NotificationItem.tsx) — displays: avatar/icon on left (PersonRegular or category-specific icon), type badge (Documents=DocumentRegular blue, Invoices=ReceiptRegular green, Status=InfoRegular orange, Analysis=SparkleRegular purple) using Fluent Badge component, message text, and relative timestamp ("2 min ago", "1 hour ago"). Use makeStyles with semantic tokens for type badge colors.</step>
+    <step order="4">Create filter toggle buttons bar — 4 toggle buttons for notification categories: Documents, Invoices, Status, Analysis. Use Fluent UI v9 ToggleButton component. Multiple filters can be active simultaneously (multi-select). When no filters are active, show all notifications. Each button shows category icon and label.</step>
+    <step order="5">Implement filter logic — filter the notification list by selected categories. When multiple categories are selected, show notifications matching ANY selected category (OR logic). Track filter state with React useState.</step>
+    <step order="6">Add empty state component — when no notifications match the current filters (or when no notifications exist at all), display a friendly empty state with a large icon (AlertRegular), "No notifications" heading, and descriptive text. Use Fluent tokens for styling.</step>
+    <step order="7">Connect NotificationPanel to PageHeader bell icon — update PageHeader.tsx to manage drawer open/close state, pass isOpen and onClose props to NotificationPanel. Update the bell icon button to toggle the drawer. Add unread count badge on the bell icon (use CounterBadge from Fluent UI).</step>
+    <step order="8">Create a useNotifications hook — for R1, returns mock notification data (since the notification backend is not yet specified). Hook signature: { notifications: INotificationItem[], isLoading: boolean, unreadCount: number, markAsRead: (id: string) => void }. Structure supports future backend integration.</step>
+    <step order="9">Verify dark mode rendering — confirm Drawer overlay, notification items, type badges, filter buttons, and empty state all render correctly across light/dark/high-contrast themes.</step>
+    <step order="10">Update TASK-INDEX.md — mark task 007 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/components/NotificationPanel/NotificationPanel.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/NotificationPanel/NotificationItem.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/NotificationPanel/NotificationFilters.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/NotificationPanel/EmptyState.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/NotificationPanel/index.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/hooks/useNotifications.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Notification Panel opens as a slide-out Drawer from the right side when the bell icon is clicked</criterion>
+    <criterion testable="true">Drawer closes via the close button (DismissRegular icon) or clicking outside the overlay</criterion>
+    <criterion testable="true">Notification items display avatar/icon, type badge (color-coded), message text, and relative timestamp</criterion>
+    <criterion testable="true">Filter toggle buttons for Documents, Invoices, Status, Analysis work with multi-select OR logic</criterion>
+    <criterion testable="true">When no filters are active, all notifications are shown (unfiltered)</criterion>
+    <criterion testable="true">Empty state displays when no notifications match current filters</criterion>
+    <criterion testable="true">Bell icon in page header shows unread count badge (CounterBadge)</criterion>
+    <criterion testable="true">Dark mode renders Drawer overlay, items, badges, and buttons correctly with semantic tokens</criterion>
+    <criterion testable="true">High-contrast mode renders accessibly with sufficient contrast</criterion>
+    <criterion testable="true">Drawer animates open/close smoothly (Fluent UI built-in transition)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Fluent UI v9 Drawer: import { OverlayDrawer, DrawerHeader, DrawerHeaderTitle, DrawerBody } from "@fluentui/react-components"
+    - OverlayDrawer position="end" opens from the right side
+    - Type badge colors (use Fluent palette tokens): Documents=colorPaletteBlueForeground2, Invoices=colorPaletteGreenForeground1, Status=colorPaletteMarigoldForeground1, Analysis=colorPalettePurpleForeground1
+    - Toggle buttons: use ToggleButton from @fluentui/react-components with checked prop for active state
+    - The unread count badge on the bell icon should use CounterBadge with appearance="filled" color="danger"
+    - For R1, notification data is mock — design the hook interface to support future Xrm.WebApi or BFF backend
+    - Consider adding a "Mark all as read" action in the DrawerHeader for future functionality
+    - Drawer width: 400px on desktop, full-width on mobile (let Fluent handle responsive behavior)
+    - Bell icon connection: the onClick handler in PageHeader should toggle a boolean state that controls DrawerPanel isOpen
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 7.</protocol>
+  </execution>
+</task>

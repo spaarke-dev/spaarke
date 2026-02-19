@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Block 2 — Portfolio Health Summary</title>
+    <phase>Phase 1: Foundation &amp; Independent Blocks</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>none</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag with code implementation — new React component with color-coded thresholds and responsive layout</rigor-reason>
+    <parallel-group>pg-phase1-ui</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build Block 2 — Portfolio Health Summary: a 4-card metric strip showing Portfolio Spend (with utilization
+    bar), Matters at Risk, Overdue Events, and Active Matters. Each card has a Fluent icon, metric value,
+    label, and optional trend indicator. The spend card includes a horizontal utilization bar with color-coded
+    thresholds (green under 65%, orange 65-85%, red over 85%). The strip uses a responsive 4-column grid that
+    collapses to 2 columns at 900px. Data comes from the BFF portfolio endpoint — show loading states while
+    BFF is not yet implemented.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 components, React data visualization, responsive design with makeStyles, and semantic color tokens.</role>
+
+  <goal>
+    A fully functional Portfolio Health Summary strip with 4 metric cards that displays correct data, applies
+    color-coded utilization thresholds, responds to light/dark/high-contrast themes, and adapts from 4-column
+    to 2-column layout at the 900px breakpoint. Loading states render while BFF data is unavailable.
+  </goal>
+
+  <context>
+    <background>
+      The Portfolio Health Summary is a high-visibility component at the top of the workspace dashboard. It
+      gives legal operations managers an at-a-glance view of their portfolio: how much budget is consumed,
+      how many matters are at risk, how many events are overdue, and total active matters. The utilization bar
+      on the spend card uses color thresholds that align with the scoring system's risk tiers. Data is sourced
+      from the BFF /api/workspace/portfolio endpoint (task 008), which aggregates across all user matters.
+      Since BFF may not be implemented yet, the component must gracefully show loading/placeholder states.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/workspace-main-page.jpg</file>
+      <file>src/client/pcf/LegalWorkspace/types/portfolio.ts</file>
+      <file>src/client/pcf/LegalWorkspace/types/components.ts</file>
+      <file>src/client/pcf/LegalWorkspace/LegalWorkspaceApp.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">All UI MUST use Fluent UI v9 — makeStyles with semantic tokens only, no hardcoded colors</constraint>
+    <constraint source="ADR-021">MUST support light, dark, and high-contrast themes — utilization bar colors must use semantic tokens or theme-aware computed values</constraint>
+    <constraint source="ADR-021">MUST use @fluentui/react-icons for metric card icons</constraint>
+    <constraint source="ADR-009">Data from BFF endpoint (when available) — handle loading and error states gracefully</constraint>
+    <constraint source="spec">Utilization thresholds: &lt;65% green, 65-85% orange, &gt;85% red</constraint>
+    <constraint source="spec">Responsive: 4-column at 900px+, 2-column below 900px</constraint>
+    <constraint source="ADR-012">Import from @spaarke/ui-components where reusable components exist</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-009.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="theme-management" location=".claude/patterns/pcf/theme-management.md">Fluent theme tokens, dark mode patterns, theme-aware styling</pattern>
+      <pattern name="workspace-layout" location="src/client/pcf/AnalysisWorkspace/">Reference for responsive grid layout patterns in workspace PCF</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create PortfolioHealth component directory at src/client/pcf/LegalWorkspace/components/PortfolioHealth/</step>
+    <step order="2">Create MetricCard component (MetricCard.tsx) — reusable card with icon (Fluent icon component), metric value (large text), label (descriptive text), optional trend indicator (up/down arrow with delta). Use makeStyles with Card component from @fluentui/react-components and semantic tokens for all colors.</step>
+    <step order="3">Create SpendUtilizationBar component (SpendUtilizationBar.tsx) — horizontal progress bar showing totalSpend/totalBudget ratio with color-coded fill: green (colorPaletteGreenForeground1) for utilization &lt;65%, orange (colorPaletteMarigoldForeground1) for 65-85%, red (colorPaletteCranberryForeground1) for &gt;85%. Display spend/budget text below bar (e.g., "$1.3M of $2.0M"). Use makeStyles with Fluent tokens for theme-safe colors.</step>
+    <step order="4">Create PortfolioHealthStrip component (PortfolioHealthStrip.tsx) — layout container for 4 metric cards in a CSS Grid: "Portfolio Spend" card (with SpendUtilizationBar, using MoneyRegular icon), "Matters at Risk" card (using WarningRegular icon, red-tinted when count &gt; 0), "Overdue Events" card (using ClockRegular icon, red-tinted when count &gt; 0), "Active Matters" card (using BriefcaseRegular icon). Responsive grid: 4 columns at 900px+, 2 columns below 900px.</step>
+    <step order="5">Create a usePortfolioHealth hook or data adapter that fetches from the BFF /api/workspace/portfolio endpoint — for now, implement with loading state (Skeleton components from Fluent UI) and optional mock data for development. The hook should return { data: IPortfolioHealth | null, isLoading: boolean, error: string | null }.</step>
+    <step order="6">Wire PortfolioHealthStrip into the workspace shell (LegalWorkspaceApp.tsx) — position in the left column grid area below Block 1 (Get Started) per the workspace-main-page.jpg screenshot layout.</step>
+    <step order="7">Verify dark mode rendering — toggle theme and confirm all metric cards, utilization bar colors, and text use semantic tokens correctly. Verify high-contrast mode.</step>
+    <step order="8">Update TASK-INDEX.md — mark task 004 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/components/PortfolioHealth/PortfolioHealthStrip.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/PortfolioHealth/MetricCard.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/PortfolioHealth/SpendUtilizationBar.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/PortfolioHealth/index.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/hooks/usePortfolioHealth.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">4 metric cards render with correct icons, values, and labels (Portfolio Spend, Matters at Risk, Overdue Events, Active Matters)</criterion>
+    <criterion testable="true">SpendUtilizationBar displays correct color for utilization thresholds: green below 65%, orange 65-85%, red above 85%</criterion>
+    <criterion testable="true">Responsive layout switches from 4-column grid to 2-column grid at the 900px breakpoint</criterion>
+    <criterion testable="true">Loading state shows Skeleton placeholders when BFF data is not yet available</criterion>
+    <criterion testable="true">Dark mode renders all metric cards correctly with semantic tokens — no visible hardcoded colors</criterion>
+    <criterion testable="true">High-contrast mode renders accessibly with sufficient color contrast</criterion>
+    <criterion testable="true">Zero hardcoded hex/rgb/hsl color values in any component file</criterion>
+    <criterion testable="true">Matters at Risk and Overdue Events cards show red-tinted accent when count is greater than 0</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Reference screenshots/workspace-main-page.jpg for the health strip layout and positioning in the overall page
+    - Fluent v9 color tokens for thresholds: use colorPaletteGreenForeground1 (green), colorPaletteMarigoldForeground1 (orange), colorPaletteCranberryForeground1 (red) — these adapt automatically to dark mode
+    - Consider using Fluent UI's ProgressBar component as a base for the utilization bar, styled with makeStyles
+    - MetricCard should be reusable — it will be used for both this block and potentially Quick Summary metrics
+    - The BFF endpoint (task 008) may not exist when this task executes — use a hook pattern with loading states
+    - The Skeleton component from @fluentui/react-components provides consistent loading placeholders
+    - Trend indicators are optional for R1 — implement the prop but don't require data for it
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 6.</protocol>
+  </execution>
+</task>

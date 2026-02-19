@@ -39,6 +39,7 @@ This directory will contain AI-optimized versions of Architecture Decision Recor
 | ADR-013 | AI Architecture | AI Tool Framework; extend BFF |
 | ADR-021 | Fluent UI v9 Design System | All UI uses Fluent v9; dark mode required |
 | ADR-023 | Choice Dialog Pattern | Rich option buttons for 2-4 choices |
+| ADR-026 | Full-Page Custom Page Standard | Standalone HTML + Vite + React 18 for full pages; no PCF |
 
 ---
 
@@ -47,6 +48,7 @@ This directory will contain AI-optimized versions of Architecture Decision Recor
 Load concise ADRs proactively when creating new components:
 - Creating API → Load ADR-001, ADR-008, ADR-010
 - Creating PCF → Load ADR-006, ADR-012, ADR-022 (React 16 compatibility)
+- Creating full-page Custom Page → Load ADR-026, ADR-021 (standalone HTML + React 18)
 - Creating Plugin → Load ADR-002
 - Working with auth → Load ADR-004, ADR-016
 - Working with SPE → Load ADR-007, ADR-019

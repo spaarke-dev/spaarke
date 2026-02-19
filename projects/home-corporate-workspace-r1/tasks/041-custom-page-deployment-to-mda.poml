@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Custom Page Deployment to MDA</title>
+    <phase>Phase 5: Deployment &amp; Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>043</blocks>
+    <tags>deploy, dataverse, solution</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Deployment to shared environment — affects MDA navigation, user-facing configuration, requires auth flow verification</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy the Legal Operations Workspace Custom Page to the Model-Driven App (MDA) in the dev Dataverse
+    environment. Import the solution from task 040, register the Custom Page in the MDA sitemap as a
+    navigation item, configure page dimensions and display properties, verify the page loads correctly in
+    the MDA context with all 7 blocks rendering, and verify the authentication flow to the BFF API works
+    from the deployed Custom Page.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse solution deployment, Model-Driven App configuration, Custom Page registration, sitemap XML, and MSAL authentication flows in Power Apps.</role>
+
+  <goal>
+    Custom Page is deployed and accessible in the MDA navigation. All 7 build blocks render correctly in the
+    production MDA context. Authentication flow to BFF API works — BFF endpoints return data to the Custom
+    Page. Page dimensions and navigation are configured correctly.
+  </goal>
+
+  <context>
+    <background>
+      The Legal Operations Workspace Custom Page must be registered within the existing Model-Driven App
+      (MDA) that legal operations managers use daily. The MDA provides the authentication context (Azure AD
+      via MSAL), the sitemap navigation, and the runtime environment for the Custom Page. The Custom Page
+      runs in its own iframe within the MDA, which provides the React 18 runtime exception. After solution
+      import (task 040), the Custom Page must be registered in the MDA sitemap, configured with appropriate
+      dimensions, and verified to work in the full MDA context including authentication to the BFF API.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/solutions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Custom Page must be accessible from MDA sitemap navigation — users should find it in the main navigation</constraint>
+    <constraint source="spec">Page must render all 7 blocks in the MDA context (not just standalone)</constraint>
+    <constraint source="ADR-008">BFF API authentication must work from Custom Page context — endpoint filters must accept the MSAL token</constraint>
+    <constraint source="spec">Custom Page dimensions should fill the available MDA content area — responsive from 1024px to 1920px+</constraint>
+    <constraint source="ADR-022">Solution must be unmanaged for dev environment deployment</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+      <file>.claude/adr/ADR-008.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-deploy" location=".claude/skills/dataverse-deploy/SKILL.md">Dataverse deployment skill with Custom Page registration and MDA configuration steps</pattern>
+      <pattern name="mda-sitemap" location="src/solutions/">Existing MDA sitemap XML for reference on navigation structure</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Import the solution from task 040 to the dev Dataverse environment if not already imported — pac solution import with verification. Confirm all components are present post-import.</step>
+    <step order="2">Register the Custom Page in the MDA sitemap — add a new SubArea element in the sitemap XML pointing to the Legal Operations Workspace Custom Page. Set appropriate Title, Icon, and Description for the navigation item.</step>
+    <step order="3">Configure Custom Page dimensions — set page width and height to fill the MDA content area. Configure responsive behavior so the page works from 1024px to 1920px+ viewport widths. Set page title displayed in the MDA header.</step>
+    <step order="4">Publish customizations in Dataverse (pac solution publish or publish via maker portal) so the sitemap changes and Custom Page registration take effect.</step>
+    <step order="5">Verify page loads in MDA context — navigate to the Custom Page via the MDA sitemap, verify all 7 blocks render (Get Started cards, Portfolio Health, Updates Feed, Smart To Do, My Portfolio, Quick Summary, Notification Bell). Check for console errors.</step>
+    <step order="6">Verify auth flow to BFF API — check that the Custom Page acquires an MSAL token from the MDA context and successfully authenticates to BFF endpoints. Test a BFF endpoint call (e.g., /api/workspace/portfolio) and verify data returns. Check browser DevTools Network tab for 200 responses.</step>
+    <step order="7">Update TASK-INDEX.md — mark task 041 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Apps CLI for solution import and publishing</tool>
+    <tool name="terminal">Run shell commands for deployment</tool>
+  </tools>
+
+  <outputs>
+    <output type="configuration">MDA sitemap with Legal Operations Workspace navigation item</output>
+    <output type="configuration">Custom Page registration in Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Custom Page is accessible from MDA sitemap navigation</criterion>
+    <criterion testable="true">Page loads in MDA context without JavaScript errors in console</criterion>
+    <criterion testable="true">All 7 build blocks render in the MDA context</criterion>
+    <criterion testable="true">Page dimensions fill MDA content area and are responsive</criterion>
+    <criterion testable="true">MSAL authentication token is acquired from MDA context</criterion>
+    <criterion testable="true">BFF API endpoints return data when called from Custom Page (200 responses)</criterion>
+    <criterion testable="true">Theme toggle works in MDA context (light/dark/high-contrast)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Dev environment: https://spaarkedev1.crm.dynamics.com
+    - Use pac auth create to authenticate to Dataverse before pac commands
+    - MDA sitemap XML: the SubArea element needs Type="10085" (Custom Page type) or the appropriate type code for your environment
+    - Custom Page dimensions: use Width="-1" and Height="-1" for full-fill behavior, or specific pixel values
+    - After publishing customizations, it may take a few minutes for changes to propagate — refresh the MDA
+    - Auth flow: the Custom Page should use the PCF framework's authentication context to get MSAL tokens
+    - If BFF auth fails, check that the Azure AD app registration includes the Custom Page URL in redirect URIs
+    - Console errors in the browser DevTools are the first indicator of deployment issues — check both the MDA frame and the Custom Page iframe
+    - Load the dataverse-deploy skill before starting this task for the complete deployment procedure
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load dataverse-deploy skill before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 6.</protocol>
+  </execution>
+</task>

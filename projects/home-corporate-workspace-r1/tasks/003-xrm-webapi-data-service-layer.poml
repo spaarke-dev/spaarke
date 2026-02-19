@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Xrm.WebApi Data Service Layer</title>
+    <phase>Phase 1: Foundation &amp; Independent Blocks</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>005, 006</blocks>
+    <tags>typescript, frontend, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation creating foundational data service — all client-side data access flows through this layer</rigor-reason>
+    <parallel-group>pg-foundation</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create a typed data service wrapper around Xrm.WebApi for client-side Dataverse queries. This service
+    provides typed methods for all entity queries used by UI blocks: matter list (My Portfolio), project list,
+    document list, event feed (Updates), and to-do CRUD operations (create, update status, toggle flag, dismiss).
+    The service must use the shared TypeScript interfaces from task 002 and handle errors with typed results.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse Xrm.WebApi, TypeScript service design, and Power Apps Custom Page data access patterns.</role>
+
+  <goal>
+    A complete DataverseService class wrapping Xrm.WebApi with typed query methods for each entity (matters,
+    events, projects, documents), to-do CRUD operations (create, update status, toggle flag, dismiss), and error
+    handling with typed Result pattern. The service is the single data access layer for all client-side Dataverse
+    operations in the workspace.
+  </goal>
+
+  <context>
+    <background>
+      The Legal Operations Workspace uses a hybrid data access pattern. Simple entity queries go through
+      Xrm.WebApi on the client side (no BFF round-trip needed), while complex aggregations and AI features
+      use BFF endpoints. This service implements the client-side half of that hybrid pattern. The Xrm.WebApi
+      is available in the Custom Page context through the PCF framework's WebApi interface. All entity queries
+      target existing Dataverse entities with the sprk_ prefix.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/client/pcf/LegalWorkspace/types/</file>
+      <file>src/client/pcf/LegalWorkspace/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Use Xrm.WebApi for simple entity queries (matters, projects, documents, events, to-do CRUD) — NOT BFF endpoints</constraint>
+    <constraint source="spec">No new Dataverse entities — only query existing sprk_event, sprk_matter, sprk_project, sprk_document</constraint>
+    <constraint source="ADR-006">Data access through PCF framework WebApi interface (ComponentFramework.WebApi)</constraint>
+    <constraint source="spec">To-do CRUD: create event with todoflag=true, update todostatus (Open/Completed/Dismissed), toggle todoflag</constraint>
+    <constraint source="spec">Matter queries filter by current user (ownerid or assigned attorney)</constraint>
+    <constraint source="spec">Event feed queries support filter categories: All, High Priority, Overdue, Alerts, Emails, Documents, Invoices, Tasks</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Xrm.WebApi query patterns, FetchXML vs OData, entity CRUD operations</pattern>
+      <pattern name="existing-pcf-data" location="src/client/pcf/AnalysisWorkspace/">Reference for data access patterns in workspace PCF controls</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create services directory at src/client/pcf/LegalWorkspace/services/</step>
+    <step order="2">Implement DataverseService class that accepts ComponentFramework.WebApi as constructor parameter — typed wrapper around Xrm.WebApi with generic query/create/update/delete helpers</step>
+    <step order="3">Add typed query methods for matters: getMattersByUser(userId: string, options?: { top?: number }) returning Promise of IResult of IMatter array — queries sprk_matter with $select for all portfolio fields, $filter by owner, $orderby name, $top default 5</step>
+    <step order="4">Add typed query methods for events feed: getEventsFeed(userId: string, filter?: EventFilterCategory) returning Promise of IResult of IEvent array — queries sprk_event with category-specific $filter predicates (High Priority: priorityscore gt 70, Overdue: duedate lt today AND statuscode eq active, Alerts: type eq 'Alert', etc.), $orderby priorityscore desc then modifiedon desc</step>
+    <step order="5">Add typed query methods: getProjectsByUser(userId: string, options?) for sprk_project, getDocumentsByMatter(matterId: string, options?) for sprk_document — both with $select, $filter, $orderby, $top</step>
+    <step order="6">Add to-do CRUD operations: createTodo(title: string, userId: string) creating sprk_event with todoflag=true, todosource='User', todostatus='Open'; updateTodoStatus(eventId: string, status: TodoStatus); toggleTodoFlag(eventId: string, flagged: boolean); dismissTodo(eventId: string) setting todostatus='Dismissed'</step>
+    <step order="7">Add error handling with typed Result pattern — IResult&lt;T&gt; = { success: true, data: T } | { success: false, error: { code: string, message: string } }. Wrap all Xrm.WebApi calls in try/catch with meaningful error messages.</step>
+    <step order="8">Create a service factory or hook (useDataverseService) that instantiates DataverseService from PCF context — enables dependency injection in React components</step>
+    <step order="9">Verify TypeScript compilation and ensure all methods return correctly typed results</step>
+    <step order="10">Update TASK-INDEX.md — mark task 003 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">TypeScript compilation check</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/services/DataverseService.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/services/index.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/hooks/useDataverseService.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/types/result.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">DataverseService class accepts ComponentFramework.WebApi and provides typed methods for all entity queries</criterion>
+    <criterion testable="true">getMattersByUser returns typed IMatter array with correct $select/$filter/$orderby for portfolio display</criterion>
+    <criterion testable="true">getEventsFeed supports all 8 filter categories (All, High Priority, Overdue, Alerts, Emails, Documents, Invoices, Tasks) with correct OData predicates</criterion>
+    <criterion testable="true">getProjectsByUser and getDocumentsByMatter return correctly typed arrays with appropriate query parameters</criterion>
+    <criterion testable="true">createTodo creates sprk_event with todoflag=true, todosource='User', todostatus='Open'</criterion>
+    <criterion testable="true">updateTodoStatus, toggleTodoFlag, and dismissTodo correctly update Dataverse records</criterion>
+    <criterion testable="true">All methods return IResult&lt;T&gt; with typed error information on failure</criterion>
+    <criterion testable="true">TypeScript compiles without errors and all return types are fully typed (no any)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Xrm.WebApi is accessed via ComponentFramework.WebApi in PCF controls
+    - Use OData query syntax ($select, $filter, $orderby, $top) for entity queries
+    - Event filter categories map to different OData $filter predicates — see spec.md Block 3 for filter definitions
+    - To-do source types: 'System' (auto-generated by scoring engine), 'User' (manually created), 'Flagged' (flagged from feed)
+    - getMattersByUser default $top should be 5 (for My Portfolio widget) but allow override
+    - Event feed default sort: priorityscore desc, then modifiedon desc (Critical priority items appear first)
+    - The IResult pattern provides type-safe error handling without throwing exceptions in UI layer
+    - Consider adding a getNotifications method for Block 7 if notification data comes from sprk_event
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Ensure types from task 002 are imported correctly.</protocol>
+  </execution>
+</task>

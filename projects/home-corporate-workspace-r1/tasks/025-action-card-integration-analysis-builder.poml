@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Action Card Integration — 6 Cards to Analysis Builder</title>
+    <phase>Phase 3: Action Cards &amp; Dialogs</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>none</blocks>
+    <tags>pcf, react, fluent-ui, frontend, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag with code implementation and AI integration — wiring 6 action cards to existing Analysis Builder with pre-configured context/intent payloads</rigor-reason>
+    <parallel-group>pg-phase3-actions</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Wire the 6 non-Create-Matter action cards to the existing AI Playbook Analysis Builder (AiToolAgent PCF).
+    Each card launches the Analysis Builder with a pre-configured context/intent payload: Create New Project,
+    Assign to Counsel, Analyze New Document, Search Document Files, Send Email Message, Schedule New Meeting.
+    Study the existing Analysis Builder integration pattern in AiToolAgent PCF, define context/intent payloads
+    for each card, and implement the launcher that opens the Analysis Builder with the correct payload.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in PCF control integration, AI Playbook Analysis Builder, AiToolAgent PCF, inter-control communication in Power Apps MDA, and context/intent payload design.</role>
+
+  <goal>
+    Each of the 6 non-Create-Matter action cards launches the AI Playbook Analysis Builder (AiToolAgent PCF)
+    with a correctly configured context/intent payload. The Analysis Builder opens and recognizes the intent,
+    presenting the appropriate starting workflow for each action. The integration uses the existing Analysis
+    Builder infrastructure — no new dialog UX is needed for these 6 cards.
+  </goal>
+
+  <context>
+    <background>
+      A key architectural decision for this project was to reuse the existing AI Playbook Analysis Builder
+      for 6 of the 7 action cards. Only Create New Matter gets a custom wizard dialog (Block 6). The other 6
+      actions (Create New Project, Assign to Counsel, Analyze New Document, Search Document Files, Send Email
+      Message, Schedule New Meeting) all launch the Analysis Builder with pre-configured context that tells it
+      which workflow to initiate. This dramatically reduces scope and leverages existing production infrastructure.
+      The AiToolAgent PCF is the Analysis Builder control — study its integration pattern for launching with
+      context.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/client/pcf/AiToolAgent/</file>
+      <file>src/client/pcf/LegalWorkspace/components/GetStarted/ActionCard.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/components/GetStarted/GetStartedRow.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/components/GetStarted/getStartedConfig.ts</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">AI features MUST use the AI Playbook platform through BFF — Analysis Builder is the existing AI UI surface</constraint>
+    <constraint source="spec">Only "Create New Matter" is a custom dialog — the other 6 cards MUST launch Analysis Builder</constraint>
+    <constraint source="spec">Each card MUST pass a pre-configured context/intent payload to Analysis Builder</constraint>
+    <constraint source="ADR-006">PCF integration — use PCF-compatible navigation and inter-control communication patterns</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="ai-tool-agent" location="src/client/pcf/AiToolAgent/">Canonical Analysis Builder PCF — study integration, context passing, and launch patterns</pattern>
+      <pattern name="ai-architecture" location="docs/guides/SPAARKE-AI-ARCHITECTURE.md">AI Tool Framework integration and intent/context payload structure</pattern>
+      <pattern name="navigation-contract" location="src/client/pcf/LegalWorkspace/utils/navigation.ts">PostMessage navigation for Custom Page → MDA communication</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Study existing Analysis Builder integration pattern in src/client/pcf/AiToolAgent/ — understand how context/intent payloads are accepted, how the control is launched, and what navigation mechanism is used (openForm, postMessage, or custom event)</step>
+    <step order="2">Create ActionCardHandlers module (ActionCardHandlers.ts) in src/client/pcf/LegalWorkspace/components/GetStarted/ — export a handler function for each of the 6 non-Create-Matter cards</step>
+    <step order="3">Define context/intent payload interfaces (IAnalysisBuilderContext) with fields: intent (string identifier), displayName (human-readable label), initialPrompt (optional pre-configured prompt text), entityContext (optional related entity reference), metadata (optional key-value pairs)</step>
+    <step order="4">Define 6 context/intent payloads: (a) Create New Project — intent: "new-project", initialPrompt: "Create a new project", (b) Assign to Counsel — intent: "assign-counsel", initialPrompt: "Assign counsel to a matter", (c) Analyze New Document — intent: "document-analysis", initialPrompt: "Analyze a document", (d) Search Document Files — intent: "document-search", initialPrompt: "Search for documents", (e) Send Email Message — intent: "email-compose", initialPrompt: "Compose an email", (f) Schedule New Meeting — intent: "meeting-schedule", initialPrompt: "Schedule a meeting"</step>
+    <step order="5">Implement launcher function that opens the Analysis Builder with the context payload — use the navigation mechanism discovered in Step 1 (likely Xrm.Navigation.openForm or postMessage to parent MDA frame)</step>
+    <step order="6">Wire each action card's onClick handler in getStartedConfig.ts to its corresponding handler function — the "Create New Matter" card onClick opens the wizard dialog (from task 022), the other 6 use ActionCardHandlers</step>
+    <step order="7">Test each card launches the Analysis Builder with correct context/intent — verify the intent identifier is passed correctly and the Analysis Builder recognizes it</step>
+    <step order="8">Update TASK-INDEX.md — mark task 025 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects, verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/components/GetStarted/ActionCardHandlers.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/GetStarted/analysisBuilderTypes.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of the 6 non-Create-Matter action cards has a click handler that launches the Analysis Builder</criterion>
+    <criterion testable="true">Create New Project card opens Analysis Builder with intent "new-project"</criterion>
+    <criterion testable="true">Assign to Counsel card opens Analysis Builder with intent "assign-counsel"</criterion>
+    <criterion testable="true">Analyze New Document card opens Analysis Builder with intent "document-analysis"</criterion>
+    <criterion testable="true">Search Document Files card opens Analysis Builder with intent "document-search"</criterion>
+    <criterion testable="true">Send Email Message card opens Analysis Builder with intent "email-compose"</criterion>
+    <criterion testable="true">Schedule New Meeting card opens Analysis Builder with intent "meeting-schedule"</criterion>
+    <criterion testable="true">Context/intent payloads include intent identifier, displayName, and optional initialPrompt</criterion>
+    <criterion testable="true">"Create New Matter" card still opens the wizard dialog (not Analysis Builder)</criterion>
+    <criterion testable="true">PCF control builds without TypeScript or webpack errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - The first step (studying AiToolAgent) is critical — the integration pattern determines everything else
+    - If AiToolAgent uses Xrm.Navigation.openForm, the context is passed as formParameters
+    - If AiToolAgent uses postMessage, the context is serialized as JSON in the message payload
+    - The context/intent payloads defined here should align with existing AI Playbook intent taxonomy
+    - This task does NOT modify the Analysis Builder itself — it only launches it with configuration
+    - If the Analysis Builder doesn't support all 6 intents yet, document which intents need to be added
+    - The launcher should handle the case where Analysis Builder is unavailable (show informational toast)
+    - Consider adding a loading indicator while the Analysis Builder opens
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Study AiToolAgent PCF thoroughly in Step 1. Follow task-execute skill protocol. Checkpoint after steps 4 and 6.</protocol>
+  </execution>
+</task>

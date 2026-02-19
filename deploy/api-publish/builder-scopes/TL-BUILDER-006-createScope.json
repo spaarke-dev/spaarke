@@ -1,0 +1,95 @@
+{
+  "id": "c1d2e3f4-a5b6-4c5d-8e9f-006006006006",
+  "name": "SYS-TL-BUILDER-006-createScope",
+  "displayName": "Create Scope",
+  "description": "Create a new scope record in Dataverse. Supports creating Actions, Skills, Knowledge, and Tool scopes with customer ownership.",
+  "scopeType": "Tool",
+  "ownerType": 1,
+  "isImmutable": true,
+  "configuration": {
+    "handlerType": "DataverseOperationHandler",
+    "operation": "createScope",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "scopeType": {
+          "type": "string",
+          "enum": ["action", "skill", "knowledge", "tool"],
+          "description": "Type of scope to create"
+        },
+        "name": {
+          "type": "string",
+          "description": "Unique name for the scope (CUST- prefix will be added)"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Human-readable display name"
+        },
+        "description": {
+          "type": "string",
+          "description": "Purpose and functionality description"
+        },
+        "content": {
+          "type": "object",
+          "description": "Type-specific content (systemPrompt, promptFragment, configuration, etc.)"
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "tags": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "documentTypes": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "basedonId": {
+          "type": "string",
+          "description": "If this is a Save As operation, ID of the source scope"
+        },
+        "parentScopeId": {
+          "type": "string",
+          "description": "If this is an Extend operation, ID of the parent scope"
+        }
+      },
+      "required": ["scopeType", "name", "displayName", "content"]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "scopeId": {
+          "type": "string",
+          "description": "Dataverse ID of the created scope"
+        },
+        "fullName": {
+          "type": "string",
+          "description": "Full name with prefix (e.g., CUST-ACT-001-name)"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      }
+    },
+    "validationRules": [
+      {
+        "rule": "name must be unique within scope type",
+        "errorMessage": "A scope with this name already exists"
+      },
+      {
+        "rule": "content must be valid for scope type",
+        "errorMessage": "Invalid content structure for this scope type"
+      }
+    ],
+    "autoPrefix": "CUST-",
+    "ownerType": 2,
+    "isImmutable": false
+  },
+  "metadata": {
+    "tags": ["builder", "tool", "dataverse", "scope", "create"],
+    "version": "1.0.0",
+    "category": "builder-dataverse-ops"
+  }
+}

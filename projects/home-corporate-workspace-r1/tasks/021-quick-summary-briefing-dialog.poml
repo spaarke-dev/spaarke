@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Quick Summary Briefing Dialog</title>
+    <phase>Phase 3: Action Cards &amp; Dialogs</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>none</blocks>
+    <tags>pcf, react, fluent-ui, frontend, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag with code implementation and AI integration — dialog component with deterministic fallback and AI-enhanced narrative</rigor-reason>
+    <parallel-group>pg-phase3-actions</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build the expanded portfolio briefing dialog that opens from the Quick Summary card's "Full briefing" link.
+    The dialog shows narrative paragraphs covering: active matters summary, at-risk explanation (red), overdue
+    events breakdown (red), top priority matter with deadline, and budget watch with utilization percentages.
+    The dialog must have a deterministic fallback (template-based narrative) that works without AI, and an
+    AI-enhanced mode when the BFF briefing endpoint returns AI-generated narrative.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 Dialog components, React 18, AI integration patterns with deterministic fallbacks, and semantic token usage for theme-aware styling.</role>
+
+  <goal>
+    A Fluent v9 Dialog component that displays a portfolio briefing with structured narrative paragraphs. The
+    dialog works in two modes: deterministic (template-based text from aggregated metrics) and AI-enhanced
+    (richer narrative from BFF briefing endpoint). At-risk and overdue items are highlighted in red using
+    semantic tokens. The dialog supports light, dark, and high-contrast themes.
+  </goal>
+
+  <context>
+    <background>
+      The briefing dialog is the expanded view of the Quick Summary card. Legal operations managers click
+      "Full briefing" to see a comprehensive portfolio overview with narrative context beyond just numbers.
+      The deterministic mode uses template strings with interpolated metrics (e.g., "You have 3 matters at risk,
+      primarily due to budget overruns in Acme Corp litigation"). The AI-enhanced mode uses the BFF briefing
+      endpoint (task 027) which calls the AI Playbook to generate richer, more contextual narrative. The
+      deterministic mode is the mandatory baseline — AI enhancement is optional.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/my-portfolio-ai-summary_2.jpg</file>
+      <file>src/client/pcf/LegalWorkspace/components/GetStarted/QuickSummaryCard.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/types/portfolio.ts</file>
+      <file>src/client/pcf/LegalWorkspace/types/api.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent v9 Dialog component from @fluentui/react-components</constraint>
+    <constraint source="ADR-021">MUST use makeStyles with semantic tokens — at-risk and overdue text uses colorPaletteRedForeground1</constraint>
+    <constraint source="ADR-021">MUST support light, dark, and high-contrast modes</constraint>
+    <constraint source="ADR-013">AI-enhanced narrative MUST be fetched from BFF endpoint, never directly from AI service</constraint>
+    <constraint source="NFR-06">MUST have a deterministic fallback that works without AI — template-based narrative from aggregated metrics</constraint>
+    <constraint source="ADR-012">Import shared UI components from @spaarke/ui-components where available</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+    </files>
+    <patterns>
+      <pattern name="theme-management" location=".claude/patterns/pcf/theme-management.md">Semantic token usage for red/green/yellow status colors</pattern>
+      <pattern name="ai-architecture" location="docs/guides/SPAARKE-AI-ARCHITECTURE.md">AI Tool Framework for BFF AI integration</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create BriefingDialog component (BriefingDialog.tsx) in src/client/pcf/LegalWorkspace/components/GetStarted/ — uses Fluent v9 Dialog, DialogSurface, DialogTitle, DialogBody, DialogActions</step>
+    <step order="2">Implement deterministic narrative generation — template-based function that takes portfolio metrics (IPortfolioHealth, IQuickSummary) and produces structured narrative paragraphs: active matters overview, at-risk explanation, overdue events breakdown, top priority with deadline, budget watch with utilization percentages</step>
+    <step order="3">Add AI-enhanced narrative mode — when BFF briefing endpoint (task 027) is available and returns AI narrative, display it instead of template-based text. Show a subtle "AI-enhanced" indicator when AI narrative is active.</step>
+    <step order="4">Style at-risk and overdue counts/text in red using colorPaletteRedForeground1 semantic token — ensure these stand out in all three themes (light, dark, high-contrast)</step>
+    <step order="5">Add close button in DialogActions — clicking closes the dialog and returns focus to the Quick Summary card</step>
+    <step order="6">Wire to BFF briefing endpoint (GET /api/workspace/briefing) — fetch on dialog open, show loading skeleton while fetching, fall back to deterministic narrative on error or timeout</step>
+    <step order="7">Verify dark mode rendering — all text, backgrounds, borders, and status colors use semantic tokens. Zero hardcoded colors.</step>
+    <step order="8">Update TASK-INDEX.md — mark task 021 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects, verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/components/GetStarted/BriefingDialog.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/GetStarted/briefingNarrative.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Briefing dialog opens when "Full briefing" link is clicked on QuickSummaryCard</criterion>
+    <criterion testable="true">Deterministic narrative displays correct template-based paragraphs from portfolio metrics</criterion>
+    <criterion testable="true">At-risk and overdue text is styled in red using colorPaletteRedForeground1 semantic token</criterion>
+    <criterion testable="true">Budget watch section shows utilization percentages per matter</criterion>
+    <criterion testable="true">Top priority matter is displayed with its deadline</criterion>
+    <criterion testable="true">AI-enhanced narrative replaces template text when BFF returns AI narrative</criterion>
+    <criterion testable="true">Dialog gracefully falls back to deterministic narrative on BFF error or timeout</criterion>
+    <criterion testable="true">Close button dismisses dialog and returns focus to trigger element</criterion>
+    <criterion testable="true">Dialog renders correctly in light, dark, and high-contrast themes</criterion>
+    <criterion testable="true">Zero hardcoded color values — all colors use Fluent semantic tokens</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Reference screenshots/my-portfolio-ai-summary_2.jpg for the briefing dialog layout and narrative structure
+    - Deterministic narrative templates should read naturally (not just "Active: 12, At Risk: 3")
+    - Example deterministic paragraph: "You currently manage 12 active matters across 4 practice areas. 3 matters are at risk due to budget overruns or overdue events, including Acme Corp Litigation which has exceeded 90% budget utilization."
+    - The AI-enhanced mode is a progressive enhancement — never block the dialog on AI availability
+    - Loading skeleton should appear briefly while fetching from BFF, then resolve to narrative
+    - Consider adding a "Refresh" button for on-demand AI re-generation
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 3 and 6.</protocol>
+  </execution>
+</task>

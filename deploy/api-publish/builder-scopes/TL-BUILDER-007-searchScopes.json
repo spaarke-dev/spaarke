@@ -1,0 +1,100 @@
+{
+  "id": "c1d2e3f4-a5b6-4c5d-8e9f-007007007007",
+  "name": "SYS-TL-BUILDER-007-searchScopes",
+  "displayName": "Search Scopes",
+  "description": "Search for existing scopes in Dataverse by type, name, tags, or semantic similarity to a query.",
+  "scopeType": "Tool",
+  "ownerType": 1,
+  "isImmutable": true,
+  "configuration": {
+    "handlerType": "DataverseOperationHandler",
+    "operation": "searchScopes",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "scopeType": {
+          "type": "string",
+          "enum": ["action", "skill", "knowledge", "tool", "all"],
+          "default": "all",
+          "description": "Type of scope to search for"
+        },
+        "query": {
+          "type": "string",
+          "description": "Search query (matches name, description, tags)"
+        },
+        "semanticQuery": {
+          "type": "string",
+          "description": "Natural language description for semantic matching"
+        },
+        "filters": {
+          "type": "object",
+          "properties": {
+            "ownerType": {
+              "type": "string",
+              "enum": ["system", "customer", "all"],
+              "default": "all"
+            },
+            "documentTypes": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Filter by compatible document types"
+            },
+            "tags": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Filter by tags (AND logic)"
+            }
+          }
+        },
+        "limit": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Maximum number of results to return"
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "scopeId": { "type": "string" },
+              "name": { "type": "string" },
+              "displayName": { "type": "string" },
+              "scopeType": { "type": "string" },
+              "description": { "type": "string" },
+              "ownerType": { "type": "string" },
+              "matchScore": { "type": "number" },
+              "tags": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        },
+        "totalCount": {
+          "type": "integer",
+          "description": "Total matching scopes (may be more than returned)"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      }
+    },
+    "searchModes": {
+      "exact": "Match on exact name or ID",
+      "keyword": "Match keywords in name, description, tags",
+      "semantic": "Semantic similarity using embeddings"
+    }
+  },
+  "metadata": {
+    "tags": ["builder", "tool", "dataverse", "scope", "search"],
+    "version": "1.0.0",
+    "category": "builder-dataverse-ops"
+  }
+}

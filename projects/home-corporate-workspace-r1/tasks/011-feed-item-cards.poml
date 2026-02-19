@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Block 3 - Feed Item Cards</title>
+    <phase>Phase 2: Core Feature Blocks</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>012, 013</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag with code implementation — complex card component with multiple interactive elements (unread dot, priority badge, flag toggle, AI button)</rigor-reason>
+    <parallel-group>pg-phase2-feed</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the FeedItemCard component for the Updates Feed. Each card displays an event with: unread dot indicator
+    (blue dot for unread events), type icon mapped to event type (email/document/task/invoice/alert using
+    @fluentui/react-icons), priority badge with color coding (Critical=red, High=orange, Medium=blue, Low=gray),
+    relative timestamp (e.g., "2h ago", "Yesterday"), flag toggle button for marking items as to-do (connects
+    to Block 3D), and an AI Summary button with sparkle icon (connects to Block 3E). Style using makeStyles
+    with Fluent v9 semantic tokens. Dark mode required.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 component composition, React 18, accessible interactive components, and relative time formatting.</role>
+
+  <goal>
+    A polished FeedItemCard component that renders within the ActivityFeedList, displaying unread status,
+    type icon, event title and summary, priority badge with correct color coding, relative timestamp,
+    flag toggle button (stub handler for now), and AI Summary button (stub handler for now). The card
+    must be keyboard accessible and render correctly in light, dark, and high-contrast modes.
+  </goal>
+
+  <context>
+    <background>
+      Feed item cards are the primary content units in the Updates Feed (Block 3). Each card represents a single
+      Event record from Dataverse and provides quick visual information about the event type, priority, timing,
+      and actions available. The flag toggle button (created in task 012) allows users to mark events as to-do items,
+      and the AI Summary button (created in task 013) opens an AI-powered analysis dialog. This task creates the
+      visual card component with stub handlers for the interactive buttons that will be wired in subsequent tasks.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/screenshots/updates-list-filtered-by-alert_1.jpg</file>
+      <file>src/client/pcf/LegalWorkspace/components/ActivityFeed/ActivityFeed.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/components/ActivityFeed/ActivityFeedList.tsx</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">All UI MUST use Fluent UI v9 (@fluentui/react-components) exclusively</constraint>
+    <constraint source="ADR-021">MUST use makeStyles (Griffel) for all custom styling with Fluent tokens — NEVER hardcode hex/rgb/hsl color values</constraint>
+    <constraint source="ADR-021">MUST support light mode, dark mode, and high-contrast mode</constraint>
+    <constraint source="ADR-021">MUST use @fluentui/react-icons for all icons (type icons, flag, sparkle, etc.)</constraint>
+    <constraint source="ADR-012">Import shared UI components from @spaarke/ui-components where available</constraint>
+    <constraint source="WCAG">Icon-only buttons MUST have aria-label attributes for screen reader accessibility</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="theme-management" location=".claude/patterns/pcf/theme-management.md">FluentProvider theme setup, dark mode detection, semantic token usage</pattern>
+      <pattern name="feed-card-reference" location="projects/home-corporate-workspace-r1/screenshots/updates-list-filtered-by-alert_1.jpg">Visual reference for feed item card layout, badges, and interactive elements</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create FeedItemCard.tsx component in src/client/pcf/LegalWorkspace/components/ActivityFeed/ with typed props interface (IFeedItemCardProps: event data, onFlagToggle callback, onAISummary callback)</step>
+    <step order="2">Add unread dot indicator — render a small blue dot (using Fluent v9 tokens.colorBrandBackground) positioned to the left of the card content for unread events. Use a boolean isRead/isUnread prop from the event data.</step>
+    <step order="3">Add type icon using @fluentui/react-icons mapped to event type — MailRegular for email, DocumentRegular for document, TaskListRegular for task, ReceiptRegular for invoice, AlertRegular for alert. Create a typeIconMap utility.</step>
+    <step order="4">Add priority badge using Fluent v9 Badge component — Critical=colorPaletteRedBackground3, High=colorPaletteYellowBackground3 (orange tone), Medium=colorPaletteBlueBorderActive, Low=colorNeutralBackground3. Badge displays priority text label.</step>
+    <step order="5">Add relative timestamp display — create a formatRelativeTime utility function (e.g., "2h ago", "Yesterday", "3 days ago", "Jan 15"). Display in muted text color using tokens.colorNeutralForeground3.</step>
+    <step order="6">Add flag toggle button — use FlagRegular/FlagFilled icons from @fluentui/react-icons. Button toggles between outlined (not flagged) and filled (flagged) states. Wire onClick to onFlagToggle callback prop. Add aria-label="Flag as to-do" / "Remove to-do flag".</step>
+    <step order="7">Add AI Summary button — use SparkleRegular icon from @fluentui/react-icons. Wire onClick to onAISummary callback prop. Add aria-label="AI Summary". Style as subtle icon button.</step>
+    <step order="8">Style all elements with makeStyles and Fluent semantic tokens. Card layout uses flexbox. Add hover state with subtle background change (tokens.colorNeutralBackground1Hover). Ensure proper spacing between elements.</step>
+    <step order="9">Verify dark mode — all colors use semantic tokens, no hardcoded values. Test high-contrast mode renders correctly.</step>
+    <step order="10">Update TASK-INDEX.md — mark task 011 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+    <tool name="terminal">Run shell commands for build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/components/ActivityFeed/FeedItemCard.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/utils/formatRelativeTime.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/utils/typeIconMap.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FeedItemCard renders within ActivityFeedList with correct layout</criterion>
+    <criterion testable="true">Unread dot indicator (blue dot) appears for unread events and is hidden for read events</criterion>
+    <criterion testable="true">Type icon correctly maps to event type (email=MailRegular, document=DocumentRegular, task=TaskListRegular, invoice=ReceiptRegular, alert=AlertRegular)</criterion>
+    <criterion testable="true">Priority badge displays correct label and color (Critical=red, High=orange, Medium=blue, Low=gray)</criterion>
+    <criterion testable="true">Relative timestamp displays correctly (e.g., "2h ago", "Yesterday", "3 days ago")</criterion>
+    <criterion testable="true">Flag toggle button switches between FlagRegular (not flagged) and FlagFilled (flagged) icons</criterion>
+    <criterion testable="true">AI Summary button renders with SparkleRegular icon and correct aria-label</criterion>
+    <criterion testable="true">All icon-only buttons have aria-label attributes for accessibility</criterion>
+    <criterion testable="true">Dark mode renders correctly with zero hardcoded color values</criterion>
+    <criterion testable="true">Card hover state shows subtle background change using semantic tokens</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Reference screenshots/updates-list-filtered-by-alert_1.jpg for card layout — unread dot on left, type icon, title/summary, badges on right, action buttons
+    - Flag toggle and AI Summary buttons are interactive stubs in this task — full behavior is wired in tasks 012 and 013
+    - Keep the formatRelativeTime utility simple: < 1h = "Xm ago", < 24h = "Xh ago", yesterday = "Yesterday", < 7d = "Xd ago", else = date string
+    - Priority badge colors should use Fluent v9 color tokens, NOT hardcoded values. Map semantic intent to token names.
+    - Consider using Fluent v9 Card component as the base container for consistent elevation and borders
+    - Event title should be truncated with ellipsis if too long (single line)
+    - Event summary/description should show max 2 lines with ellipsis
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 7.</protocol>
+  </execution>
+</task>

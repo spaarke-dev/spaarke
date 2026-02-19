@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Create Matter Step 2 — Form and AI Pre-fill</title>
+    <phase>Phase 3: Action Cards &amp; Dialogs</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>024</blocks>
+    <tags>pcf, react, fluent-ui, frontend, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag with code implementation and AI integration — form with AI pre-fill from uploaded documents, creating core matter record</rigor-reason>
+    <parallel-group>pg-phase3-dialog</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build Step 2 of the Create New Matter wizard: the Create Record form with AI pre-fill capability.
+    The form uses a 2-column layout with fields: Matter Type (dropdown), Practice Area (dropdown), Matter Name
+    (text input), Organization (lookup), Estimated Budget (currency input), Key Parties (multiline text), and
+    Summary (multiline text). When files were uploaded in Step 1, call the BFF AI pre-fill endpoint to analyze
+    documents and auto-populate fields. Pre-filled fields show a sparkle "AI" tag indicator. An "AI Pre-filled"
+    badge appears at the top-right of the form. Users can edit any field regardless of AI pre-fill.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 form components, React 18 form state management, AI integration patterns with BFF endpoints, and accessible form UX with validation.</role>
+
+  <goal>
+    A 2-column form within the wizard dialog's Step 2 content area. All 7 fields render with correct Fluent v9
+    components (Dropdown, Input, Textarea). When files exist from Step 1, the BFF AI pre-fill endpoint is called
+    on step entry, and returned values populate the form fields. Pre-filled fields are marked with a sparkle
+    "AI" tag, and an "AI Pre-filled" badge appears at the top-right. All fields are editable. Required fields
+    are validated before the Next button is enabled. The form supports light, dark, and high-contrast themes.
+  </goal>
+
+  <context>
+    <background>
+      Step 2 is the core record creation step in the Create New Matter wizard. The AI pre-fill feature is a
+      major productivity enhancement: when users upload documents in Step 1 (contracts, engagement letters, etc.),
+      the AI analyzes them and suggests field values for the matter record. This reduces manual data entry and
+      improves data quality. The AI pre-fill calls the BFF endpoint POST /api/workspace/matters/pre-fill
+      (task 028), which uses the AI Playbook for document analysis. Pre-fill is progressive — the form is fully
+      functional without AI. Users can override any AI-suggested value.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/create-new-matter-dialog-wizard_2.jpg</file>
+      <file>src/client/pcf/LegalWorkspace/components/CreateMatter/WizardDialog.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/components/CreateMatter/wizardTypes.ts</file>
+      <file>src/client/pcf/LegalWorkspace/types/entities.ts</file>
+      <file>src/client/pcf/LegalWorkspace/types/api.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent v9 form components: Dropdown, Input, Textarea, Field, Label from @fluentui/react-components</constraint>
+    <constraint source="ADR-021">MUST use makeStyles with semantic tokens — NEVER hardcode colors</constraint>
+    <constraint source="ADR-021">MUST support light, dark, and high-contrast modes</constraint>
+    <constraint source="ADR-021">MUST use @fluentui/react-icons for the sparkle AI indicator (SparkleRegular)</constraint>
+    <constraint source="ADR-013">AI pre-fill MUST be fetched from BFF endpoint POST /api/workspace/matters/pre-fill — never call AI directly from client</constraint>
+    <constraint source="ADR-012">Import shared UI components from @spaarke/ui-components where available</constraint>
+    <constraint source="spec">All fields editable by user regardless of AI pre-fill</constraint>
+    <constraint source="spec">Pre-filled fields show sparkle "AI" tag indicator</constraint>
+    <constraint source="spec">"AI Pre-filled" badge at top-right when AI has populated fields</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="theme-management" location=".claude/patterns/pcf/theme-management.md">Semantic token usage for form components</pattern>
+      <pattern name="ai-architecture" location="docs/guides/SPAARKE-AI-ARCHITECTURE.md">AI Tool Framework for BFF AI integration patterns</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create CreateRecordStep component (CreateRecordStep.tsx) in src/client/pcf/LegalWorkspace/components/CreateMatter/</step>
+    <step order="2">Create 2-column form layout using makeStyles with CSS Grid — left column: Matter Type, Matter Name, Estimated Budget. Right column: Practice Area, Organization, Key Parties. Summary spans full width below both columns.</step>
+    <step order="3">Add form fields with Fluent v9 components: Matter Type (Dropdown with options: Litigation, Transaction, Advisory, Regulatory, IP, Employment), Practice Area (Dropdown with options: Corporate, Real Estate, IP, Employment, Litigation, Tax, Environmental), Matter Name (Input), Organization (Input with lookup styling), Estimated Budget (Input type="number" with currency formatting), Key Parties (Textarea, 3 rows), Summary (Textarea, 5 rows)</step>
+    <step order="4">Implement AI pre-fill integration: on step entry, if files exist from Step 1, call BFF endpoint POST /api/workspace/matters/pre-fill with file references. Show loading skeleton on form fields while AI analysis is in progress.</step>
+    <step order="5">Create sparkle "AI" tag component (AiFieldTag.tsx) — small badge with SparkleRegular icon and "AI" text, rendered next to field labels for pre-filled fields. Track which fields were pre-filled in form state.</step>
+    <step order="6">Create "AI Pre-filled" badge component — rendered at top-right of the form when any fields have been pre-filled by AI. Uses Fluent v9 Badge component with brand color.</step>
+    <step order="7">Ensure all fields remain fully editable after AI pre-fill — editing a pre-filled field does NOT remove the AI tag (the tag indicates the initial value came from AI)</step>
+    <step order="8">Implement form validation: Matter Type, Practice Area, Matter Name, and Organization are required. Next button disabled until all required fields have values.</step>
+    <step order="9">Wire to BFF AI pre-fill endpoint — stub with mock response until task 028 provides the real endpoint. Handle error gracefully (show empty form, no error modal).</step>
+    <step order="10">Verify dark mode rendering — form fields, labels, AI tags, and validation messages all use semantic tokens. Zero hardcoded colors.</step>
+    <step order="11">Update TASK-INDEX.md — mark task 023 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects, verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/components/CreateMatter/CreateRecordStep.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/CreateMatter/AiFieldTag.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/CreateMatter/formTypes.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">2-column form layout renders with all 7 fields using correct Fluent v9 components</criterion>
+    <criterion testable="true">Matter Type and Practice Area dropdowns show correct option lists</criterion>
+    <criterion testable="true">AI pre-fill populates form fields from BFF response when files exist from Step 1</criterion>
+    <criterion testable="true">Loading skeleton appears on form fields while AI analysis is in progress</criterion>
+    <criterion testable="true">Sparkle "AI" tag appears next to labels of pre-filled fields</criterion>
+    <criterion testable="true">"AI Pre-filled" badge appears at top-right when any fields are pre-filled</criterion>
+    <criterion testable="true">All fields are editable regardless of AI pre-fill state</criterion>
+    <criterion testable="true">Required field validation prevents Next unless Matter Type, Practice Area, Matter Name, and Organization have values</criterion>
+    <criterion testable="true">Form gracefully handles BFF error by showing empty form without error modal</criterion>
+    <criterion testable="true">Form renders correctly in light, dark, and high-contrast themes</criterion>
+    <criterion testable="true">Zero hardcoded color values — all colors use Fluent semantic tokens</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Reference screenshots/create-new-matter-dialog-wizard_2.jpg for the form layout, AI tags, and field arrangement
+    - The Organization field is a text input for now — full Dataverse lookup may be added in Phase 4
+    - Budget should display with currency symbol and thousand separators (Intl.NumberFormat)
+    - AI pre-fill is a progressive enhancement — the form must be fully functional without it
+    - Track pre-filled fields in state: Map&lt;fieldName, boolean&gt; so AI tags render correctly
+    - Form state should be managed with useReducer for clean field updates and AI pre-fill merging
+    - Consider debouncing the AI pre-fill call if the user navigates quickly between steps
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 8.</protocol>
+  </execution>
+</task>

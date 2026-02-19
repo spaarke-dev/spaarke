@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>BFF - Effort Scoring Engine</title>
+    <phase>Phase 2: Core Feature Blocks</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>019</blocks>
+    <tags>bff-api, api, backend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag with complex business logic — effort scoring with base effort tables, multiplicative complexity multipliers, cap at 100, and comprehensive unit tests</rigor-reason>
+    <parallel-group>pg-scoring</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create an effort scoring engine for the Legal Operations Workspace BFF API. The engine calculates effort scores
+    using a base effort value determined by event type (email=15, document review=25, task=20, invoice=30, meeting=20,
+    analysis=35, alert response=10) with complexity multipliers applied multiplicatively: multiple parties (1.3x),
+    cross-jurisdiction (1.2x), regulatory (1.1x), high value (1.2x), time-sensitive (1.3x). Final score =
+    base x product(applicable multipliers), capped at 100. Generate transparent reason strings showing base effort
+    and each applied multiplier. Add comprehensive unit tests.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET 8 service design, multiplicative scoring algorithms, unit testing with xUnit, and transparent business rule implementation.</role>
+
+  <goal>
+    EffortScoringService class that accepts event context data and returns an EffortScoreResult containing:
+    numeric score (0-100, capped), effort level (High/Med/Low), base effort value, list of applied complexity
+    multipliers, and a transparent reason string. Unit tests cover all event types, all multiplier combinations,
+    cap behavior, and edge cases.
+  </goal>
+
+  <context>
+    <background>
+      Effort scoring complements priority scoring to give legal operations managers a complete picture of
+      each work item's importance and resource requirements. While priority determines urgency (what to do first),
+      effort determines capacity planning (how much work is involved). The effort score is displayed alongside
+      the priority score in to-do item badges and in the AI Summary scoring grid (Block 4D). The scoring uses
+      a base-plus-multiplier model: each event type has a base effort value reflecting typical time investment,
+      and complexity multipliers are applied multiplicatively for contextual factors. This multiplicative approach
+      means that multiple complexity factors compound (e.g., a multi-party cross-jurisdictional matter has effort
+      multiplied by both 1.3x and 1.2x = 1.56x of base). Scores are capped at 100 to keep the scale bounded.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/PriorityScoringService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Scorecard/ScorecardCalculatorEndpoints.cs</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API pattern — service registered as concrete type</constraint>
+    <constraint source="ADR-010">DI minimalism — register as concrete type. Total BFF DI registrations ≤15 non-framework lines.</constraint>
+    <constraint source="spec">Scoring MUST be deterministic — same inputs produce same outputs</constraint>
+    <constraint source="spec">Final score MUST be capped at 100</constraint>
+    <constraint source="spec">Multipliers are applied multiplicatively: base x product(multipliers)</constraint>
+    <constraint source="spec">Effort levels: High (70-100), Med (40-69), Low (0-39)</constraint>
+    <constraint source="FR-20">Effort scoring calculates correct score based on event type base + complexity multipliers — score matches formula for all test cases</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="scoring-pattern" location="src/server/api/Sprk.Bff.Api/Api/Scorecard/ScorecardCalculatorEndpoints.cs">Canonical scoring endpoint pattern — follow for service structure</pattern>
+      <pattern name="service-registration" location=".claude/patterns/api/service-registration.md">DI module pattern for service registration</pattern>
+      <pattern name="priority-scoring-sibling" location="src/server/api/Sprk.Bff.Api/Services/Workspace/PriorityScoringService.cs">Sibling service — follow same patterns for consistency</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create EffortScoringService.cs at src/server/api/Sprk.Bff.Api/Services/Workspace/EffortScoringService.cs — define the service class with a CalculateEffortScore method. Define EffortScoreResult record (Score, Level, BaseEffort, AppliedMultipliers list, ReasonString).</step>
+    <step order="2">Define base effort table as a static dictionary mapping event type to base effort value: Email=15, DocumentReview=25, Task=20, Invoice=30, Meeting=20, Analysis=35, AlertResponse=10. Define an EventType enum or use string constants matching Dataverse option set values.</step>
+    <step order="3">Define complexity multiplier rules — each multiplier has a name, multiplier value, and a boolean condition check. Multipliers: MultipleParties (1.3x), CrossJurisdiction (1.2x), Regulatory (1.1x), HighValue (1.2x), TimeSensitive (1.3x). Define ComplexityMultiplier record (Name, Value, IsApplied).</step>
+    <step order="4">Implement scoring calculation: 1) Look up base effort from event type table, 2) Evaluate each complexity multiplier condition, 3) Calculate final = base x product(applied multiplier values), 4) Round to nearest integer, 5) Cap at 100. If event type is unknown, use default base of 20.</step>
+    <step order="5">Generate transparent reason string — format: "Base effort: Document Review (25) x Multiple parties (1.3x) x Cross-jurisdiction (1.2x) = 39 pts (Low effort)". List base effort first, then each applied multiplier, then equals final score with level.</step>
+    <step order="6">Determine effort level from final score: High (70-100), Med (40-69), Low (0-39).</step>
+    <step order="7">Define EffortScoreInput record/DTO — fields: EventType (string), HasMultipleParties (bool), IsCrossJurisdiction (bool), IsRegulatory (bool), IsHighValue (bool), IsTimeSensitive (bool). This is the input contract for the scoring method.</step>
+    <step order="8">Add comprehensive unit tests at tests/Sprk.Bff.Api.Tests/Services/Workspace/EffortScoringServiceTests.cs — test each event type with no multipliers (base only), test each individual multiplier, test all multipliers applied (should hit cap), test various combinations, test unknown event type default, test cap at 100, test boundary values for effort levels. Use xUnit with [Theory] and [InlineData].</step>
+    <step order="9">Verify build — run dotnet build to ensure compilation succeeds. Run dotnet test to verify all tests pass.</step>
+    <step order="10">Update TASK-INDEX.md — mark task 018 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands for build and test verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/EffortScoringService.cs</output>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Services/Workspace/EffortScoringServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">EffortScoringService returns correct base effort for each event type: Email=15, DocumentReview=25, Task=20, Invoice=30, Meeting=20, Analysis=35, AlertResponse=10</criterion>
+    <criterion testable="true">Multiple parties multiplier (1.3x) is applied correctly when HasMultipleParties=true</criterion>
+    <criterion testable="true">Cross-jurisdiction multiplier (1.2x) is applied correctly when IsCrossJurisdiction=true</criterion>
+    <criterion testable="true">Regulatory multiplier (1.1x) is applied correctly when IsRegulatory=true</criterion>
+    <criterion testable="true">High value multiplier (1.2x) is applied correctly when IsHighValue=true</criterion>
+    <criterion testable="true">Time-sensitive multiplier (1.3x) is applied correctly when IsTimeSensitive=true</criterion>
+    <criterion testable="true">Multipliers are applied multiplicatively (base x m1 x m2 x ...), not additively</criterion>
+    <criterion testable="true">Final score is capped at 100 when calculated value exceeds 100</criterion>
+    <criterion testable="true">Effort level correctly determined: High (70-100), Med (40-69), Low (0-39)</criterion>
+    <criterion testable="true">Reason string shows base effort, each applied multiplier, and final score with level</criterion>
+    <criterion testable="true">Unknown event type defaults to base effort of 20</criterion>
+    <criterion testable="true">All unit tests pass (dotnet test succeeds)</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Follow the same service structure as PriorityScoringService for consistency (same namespace, similar patterns)
+    - Multiplier math example: Analysis (35) with MultipleParties (1.3x) + CrossJurisdiction (1.2x) + TimeSensitive (1.3x) = 35 x 1.3 x 1.2 x 1.3 = 71.148 → rounded to 71 → High effort
+    - All 5 multipliers applied to Analysis (35): 35 x 1.3 x 1.2 x 1.1 x 1.2 x 1.3 = 35 x 2.4024 = 84.08 → 84 → High effort
+    - All 5 multipliers applied to Invoice (30): 30 x 2.4024 = 72.07 → 72 → High effort
+    - All 5 multipliers applied to AlertResponse (10): 10 x 2.4024 = 24.02 → 24 → Low effort (even with all multipliers, low base keeps it low)
+    - Edge case: Email (15) with ALL multipliers = 15 x 2.4024 = 36.04 → 36 → Low effort
+    - Cap scenario: If a future base effort + multipliers exceeds 100, cap applies (currently no combination exceeds 100 with defined values, but cap should still be tested)
+    - The EffortScoreInput DTO field names should match Dataverse field conventions where possible
+    - Consider making the base effort table and multiplier definitions configurable (but start with constants for simplicity)
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 7.</protocol>
+  </execution>
+</task>

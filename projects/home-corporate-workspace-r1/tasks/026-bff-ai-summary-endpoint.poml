@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>BFF — AI Summary Endpoint</title>
+    <phase>Phase 3: Action Cards &amp; Dialogs</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>008</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, api, ai, minimal-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag with code implementation — AI endpoint with rate limiting, authorization, and PlaybookService integration</rigor-reason>
+    <parallel-group>pg-ai-integration</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create a BFF endpoint POST /api/workspace/ai-summary that generates an AI summary for a feed item or
+    to-do item. The endpoint accepts an entity type and entity ID, uses the AI Playbook platform (PlaybookService)
+    to analyze the event, and returns analysis text plus suggested actions. The endpoint must be rate-limited
+    to prevent abuse of AI resources. Follow the existing AI endpoint pattern in Api/Ai/AnalysisEndpoints.cs.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET 8 Minimal API, AI Playbook integration via PlaybookService, rate limiting middleware, endpoint authorization filters, and ProblemDetails error handling.</role>
+
+  <goal>
+    A working BFF endpoint at POST /api/workspace/ai-summary that accepts an AiSummaryRequest (entityType, entityId,
+    optional context string), calls the AI Playbook to analyze the referenced entity, and returns an AiSummaryResponse
+    with analysis text and suggested actions array. The endpoint has rate limiting, endpoint authorization, and
+    ProblemDetails error responses. It is registered in DI and builds without errors.
+  </goal>
+
+  <context>
+    <background>
+      The AI Summary endpoint powers the "AI Summary" feature in both the Updates Feed (Block 3E) and the
+      Smart To Do list (Block 4D). When a user clicks the AI summary button on a feed item or to-do item,
+      the PCF client calls this endpoint with the entity type (e.g., "sprk_event") and entity ID. The BFF
+      fetches the entity details from Dataverse, passes them to the AI Playbook (PlaybookService) for analysis,
+      and returns a structured response with analysis narrative and suggested actions. The endpoint follows
+      the same pattern as Api/Ai/AnalysisEndpoints.cs, which is the canonical AI endpoint reference.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Workspace/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Infrastructure/ProblemDetailsHelper.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API pattern — MapPost with handler delegate, NOT controllers</constraint>
+    <constraint source="ADR-008">MUST use endpoint filter for authorization — NOT global middleware</constraint>
+    <constraint source="ADR-010">DI registrations MUST count toward ≤15 non-framework limit — use module extension method</constraint>
+    <constraint source="ADR-013">MUST use PlaybookService (AI Playbook platform) for AI analysis — NOT direct OpenAI calls</constraint>
+    <constraint source="ADR-013">MUST include rate limiting on AI endpoints to prevent abuse</constraint>
+    <constraint source="spec">Response MUST include analysis text and suggested actions array</constraint>
+    <constraint source="spec">MUST return ProblemDetails on error (validation, AI failure, timeout)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-008.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="ai-endpoint" location="src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs">Canonical AI endpoint pattern — follow this for endpoint structure, PlaybookService usage, and error handling</pattern>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint registration with MapGroup, handler delegates, and endpoint filters</pattern>
+      <pattern name="error-handling" location=".claude/patterns/api/error-handling.md">ProblemDetails response pattern for validation and service errors</pattern>
+      <pattern name="di-module" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs">Module extension method pattern for DI registration</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create WorkspaceAiService class (WorkspaceAiService.cs) in src/server/api/Sprk.Bff.Api/Services/Workspace/ — inject PlaybookService, implement GenerateAiSummaryAsync method that fetches entity from Dataverse and calls PlaybookService for analysis</step>
+    <step order="2">Create AiSummaryRequest record (entityType: string, entityId: Guid, context: string?) and AiSummaryResponse record (analysis: string, suggestedActions: string[], confidence: double, generatedAt: DateTimeOffset) — place in Api/Workspace/Models/</step>
+    <step order="3">Add AI summary endpoint to WorkspaceEndpoints (or create if not existing): MapPost("/ai-summary", HandleAiSummary) — validate request, call WorkspaceAiService, return AiSummaryResponse</step>
+    <step order="4">Add rate limiting to the endpoint — use Microsoft.AspNetCore.RateLimiting with a fixed window policy (e.g., 10 requests per minute per user). Follow existing rate limiting patterns in the codebase.</step>
+    <step order="5">Add endpoint authorization via endpoint filter — follow DocumentAuthorizationFilter pattern for workspace authorization</step>
+    <step order="6">Implement error handling — return ProblemDetails for: invalid request (400), entity not found (404), AI service unavailable (503), rate limited (429), timeout (504). Use ProblemDetailsHelper.</step>
+    <step order="7">Register WorkspaceAiService in DI — use module extension method pattern (WorkspaceModule.cs or extend existing). Ensure total non-framework DI registrations stay ≤15.</step>
+    <step order="8">Verify dotnet build succeeds with no errors or warnings</step>
+    <step order="9">Update TASK-INDEX.md — mark task 026 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects, verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceAiService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/Models/AiSummaryRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/Models/AiSummaryResponse.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/workspace/ai-summary endpoint exists and accepts AiSummaryRequest</criterion>
+    <criterion testable="true">Endpoint calls PlaybookService for AI analysis (not direct OpenAI)</criterion>
+    <criterion testable="true">Response includes analysis text and suggestedActions array</criterion>
+    <criterion testable="true">Rate limiting is active — returns 429 when limit exceeded</criterion>
+    <criterion testable="true">Endpoint authorization filter is applied</criterion>
+    <criterion testable="true">Invalid request returns 400 ProblemDetails with validation errors</criterion>
+    <criterion testable="true">Entity not found returns 404 ProblemDetails</criterion>
+    <criterion testable="true">AI service failure returns 503 ProblemDetails</criterion>
+    <criterion testable="true">WorkspaceAiService is registered in DI via module extension method</criterion>
+    <criterion testable="true">Total non-framework DI registrations remain ≤15</criterion>
+    <criterion testable="true">Solution builds without errors (dotnet build)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Follow Api/Ai/AnalysisEndpoints.cs as the canonical reference for AI endpoint structure
+    - The PlaybookService is already in production — inject and call it, do not create a new AI service
+    - Rate limiting should be per-user (based on authenticated identity), not per-IP
+    - Consider using a sliding window rate limiter if available in the codebase
+    - The "context" field in the request allows the client to pass additional context (e.g., "This is a to-do item")
+    - The confidence field in the response is a 0.0-1.0 value from the AI Playbook
+    - If WorkspaceEndpoints.cs already exists from task 008/009, extend it — do not create a duplicate
+    - Check existing DI registration count before adding WorkspaceAiService
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Study AnalysisEndpoints.cs as canonical reference. Checkpoint after steps 3 and 6.</protocol>
+  </execution>
+</task>

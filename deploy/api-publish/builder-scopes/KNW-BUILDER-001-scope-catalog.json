@@ -1,0 +1,143 @@
+{
+  "id": "d1e2f3a4-b5c6-4d5e-9f0a-001001001001",
+  "name": "SYS-KNW-BUILDER-001-ScopeCatalog",
+  "displayName": "Scope Catalog",
+  "description": "Catalog of all available system scopes for reference during playbook building. Provides searchable inventory of Actions, Skills, Knowledge, and Tools with their purposes and compatibility information.",
+  "scopeType": "Knowledge",
+  "ownerType": 1,
+  "isImmutable": true,
+  "content": {
+    "sourceType": "inline",
+    "contentType": "catalog",
+    "catalog": {
+      "actions": [
+        {
+          "id": "SYS-ACT-001",
+          "name": "Entity Extraction",
+          "description": "Extract named entities (parties, dates, amounts) from document text",
+          "documentTypes": ["ALL"],
+          "outputSchema": { "entities": "array" }
+        },
+        {
+          "id": "SYS-ACT-002",
+          "name": "Document Summary",
+          "description": "Generate TL;DR summary of document content",
+          "documentTypes": ["ALL"],
+          "outputSchema": { "summary": "string", "keyPoints": "array" }
+        },
+        {
+          "id": "SYS-ACT-003",
+          "name": "Clause Analysis",
+          "description": "Analyze and categorize document clauses",
+          "documentTypes": ["CONTRACT", "LEASE", "AGREEMENT"],
+          "outputSchema": { "clauses": "array" }
+        },
+        {
+          "id": "SYS-ACT-004",
+          "name": "Risk Detection",
+          "description": "Identify potential risks and issues in document",
+          "documentTypes": ["ALL"],
+          "outputSchema": { "risks": "array", "overallRiskLevel": "string" }
+        },
+        {
+          "id": "SYS-ACT-005",
+          "name": "Financial Term Extraction",
+          "description": "Extract monetary values, payment terms, and financial provisions",
+          "documentTypes": ["CONTRACT", "LEASE", "FINANCIAL"],
+          "outputSchema": { "financialTerms": "object" }
+        }
+      ],
+      "skills": [
+        {
+          "id": "SYS-SKL-001",
+          "name": "Real Estate Domain",
+          "description": "Domain expertise for real estate documents",
+          "applicableDocTypes": ["LEASE", "DEED", "EASEMENT"]
+        },
+        {
+          "id": "SYS-SKL-002",
+          "name": "Contract Law Basics",
+          "description": "Basic contract law principles and terminology",
+          "applicableDocTypes": ["CONTRACT", "AGREEMENT"]
+        },
+        {
+          "id": "SYS-SKL-003",
+          "name": "Financial Analysis",
+          "description": "Financial document analysis expertise",
+          "applicableDocTypes": ["FINANCIAL", "LOAN", "INVOICE"]
+        },
+        {
+          "id": "SYS-SKL-004",
+          "name": "Insurance Expertise",
+          "description": "Insurance document and certificate analysis",
+          "applicableDocTypes": ["INSURANCE", "COI"]
+        }
+      ],
+      "knowledge": [
+        {
+          "id": "SYS-KNW-001",
+          "name": "Standard Contract Terms",
+          "description": "Reference database of standard contract clauses",
+          "sourceType": "index"
+        },
+        {
+          "id": "SYS-KNW-002",
+          "name": "Company Policies",
+          "description": "Organization-specific policies and guidelines",
+          "sourceType": "document"
+        },
+        {
+          "id": "SYS-KNW-003",
+          "name": "Regulatory Requirements",
+          "description": "Industry regulatory compliance requirements",
+          "sourceType": "index"
+        }
+      ],
+      "tools": [
+        {
+          "id": "SYS-TL-001",
+          "name": "Entity Extractor Handler",
+          "description": "Structured entity extraction with validation",
+          "handlerType": "EntityExtractorHandler"
+        },
+        {
+          "id": "SYS-TL-002",
+          "name": "Clause Analyzer Handler",
+          "description": "Clause detection and classification",
+          "handlerType": "ClauseAnalyzerHandler"
+        },
+        {
+          "id": "SYS-TL-003",
+          "name": "Document Classifier Handler",
+          "description": "Document type classification",
+          "handlerType": "DocumentClassifierHandler"
+        },
+        {
+          "id": "SYS-TL-004",
+          "name": "Summary Handler",
+          "description": "Configurable document summarization",
+          "handlerType": "SummaryHandler"
+        },
+        {
+          "id": "SYS-TL-005",
+          "name": "Risk Detector Handler",
+          "description": "Risk scoring and categorization",
+          "handlerType": "RiskDetectorHandler"
+        },
+        {
+          "id": "SYS-TL-009",
+          "name": "Generic Analysis Handler",
+          "description": "Highly configurable analysis for custom use cases",
+          "handlerType": "GenericAnalysisHandler"
+        }
+      ]
+    },
+    "lastUpdated": "2026-01-19",
+    "version": "1.0.0"
+  },
+  "metadata": {
+    "tags": ["builder", "knowledge", "catalog", "reference"],
+    "version": "1.0.0",
+    "category": "builder-reference"
+  }
+}

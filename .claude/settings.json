@@ -12,21 +12,7 @@
       "Grep(**)",
       "Skill(*)",
       "Task(*)",
-      "Bash(git *)",
-      "Bash(gh *)",
-      "Bash(dotnet *)",
-      "Bash(npm *)",
-      "Bash(npx *)",
-      "Bash(az *)",
-      "Bash(pac *)",
-      "Bash(claude *)",
-      "Bash(wc *)",
-      "Bash(ls *)",
-      "Bash(pwd)",
-      "Bash(which *)",
-      "Bash(* --version)",
-      "Bash(* --help)",
-      "Bash(xargs -I {} sh -c 'echo \"\"=== {} ===\"\" && tail -50 {}')"
+      "Bash(*)"
     ]
   }
 }
