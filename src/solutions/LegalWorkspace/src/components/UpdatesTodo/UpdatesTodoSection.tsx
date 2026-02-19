@@ -51,7 +51,7 @@ type TabValue = "updates" | "todo";
 // Styles
 // ---------------------------------------------------------------------------
 
-const SECTION_HEIGHT = "520px";
+const SECTION_HEIGHT = "560px";
 
 const useStyles = makeStyles({
   card: {
@@ -63,7 +63,7 @@ const useStyles = makeStyles({
     ...shorthands.borderColor(tokens.colorNeutralStroke2),
     borderRadius: tokens.borderRadiusMedium,
     overflow: "hidden",
-    height: SECTION_HEIGHT,
+    flex: "1 1 auto",
     minHeight: SECTION_HEIGHT,
   },
 
@@ -73,10 +73,10 @@ const useStyles = makeStyles({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: "0px",
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalXS,
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalS,
     gap: tokens.spacingHorizontalS,
     flexShrink: 0,
   },
@@ -95,6 +95,8 @@ const useStyles = makeStyles({
   tabList: {
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalXS,
+    columnGap: tokens.spacingHorizontalM,
     flexShrink: 0,
   },
   tabLabel: {
@@ -228,7 +230,7 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
         selectedValue={activeTab}
         onTabSelect={handleTabSelect}
         className={styles.tabList}
-        size="small"
+        size="medium"
         aria-label="Activity view"
       >
         <Tab value="updates">

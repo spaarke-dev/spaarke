@@ -91,11 +91,11 @@ const useStyles = makeStyles({
   card: {
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalXS,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalXS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
+    gap: tokens.spacingVerticalS,
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
     borderBottomWidth: "1px",
     borderBottomStyle: "solid",
     borderBottomColor: tokens.colorNeutralStroke3,
@@ -120,7 +120,7 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: tokens.spacingHorizontalS,
+    gap: tokens.spacingHorizontalM,
   },
 
   // ── Left: type icon circle ─────────────────────────────────────────────

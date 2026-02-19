@@ -25,15 +25,19 @@ const useStyles = makeStyles({
   root: {
     display: "flex",
     flexDirection: "column",
-    minHeight: "100%",
+    height: "100%",
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
   },
   content: {
     flex: "1 1 auto",
-    padding: tokens.spacingVerticalL,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+    minHeight: 0,
+    padding: tokens.spacingVerticalXL,
+    paddingLeft: tokens.spacingHorizontalXL,
+    paddingRight: tokens.spacingHorizontalXL,
   },
   footer: {
     padding: tokens.spacingVerticalS,

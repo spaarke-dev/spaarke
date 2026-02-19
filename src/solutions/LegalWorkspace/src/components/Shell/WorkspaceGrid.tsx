@@ -72,20 +72,23 @@ const useStyles = makeStyles({
   grid: {
     display: "grid",
     gridTemplateColumns: "1fr",
-    gap: tokens.spacingVerticalL,
+    gap: tokens.spacingVerticalXL,
+    flex: "1 1 auto",
+    minHeight: 0,
     "@media (min-width: 1024px)": {
-      gridTemplateColumns: "3fr 2fr",
+      gridTemplateColumns: "1fr 380px",
+      gridTemplateRows: "1fr",
     },
   },
   leftColumn: {
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalM,
+    gap: tokens.spacingVerticalL,
   },
   rightColumn: {
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalM,
+    gap: tokens.spacingVerticalL,
   },
   placeholderCard: {
     minHeight: "120px",
@@ -206,7 +209,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       <Toaster toasterId={toasterId} position="bottom-end" />
 
       <div className={styles.grid} style={gridStyle}>
-        {/* Left column (60%): Get Started + tabbed Updates/To Do */}
+        {/* Left column (fluid): Get Started + tabbed Updates/To Do */}
         <div className={styles.leftColumn}>
           {/* Block 1 — Get Started (action cards) */}
           <GetStartedRow onCardClick={cardClickHandlers} />
@@ -214,7 +217,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
           <UpdatesTodoSection webApi={webApi} userId={userId} />
         </div>
 
-        {/* Right column (40%): AI Summary panel */}
+        {/* Right column (380px): Spaarke chat panel */}
         <div className={styles.rightColumn}>
           <SummaryPanel webApi={webApi} userId={userId} />
         </div>

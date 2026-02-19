@@ -22,7 +22,7 @@ const useStyles = makeStyles({
   section: {
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalS,
+    gap: tokens.spacingVerticalM,
   },
   sectionTitle: {
     color: tokens.colorNeutralForeground1,
@@ -62,14 +62,14 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "row",
     alignItems: "stretch",
-    gap: tokens.spacingHorizontalM,
+    gap: tokens.spacingHorizontalL,
     minWidth: "max-content",
     paddingBottom: tokens.spacingVerticalXS,
   },
   actionCards: {
     display: "flex",
     flexDirection: "row",
-    gap: tokens.spacingHorizontalM,
+    gap: tokens.spacingHorizontalL,
     alignItems: "stretch",
   },
 });
