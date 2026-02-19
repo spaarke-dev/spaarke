@@ -35,10 +35,9 @@
 |-------|-------|
 | **Branch** | `work/home-corporate-workspace-r1` |
 | **Project Path** | `projects/home-corporate-workspace-r1/` |
-| **PCF Path** | `src/client/pcf/LegalWorkspace/` |
+| **Solutions Path** | `src/solutions/LegalWorkspace/` |
 | **API Path** | `src/server/api/Sprk.Bff.Api/` |
-| **Solutions Path** | `src/solutions/` |
-| **Type** | PCF (Custom Page) + BFF API |
+| **Type** | Standalone HTML Web Resource (Custom Page) + BFF API |
 | **Complexity** | High |
 
 ---
@@ -219,7 +218,7 @@ See spec.md Visual References table for complete mapping.
 
 | Decision | Choice | Date | Rationale |
 |----------|--------|------|-----------|
-| Hosting model | Power Apps Custom Page (React 18) | 2026-02-17 | ADR exception — full React app needed |
+| Hosting model | Standalone HTML Web Resource (React 18, ADR-026) | 2026-02-18 | Vite-built single HTML file; PCF scaffold removed |
 | Data access | Hybrid (Xrm.WebApi + BFF) | 2026-02-17 | Simple queries client, aggregations server |
 | Action cards | Reuse Analysis Builder for 6 of 7 | 2026-02-17 | Major scope reduction, existing infrastructure |
 | Prototype code | None — implement from design + screenshots | 2026-02-17 | Fresh implementation |

@@ -6,7 +6,7 @@
 > **Environment**: https://spaarkedev1.crm.dynamics.com
 > **BFF API**: https://spe-api-dev-67e2xz.azurewebsites.net
 > **Source Branch**: work/home-corporate-workspace-r1
-> **PCF Control**: sprk_Spaarke.Controls.LegalWorkspace v1.0.1
+> **Web Resource**: sprk_corporateworkspace (standalone HTML, ADR-026)
 > **Solution**: SpaarkeLegalWorkspace (unmanaged — ADR-022)
 
 ---
