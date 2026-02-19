@@ -69,15 +69,13 @@ export function buildDefaultEmailSubject(matterName: string): string {
 }
 
 export function buildDefaultEmailBody(form: ICreateMatterFormState): string {
-  const typeStr = form.matterType ? ` ${form.matterType.toLowerCase()}` : '';
-  const areaStr = form.practiceArea ? ` (${form.practiceArea})` : '';
-  const orgStr = form.organization ? `\n\nOrganization: ${form.organization}` : '';
-  const partiesStr = form.keyParties ? `\n\nKey Parties:\n${form.keyParties}` : '';
+  const typeStr = form.matterTypeName ? ` ${form.matterTypeName.toLowerCase()}` : '';
+  const areaStr = form.practiceAreaName ? ` (${form.practiceAreaName})` : '';
 
   return (
     `Dear Client,\n\n` +
     `We are pleased to confirm that your${typeStr} matter, "${form.matterName}"${areaStr}, ` +
-    `has been created in our legal management system.${orgStr}${partiesStr}\n\n` +
+    `has been created in our legal management system.\n\n` +
     `Our team will be in touch shortly to discuss next steps and any actions required from you.\n\n` +
     `Please do not hesitate to reach out if you have any questions.\n\n` +
     `Kind regards,\n` +

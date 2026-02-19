@@ -212,8 +212,8 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
 
     fetchAiDraftSummary(
       formValues.matterName,
-      formValues.matterType,
-      formValues.practiceArea
+      formValues.matterTypeName,
+      formValues.practiceAreaName
     )
       .then((result) => {
         if (cancelled) return;

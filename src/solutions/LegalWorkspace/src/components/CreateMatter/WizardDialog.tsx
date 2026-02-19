@@ -91,18 +91,22 @@ export interface IWizardDialogPropsInternal extends IWizardDialogProps {
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  // Override DialogSurface to reach ~800px and fill height nicely
+  // Override DialogSurface — portrait orientation, resizable
   surface: {
-    width: '800px',
-    maxWidth: '95vw',
+    width: '640px',
+    maxWidth: '90vw',
+    minHeight: '70vh',
+    maxHeight: '95vh',
     padding: '0px',
+    resize: 'both',
+    overflow: 'auto',
   },
   // DialogBody: remove default padding so we control layout entirely
   body: {
     padding: '0px',
     display: 'flex',
     flexDirection: 'column',
-    maxHeight: '85vh',
+    height: '80vh',
     overflow: 'hidden',
   },
   // Custom title bar (replaces DialogTitle default rendering)
@@ -387,12 +391,15 @@ const Step1Content: React.FC<IStep1ContentProps> = ({
 // ---------------------------------------------------------------------------
 
 const EMPTY_FORM_STATE: ICreateMatterFormState = {
-  matterType: '',
+  matterTypeId: '',
+  matterTypeName: '',
+  practiceAreaId: '',
+  practiceAreaName: '',
   matterName: '',
-  estimatedBudget: '',
-  practiceArea: '',
-  organization: '',
-  keyParties: '',
+  assignedAttorneyId: '',
+  assignedAttorneyName: '',
+  assignedParalegalId: '',
+  assignedParalegalName: '',
   summary: '',
 };
 
@@ -680,6 +687,7 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
       case 1:
         return (
           <CreateRecordStep
+            webApi={webApi!}
             uploadedFileNames={state.uploadedFiles.map((f) => f.name)}
             onValidChange={setStep2Valid}
             onSubmit={(values) => setStep2FormValues(values)}

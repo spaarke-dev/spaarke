@@ -3,7 +3,7 @@
  * Form state types and interfaces for Create New Matter — Step 2 (Create Record).
  *
  * Covers:
- *   - ICreateMatterFormState: full form field values
+ *   - ICreateMatterFormState: full form field values (lookup-based)
  *   - ICreateMatterFormErrors: field-level validation error messages
  *   - IAiPrefillFields: shape of the BFF pre-fill response
  *   - IAiPrefillStatus: loading / success / error / idle for AI pre-fill lifecycle
@@ -11,30 +11,7 @@
  *   - ICreateRecordStepProps: props accepted by CreateRecordStep
  */
 
-// ---------------------------------------------------------------------------
-// Option enumerations
-// ---------------------------------------------------------------------------
-
-/** Allowed values for the Matter Type dropdown. */
-export type MatterType =
-  | 'Litigation'
-  | 'Transaction'
-  | 'Advisory'
-  | 'Regulatory'
-  | 'IP'
-  | 'Employment'
-  | '';
-
-/** Allowed values for the Practice Area dropdown. */
-export type PracticeArea =
-  | 'Corporate'
-  | 'Real Estate'
-  | 'IP'
-  | 'Employment'
-  | 'Litigation'
-  | 'Tax'
-  | 'Environmental'
-  | '';
+import type { IWebApi } from '../../types/xrm';
 
 // ---------------------------------------------------------------------------
 // Form state
@@ -42,28 +19,33 @@ export type PracticeArea =
 
 /** Mutable form field values managed by useReducer. */
 export interface ICreateMatterFormState {
-  /** Matter Type (required). */
-  matterType: MatterType;
-  /** Matter Name — free text (required). */
+  /** sprk_mattertype_ref lookup — GUID of the selected record. */
+  matterTypeId: string;
+  /** Display name of the selected matter type. */
+  matterTypeName: string;
+  /** sprk_practicearea_ref lookup — GUID of the selected record. */
+  practiceAreaId: string;
+  /** Display name of the selected practice area. */
+  practiceAreaName: string;
+  /** Matter Name — free text (required). Maps to sprk_name. */
   matterName: string;
-  /** Estimated Budget — numeric string; empty string when not set. */
-  estimatedBudget: string;
-  /** Practice Area (required). */
-  practiceArea: PracticeArea;
-  /** Organization — free text (required). */
-  organization: string;
-  /** Key Parties — free text, multi-line. */
-  keyParties: string;
-  /** Summary — free text, multi-line. */
+  /** Assigned Attorney — contact GUID. */
+  assignedAttorneyId: string;
+  /** Display name of the assigned attorney. */
+  assignedAttorneyName: string;
+  /** Assigned Paralegal — contact GUID. */
+  assignedParalegalId: string;
+  /** Display name of the assigned paralegal. */
+  assignedParalegalName: string;
+  /** Summary / Description — free text, multi-line. Maps to sprk_description. */
   summary: string;
 }
 
 /** Field-level validation error messages (undefined = no error). */
 export interface ICreateMatterFormErrors {
-  matterType?: string;
+  matterTypeId?: string;
+  practiceAreaId?: string;
   matterName?: string;
-  practiceArea?: string;
-  organization?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,12 +58,11 @@ export interface ICreateMatterFormErrors {
  * confidently extract.
  */
 export interface IAiPrefillFields {
-  matterType?: MatterType;
+  matterTypeId?: string;
+  matterTypeName?: string;
+  practiceAreaId?: string;
+  practiceAreaName?: string;
   matterName?: string;
-  estimatedBudget?: string;
-  practiceArea?: PracticeArea;
-  organization?: string;
-  keyParties?: string;
   summary?: string;
 }
 
@@ -120,6 +101,14 @@ export type FormAction =
       type: 'SET_FIELD';
       field: keyof ICreateMatterFormState;
       value: string;
+    }
+  /** Set a lookup field (id + name pair). */
+  | {
+      type: 'SET_LOOKUP';
+      idField: keyof ICreateMatterFormState;
+      nameField: keyof ICreateMatterFormState;
+      id: string;
+      name: string;
     }
   /** Bulk-apply AI pre-filled values and record which fields were set. */
   | {
@@ -166,6 +155,9 @@ export interface IAiPrefillResponse {
 // ---------------------------------------------------------------------------
 
 export interface ICreateRecordStepProps {
+  /** Xrm.WebApi reference for Dataverse lookup queries. */
+  webApi: IWebApi;
+
   /**
    * Files uploaded in Step 1.  Passed to CreateRecordStep so it can trigger
    * the BFF AI pre-fill call on mount when files are present.
@@ -180,7 +172,7 @@ export interface ICreateRecordStepProps {
 
   /**
    * Called by the parent wizard just before advancing to Step 3, so the
-   * wizard can store the final form values in its own state for task 024.
+   * wizard can store the final form values in its own state.
    */
   onSubmit: (values: ICreateMatterFormState) => void;
 }

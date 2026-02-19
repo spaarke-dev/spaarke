@@ -17,7 +17,7 @@
 
 import type { ICreateMatterFormState } from './formTypes';
 import type { IUploadedFile } from './wizardTypes';
-import type { IContact } from '../../types/entities';
+import type { IContact, ILookupItem } from '../../types/entities';
 import type { IWebApi, WebApiEntity } from '../../types/xrm';
 
 // ---------------------------------------------------------------------------
@@ -92,35 +92,24 @@ function buildMatterEntity(
     sprk_name: form.matterName.trim(),
   };
 
-  if (form.matterType) {
-    // sprk_mattertype_ref is a lookup to sprk_mattertype_ref table.
-    // The form stores the GUID of the selected matter type record.
-    // Use OData bind syntax to set the lookup value.
-    entity['sprk_mattertype_ref@odata.bind'] = `/sprk_mattertype_refs(${form.matterType})`;
+  if (form.matterTypeId) {
+    entity['sprk_mattertype_ref@odata.bind'] = `/sprk_mattertype_refs(${form.matterTypeId})`;
   }
 
-  if (form.practiceArea) {
-    entity['sprk_practicearea'] = form.practiceArea;
+  if (form.practiceAreaId) {
+    entity['sprk_practicearea_ref@odata.bind'] = `/sprk_practicearea_refs(${form.practiceAreaId})`;
   }
 
-  if (form.estimatedBudget && form.estimatedBudget !== '') {
-    const budget = parseFloat(form.estimatedBudget);
-    if (!isNaN(budget)) {
-      entity['sprk_totalbudget'] = budget;
-    }
+  if (form.assignedAttorneyId) {
+    entity['sprk_assignedattorney@odata.bind'] = `/contacts(${form.assignedAttorneyId})`;
+  }
+
+  if (form.assignedParalegalId) {
+    entity['sprk_assignedparalegal@odata.bind'] = `/contacts(${form.assignedParalegalId})`;
   }
 
   if (form.summary && form.summary.trim() !== '') {
     entity['sprk_description'] = form.summary.trim();
-  }
-
-  // Note: organization and keyParties do not map to simple text fields —
-  // organization is a lookup; keyParties is stored in description/notes.
-  // For this wizard we store keyParties as part of the description.
-  if (form.keyParties && form.keyParties.trim() !== '') {
-    const existingDesc = (entity['sprk_description'] as string) ?? '';
-    const keyPartiesSection = `\n\nKey Parties:\n${form.keyParties.trim()}`;
-    entity['sprk_description'] = existingDesc + keyPartiesSection;
   }
 
   return entity;
@@ -250,7 +239,7 @@ export class MatterService {
   ): Promise<{ success: boolean; warning?: string }> {
     try {
       const updatePayload: WebApiEntity = {
-        'sprk_leadattorney@odata.bind': `/sprk_contacts(${input.contactId})`,
+        'sprk_leadattorney@odata.bind': `/contacts(${input.contactId})`,
       };
       await this._webApi.updateRecord('sprk_matter', matterId, updatePayload);
       return { success: true };
@@ -323,7 +312,7 @@ export class MatterService {
 }
 
 // ---------------------------------------------------------------------------
-// Contact search helper (for AssignCounselStep)
+// Contact search helper (for AssignCounselStep and lookup fields)
 // ---------------------------------------------------------------------------
 
 /**
@@ -348,6 +337,80 @@ export async function searchContacts(
 
   const result = await webApi.retrieveMultipleRecords('sprk_contact', query, 10);
   return result.entities as unknown as IContact[];
+}
+
+/**
+ * Search contacts and return as ILookupItem[] (for LookupField compatibility).
+ */
+export async function searchContactsAsLookup(
+  webApi: IWebApi,
+  nameFilter: string
+): Promise<ILookupItem[]> {
+  const contacts = await searchContacts(webApi, nameFilter);
+  return contacts.map((c) => ({
+    id: c.sprk_contactid,
+    name: c.sprk_name + (c.sprk_email ? ` (${c.sprk_email})` : ''),
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Matter Type search helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Search sprk_mattertype_ref records by name fragment.
+ * Returns up to 10 matching matter types as ILookupItem.
+ */
+export async function searchMatterTypes(
+  webApi: IWebApi,
+  nameFilter: string
+): Promise<ILookupItem[]> {
+  if (!nameFilter || nameFilter.trim().length < 1) {
+    return [];
+  }
+
+  const encodedFilter = encodeURIComponent(nameFilter.trim());
+  const query =
+    `?$select=sprk_mattertype_refid,sprk_name` +
+    `&$filter=contains(sprk_name,'${encodedFilter}')` +
+    `&$orderby=sprk_name asc` +
+    `&$top=10`;
+
+  const result = await webApi.retrieveMultipleRecords('sprk_mattertype_ref', query, 10);
+  return result.entities.map((e) => ({
+    id: e['sprk_mattertype_refid'] as string,
+    name: e['sprk_name'] as string,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Practice Area search helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Search sprk_practicearea_ref records by name fragment.
+ * Returns up to 10 matching practice areas as ILookupItem.
+ */
+export async function searchPracticeAreas(
+  webApi: IWebApi,
+  nameFilter: string
+): Promise<ILookupItem[]> {
+  if (!nameFilter || nameFilter.trim().length < 1) {
+    return [];
+  }
+
+  const encodedFilter = encodeURIComponent(nameFilter.trim());
+  const query =
+    `?$select=sprk_practicearea_refid,sprk_name` +
+    `&$filter=contains(sprk_name,'${encodedFilter}')` +
+    `&$orderby=sprk_name asc` +
+    `&$top=10`;
+
+  const result = await webApi.retrieveMultipleRecords('sprk_practicearea_ref', query, 10);
+  return result.entities.map((e) => ({
+    id: e['sprk_practicearea_refid'] as string,
+    name: e['sprk_name'] as string,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -378,14 +441,12 @@ export async function fetchAiDraftSummary(
     });
 
     if (!response.ok) {
-      // Fallback to mock summary
       return buildFallbackSummary(matterName, matterType, practiceArea);
     }
 
     const data: IAiDraftSummaryResponse = await response.json();
     return data;
   } catch {
-    // Network error — return fallback
     return buildFallbackSummary(matterName, matterType, practiceArea);
   }
 }

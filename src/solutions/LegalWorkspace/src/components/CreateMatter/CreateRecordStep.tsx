@@ -1,32 +1,28 @@
 /**
  * CreateRecordStep.tsx
- * Step 2 of the "Create New Matter" wizard — 2-column form with AI pre-fill.
+ * Step 2 of the "Create New Matter" wizard — 2-column form with lookup fields.
  *
  * Layout (CSS Grid):
  *   ┌───────────────────────────┬──────────────────────────────┐
- *   │  Matter Type (Dropdown)   │  Practice Area (Dropdown)    │
- *   │  Matter Name (Input) *    │  Organization (Input) *      │
- *   │  Estimated Budget (Input) │  Key Parties (Textarea)      │
+ *   │  Matter Type (lookup)     │  Practice Area (lookup)       │
  *   ├───────────────────────────┴──────────────────────────────┤
- *   │  Summary (Textarea, full-width, 5 rows)                  │
+ *   │  Matter Name (Input, full-width) *                       │
+ *   ├───────────────────────────┬──────────────────────────────┤
+ *   │  Assigned Attorney (lookup)│  Assigned Paralegal (lookup) │
+ *   ├───────────────────────────┴──────────────────────────────┤
+ *   │  Summary (Textarea, full-width) + "Generate with AI"     │
  *   └──────────────────────────────────────────────────────────┘
  *
- * AI Pre-fill lifecycle:
- *   1. On mount, if uploadedFileNames.length > 0 → POST /api/workspace/matters/pre-fill
- *   2. While call is in-flight → each field shows a Skeleton placeholder
- *   3. On success → fields are populated; AI-populated fields get an AiFieldTag
- *      next to their label + an "AI Pre-filled" badge at top-right
- *   4. On BFF error → fields stay empty (graceful fallback, no error modal)
- *   5. User may edit any field regardless of AI pre-fill state
+ * Lookup fields use LookupField component with debounced Dataverse search.
+ * Summary has an AI generate button that calls BFF endpoint.
  *
  * Form validation:
- *   Required: Matter Type, Practice Area, Matter Name, Organization
- *   → `onValidChange(true)` emitted when all four have values
+ *   Required: Matter Type, Practice Area, Matter Name
+ *   → `onValidChange(true)` emitted when all three have values
  *
  * Constraints:
- *   - Fluent v9 only: Dropdown (Select), Input, Textarea, Field, Label, Skeleton
+ *   - Fluent v9 only: Input, Textarea, Field, Label, Skeleton, Button, Spinner
  *   - makeStyles with semantic tokens — ZERO hardcoded colours
- *   - SparkleRegular from @fluentui/react-icons for AI indicator
  *   - Supports light, dark, and high-contrast modes
  */
 
@@ -34,16 +30,17 @@ import * as React from 'react';
 import {
   Field,
   Input,
-  Label,
-  Select,
   Skeleton,
   SkeletonItem,
   Text,
   Badge,
   Textarea,
+  Button,
+  Spinner,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
+import { SparkleRegular } from '@fluentui/react-icons';
 import {
   ICreateRecordStepProps,
   ICreateMatterFormState,
@@ -51,33 +48,20 @@ import {
   IAiPrefillFields,
   FormAction,
   IAiPrefillResponse,
-  MatterType,
-  PracticeArea,
 } from './formTypes';
 import { AiFieldTag } from './AiFieldTag';
+import { LookupField } from './LookupField';
+import {
+  searchMatterTypes,
+  searchPracticeAreas,
+  searchContactsAsLookup,
+  fetchAiDraftSummary,
+} from './matterService';
+import type { ILookupItem } from '../../types/entities';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-const MATTER_TYPE_OPTIONS: MatterType[] = [
-  'Litigation',
-  'Transaction',
-  'Advisory',
-  'Regulatory',
-  'IP',
-  'Employment',
-];
-
-const PRACTICE_AREA_OPTIONS: PracticeArea[] = [
-  'Corporate',
-  'Real Estate',
-  'IP',
-  'Employment',
-  'Litigation',
-  'Tax',
-  'Environmental',
-];
 
 const PREFILL_ENDPOINT = '/api/workspace/matters/pre-fill';
 
@@ -87,12 +71,15 @@ const PREFILL_ENDPOINT = '/api/workspace/matters/pre-fill';
 
 function buildInitialFormState(): ICreateMatterFormState {
   return {
-    matterType: '',
+    matterTypeId: '',
+    matterTypeName: '',
+    practiceAreaId: '',
+    practiceAreaName: '',
     matterName: '',
-    estimatedBudget: '',
-    practiceArea: '',
-    organization: '',
-    keyParties: '',
+    assignedAttorneyId: '',
+    assignedAttorneyName: '',
+    assignedParalegalId: '',
+    assignedParalegalName: '',
     summary: '',
   };
 }
@@ -125,6 +112,17 @@ function combinedReducer(
       };
     }
 
+    case 'SET_LOOKUP': {
+      return {
+        ...state,
+        form: {
+          ...state.form,
+          [action.idField]: action.id,
+          [action.nameField]: action.name,
+        },
+      };
+    }
+
     case 'APPLY_AI_PREFILL': {
       const fields = action.fields;
       const nextForm = { ...state.form };
@@ -133,8 +131,6 @@ function combinedReducer(
       (Object.keys(fields) as (keyof IAiPrefillFields)[]).forEach((key) => {
         const val = fields[key];
         if (val !== undefined && val !== '') {
-          // Type-safe assignment — both IAiPrefillFields and ICreateMatterFormState
-          // share the same field names and compatible value types.
           (nextForm as Record<string, string>)[key] = val as string;
           prefilledFields.add(key as keyof ICreateMatterFormState);
         }
@@ -171,7 +167,6 @@ function combinedReducer(
     }
 
     case 'CLEAR_ERRORS': {
-      // No errors are stored in state; validation is derived — no-op
       return state;
     }
 
@@ -189,10 +184,9 @@ function combinedReducer(
  */
 function isFormValid(form: ICreateMatterFormState): boolean {
   return (
-    form.matterType !== '' &&
-    form.matterName.trim() !== '' &&
-    form.practiceArea !== '' &&
-    form.organization.trim() !== ''
+    form.matterTypeId !== '' &&
+    form.practiceAreaId !== '' &&
+    form.matterName.trim() !== ''
   );
 }
 
@@ -239,7 +233,7 @@ const useStyles = makeStyles({
     gap: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalL}`,
   },
 
-  // Fields that should span both columns (Summary)
+  // Fields that should span both columns
   fullWidth: {
     gridColumn: '1 / -1',
   },
@@ -249,6 +243,14 @@ const useStyles = makeStyles({
     display: 'inline-flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalXXS,
+  },
+
+  // ── Summary section ────────────────────────────────────────────────────────
+  summaryHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalM,
   },
 
   // ── Skeleton items ────────────────────────────────────────────────────────
@@ -265,10 +267,6 @@ const useStyles = makeStyles({
     width: '100%',
     height: '32px',
   },
-  skeletonTextarea: {
-    width: '100%',
-    height: '72px',
-  },
   skeletonTextareaLg: {
     width: '100%',
     height: '100px',
@@ -280,21 +278,12 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 /** Skeleton placeholder for a single-line input field during AI loading. */
-const FieldSkeleton: React.FC<{ textareaRows?: number }> = ({
-  textareaRows,
-}) => {
+const FieldSkeleton: React.FC<{ large?: boolean }> = ({ large }) => {
   const styles = useStyles();
-  const inputClass =
-    textareaRows && textareaRows >= 5
-      ? styles.skeletonTextareaLg
-      : textareaRows
-      ? styles.skeletonTextarea
-      : styles.skeletonInput;
-
   return (
     <Skeleton className={styles.skeletonField}>
       <SkeletonItem className={styles.skeletonLabel} />
-      <SkeletonItem className={inputClass} />
+      <SkeletonItem className={large ? styles.skeletonTextareaLg : styles.skeletonInput} />
     </Skeleton>
   );
 };
@@ -304,6 +293,7 @@ const FieldSkeleton: React.FC<{ textareaRows?: number }> = ({
 // ---------------------------------------------------------------------------
 
 export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
+  webApi,
   uploadedFileNames,
   onValidChange,
   onSubmit,
@@ -318,29 +308,21 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
 
   const { form, ai } = state;
 
+  // ── AI summary generation state ────────────────────────────────────────────
+  const [isGeneratingSummary, setIsGeneratingSummary] = React.useState(false);
+
   // ── Notify parent of validity changes ─────────────────────────────────────
   const valid = isFormValid(form);
   React.useEffect(() => {
     onValidChange(valid);
   }, [valid, onValidChange]);
 
-  // ── Expose submit values to parent via ref-based callback ──────────────────
-  // The parent wizard calls onSubmit when advancing to Step 3.
-  // We use a stable ref so the latest form values are always captured.
-  const latestFormRef = React.useRef<ICreateMatterFormState>(form);
-  React.useEffect(() => {
-    latestFormRef.current = form;
-  }, [form]);
-
-  // Store onSubmit in ref to keep the effect below stable.
+  // ── Emit latest form values to parent on every change ─────────────────────
   const onSubmitRef = React.useRef(onSubmit);
   React.useEffect(() => {
     onSubmitRef.current = onSubmit;
   }, [onSubmit]);
 
-  // ── Emit latest form values to parent on every change ─────────────────────
-  // This allows WizardDialog (task 024) to always have current form values
-  // without requiring an imperative "submit" call on step transition.
   React.useEffect(() => {
     onSubmitRef.current(form);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -349,7 +331,6 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
   // ── AI Pre-fill on mount ───────────────────────────────────────────────────
   React.useEffect(() => {
     if (uploadedFileNames.length === 0) {
-      // No files — stay idle, show empty form
       return;
     }
 
@@ -368,7 +349,6 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
         if (cancelled) return;
 
         if (!response.ok) {
-          // Graceful fallback: BFF error → empty form, no error modal
           dispatch({ type: 'AI_PREFILL_ERROR' });
           return;
         }
@@ -384,7 +364,6 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
         dispatch({ type: 'AI_PREFILL_SUCCESS' });
       } catch {
         if (!cancelled) {
-          // Network error or JSON parse failure → graceful fallback
           dispatch({ type: 'AI_PREFILL_ERROR' });
         }
       }
@@ -395,34 +374,137 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
     return () => {
       cancelled = true;
     };
-    // Only re-run when the files list reference changes (i.e. on step entry).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadedFileNames]);
 
-  // ── Field change handlers ──────────────────────────────────────────────────
+  // ── Lookup search callbacks (stable refs) ──────────────────────────────────
+
+  const handleSearchMatterTypes = React.useCallback(
+    (query: string) => searchMatterTypes(webApi, query),
+    [webApi]
+  );
+
+  const handleSearchPracticeAreas = React.useCallback(
+    (query: string) => searchPracticeAreas(webApi, query),
+    [webApi]
+  );
+
+  const handleSearchAttorneys = React.useCallback(
+    (query: string) => searchContactsAsLookup(webApi, query),
+    [webApi]
+  );
+
+  const handleSearchParalegals = React.useCallback(
+    (query: string) => searchContactsAsLookup(webApi, query),
+    [webApi]
+  );
+
+  // ── Lookup change handlers ─────────────────────────────────────────────────
+
+  const handleMatterTypeChange = React.useCallback(
+    (item: ILookupItem | null) => {
+      dispatch({
+        type: 'SET_LOOKUP',
+        idField: 'matterTypeId',
+        nameField: 'matterTypeName',
+        id: item?.id ?? '',
+        name: item?.name ?? '',
+      });
+    },
+    []
+  );
+
+  const handlePracticeAreaChange = React.useCallback(
+    (item: ILookupItem | null) => {
+      dispatch({
+        type: 'SET_LOOKUP',
+        idField: 'practiceAreaId',
+        nameField: 'practiceAreaName',
+        id: item?.id ?? '',
+        name: item?.name ?? '',
+      });
+    },
+    []
+  );
+
+  const handleAttorneyChange = React.useCallback(
+    (item: ILookupItem | null) => {
+      dispatch({
+        type: 'SET_LOOKUP',
+        idField: 'assignedAttorneyId',
+        nameField: 'assignedAttorneyName',
+        id: item?.id ?? '',
+        name: item?.name ?? '',
+      });
+    },
+    []
+  );
+
+  const handleParalegalChange = React.useCallback(
+    (item: ILookupItem | null) => {
+      dispatch({
+        type: 'SET_LOOKUP',
+        idField: 'assignedParalegalId',
+        nameField: 'assignedParalegalName',
+        id: item?.id ?? '',
+        name: item?.name ?? '',
+      });
+    },
+    []
+  );
+
+  // ── Text field change handler ──────────────────────────────────────────────
+
   const handleFieldChange = React.useCallback(
     (field: keyof ICreateMatterFormState) =>
-      (
-        e: React.ChangeEvent<
-          HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
-        >
-      ) => {
+      (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         dispatch({ type: 'SET_FIELD', field, value: e.target.value });
       },
     []
   );
 
+  // ── AI Summary generation ──────────────────────────────────────────────────
+
+  const handleGenerateSummary = React.useCallback(async () => {
+    setIsGeneratingSummary(true);
+    try {
+      const result = await fetchAiDraftSummary(
+        form.matterName,
+        form.matterTypeName,
+        form.practiceAreaName
+      );
+      dispatch({ type: 'SET_FIELD', field: 'summary', value: result.summary });
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  }, [form.matterName, form.matterTypeName, form.practiceAreaName]);
+
   // ── Derived ───────────────────────────────────────────────────────────────
   const isLoading = ai.status === 'loading';
   const hasAnyPrefill = ai.prefilledFields.size > 0;
 
-  /** Returns true if the given field was pre-filled by AI. */
   const isAiField = (field: keyof ICreateMatterFormState): boolean =>
     ai.prefilledFields.has(field);
 
+  // Build lookup value objects from form state
+  const matterTypeValue: ILookupItem | null = form.matterTypeId
+    ? { id: form.matterTypeId, name: form.matterTypeName }
+    : null;
+
+  const practiceAreaValue: ILookupItem | null = form.practiceAreaId
+    ? { id: form.practiceAreaId, name: form.practiceAreaName }
+    : null;
+
+  const attorneyValue: ILookupItem | null = form.assignedAttorneyId
+    ? { id: form.assignedAttorneyId, name: form.assignedAttorneyName }
+    : null;
+
+  const paralegalValue: ILookupItem | null = form.assignedParalegalId
+    ? { id: form.assignedParalegalId, name: form.assignedParalegalName }
+    : null;
+
   /**
-   * Renders the label for a field.  If the field was AI-pre-filled, appends
-   * an AiFieldTag next to the label text.
+   * Renders the label for a text field with optional required mark and AI tag.
    */
   const renderLabel = (
     text: string,
@@ -456,7 +538,6 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
           </Text>
         </div>
 
-        {/* AI Pre-filled badge — shown once pre-fill completes with ≥1 field */}
         {hasAnyPrefill && (
           <Badge
             className={styles.aiBadge}
@@ -471,62 +552,48 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
 
       {/* 2-column form grid */}
       {isLoading ? (
-        /* Skeleton placeholders while BFF call is in-flight */
         <div className={styles.formGrid}>
           <FieldSkeleton />
           <FieldSkeleton />
-          <FieldSkeleton />
-          <FieldSkeleton />
-          <FieldSkeleton />
-          <FieldSkeleton textareaRows={3} />
           <div className={styles.fullWidth}>
-            <FieldSkeleton textareaRows={5} />
+            <FieldSkeleton />
+          </div>
+          <FieldSkeleton />
+          <FieldSkeleton />
+          <div className={styles.fullWidth}>
+            <FieldSkeleton large />
           </div>
         </div>
       ) : (
         <div className={styles.formGrid}>
-          {/* ── Left column ── */}
+          {/* ── Row 1: Matter Type + Practice Area ── */}
 
-          {/* Matter Type */}
-          <Field
-            label={renderLabel('Matter Type', 'matterType', true)}
+          <LookupField
+            label="Matter Type"
             required
-          >
-            <Select
-              value={form.matterType}
-              onChange={handleFieldChange('matterType')}
-              aria-label="Matter Type"
-            >
-              <option value="">Select matter type</option>
-              {MATTER_TYPE_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </Select>
-          </Field>
+            placeholder="Search matter types..."
+            value={matterTypeValue}
+            onChange={handleMatterTypeChange}
+            onSearch={handleSearchMatterTypes}
+            isAiPrefilled={isAiField('matterTypeId')}
+            minSearchLength={1}
+          />
 
-          {/* Practice Area */}
-          <Field
-            label={renderLabel('Practice Area', 'practiceArea', true)}
+          <LookupField
+            label="Practice Area"
             required
-          >
-            <Select
-              value={form.practiceArea}
-              onChange={handleFieldChange('practiceArea')}
-              aria-label="Practice Area"
-            >
-              <option value="">Select practice area</option>
-              {PRACTICE_AREA_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </Select>
-          </Field>
+            placeholder="Search practice areas..."
+            value={practiceAreaValue}
+            onChange={handlePracticeAreaChange}
+            onSearch={handleSearchPracticeAreas}
+            isAiPrefilled={isAiField('practiceAreaId')}
+            minSearchLength={1}
+          />
 
-          {/* Matter Name */}
+          {/* ── Row 2: Matter Name (full width) ── */}
+
           <Field
+            className={styles.fullWidth}
             label={renderLabel('Matter Name', 'matterName', true)}
             required
           >
@@ -538,50 +605,42 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
             />
           </Field>
 
-          {/* Organization */}
-          <Field
-            label={renderLabel('Organization', 'organization', true)}
-            required
-          >
-            <Input
-              value={form.organization}
-              onChange={handleFieldChange('organization')}
-              placeholder="Enter organization"
-              aria-label="Organization"
-            />
-          </Field>
+          {/* ── Row 3: Assigned Attorney + Assigned Paralegal ── */}
 
-          {/* Estimated Budget */}
-          <Field label={renderLabel('Estimated Budget', 'estimatedBudget')}>
-            <Input
-              type="number"
-              value={form.estimatedBudget}
-              onChange={handleFieldChange('estimatedBudget')}
-              placeholder="0.00"
-              contentBefore={
-                <Label aria-hidden="true">$</Label>
-              }
-              aria-label="Estimated Budget"
-            />
-          </Field>
+          <LookupField
+            label="Assigned Attorney"
+            placeholder="Search contacts..."
+            value={attorneyValue}
+            onChange={handleAttorneyChange}
+            onSearch={handleSearchAttorneys}
+            minSearchLength={2}
+          />
 
-          {/* Key Parties */}
-          <Field label={renderLabel('Key Parties', 'keyParties')}>
-            <Textarea
-              value={form.keyParties}
-              onChange={handleFieldChange('keyParties')}
-              placeholder="List key individuals, entities, or counterparties"
-              rows={3}
-              resize="vertical"
-              aria-label="Key Parties"
-            />
-          </Field>
+          <LookupField
+            label="Assigned Paralegal"
+            placeholder="Search contacts..."
+            value={paralegalValue}
+            onChange={handleParalegalChange}
+            onSearch={handleSearchParalegals}
+            minSearchLength={2}
+          />
 
-          {/* Summary — full width */}
-          <Field
-            className={styles.fullWidth}
-            label={renderLabel('Summary', 'summary')}
-          >
+          {/* ── Row 4: Summary — full width with AI generate ── */}
+
+          <div className={styles.fullWidth}>
+            <div className={styles.summaryHeader}>
+              {renderLabel('Summary', 'summary')}
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={isGeneratingSummary ? <Spinner size="extra-tiny" /> : <SparkleRegular />}
+                onClick={handleGenerateSummary}
+                disabled={isGeneratingSummary || !form.matterName.trim()}
+                aria-label="Generate summary with AI"
+              >
+                {isGeneratingSummary ? 'Generating\u2026' : 'Generate with AI'}
+              </Button>
+            </div>
             <Textarea
               value={form.summary}
               onChange={handleFieldChange('summary')}
@@ -589,38 +648,13 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
               rows={5}
               resize="vertical"
               aria-label="Summary"
+              style={{ marginTop: tokens.spacingVerticalXS }}
             />
-          </Field>
+          </div>
         </div>
       )}
     </div>
   );
 };
 
-// ---------------------------------------------------------------------------
-// Imperative handle for parent wizard to request form values
-// ---------------------------------------------------------------------------
-
-/**
- * The parent wizard (WizardDialog) needs to read the current form state when
- * the user clicks Next.  Rather than lifting all form state into the wizard,
- * we expose a stable callback via a custom hook approach.
- *
- * WizardDialog passes `onSubmit` — this component calls it automatically
- * when `onValidChange(true)` was the last emission AND the Next button was
- * pressed.  The actual invocation contract is:
- *
- *   1. WizardDialog calls `handleNext()`.
- *   2. WizardDialog notices currentStepIndex === 1 → calls `stepRef.current?.submit()`.
- *   3. CreateRecordStep calls `onSubmit(latestFormRef.current)`.
- *
- * However, to keep WizardDialog simple for this task, we expose the submit
- * callback through the `onSubmit` prop pattern.  The parent calls it via
- * a forwarded ref if it needs to, or we emit it inline via an effect when the
- * parent triggers a step transition.
- *
- * For task 023 scope: the values are emitted via `onSubmit` on every
- * keystroke so the parent always has the latest values without needing a ref.
- * Task 024 will read these values from wizard state.
- */
 export { CreateRecordStep as default };

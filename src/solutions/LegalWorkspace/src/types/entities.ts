@@ -81,3 +81,9 @@ export interface IContact {
   sprk_name: string;
   sprk_email?: string;
 }
+
+/** Generic lookup item for Dataverse reference table searches. */
+export interface ILookupItem {
+  id: string;
+  name: string;
+}

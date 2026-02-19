@@ -15,6 +15,7 @@ export { WizardStepper } from './WizardStepper';
 export { FileUploadZone } from './FileUploadZone';
 export { UploadedFileList } from './UploadedFileList';
 export { CreateRecordStep } from './CreateRecordStep';
+export { LookupField } from './LookupField';
 export { AiFieldTag } from './AiFieldTag';
 
 // Task 024 — Step 3 + follow-on step components
@@ -29,7 +30,14 @@ export {
 export { SuccessConfirmation } from './SuccessConfirmation';
 
 // Task 024 — Service layer
-export { MatterService, searchContacts, fetchAiDraftSummary } from './matterService';
+export {
+  MatterService,
+  searchContacts,
+  searchContactsAsLookup,
+  searchMatterTypes,
+  searchPracticeAreas,
+  fetchAiDraftSummary,
+} from './matterService';
 
 // Types — wizard
 export type {
@@ -58,8 +66,6 @@ export type {
   IAiPrefillRequest,
   IAiPrefillResponse,
   AiPrefillStatus,
-  MatterType,
-  PracticeArea,
   FormAction,
 } from './formTypes';
 
