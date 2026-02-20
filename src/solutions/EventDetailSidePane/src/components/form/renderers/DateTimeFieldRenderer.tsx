@@ -120,7 +120,7 @@ export const DateTimeFieldRenderer: React.FC<DateTimeFieldRendererProps> = ({
         value={dateValue}
         onSelectDate={handleDateSelect}
         disabled={isDisabled}
-        placeholder="Select date..."
+        placeholder=""
         formatDate={formatDateForDisplay}
         aria-label={`${config.label} date`}
       />

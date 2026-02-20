@@ -52,6 +52,8 @@ export interface FormRendererProps {
   disabled: boolean;
   /** Whether the config is still loading */
   isLoading?: boolean;
+  /** Render fields in a flat list without section headers (default: false) */
+  flatMode?: boolean;
   /** Section expanded states (for persistence across tab switches) */
   sectionStates?: Record<string, boolean>;
   /** Callback when a section's expanded state changes */
@@ -65,6 +67,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   onChange,
   disabled,
   isLoading = false,
+  flatMode = false,
   sectionStates,
   onSectionExpandedChange,
 }) => {
@@ -99,6 +102,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
           onChange={onChange}
           disabled={disabled}
           metadata={metadata}
+          flatMode={flatMode}
           expanded={sectionStates?.[section.id]}
           onExpandedChange={onSectionExpandedChange}
         />

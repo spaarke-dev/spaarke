@@ -33,7 +33,7 @@ export const TextFieldRenderer: React.FC<TextFieldRendererProps> = ({
       value={(value as string) ?? ""}
       onChange={handleChange}
       disabled={disabled || config.readOnly}
-      placeholder={`Enter ${config.label.toLowerCase()}...`}
+      placeholder=""
       aria-label={config.label}
       appearance="underline"
     />

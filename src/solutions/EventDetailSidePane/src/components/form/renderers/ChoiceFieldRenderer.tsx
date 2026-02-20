@@ -64,7 +64,7 @@ export const ChoiceFieldRenderer: React.FC<ChoiceFieldRendererProps> = ({
       selectedOptions={numericValue !== null ? [String(numericValue)] : []}
       onOptionSelect={handleChange}
       disabled={disabled || config.readOnly}
-      placeholder={`Select ${config.label.toLowerCase()}...`}
+      placeholder=""
       aria-label={config.label}
       style={{ width: "100%" }}
     >

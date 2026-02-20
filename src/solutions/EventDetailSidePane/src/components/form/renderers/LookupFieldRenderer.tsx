@@ -240,19 +240,17 @@ export const LookupFieldRenderer: React.FC<LookupFieldRendererProps> = ({
     );
   }
 
-  // Empty state
+  // Empty state — icon-only affordance
   return (
     <div className={styles.emptyState}>
       <Button
-        appearance="secondary"
+        appearance="subtle"
         icon={<SearchRegular />}
         onClick={handleLookup}
         disabled={isDisabled}
         aria-label={`Select ${config.label}`}
-        style={{ width: "100%" }}
-      >
-        Select {config.label}
-      </Button>
+        size="small"
+      />
     </div>
   );
 };

@@ -20,11 +20,9 @@ import {
   tokens,
 } from "@fluentui/react-components";
 import {
-  NoteRegular,
   AddRegular,
   SaveRegular,
 } from "@fluentui/react-icons";
-import { CollapsibleSection } from "./CollapsibleSection";
 import { useRelatedRecord } from "../hooks/useRelatedRecord";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -32,6 +30,17 @@ import { useRelatedRecord } from "../hooks/useRelatedRecord";
 // ─────────────────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
+  section: {
+    display: "flex",
+    flexDirection: "column",
+    ...shorthands.padding("8px", "20px"),
+  },
+  label: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    marginBottom: "4px",
+  },
   container: {
     display: "flex",
     flexDirection: "column",
@@ -152,11 +161,8 @@ export const MemoSection: React.FC<MemoSectionProps> = ({
   }, [isDirty, memo.recordId, handleSave]);
 
   return (
-    <CollapsibleSection
-      title="Memo"
-      icon={<NoteRegular />}
-      defaultExpanded={true}
-    >
+    <div className={styles.section} data-section="memo">
+      <Text className={styles.label}>Memo</Text>
       <div className={styles.container}>
         {/* Loading state */}
         {memo.isLoading && (
@@ -172,7 +178,7 @@ export const MemoSection: React.FC<MemoSectionProps> = ({
               onChange={handleTextChange}
               onBlur={handleBlur}
               disabled={disabled || isSaving}
-              placeholder="Enter memo..."
+              placeholder=""
               resize="vertical"
               rows={3}
               appearance="outline"
@@ -198,12 +204,12 @@ export const MemoSection: React.FC<MemoSectionProps> = ({
           </>
         )}
 
-        {/* No memo — show add button */}
+        {/* No memo — subtle empty state */}
         {!memo.isLoading && !memo.record && (
           <div className={styles.emptyState}>
-            <Text className={styles.emptyText}>No memo for this event</Text>
+            <Text className={styles.emptyText}>No memo</Text>
             <Button
-              appearance="secondary"
+              appearance="subtle"
               icon={<AddRegular />}
               onClick={handleAddMemo}
               disabled={disabled || isSaving}
@@ -214,6 +220,6 @@ export const MemoSection: React.FC<MemoSectionProps> = ({
           </div>
         )}
       </div>
-    </CollapsibleSection>
+    </div>
   );
 };

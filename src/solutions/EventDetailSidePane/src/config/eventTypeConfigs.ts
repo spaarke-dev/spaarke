@@ -8,11 +8,13 @@
  * each sprk_eventtype record in Dataverse.
  *
  * Fixed chrome (NOT in these configs):
- * - Header: sprk_eventname (inline editable), Event Type badge, parent link
- * - StatusSection: statuscode (radio buttons)
+ * - Header: sprk_eventname (inline editable), Event Type badge, parent link, action buttons
+ * - StatusSection: statuscode (dropdown)
  * - MemoSection: sprk_memo (separate entity)
- * - TodoSection: sprk_eventtodo (separate entity)
  * - Footer: Save button, version
+ *
+ * Assigned fields (sprk_assignedto, sprk_assignedattorney, etc.) are
+ * intentionally excluded — they are visible in the grid view.
  *
  * Field name corrections:
  * - sprk_completedby (correct) — OOB form doc had "sprk_compledby" typo
@@ -63,40 +65,6 @@ export const TASK_CONFIG: IFormConfig = {
         { name: "sprk_effort", type: "choice", label: "Effort" },
       ],
     },
-    {
-      id: "assigned",
-      title: "Assigned",
-      fields: [
-        {
-          name: "sprk_assignedto",
-          type: "lookup",
-          label: "Assigned To",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedTo",
-        },
-        {
-          name: "sprk_assignedattorney",
-          type: "lookup",
-          label: "Assigned Attorney",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedAttorney",
-        },
-        {
-          name: "sprk_assignedparalegal",
-          type: "lookup",
-          label: "Assigned Paralegal",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedParalegal",
-        },
-        {
-          name: "ownerid",
-          type: "lookup",
-          label: "Owner",
-          targets: ["systemuser", "team"],
-          readOnly: true,
-        },
-      ],
-    },
   ],
 };
 
@@ -127,40 +95,6 @@ export const ACTION_CONFIG: IFormConfig = {
           label: "Completed By",
           targets: ["contact"],
           navigationProperty: "sprk_CompletedBy",
-        },
-      ],
-    },
-    {
-      id: "assigned",
-      title: "Assigned",
-      fields: [
-        {
-          name: "sprk_assignedto",
-          type: "lookup",
-          label: "Assigned To",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedTo",
-        },
-        {
-          name: "sprk_assignedattorney",
-          type: "lookup",
-          label: "Assigned Attorney",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedAttorney",
-        },
-        {
-          name: "sprk_assignedparalegal",
-          type: "lookup",
-          label: "Assigned Paralegal",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedParalegal",
-        },
-        {
-          name: "ownerid",
-          type: "lookup",
-          label: "Owner",
-          targets: ["systemuser", "team"],
-          readOnly: true,
         },
       ],
     },
@@ -206,40 +140,6 @@ export const MILESTONE_CONFIG: IFormConfig = {
         { name: "sprk_effort", type: "choice", label: "Effort" },
       ],
     },
-    {
-      id: "assigned",
-      title: "Assigned",
-      fields: [
-        {
-          name: "sprk_assignedto",
-          type: "lookup",
-          label: "Assigned To",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedTo",
-        },
-        {
-          name: "sprk_assignedattorney",
-          type: "lookup",
-          label: "Assigned Attorney",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedAttorney",
-        },
-        {
-          name: "sprk_assignedparalegal",
-          type: "lookup",
-          label: "Assigned Paralegal",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedParalegal",
-        },
-        {
-          name: "ownerid",
-          type: "lookup",
-          label: "Owner",
-          targets: ["systemuser", "team"],
-          readOnly: true,
-        },
-      ],
-    },
   ],
 };
 
@@ -265,40 +165,6 @@ export const MEETING_CONFIG: IFormConfig = {
         { name: "sprk_meetingtype", type: "choice", label: "Meeting Type" },
         { name: "sprk_meetingdate", type: "date", label: "Meeting Date" },
         { name: "sprk_meetinglink", type: "url", label: "Meeting Link" },
-      ],
-    },
-    {
-      id: "assigned",
-      title: "Assigned",
-      fields: [
-        {
-          name: "sprk_assignedto",
-          type: "lookup",
-          label: "Assigned To",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedTo",
-        },
-        {
-          name: "sprk_assignedattorney",
-          type: "lookup",
-          label: "Assigned Attorney",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedAttorney",
-        },
-        {
-          name: "sprk_assignedparalegal",
-          type: "lookup",
-          label: "Assigned Paralegal",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedParalegal",
-        },
-        {
-          name: "ownerid",
-          type: "lookup",
-          label: "Owner",
-          targets: ["systemuser", "team"],
-          readOnly: true,
-        },
       ],
     },
   ],
@@ -335,40 +201,6 @@ export const EMAIL_CONFIG: IFormConfig = {
         { name: "sprk_emailto", type: "text", label: "To" },
       ],
     },
-    {
-      id: "assigned",
-      title: "Assigned",
-      fields: [
-        {
-          name: "sprk_assignedto",
-          type: "lookup",
-          label: "Assigned To",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedTo",
-        },
-        {
-          name: "sprk_assignedattorney",
-          type: "lookup",
-          label: "Assigned Attorney",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedAttorney",
-        },
-        {
-          name: "sprk_assignedparalegal",
-          type: "lookup",
-          label: "Assigned Paralegal",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedParalegal",
-        },
-        {
-          name: "ownerid",
-          type: "lookup",
-          label: "Owner",
-          targets: ["systemuser", "team"],
-          readOnly: true,
-        },
-      ],
-    },
   ],
 };
 
@@ -401,40 +233,6 @@ export const APPROVAL_CONFIG: IFormConfig = {
         },
       ],
     },
-    {
-      id: "assigned",
-      title: "Assigned",
-      fields: [
-        {
-          name: "sprk_assignedto",
-          type: "lookup",
-          label: "Assigned To",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedTo",
-        },
-        {
-          name: "sprk_assignedattorney",
-          type: "lookup",
-          label: "Assigned Attorney",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedAttorney",
-        },
-        {
-          name: "sprk_assignedparalegal",
-          type: "lookup",
-          label: "Assigned Paralegal",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedParalegal",
-        },
-        {
-          name: "ownerid",
-          type: "lookup",
-          label: "Owner",
-          targets: ["systemuser", "team"],
-          readOnly: true,
-        },
-      ],
-    },
   ],
 };
 
@@ -464,40 +262,6 @@ export const PHONE_CALL_CONFIG: IFormConfig = {
           label: "Completed By",
           targets: ["contact"],
           navigationProperty: "sprk_CompletedBy",
-        },
-      ],
-    },
-    {
-      id: "assigned",
-      title: "Assigned",
-      fields: [
-        {
-          name: "sprk_assignedto",
-          type: "lookup",
-          label: "Assigned To",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedTo",
-        },
-        {
-          name: "sprk_assignedattorney",
-          type: "lookup",
-          label: "Assigned Attorney",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedAttorney",
-        },
-        {
-          name: "sprk_assignedparalegal",
-          type: "lookup",
-          label: "Assigned Paralegal",
-          targets: ["contact"],
-          navigationProperty: "sprk_AssignedParalegal",
-        },
-        {
-          name: "ownerid",
-          type: "lookup",
-          label: "Owner",
-          targets: ["systemuser", "team"],
-          readOnly: true,
         },
       ],
     },

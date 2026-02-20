@@ -1,29 +1,26 @@
 /**
- * StatusSection - Status selection component for Event Detail Side Pane
+ * StatusSection - Status dropdown for Event Detail Side Pane
  *
- * Displays status reason options as radio buttons for quick status changes.
- * Uses Fluent UI v9 RadioGroup component with proper theming.
+ * Displays a compact dropdown for quick status changes.
+ * Uses Fluent UI v9 Dropdown component.
  *
  * Status Reason Values (from Dataverse sprk_event.statuscode):
  * Active (statecode 0):
  *   1           = Draft
  *   659,490,001 = Open
+ *   659,490,006 = On Hold
+ * Inactive (statecode 1):
  *   659,490,002 = Completed
  *   659,490,003 = Closed
- *   659,490,006 = On Hold
- *   659,490,007 = Reassigned
- * Inactive (statecode 1):
- *   2           = No Further Action
  *   659,490,004 = Cancelled
- *   659,490,005 = Transferred
  *
  * @see projects/events-workspace-apps-UX-r1/tasks/033-create-status-section.poml
  */
 
 import * as React from "react";
 import {
-  RadioGroup,
-  Radio,
+  Dropdown,
+  Option,
   Label,
   makeStyles,
   tokens,
@@ -68,7 +65,6 @@ export interface StatusSectionProps {
 
 /**
  * Status reason options mapped from Dataverse sprk_event.statuscode values
- * Active (statecode 0)
  */
 export const STATUS_REASON_OPTIONS: StatusReasonOption[] = [
   { value: 1, label: "Draft" },
@@ -79,10 +75,7 @@ export const STATUS_REASON_OPTIONS: StatusReasonOption[] = [
   { value: 659490004, label: "Cancelled" },
 ];
 
-/**
- * Default label for the status section
- */
-const DEFAULT_LABEL = "Status";
+const DEFAULT_LABEL = "Update Status";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -92,27 +85,13 @@ const useStyles = makeStyles({
   container: {
     display: "flex",
     flexDirection: "column",
-    ...shorthands.gap("8px"),
+    ...shorthands.gap("4px"),
+    ...shorthands.padding("8px", "20px"),
   },
   label: {
     fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-    marginBottom: "4px",
-  },
-  radioGroup: {
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.gap("4px"),
-  },
-  radio: {
-    // Allow radios to wrap naturally
-  },
-  // Horizontal layout variant for compact display
-  radioGroupHorizontal: {
-    display: "flex",
-    flexDirection: "row",
-    flexWrap: "wrap",
-    ...shorthands.gap("12px", "8px"),
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
   },
 });
 
@@ -120,23 +99,6 @@ const useStyles = makeStyles({
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * StatusSection component for selecting event status reason.
- *
- * Uses Fluent UI v9 RadioGroup with vertical layout for clear selection.
- * Supports light, dark, and high-contrast themes via tokens.
- *
- * @example
- * ```tsx
- * const [status, setStatus] = useState<StatusReasonValue>(3);
- *
- * <StatusSection
- *   value={status}
- *   onChange={setStatus}
- *   disabled={!canEdit}
- * />
- * ```
- */
 export const StatusSection: React.FC<StatusSectionProps> = ({
   value,
   onChange,
@@ -145,42 +107,40 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
 }) => {
   const styles = useStyles();
 
-  /**
-   * Handle radio selection change
-   */
   const handleChange = React.useCallback(
-    (_ev: React.FormEvent<HTMLDivElement>, data: { value: string }) => {
-      const numericValue = parseInt(data.value, 10) as StatusReasonValue;
-      onChange(numericValue);
+    (_ev: unknown, data: { optionValue?: string }) => {
+      if (data.optionValue) {
+        const numericValue = parseInt(data.optionValue, 10) as StatusReasonValue;
+        onChange(numericValue);
+      }
     },
     [onChange]
   );
 
+  const selectedLabel = React.useMemo(() => {
+    return STATUS_REASON_OPTIONS.find((o) => o.value === value)?.label ?? "";
+  }, [value]);
+
   return (
     <div className={styles.container}>
-      <Label className={styles.label} htmlFor="status-radio-group">
+      <Label className={styles.label} htmlFor="status-dropdown">
         {label}
       </Label>
-      <RadioGroup
-        id="status-radio-group"
-        className={styles.radioGroup}
-        value={String(value)}
-        onChange={handleChange}
+      <Dropdown
+        id="status-dropdown"
+        value={selectedLabel}
+        selectedOptions={[String(value)]}
+        onOptionSelect={handleChange}
         disabled={disabled}
         aria-label={`Select ${label.toLowerCase()}`}
+        style={{ width: "100%" }}
       >
         {STATUS_REASON_OPTIONS.map((option) => (
-          <Radio
-            key={option.value}
-            className={styles.radio}
-            value={String(option.value)}
-            label={option.label}
-            aria-describedby={
-              option.description ? `status-desc-${option.value}` : undefined
-            }
-          />
+          <Option key={option.value} value={String(option.value)}>
+            {option.label}
+          </Option>
         ))}
-      </RadioGroup>
+      </Dropdown>
     </div>
   );
 };

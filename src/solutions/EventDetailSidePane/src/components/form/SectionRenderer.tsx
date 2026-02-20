@@ -31,6 +31,8 @@ export interface SectionRendererProps {
   onChange: FieldChangeCallback;
   disabled: boolean;
   metadata: Map<string, IFieldMetadata>;
+  /** Render fields without section header/collapsibility */
+  flatMode?: boolean;
   /** Controlled expanded state (for persistence) */
   expanded?: boolean;
   /** Callback when expanded state changes */
@@ -43,6 +45,7 @@ export const SectionRenderer: React.FC<SectionRendererProps> = ({
   onChange,
   disabled,
   metadata,
+  flatMode = false,
   expanded,
   onExpandedChange,
 }) => {
@@ -86,20 +89,22 @@ export const SectionRenderer: React.FC<SectionRendererProps> = ({
     [values]
   );
 
-  // Non-collapsible section
-  if (config.collapsible === false) {
+  const fieldElements = config.fields.map((field) => (
+    <FieldRenderer
+      key={field.name}
+      config={field}
+      value={getFieldValue(field.name, field.type)}
+      onChange={onChange}
+      disabled={disabled}
+      metadata={metadata.get(field.name)}
+    />
+  ));
+
+  // Flat mode or non-collapsible: render fields directly without section header
+  if (flatMode || config.collapsible === false) {
     return (
-      <div className={styles.fieldsContainer} style={{ padding: "12px 20px" }}>
-        {config.fields.map((field) => (
-          <FieldRenderer
-            key={field.name}
-            config={field}
-            value={getFieldValue(field.name, field.type)}
-            onChange={onChange}
-            disabled={disabled}
-            metadata={metadata.get(field.name)}
-          />
-        ))}
+      <div className={styles.fieldsContainer} style={{ padding: "4px 20px" }}>
+        {fieldElements}
       </div>
     );
   }
@@ -112,16 +117,7 @@ export const SectionRenderer: React.FC<SectionRendererProps> = ({
       onExpandedChange={handleExpandedChange}
     >
       <div className={styles.fieldsContainer}>
-        {config.fields.map((field) => (
-          <FieldRenderer
-            key={field.name}
-            config={field}
-            value={getFieldValue(field.name, field.type)}
-            onChange={onChange}
-            disabled={disabled}
-            metadata={metadata.get(field.name)}
-          />
-        ))}
+        {fieldElements}
       </div>
     </CollapsibleSection>
   );

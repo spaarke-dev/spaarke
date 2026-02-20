@@ -4,8 +4,8 @@
  * Renders the Event Detail side pane with theme support.
  * Uses Approach A dynamic form renderer — the JSON IS the form definition.
  *
- * Fixed chrome: Header, StatusReasonBar, Memo, ToDo, Footer.
- * Config-driven: Everything between StatusReasonBar and Memo/ToDo
+ * Fixed chrome: Header, StatusReasonBar, Memo, Footer.
+ * Config-driven: Everything between StatusReasonBar and Memo
  * is rendered dynamically from the sprk_fieldconfigjson on the Event Type.
  *
  * @see approach-a-dynamic-form-renderer.md
@@ -34,8 +34,8 @@ import {
 } from "./components";
 import { FormRenderer } from "./components/form";
 import { MemoSection } from "./components/MemoSection";
-import { TodoSection } from "./components/TodoSection";
 import { closeSidePane } from "./services/sidePaneService";
+import { getXrm } from "./utils/xrmAccess";
 import { IEventRecord } from "./types/EventRecord";
 import type { ILookupValue } from "./types/FormConfig";
 import {
@@ -598,6 +598,67 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
     }
   }, [isDirty]);
 
+  // Key counter to force MemoSection remount after creating a new memo
+  const [memoKey, setMemoKey] = React.useState(0);
+
+  /**
+   * Handle +Memo button: scroll to memo section, or create + scroll
+   */
+  const handleAddMemo = React.useCallback(async () => {
+    const memoEl = document.querySelector("[data-section='memo']");
+    if (memoEl) {
+      memoEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    // No memo section visible — create one via WebApi
+    if (!params.eventId) return;
+    const xrm = getXrm();
+    if (!xrm?.WebApi?.createRecord) {
+      console.warn("[App] Xrm.WebApi.createRecord not available");
+      return;
+    }
+
+    try {
+      await xrm.WebApi.createRecord("sprk_memo", {
+        sprk_name: "Event Memo",
+        sprk_memobody: "",
+        "sprk_RegardingEvent@odata.bind": `/sprk_events(${params.eventId})`,
+      });
+      // Force MemoSection remount to pick up the new record
+      setMemoKey((k) => k + 1);
+      // Scroll after remount
+      requestAnimationFrame(() => {
+        const el = document.querySelector("[data-section='memo']");
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    } catch (err) {
+      console.error("[App] Error creating memo:", err);
+    }
+  }, [params.eventId]);
+
+  /**
+   * Handle +To Do button: create a new sprk_eventtodo record
+   */
+  const handleAddTodo = React.useCallback(async () => {
+    if (!params.eventId) return;
+    const xrm = getXrm();
+    if (!xrm?.WebApi?.createRecord) {
+      console.warn("[App] Xrm.WebApi.createRecord not available");
+      return;
+    }
+
+    try {
+      await xrm.WebApi.createRecord("sprk_eventtodo", {
+        sprk_name: "New To Do",
+        "sprk_RegardingEvent@odata.bind": `/sprk_events(${params.eventId})`,
+      });
+      console.log("[App] To-do created for event:", params.eventId);
+    } catch (err) {
+      console.error("[App] Error creating to-do:", err);
+    }
+  }, [params.eventId]);
+
   /**
    * Handle unsaved changes dialog action
    */
@@ -663,13 +724,15 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
   return (
     <FluentProvider theme={theme}>
       <div className={styles.root}>
-        {/* Header Section: Name, Type Badge, Parent Link, Close Button */}
+        {/* Header Section: Name, Type Badge, Action Row, Close Button */}
         <HeaderSection
           eventId={params.eventId}
           onEventLoaded={handleEventLoaded}
           onNameUpdated={handleNameUpdated}
           onCloseRequest={handleCloseRequest}
           isReadOnly={isReadOnly}
+          onAddMemo={handleAddMemo}
+          onAddTodo={handleAddTodo}
         />
 
         {/* Read-Only Banner (when user lacks edit permission) */}
@@ -698,16 +761,12 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
             isLoading={formConfig.isLoading}
             sectionStates={sectionStates}
             onSectionExpandedChange={handleSectionExpandedChange}
+            flatMode={true}
           />
 
           {/* Fixed Chrome: Memo Section */}
           <MemoSection
-            eventId={params.eventId}
-            disabled={isDisabled}
-          />
-
-          {/* Fixed Chrome: To Do Section */}
-          <TodoSection
+            key={memoKey}
             eventId={params.eventId}
             disabled={isDisabled}
           />
@@ -724,7 +783,6 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
           onDiscard={handleDiscard}
           version="2.1.0"
           isReadOnly={isReadOnly}
-          eventId={params.eventId}
         />
 
         {/* Unsaved Changes Dialog */}

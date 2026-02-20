@@ -3,6 +3,9 @@
  *
  * Used when an Event Type has no sprk_fieldconfigjson value (null or empty).
  * Provides a minimal useful form with common fields.
+ *
+ * Assigned fields (sprk_assignedto, sprk_assignedattorney, etc.) are
+ * intentionally excluded — they are visible in the grid view.
  */
 
 import type { IFormConfig } from "../types/FormConfig";
@@ -25,37 +28,6 @@ export const FALLBACK_FORM_CONFIG: IFormConfig = {
           type: "lookup",
           label: "Completed By",
           targets: ["contact"],
-        },
-      ],
-    },
-    {
-      id: "assigned",
-      title: "Assigned",
-      fields: [
-        {
-          name: "sprk_assignedto",
-          type: "lookup",
-          label: "Assigned To",
-          targets: ["contact"],
-        },
-        {
-          name: "sprk_assignedattorney",
-          type: "lookup",
-          label: "Assigned Attorney",
-          targets: ["contact"],
-        },
-        {
-          name: "sprk_assignedparalegal",
-          type: "lookup",
-          label: "Assigned Paralegal",
-          targets: ["contact"],
-        },
-        {
-          name: "ownerid",
-          type: "lookup",
-          label: "Owner",
-          targets: ["systemuser", "team"],
-          readOnly: true,
         },
       ],
     },

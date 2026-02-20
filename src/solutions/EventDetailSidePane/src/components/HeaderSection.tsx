@@ -18,7 +18,6 @@ import {
   tokens,
   Input,
   Badge,
-  Link,
   Button,
   Spinner,
   Text,
@@ -28,10 +27,17 @@ import {
   DismissRegular,
   OpenRegular,
   CalendarMonthRegular,
+  NoteAddRegular,
+  TaskListAddRegular,
+  ArrowExportRegular,
 } from "@fluentui/react-icons";
 import { IEventRecord } from "../types/EventRecord";
 import { loadEventHeader, updateEventName } from "../services/eventService";
-import { closeSidePane, navigateToParentRecord } from "../services/sidePaneService";
+import {
+  closeSidePane,
+  navigateToParentRecord,
+  openEventRecord,
+} from "../services/sidePaneService";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles (Fluent UI v9 makeStyles with semantic tokens)
@@ -116,6 +122,11 @@ const useStyles = makeStyles({
   separator: {
     color: tokens.colorNeutralForeground4,
   },
+  actionRow: {
+    display: "flex",
+    alignItems: "center",
+    ...shorthands.gap("2px"),
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -133,6 +144,10 @@ export interface IHeaderSectionProps {
   onCloseRequest?: () => void;
   /** Whether the form is in read-only mode (disables name editing) */
   isReadOnly?: boolean;
+  /** Callback when +Memo button is clicked */
+  onAddMemo?: () => void;
+  /** Callback when +To Do button is clicked */
+  onAddTodo?: () => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -145,6 +160,8 @@ export const HeaderSection: React.FC<IHeaderSectionProps> = ({
   onNameUpdated,
   onCloseRequest,
   isReadOnly = false,
+  onAddMemo,
+  onAddTodo,
 }) => {
   const styles = useStyles();
 
@@ -279,6 +296,15 @@ export const HeaderSection: React.FC<IHeaderSectionProps> = ({
   }, [eventId, event, editingName, onNameUpdated]);
 
   /**
+   * Handle Open Record click - opens full event form in modal
+   */
+  const handleOpenRecord = React.useCallback(() => {
+    if (eventId) {
+      openEventRecord(eventId);
+    }
+  }, [eventId]);
+
+  /**
    * Handle Enter key in name input - blur to save
    */
   const handleNameKeyDown = React.useCallback(
@@ -365,9 +391,8 @@ export const HeaderSection: React.FC<IHeaderSectionProps> = ({
             readOnly={isReadOnly}
           />
 
-          {/* Meta Row: Type Badge + Parent Link */}
+          {/* Meta Row: Type Badge + Parent Name */}
           <div className={styles.metaRow}>
-            {/* Event Type Badge */}
             <Badge
               className={styles.typeBadge}
               appearance="filled"
@@ -377,19 +402,60 @@ export const HeaderSection: React.FC<IHeaderSectionProps> = ({
               {eventTypeName}
             </Badge>
 
-            {/* Parent Record Link (if available) */}
-            {parentName && parentUrl && (
+            {parentName && (
               <>
                 <Text className={styles.separator}>|</Text>
-                <Link
-                  className={styles.parentLink}
-                  onClick={handleParentClick}
-                  aria-label={`Navigate to ${parentName}`}
-                >
-                  <OpenRegular className={styles.parentIcon} />
+                <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
                   {parentName}
-                </Link>
+                </Text>
               </>
+            )}
+          </div>
+
+          {/* Action Row: +Memo, +To Do, Open Record, Open Parent */}
+          <div className={styles.actionRow}>
+            {onAddMemo && (
+              <Button
+                appearance="subtle"
+                icon={<NoteAddRegular />}
+                onClick={onAddMemo}
+                size="small"
+                aria-label="Add memo"
+              >
+                Memo
+              </Button>
+            )}
+            {onAddTodo && (
+              <Button
+                appearance="subtle"
+                icon={<TaskListAddRegular />}
+                onClick={onAddTodo}
+                size="small"
+                aria-label="Add to-do"
+              >
+                To Do
+              </Button>
+            )}
+            <Button
+              appearance="subtle"
+              icon={<OpenRegular />}
+              onClick={handleOpenRecord}
+              size="small"
+              aria-label="Open full record"
+            >
+              Open
+            </Button>
+            {parentUrl && (
+              <Button
+                appearance="subtle"
+                icon={<ArrowExportRegular />}
+                onClick={handleParentClick}
+                size="small"
+                aria-label={`Navigate to ${parentName}`}
+                title={parentName}
+              >
+                Parent
+              </Button>
             )}
           </div>
         </div>
