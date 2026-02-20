@@ -23,6 +23,7 @@ import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IUploadProgress } from '../../services/EntityCreationService';
 import { getBffBaseUrl } from '../../config/bffConfig';
 import { authenticatedFetch } from '../../services/bffAuthProvider';
+import { getXrm, getUserId } from '../../services/xrmProvider';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -144,6 +145,187 @@ async function _discoverNavProps(entityLogicalName: string): Promise<Record<stri
  */
 function _resolveNavProp(navPropMap: Record<string, string>, columnLogical: string): string {
   return navPropMap[columnLogical] ?? columnLogical;
+}
+
+// ---------------------------------------------------------------------------
+// Email activity helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a Dataverse email entity payload with activity parties for From/To.
+ *
+ * Activity parties are required for the email router (server-side sync) to
+ * process the email. The `email_activity_parties` collection is a deep-insert
+ * on the email entity.
+ *
+ * Participation type masks:
+ *   1 = Sender (From)
+ *   2 = To Recipient
+ *   3 = CC Recipient
+ *   4 = BCC Recipient
+ */
+/**
+ * Resolve an email address to a Dataverse contact record.
+ * Returns the contact GUID if found, null otherwise.
+ * Searches emailaddress1 (primary email) on the contact entity.
+ */
+async function _resolveEmailToContact(
+  webApi: IWebApi,
+  email: string
+): Promise<string | null> {
+  try {
+    const safeEmail = email.trim().replace(/'/g, "''");
+    const result = await webApi.retrieveMultipleRecords(
+      'contact',
+      `?$select=contactid&$filter=emailaddress1 eq '${safeEmail}'&$top=1`,
+      1
+    );
+    if (result.entities.length > 0) {
+      const contactId = result.entities[0]['contactid'] as string;
+      console.info(`[MatterService] Resolved email "${email}" to contact: ${contactId}`);
+      return contactId;
+    }
+    console.info(`[MatterService] No contact found for email "${email}"`);
+    return null;
+  } catch (err) {
+    console.warn(`[MatterService] Contact lookup failed for "${email}":`, err);
+    return null;
+  }
+}
+
+/**
+ * Build a Dataverse email entity payload with activity parties for From/To.
+ *
+ * Recipients MUST be resolved to Dataverse records (contact, systemuser, etc.)
+ * because Dataverse blocks sending to unresolved email addresses by default.
+ * The resolvedToParties parameter contains pre-resolved activity party objects.
+ */
+function _buildEmailEntity(params: {
+  subject: string;
+  body: string;
+  matterId: string;
+  matterName?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  resolvedToParties: any[];
+}): WebApiEntity {
+  const { subject, body, matterId, matterName, resolvedToParties } = params;
+
+  // Build a link to the matter record for the email recipient
+  const xrm = getXrm();
+  const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '';
+  const matterUrl = clientUrl
+    ? `${clientUrl}/main.aspx?etn=sprk_matter&id=${matterId}&pagetype=entityrecord`
+    : '';
+
+  // Append matter link to the email body
+  let fullBody = body;
+  if (matterUrl) {
+    const label = matterName ? `View Matter: ${matterName}` : 'View Matter';
+    fullBody += `\n\n---\n${label}\n${matterUrl}`;
+  }
+
+  // Build activity parties: From (current user) + resolved To recipients
+  const userId = getUserId();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const activityParties: any[] = [];
+
+  if (userId) {
+    activityParties.push({
+      'partyid_systemuser@odata.bind': `/systemusers(${userId})`,
+      participationtypemask: 1, // From (Sender)
+    });
+  }
+
+  activityParties.push(...resolvedToParties);
+
+  const emailEntity: WebApiEntity = {
+    subject,
+    description: fullBody,
+    directioncode: true, // Outgoing
+    email_activity_parties: activityParties,
+  };
+
+  return emailEntity;
+}
+
+/**
+ * Resolve email addresses to Dataverse activity party objects.
+ * For each address, tries to find a matching contact record.
+ * - If found: uses partyid_contact@odata.bind (resolved recipient)
+ * - If not found: uses addressused (unresolved — may be blocked by org settings)
+ */
+async function _resolveToParties(
+  webApi: IWebApi,
+  toAddress: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<any[]> {
+  const addresses = toAddress.split(/[;,]/).map((a) => a.trim()).filter(Boolean);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const parties: any[] = [];
+
+  for (const addr of addresses) {
+    const contactId = await _resolveEmailToContact(webApi, addr);
+    if (contactId) {
+      // Resolved to a contact record — Dataverse will accept this
+      parties.push({
+        'partyid_contact@odata.bind': `/contacts(${contactId})`,
+        participationtypemask: 2, // To
+      });
+    } else {
+      // Unresolved — use addressused as fallback
+      parties.push({
+        addressused: addr,
+        participationtypemask: 2, // To
+      });
+    }
+  }
+
+  return parties;
+}
+
+/**
+ * Call the Dataverse SendEmail bound action to mark an email as "Pending Send".
+ * Server-side sync will process it through the configured mailbox (Exchange/SMTP).
+ *
+ * SendEmail is a BOUND action on the email entity — the correct OData URL is:
+ *   POST /api/data/v9.0/emails({id})/Microsoft.Dynamics.CRM.SendEmail
+ *
+ * The unbound format (POST /api/data/v9.0/SendEmail) returns 404.
+ */
+async function _sendEmail(emailActivityId: string): Promise<void> {
+  const xrm = getXrm();
+  const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '';
+
+  if (!clientUrl) {
+    console.warn('[MatterService] Cannot determine Dataverse URL — cannot send email');
+    throw new Error('Cannot determine Dataverse URL for SendEmail');
+  }
+
+  const url = `${clientUrl}/api/data/v9.0/emails(${emailActivityId})/Microsoft.Dynamics.CRM.SendEmail`;
+  console.info('[MatterService] Calling SendEmail bound action:', url);
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'OData-Version': '4.0',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ IssueSend: true }),
+    });
+
+    if (response.ok || response.status === 204) {
+      console.info('[MatterService] SendEmail action succeeded for:', emailActivityId);
+    } else {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      console.error('[MatterService] SendEmail failed:', response.status, errorText);
+      throw new Error(`SendEmail failed: ${response.status} ${errorText}`);
+    }
+  } catch (err) {
+    console.error('[MatterService] SendEmail error:', err);
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -362,20 +544,23 @@ export class MatterService {
         return { success: true };
       }
 
-      // Create a draft email activity in Dataverse linked to the matter.
-      // "regardingobjectid_sprk_matter" is a polymorphic regarding-object lookup
-      // on the email entity — discover its correct nav-prop name.
-      const emailNavProps = await _discoverNavProps('email');
-      const regardingProp = _resolveNavProp(emailNavProps, 'regardingobjectid_sprk_matter');
+      const recipients = input.recipientEmails.join('; ');
 
-      const emailEntity: WebApiEntity = {
+      // Resolve email addresses to Dataverse contact records.
+      // Resolved recipients get proper activity history on their contact record.
+      const resolvedToParties = await _resolveToParties(this._webApi, recipients);
+
+      // Build email entity with activity parties (From/To) for server-side sync.
+      const emailEntity = _buildEmailEntity({
         subject: `Matter Summary: ${matterName}`,
-        description: `Summary distribution for matter "${matterName}" to: ${input.recipientEmails.join(', ')}`,
-        [`${regardingProp}@odata.bind`]: `/sprk_matters(${matterId})`,
-      };
+        body: `Summary distribution for matter "${matterName}" to: ${recipients}`,
+        resolvedToParties,
+        matterId,
+        matterName,
+      });
 
-      await this._webApi.createRecord('email', emailEntity);
-      return { success: true };
+      const result = await this._createAndSendEmail(emailEntity, matterId);
+      return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       return {
@@ -390,18 +575,19 @@ export class MatterService {
     input: ISendEmailInput
   ): Promise<{ success: boolean; warning?: string }> {
     try {
-      // Reuse cached email nav-props (already fetched by _distributeSummary if called)
-      const emailNavProps = await _discoverNavProps('email');
-      const regardingProp = _resolveNavProp(emailNavProps, 'regardingobjectid_sprk_matter');
+      // Resolve email addresses to Dataverse contact records.
+      const resolvedToParties = await _resolveToParties(this._webApi, input.to);
 
-      const emailEntity: WebApiEntity = {
+      // Build email entity with activity parties (From/To) for server-side sync.
+      const emailEntity = _buildEmailEntity({
         subject: input.subject,
-        description: input.body,
-        [`${regardingProp}@odata.bind`]: `/sprk_matters(${matterId})`,
-      };
+        body: input.body,
+        resolvedToParties,
+        matterId,
+      });
 
-      await this._webApi.createRecord('email', emailEntity);
-      return { success: true };
+      const result = await this._createAndSendEmail(emailEntity, matterId);
+      return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       return {
@@ -409,6 +595,122 @@ export class MatterService {
         warning: `Could not create email activity (${message}). Please send manually.`,
       };
     }
+  }
+
+  /**
+   * Create an email activity and trigger send via the Dataverse SendEmail action.
+   * Server-side sync will process the email through the configured mailbox.
+   *
+   * Strategy:
+   *   1. Discover regarding nav-prop via metadata (email → sprk_matter relationship)
+   *   2. Create email with regarding binding if relationship exists
+   *   3. If create-with-regarding fails, create without and patch regarding separately
+   *   4. Call SendEmail bound action to mark "Pending Send"
+   */
+  private async _createAndSendEmail(
+    emailEntity: WebApiEntity,
+    matterId: string
+  ): Promise<{ success: boolean; warning?: string }> {
+    let emailId: string;
+    let regardingSet = false;
+
+    // Discover the correct regarding nav-prop name from email entity metadata.
+    // The regarding relationship to sprk_matter requires activities to be enabled
+    // on the sprk_matter entity. The nav-prop name may differ from the column name.
+    const emailNavProps = await _discoverNavProps('email');
+    const regardingNavProp = emailNavProps['regardingobjectid']
+      ? 'regardingobjectid'
+      : null;
+
+    // Look for the specific sprk_matter regarding nav-prop.
+    // It could be 'regardingobjectid_sprk_matter' or discovered from metadata.
+    let regardingBindingKey = '';
+    if (regardingNavProp) {
+      // Standard pattern: regardingobjectid_ENTITYNAME@odata.bind
+      regardingBindingKey = 'regardingobjectid_sprk_matter@odata.bind';
+    }
+    // Also check if there's a specific nav-prop discovered for sprk_matter regarding
+    for (const [col, nav] of Object.entries(emailNavProps)) {
+      if (col.startsWith('regardingobjectid') && nav.toLowerCase().includes('sprk_matter')) {
+        regardingBindingKey = `${nav}@odata.bind`;
+        console.info('[MatterService] Discovered regarding nav-prop for sprk_matter:', nav);
+        break;
+      }
+    }
+
+    // Attempt 1: create with regarding binding
+    if (regardingBindingKey) {
+      try {
+        emailEntity[regardingBindingKey] = `/sprk_matters(${matterId})`;
+        console.info('[MatterService] Creating email with regarding:', regardingBindingKey);
+        const result = await this._webApi.createRecord('email', emailEntity);
+        emailId = result.id;
+        regardingSet = true;
+      } catch (err) {
+        console.warn('[MatterService] Create with regarding failed:', err);
+        delete emailEntity[regardingBindingKey];
+        // Fall through to attempt without regarding
+      }
+    }
+
+    // Attempt 2: create without regarding
+    if (!regardingSet) {
+      try {
+        console.info('[MatterService] Creating email without regarding');
+        const result = await this._webApi.createRecord('email', emailEntity);
+        emailId = result.id;
+      } catch (secondErr) {
+        // Attempt 3: minimal payload (no activity parties, no regarding)
+        console.warn('[MatterService] Email create failed, trying minimal:', secondErr);
+        const minimalEntity: WebApiEntity = {
+          subject: emailEntity['subject'] as string,
+          description: emailEntity['description'] as string,
+          directioncode: true,
+        };
+        const result = await this._webApi.createRecord('email', minimalEntity);
+        emailId = result.id;
+      }
+    }
+
+    console.info('[MatterService] Email activity created:', emailId, 'regarding set:', regardingSet);
+
+    // If regarding was not set during create, try patching it separately.
+    // This handles cases where the deep-insert fails but a direct update works.
+    if (!regardingSet && matterId) {
+      try {
+        const patchKey = regardingBindingKey || 'regardingobjectid_sprk_matter@odata.bind';
+        await this._webApi.updateRecord('email', emailId, {
+          [patchKey]: `/sprk_matters(${matterId})`,
+        });
+        console.info('[MatterService] Regarding set via separate update');
+        regardingSet = true;
+      } catch (patchErr) {
+        console.warn('[MatterService] Could not set regarding (activities may not be enabled on sprk_matter):', patchErr);
+      }
+    }
+
+    // Send the email via the Dataverse SendEmail bound action.
+    // This marks the email as "Pending Send" for server-side sync to process.
+    try {
+      await _sendEmail(emailId);
+      console.info('[MatterService] SendEmail action succeeded for:', emailId);
+    } catch (sendErr) {
+      console.warn('[MatterService] SendEmail action failed (email created as draft):', sendErr);
+      return {
+        success: true,
+        warning: 'Email created as draft but could not be sent automatically. Please send from the email record.',
+      };
+    }
+
+    const warnings: string[] = [];
+    if (!regardingSet) {
+      warnings.push('Email sent but not linked to matter (activities may not be enabled on sprk_matter entity).');
+    }
+
+    return {
+      success: true,
+      warning: warnings.length > 0 ? warnings.join(' ') : undefined,
+    };
   }
 }
 
