@@ -331,11 +331,17 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
   }, [form]);
 
   // ── AI Pre-fill on mount ───────────────────────────────────────────────────
+  // Stable dependency key: join file names into a single string so the effect
+  // doesn't re-run on every render (uploadedFileNames is a new array ref each time).
+  const prefillKey = uploadedFileNames.join('|');
+  const prefillAttemptedRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (uploadedFiles.length === 0) {
+    if (uploadedFiles.length === 0 || prefillAttemptedRef.current) {
       return;
     }
 
+    prefillAttemptedRef.current = true;
     let cancelled = false;
     const abortController = new AbortController();
 
@@ -352,6 +358,8 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
         for (const f of uploadedFiles) {
           formData.append('files', f.file, f.name);
         }
+
+        console.info('[CreateMatter] Starting AI pre-fill...', { fileCount: uploadedFiles.length });
 
         const response = await authenticatedFetch(`${bffBaseUrl}${PREFILL_PATH}`, {
           method: 'POST',
@@ -372,6 +380,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
 
         // BFF returns flat PreFillResponse; map to IAiPrefillFields
         const data = await response.json();
+        console.info('[CreateMatter] Pre-fill response:', data);
 
         if (cancelled) return;
 
@@ -391,6 +400,8 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
         if (!cancelled) {
           if (abortController.signal.aborted) {
             console.warn('[CreateMatter] Pre-fill timed out after 60s');
+          } else {
+            console.warn('[CreateMatter] Pre-fill failed:', err);
           }
           dispatch({ type: 'AI_PREFILL_ERROR' });
         }
@@ -404,7 +415,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
       abortController.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uploadedFileNames]);
+  }, [prefillKey]);
 
   // ── Lookup search callbacks (stable refs) ──────────────────────────────────
 
