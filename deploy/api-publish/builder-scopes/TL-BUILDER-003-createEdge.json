@@ -1,0 +1,80 @@
+{
+  "id": "c1d2e3f4-a5b6-4c5d-8e9f-003003003003",
+  "name": "SYS-TL-BUILDER-003-createEdge",
+  "displayName": "Create Edge",
+  "description": "Create a connection (edge) between two nodes on the canvas. Defines execution flow between nodes.",
+  "scopeType": "Tool",
+  "ownerType": 1,
+  "isImmutable": true,
+  "configuration": {
+    "handlerType": "CanvasOperationHandler",
+    "operation": "createEdge",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sourceId": {
+          "type": "string",
+          "description": "ID of the source node"
+        },
+        "sourceLabel": {
+          "type": "string",
+          "description": "Label of the source node (alternative to sourceId)"
+        },
+        "targetId": {
+          "type": "string",
+          "description": "ID of the target node"
+        },
+        "targetLabel": {
+          "type": "string",
+          "description": "Label of the target node (alternative to targetId)"
+        },
+        "label": {
+          "type": "string",
+          "description": "Optional label for the edge (e.g., 'true', 'false' for conditions)"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["default", "success", "failure", "true", "false"],
+          "default": "default",
+          "description": "Edge type for conditional routing"
+        }
+      },
+      "required": []
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "edgeId": {
+          "type": "string",
+          "description": "Generated ID of the new edge"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      }
+    },
+    "validationRules": [
+      {
+        "rule": "source node must exist",
+        "errorMessage": "Source node not found"
+      },
+      {
+        "rule": "target node must exist",
+        "errorMessage": "Target node not found"
+      },
+      {
+        "rule": "edge must not create cycle",
+        "errorMessage": "Edge would create a cycle in the playbook flow"
+      },
+      {
+        "rule": "duplicate edge check",
+        "errorMessage": "Edge already exists between these nodes"
+      }
+    ]
+  },
+  "metadata": {
+    "tags": ["builder", "tool", "canvas", "edge", "connection"],
+    "version": "1.0.0",
+    "category": "builder-canvas-ops"
+  }
+}

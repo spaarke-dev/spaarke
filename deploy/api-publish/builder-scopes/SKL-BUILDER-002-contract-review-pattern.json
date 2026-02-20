@@ -1,0 +1,17 @@
+{
+  "id": "b1c2d3e4-f5a6-4b5c-9d8e-002002002002",
+  "name": "SYS-SKL-BUILDER-002-ContractReviewPattern",
+  "displayName": "Contract Review Pattern",
+  "description": "Domain expertise for building contract review playbooks. Provides guidance on general contract structure, standard clauses, negotiation points, and risk areas.",
+  "scopeType": "Skill",
+  "ownerType": 1,
+  "isImmutable": true,
+  "promptFragment": "## Contract Review Playbook Expertise\n\nWhen building playbooks for contract document review, apply this domain knowledge:\n\n### Standard Contract Components\n\n1. **Identification & Recitals**\n   - Parties (full legal names, addresses, entity types)\n   - Effective date and execution date\n   - Recitals/background (purpose and context)\n   - Definitions section\n\n2. **Core Commercial Terms**\n   - Scope of work/services/goods\n   - Pricing and payment terms\n   - Delivery/performance schedule\n   - Acceptance criteria\n   - Change order procedures\n\n3. **Legal Protections**\n   - Representations and warranties\n   - Indemnification provisions\n   - Limitation of liability\n   - Insurance requirements\n   - Confidentiality obligations\n\n4. **Intellectual Property**\n   - IP ownership provisions\n   - License grants\n   - Work product ownership\n   - Background IP carve-outs\n\n5. **Term & Termination**\n   - Initial term and renewals\n   - Termination for convenience\n   - Termination for cause/default\n   - Effect of termination\n   - Survival clauses\n\n6. **Boilerplate Provisions**\n   - Governing law and jurisdiction\n   - Dispute resolution (arbitration, mediation, litigation)\n   - Force majeure\n   - Assignment restrictions\n   - Amendment requirements\n   - Notice provisions\n   - Severability\n   - Integration/entire agreement\n\n### Recommended Node Sequence for Contract Playbooks\n\n1. **TL;DR Summary** - Quick overview of deal terms\n2. **Party Identification** - Extract all parties and roles\n3. **Commercial Terms Analysis** - Scope, pricing, schedule\n4. **Legal Terms Analysis** - Warranties, indemnities, liability\n5. **Risk Assessment** - Flag unfavorable provisions\n6. **Comparison** (optional) - Compare to standard terms\n7. **Assemble** - Structured output\n8. **Deliver** - Final report\n\n### Contract Types to Consider\n\n- Service Agreements (MSA, SOW)\n- Purchase Agreements\n- License Agreements (software, IP)\n- NDAs/Confidentiality Agreements\n- Employment/Consulting Agreements\n- Partnership/JV Agreements\n\n### Risk Indicators to Flag\n\n- Unlimited liability exposure\n- Broad indemnification without carve-outs\n- One-sided termination rights\n- Automatic renewal with long notice periods\n- Unfavorable IP ownership provisions\n- Broad assignment rights (other party)\n- Weak data protection provisions\n- Missing force majeure\n- Exclusive remedy limitations",
+  "metadata": {
+    "tags": ["builder", "skill", "contract", "legal", "pattern"],
+    "applicableDocTypes": ["CONTRACT", "AGREEMENT", "MSA", "SOW", "NDA"],
+    "expertiseArea": "contracts",
+    "version": "1.0.0",
+    "category": "builder-domain"
+  }
+}

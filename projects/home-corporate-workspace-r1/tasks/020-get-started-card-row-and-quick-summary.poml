@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Get Started Card Row and Quick Summary Card</title>
+    <phase>Phase 3: Action Cards &amp; Dialogs</phase>
+    <status>completed</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>001, 002</dependencies>
+    <blocks>021, 025</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag with code implementation — foundational Block 1 UI that action card integration and briefing dialog depend on</rigor-reason>
+    <parallel-group>pg-phase3-actions</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build the Get Started section (Block 1) with a horizontal scrollable row of 7 action cards and a Quick Summary
+    briefing card. Each action card has an icon, label, and click target. The Quick Summary card (280-320px fixed
+    width) sits at the left of the row and shows deterministic aggregation metrics: active matters count,
+    spend/budget, at-risk count (red), overdue count (red), top priority matter, and a "Full briefing" link.
+    This is a Power Apps Custom Page (React 18 exception) — you CAN use createRoot and modern React 18 APIs.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in PCF control development, Fluent UI v9 component composition, React 18, responsive layout with makeStyles, and semantic token usage for dark mode.</role>
+
+  <goal>
+    A horizontal scrollable Get Started row with 7 action cards and a Quick Summary briefing card rendered at the
+    top of the left column. Each action card shows an icon and label and invokes an onClick handler. The Quick
+    Summary card is fixed at 280-320px width and displays deterministic portfolio metrics with at-risk and overdue
+    counts styled in red using semantic tokens. A "Full briefing" link opens the briefing dialog (wired in task 021).
+    All components support light, dark, and high-contrast themes with zero hardcoded colors.
+  </goal>
+
+  <context>
+    <background>
+      The Get Started section is the first thing legal operations managers see on the workspace dashboard. It
+      provides quick-action entry points for the 7 most common tasks (Create New Matter, Create New Project,
+      Assign to Counsel, Analyze New Document, Search Document Files, Send Email Message, Schedule New Meeting)
+      plus a Quick Summary card showing portfolio health at a glance. The Quick Summary uses deterministic
+      aggregation (no AI required) — counts and sums from existing Dataverse entities. The "Full briefing" link
+      expands to a narrative dialog (task 021).
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/plan.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/workspace-main-page.jpg</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/my-portfolio-ai-summary_1.jpg</file>
+      <file>src/client/pcf/LegalWorkspace/LegalWorkspaceApp.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/types/index.ts</file>
+      <file>src/client/pcf/LegalWorkspace/components/Shell/WorkspaceGrid.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">All UI MUST use Fluent UI v9 (@fluentui/react-components) exclusively — no v8, no third-party UI libraries</constraint>
+    <constraint source="ADR-021">MUST use makeStyles (Griffel) for all custom styling with Fluent tokens — NEVER hardcode hex/rgb/hsl color values</constraint>
+    <constraint source="ADR-021">MUST support light mode, dark mode, and high-contrast mode via FluentProvider theme switching</constraint>
+    <constraint source="ADR-021">MUST use semantic color tokens from @fluentui/react-components tokens — at-risk and overdue use colorPaletteRedForeground1</constraint>
+    <constraint source="ADR-021">MUST use @fluentui/react-icons for all card icons</constraint>
+    <constraint source="ADR-012">Import shared UI components from @spaarke/ui-components where available</constraint>
+    <constraint source="ADR-006">Build as PCF control — no legacy JS webresources</constraint>
+    <constraint source="spec">Quick Summary card MUST be 280-320px fixed width</constraint>
+    <constraint source="spec">Action card row MUST be horizontally scrollable when cards overflow viewport</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-006.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="theme-management" location=".claude/patterns/pcf/theme-management.md">FluentProvider theme setup, dark mode detection, theme switching with tokens</pattern>
+      <pattern name="workspace-pcf-reference" location="src/client/pcf/AnalysisWorkspace/">Canonical multi-panel workspace PCF with theme handling — follow component structure</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create GetStarted component directory at src/client/pcf/LegalWorkspace/components/GetStarted/</step>
+    <step order="2">Create ActionCard component (ActionCard.tsx) — accepts icon (Fluent icon component), label (string), onClick handler, and optional disabled state. Uses Card from @fluentui/react-components with hover elevation and focus ring.</step>
+    <step order="3">Create horizontal scrollable card row component (GetStartedRow.tsx) — uses CSS Grid or Flexbox with overflow-x: auto, gap between cards, and smooth scroll behavior. Renders 7 ActionCard instances plus the QuickSummaryCard.</step>
+    <step order="4">Define 7 action card configurations with icons from @fluentui/react-icons: (1) Create New Matter (AddSquareRegular), (2) Create New Project (FolderAddRegular), (3) Assign to Counsel (PersonAddRegular), (4) Analyze New Document (DocumentSearchRegular), (5) Search Document Files (SearchRegular), (6) Send Email Message (MailRegular), (7) Schedule New Meeting (CalendarAddRegular)</step>
+    <step order="5">Create QuickSummaryCard component (QuickSummaryCard.tsx) — fixed width 280-320px, displays deterministic portfolio metrics fetched from BFF briefing endpoint (stub data until BFF available)</step>
+    <step order="6">Add summary metrics to QuickSummaryCard: active matters count, spend/budget formatted as currency, at-risk count styled with colorPaletteRedForeground1 token, overdue count styled with colorPaletteRedForeground1 token, top priority matter name</step>
+    <step order="7">Add "Full briefing" link at bottom of QuickSummaryCard that triggers onOpenBriefing callback (briefing dialog implemented in task 021)</step>
+    <step order="8">Wire action card click handlers as stubs (onClick callbacks that will be connected in tasks 024 and 025)</step>
+    <step order="9">Verify dark mode rendering — confirm all text, backgrounds, borders, and metric colors use semantic tokens. Zero hardcoded color values.</step>
+    <step order="10">Update TASK-INDEX.md — mark task 020 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects, verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/components/GetStarted/ActionCard.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/GetStarted/GetStartedRow.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/GetStarted/QuickSummaryCard.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/GetStarted/getStartedConfig.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/GetStarted/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">7 action cards render in a horizontal scrollable row with correct icons and labels</criterion>
+    <criterion testable="true">Quick Summary card renders at 280-320px fixed width with portfolio metrics</criterion>
+    <criterion testable="true">At-risk and overdue counts are styled in red using colorPaletteRedForeground1 semantic token</criterion>
+    <criterion testable="true">Top priority matter name is displayed in the Quick Summary card</criterion>
+    <criterion testable="true">"Full briefing" link is present and triggers onOpenBriefing callback</criterion>
+    <criterion testable="true">Card row is horizontally scrollable when 7 cards overflow the available width</criterion>
+    <criterion testable="true">Each action card has a hover elevation effect and focus ring for accessibility</criterion>
+    <criterion testable="true">All components render correctly in light, dark, and high-contrast themes</criterion>
+    <criterion testable="true">Zero hardcoded color values (hex, rgb, hsl) — all colors use Fluent semantic tokens</criterion>
+    <criterion testable="true">PCF control builds without TypeScript or webpack errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Reference screenshots/workspace-main-page.jpg for the Get Started row layout and card sizing
+    - Reference screenshots/my-portfolio-ai-summary_1.jpg for Quick Summary card design
+    - The Quick Summary uses deterministic data only — no AI. AI-enhanced narrative is in the briefing dialog (task 021)
+    - Card onClick handlers are stubs initially — task 025 wires the 6 Analysis Builder cards, task 022-024 wire Create New Matter
+    - Use Fluent v9 Card component for consistent elevation, borders, and interactive states
+    - Spend/budget should be formatted as currency (e.g., "$125K / $200K") using Intl.NumberFormat
+    - The card row should not show a scrollbar unless hovered (CSS overflow behavior)
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 7.</protocol>
+  </execution>
+</task>

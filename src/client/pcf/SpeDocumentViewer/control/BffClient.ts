@@ -378,12 +378,22 @@ export class BffClient {
      */
     private async handleErrorResponse(response: Response, correlationId: string): Promise<never> {
         const responseText = await response.text();
+
+        // Diagnostic: log raw response to identify empty/HTML/non-JSON responses
+        console.warn(`[BffClient] Raw error response (${response.status}):`, {
+            contentType: response.headers.get('content-type'),
+            corsHeader: response.headers.get('access-control-allow-origin'),
+            bodyLength: responseText.length,
+            bodyPreview: responseText.substring(0, 500)
+        });
+
         let errorBody: BffErrorResponse | null = null;
 
         try {
             errorBody = JSON.parse(responseText) as BffErrorResponse;
         } catch {
             // Non-JSON response
+            console.warn('[BffClient] Response is not JSON. Raw body:', responseText.substring(0, 1000));
         }
 
         const errorCode = errorBody?.extensions?.code as string | undefined;

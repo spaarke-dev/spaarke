@@ -1,14 +1,14 @@
 # SDAP Troubleshooting Guide
 
 > **Source**: SDAP-ARCHITECTURE-GUIDE.md (Critical Issues & Resolutions section)
-> **Last Updated**: January 9, 2026
+> **Last Updated**: February 18, 2026
 > **Applies To**: Debugging SDAP issues, error resolution
 
 ---
 
 ## TL;DR
 
-Six documented issues: (1) AADSTS500011 - missing app user, (2) Wrong OAuth scope format, (3) Double `/api` path, (4) Wrong relationship name, (5) ManagedIdentity failure, (6) Kiota assembly binding error. Most issues are auth/config related.
+Fourteen documented issues. Auth/config: (1) AADSTS500011, (2) Wrong OAuth scope, (3) Double `/api` path, (4) Wrong relationship name, (5) ManagedIdentity failure, (6) Kiota assembly binding. Email: (7-11) attachment/webhook/polling issues. Deployment/startup: (12) 500.30 diagnostic procedure, (13) Minimal API GET-with-body trap, (14) BackgroundService DI timing.
 
 ---
 
@@ -234,6 +234,10 @@ pac admin list-service-principals --environment https://spaarkedev1.crm.dynamics
 | 400 on record create | Navigation property case mismatch | NavMap response in browser |
 | Upload works, record fails | Lookup binding wrong | Payload in browser Network tab |
 | Preview iframe blank | Preview URL wrong or CORS | Check iframe src in Elements tab |
+| 500.30 after deployment | App crash at startup | Fetch stdout logs via Kudu API (Issue 12) |
+| 500.30 with "Body was inferred" | GET endpoint with body param | Check endpoint handler signatures (Issue 13) |
+| 500.30 with DI resolution error | BackgroundService eager DI | Check AddHostedService constructors (Issue 14) |
+| Oversized publish.zip (>100 MB) | Stale publish dirs in source | Clean source tree before publish (Issue 15) |
 
 ---
 
@@ -455,6 +459,277 @@ curl -X POST "https://spe-api-dev-67e2xz.azurewebsites.net/api/v1/emails/{emailI
 
 ---
 
+## BFF API Startup & Deployment Issues
+
+These issues cause HTTP 500.30 (ASP.NET Core app failed to start) — the app crashes before it can serve any request. The IIS error page gives no useful information; you must read the stdout logs to diagnose.
+
+---
+
+### Issue 12: Diagnosing HTTP 500.30 — Reading Stdout Logs
+
+#### Symptom
+```
+HTTP Error 500.30 - ASP.NET Core app failed to start
+Module: AspNetCoreModuleV2
+Error Code: 0x8007023e
+```
+
+IIS returns a generic HTML error page with no stack trace. Browser dev tools show HTML, not JSON ProblemDetails. This means the crash happened below the ASP.NET middleware layer (during host startup).
+
+#### Diagnostic Procedure
+
+**Step 1: Ensure stdout logging is enabled in the deployed web.config**
+
+```xml
+<!-- In web.config (deployed to wwwroot) -->
+<aspNetCore processPath="dotnet" arguments=".\Sprk.Bff.Api.dll"
+            stdoutLogEnabled="true"
+            stdoutLogFile=".\logs\stdout"
+            hostingModel="inprocess" />
+```
+
+> Note: `dotnet publish` regenerates web.config from the project template with `stdoutLogEnabled="false"`. You must edit the published web.config after each publish, or update the project template.
+
+**Step 2: Fetch stdout logs via Kudu VFS API**
+
+```powershell
+# Get Kudu credentials
+az webapp deployment list-publishing-credentials `
+  --name spe-api-dev-67e2xz `
+  --resource-group spe-infrastructure-westus2 `
+  --query "{user: publishingUserName, pass: publishingPassword}" -o json
+
+# List stdout log files
+$headers = @{ Authorization = "Basic $base64" }
+Invoke-RestMethod -Uri 'https://spe-api-dev-67e2xz.scm.azurewebsites.net/api/vfs/site/wwwroot/logs/' -Headers $headers |
+  Sort-Object mtime -Descending | Select-Object -First 5 name, size, mtime
+
+# Read the most recent log
+Invoke-RestMethod -Uri 'https://spe-api-dev-67e2xz.scm.azurewebsites.net/api/vfs/site/wwwroot/logs/{filename}' -Headers $headers
+```
+
+**Step 3: Search for the crash**
+
+Look for these markers in the stdout log:
+- `crit: Microsoft.AspNetCore.Hosting.Diagnostics[6]` — Application startup exception
+- `fail: Microsoft.Extensions.Hosting.Internal.Host[11]` — Hosting failed to start
+- `System.InvalidOperationException` — Common for DI and routing errors
+
+**Alternative: Deploy via CLI (ensures deployment actually takes effect)**
+
+```bash
+az webapp deploy --resource-group spe-infrastructure-westus2 \
+  --name spe-api-dev-67e2xz \
+  --src-path deploy/publish.zip --type zip
+```
+
+---
+
+### Issue 13: Minimal API GET Endpoint with Body Parameter (Startup Crash)
+
+#### Symptom
+```
+System.InvalidOperationException: Body was inferred but the method does not allow inferred body parameters.
+
+Parameter           | Source
+-----------------------------------------------
+id                  | Route (Inferred)
+request             | Body (Inferred)
+someService         | Services (Inferred)
+```
+
+The app compiles successfully but crashes at startup when ASP.NET builds the endpoint metadata.
+
+#### Root Cause
+
+In ASP.NET Minimal APIs, **GET and DELETE endpoints cannot have inferred body parameters**. If a handler method accepts a complex type parameter (e.g., `ScoreRequest request`) that isn't registered in DI and isn't a route/query parameter, the framework infers it as a body parameter — which is invalid for GET.
+
+This is a **compile-time silent, runtime-fatal** error. It crashes during `ApplicationBuilder.Build()`, killing the entire app.
+
+#### Resolution
+
+**Option A: Change to POST** (preferred when sending data)
+```csharp
+// BEFORE (crashes at startup)
+group.MapGet("/events/{id:guid}/scores", GetEventScores);
+
+// AFTER
+group.MapPost("/events/{id:guid}/scores", GetEventScores);
+```
+
+**Option B: Add explicit attribute** (if GET is required)
+```csharp
+private static IResult GetEventScores(
+    Guid id,
+    [FromBody] ScoreRequest request,  // Explicit — still invalid for GET!
+    ...
+```
+> This does NOT fix the issue for GET. You must use POST/PUT/PATCH for body parameters.
+
+**Option C: Use query parameters instead**
+```csharp
+// Restructure to accept inputs as query params
+private static IResult GetEventScores(
+    Guid id,
+    [FromQuery] int priorityScore,
+    [FromQuery] string effortLevel,
+    ...
+```
+
+#### Prevention
+
+When creating Minimal API endpoints, verify:
+- **GET/DELETE handlers**: All parameters must be route, query, header, or DI services
+- **POST/PUT/PATCH handlers**: May include one body parameter (complex type)
+- **Code review check**: Any handler with a complex type parameter on a GET endpoint is a startup crash waiting to happen
+
+#### Files Affected (February 2026)
+- `WorkspaceEndpoints.cs:88` — `GetEventScores` changed from MapGet to MapPost
+- `useTodoScoring.ts:239` — Client fetch changed from GET to POST
+
+---
+
+### Issue 14: BackgroundService Forces Eager DI Resolution at Startup
+
+#### Symptom
+```
+System.InvalidOperationException: Unable to resolve service for type 'IDataverseService'
+```
+App crashes with 500.30 immediately after startup. The stack trace shows the error originates from `Microsoft.Extensions.Hosting.Internal.Host[11]` during `IHost.StartAsync()`.
+
+#### Root Cause
+
+`AddHostedService<T>()` registers a service that is resolved and started during `IHost.StartAsync()`. This means **all constructor dependencies are resolved at host startup**, not lazily.
+
+If a constructor dependency (like `IDataverseService`) is a Singleton that connects eagerly in its own constructor (e.g., `DataverseServiceClientImpl` creates a `ServiceClient` connection on line 64), a connection failure crashes the entire host.
+
+```csharp
+// DANGEROUS: BackgroundService with eager dependency
+public class TodoGenerationService : BackgroundService
+{
+    public TodoGenerationService(IDataverseService dataverse, ...)
+    {
+        // dataverse is resolved NOW, during host startup
+        // If DataverseServiceClientImpl constructor throws, host crashes
+    }
+}
+```
+
+#### Resolution
+
+Use `IServiceProvider` for lazy resolution in `ExecuteAsync()`:
+
+```csharp
+public class TodoGenerationService : BackgroundService
+{
+    private readonly IServiceProvider _serviceProvider;
+    private IDataverseService? _dataverse;
+
+    public TodoGenerationService(IServiceProvider serviceProvider, ...)
+    {
+        _serviceProvider = serviceProvider;  // Always succeeds
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        await Task.Delay(initialDelay, stoppingToken);  // Don't blast at startup
+
+        try
+        {
+            _dataverse = _serviceProvider.GetRequiredService<IDataverseService>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to resolve IDataverseService. Service will not run.");
+            return;  // Service disabled, but app keeps running
+        }
+
+        // ... normal operation with _dataverse
+    }
+}
+```
+
+#### Key Principle
+
+**BackgroundServices must never crash the host.** If a background service can't get its dependencies, it should log the error and exit gracefully. The main app (health endpoints, API endpoints) must remain functional.
+
+#### Known Eager Singletons in This Codebase
+
+| Singleton | Eager Behavior | Safe in BackgroundService? |
+|-----------|---------------|---------------------------|
+| `DataverseServiceClientImpl` | Connects to Dataverse in constructor | No — use `IServiceProvider` |
+| `OpenAiClient` | Creates `AzureOpenAIClient` in constructor | Only if conditionally registered |
+| `GraphClientFactory` | Creates `ConfidentialClientApplication` | Generally safe (doesn't connect) |
+| `PriorityScoringService` | Stateless, no external calls | Yes |
+
+#### Files Affected (February 2026)
+- `TodoGenerationService.cs` — Changed from direct `IDataverseService` injection to `IServiceProvider` lazy resolution
+- `WorkspaceModule.cs:82-85` — Updated comment documenting the pattern
+
+---
+
+### Issue 15: Publish Artifact Contamination (Oversized Zip)
+
+#### Symptom
+
+`publish.zip` is unexpectedly large (e.g., 200+ MB instead of ~60 MB) with 1000+ entries. Deployment may fail or behave unexpectedly.
+
+#### Root Cause
+
+If previous `dotnet publish` output directories (`publish/`, `publish-output/`, `bin/Release/net8.0/publish/`) exist inside the project source tree, subsequent `dotnet publish` picks them up as content files and includes them recursively in the output.
+
+```
+src/server/api/Sprk.Bff.Api/
+├── publish/                    ← Stale from previous build
+│   ├── Sprk.Bff.Api.dll
+│   ├── publish/                ← Nested copy!
+│   │   ├── Sprk.Bff.Api.dll
+│   │   └── ...
+│   └── ...
+├── Sprk.Bff.Api.csproj
+└── ...
+```
+
+#### Resolution
+
+**Step 1: Always publish to an external directory**
+
+```bash
+# CORRECT: Output outside the project source tree
+dotnet publish src/server/api/Sprk.Bff.Api -c Release -o deploy/api-publish
+
+# WRONG: Output inside the project directory (creates recursive nesting)
+dotnet publish src/server/api/Sprk.Bff.Api -c Release -o src/server/api/Sprk.Bff.Api/publish
+```
+
+**Step 2: Clean stale directories if they exist**
+
+```bash
+rm -rf src/server/api/Sprk.Bff.Api/publish/
+rm -rf src/server/api/Sprk.Bff.Api/publish-output/
+```
+
+**Step 3: Verify the zip before deploying**
+
+```powershell
+# Quick check: entry count should be ~240, not 1000+
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [System.IO.Compression.ZipFile]::OpenRead('deploy/publish.zip')
+Write-Output "Entries: $($zip.Entries.Count)"
+
+# Check for nested publish dirs (should return nothing)
+$zip.Entries | Where-Object { $_.FullName -like 'publish*' }
+$zip.Dispose()
+```
+
+#### Prevention
+
+- Always use `deploy/api-publish/` as the publish output path
+- Add `publish/` and `publish-output/` to `.gitignore` inside the API project directory
+- Verify zip size and entry count before every deployment (~60 MB, ~240 entries)
+
+---
+
 ## Post-Deployment Checklist
 
 - [ ] Health endpoint returns 200
@@ -480,3 +755,4 @@ curl -X POST "https://spe-api-dev-67e2xz.azurewebsites.net/api/v1/emails/{emailI
 
 *Condensed from troubleshooting sections of architecture guide*
 *Email-to-Document issues added January 2026*
+*BFF API startup/deployment issues added February 2026*

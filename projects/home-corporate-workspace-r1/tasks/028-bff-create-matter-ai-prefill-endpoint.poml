@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>BFF — Create Matter AI Pre-fill Endpoint</title>
+    <phase>Phase 3: Action Cards &amp; Dialogs</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>008</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, api, ai, minimal-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag with code implementation — file upload handling, SpeFileStore integration, AI document analysis via PlaybookService, and structured field extraction</rigor-reason>
+    <parallel-group>pg-ai-integration</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create a BFF endpoint POST /api/workspace/matters/pre-fill that accepts uploaded files (multipart/form-data),
+    stores them temporarily via SpeFileStore, analyzes them using the AI Playbook (document analysis), and returns
+    pre-filled matter form field values. The AI extracts: matter type, practice area, matter name, organization,
+    estimated budget, key parties, and summary from the uploaded documents. The endpoint is rate-limited to
+    prevent AI abuse.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET 8 Minimal API file handling, multipart form data processing, SpeFileStore facade for SPE file operations, AI Playbook document analysis via PlaybookService, and structured data extraction from AI responses.</role>
+
+  <goal>
+    A working BFF endpoint at POST /api/workspace/matters/pre-fill that accepts multipart/form-data with file
+    uploads, stores files via SpeFileStore, calls the AI Playbook for document analysis, extracts structured field
+    values from the AI response, and returns a PreFillResponse with matter field values. The endpoint validates
+    file types and sizes, is rate-limited, and returns ProblemDetails on error. It builds without errors.
+  </goal>
+
+  <context>
+    <background>
+      The AI pre-fill endpoint is a key productivity feature for the Create New Matter wizard. When users upload
+      documents in Step 1 (contracts, engagement letters, invoices, etc.), Step 2 calls this endpoint to have
+      the AI analyze the documents and suggest field values for the matter record. This reduces manual data entry
+      from ~5 minutes to ~30 seconds of review. The endpoint handles file upload storage (via SpeFileStore facade
+      per ADR-007), AI document analysis (via PlaybookService per ADR-013), and structured extraction of matter
+      field values from the AI response.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Workspace/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Spe/SpeFileStore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Infrastructure/ProblemDetailsHelper.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API pattern — MapPost with handler delegate accepting IFormFileCollection</constraint>
+    <constraint source="ADR-007">File uploads MUST route through SpeFileStore facade — do NOT access SharePoint/SPE directly</constraint>
+    <constraint source="ADR-008">MUST use endpoint filter for authorization</constraint>
+    <constraint source="ADR-010">DI registrations MUST count toward ≤15 non-framework limit</constraint>
+    <constraint source="ADR-013">AI document analysis MUST use PlaybookService — NOT direct OpenAI calls</constraint>
+    <constraint source="ADR-013">MUST include rate limiting on AI endpoints</constraint>
+    <constraint source="spec">Supported file types: PDF (.pdf), DOCX (.docx), XLSX (.xlsx)</constraint>
+    <constraint source="spec">Maximum file size: 10MB per file</constraint>
+    <constraint source="spec">Pre-fill response MUST include: matterType, practiceArea, matterName, organization, estimatedBudget, keyParties, summary</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-007.md</file>
+      <file>.claude/adr/ADR-008.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="ai-endpoint" location="src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs">Canonical AI endpoint pattern — follow for PlaybookService integration</pattern>
+      <pattern name="spe-file-store" location="src/server/api/Sprk.Bff.Api/Services/Spe/SpeFileStore.cs">SpeFileStore facade for file upload/download — follow for file handling</pattern>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint registration and file upload handling</pattern>
+      <pattern name="error-handling" location=".claude/patterns/api/error-handling.md">ProblemDetails for file validation and AI service errors</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add pre-fill endpoint to WorkspaceEndpoints: MapPost("/matters/pre-fill", HandlePreFill) — accepts multipart/form-data with IFormFileCollection</step>
+    <step order="2">Create PreFillResponse record with extracted field values: matterType (string?), practiceArea (string?), matterName (string?), organization (string?), estimatedBudget (decimal?), keyParties (string?), summary (string?), confidence (double), preFilledFields (string[] — list of field names that were successfully extracted)</step>
+    <step order="3">Implement file validation — reject files that are not PDF/DOCX/XLSX (by extension and content type), reject files larger than 10MB. Return 400 ProblemDetails with specific validation errors per file.</step>
+    <step order="4">Store uploaded files temporarily via SpeFileStore — use temporary container or staging area. Files are stored for AI analysis and later associated with the matter record (in task 024 Finish flow).</step>
+    <step order="5">Call AI Playbook (PlaybookService) for document analysis — pass file content/references with a prompt instructing extraction of: matter type, practice area, matter name, organization, budget, key parties, and summary. Use structured output format if supported by PlaybookService.</step>
+    <step order="6">Parse AI response and extract structured field values — map AI output to PreFillResponse fields. Track which fields were successfully extracted in preFilledFields array. Handle partial extraction gracefully (some fields null).</step>
+    <step order="7">Add rate limiting — same policy as task 026 (10 requests per minute per user). Return 429 ProblemDetails when exceeded.</step>
+    <step order="8">Verify dotnet build succeeds with no errors or warnings</step>
+    <step order="9">Update TASK-INDEX.md — mark task 028 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects, verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/Models/PreFillResponse.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/workspace/matters/pre-fill endpoint exists and accepts multipart/form-data</criterion>
+    <criterion testable="true">Files with invalid types (not PDF/DOCX/XLSX) are rejected with 400 ProblemDetails</criterion>
+    <criterion testable="true">Files larger than 10MB are rejected with 400 ProblemDetails</criterion>
+    <criterion testable="true">Files are stored via SpeFileStore facade (not direct SPE access)</criterion>
+    <criterion testable="true">AI Playbook is called for document analysis via PlaybookService</criterion>
+    <criterion testable="true">Response includes extracted field values: matterType, practiceArea, matterName, organization, estimatedBudget, keyParties, summary</criterion>
+    <criterion testable="true">preFilledFields array lists only fields that were successfully extracted</criterion>
+    <criterion testable="true">Partial extraction is handled gracefully — unextracted fields are null</criterion>
+    <criterion testable="true">Rate limiting returns 429 ProblemDetails when limit exceeded</criterion>
+    <criterion testable="true">Endpoint authorization filter is applied</criterion>
+    <criterion testable="true">Solution builds without errors (dotnet build)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Follow Api/Ai/AnalysisEndpoints.cs for AI endpoint structure and PlaybookService usage
+    - Follow Services/Spe/SpeFileStore.cs for file upload patterns — understand upload method signatures
+    - File content can be passed to AI as base64 or via file references (depends on PlaybookService API)
+    - The AI prompt should instruct structured JSON output for reliable field extraction
+    - Budget extraction should handle various formats: "$1,000,000", "1M", "one million dollars"
+    - Practice area mapping should normalize AI output to the dropdown options defined in the form
+    - Consider extracting key parties as a comma-separated list or structured array
+    - If AI Playbook times out, return empty PreFillResponse with confidence=0 (no error)
+    - The temporary file storage path should be cleaned up after the matter is created (or after a timeout)
+    - Multipart form data handling in Minimal API: use [FromForm] attribute or IFormFileCollection parameter
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Study SpeFileStore thoroughly for file handling. Checkpoint after steps 4 and 7.</protocol>
+  </execution>
+</task>

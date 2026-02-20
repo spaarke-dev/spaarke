@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Block 5 — My Portfolio Widget (Projects + Documents Tabs)</title>
+    <phase>Phase 1: Foundation &amp; Independent Blocks</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks>none</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Extends existing component (task 005) with two additional tabs — less complex than initial widget build, follows established patterns</rigor-reason>
+    <parallel-group>pg-phase1-ui</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add the Projects and Documents tabs to the My Portfolio widget (Block 5) created in task 005. The Projects
+    tab shows project items with name, status badge (Active/Planning), type, owner, practice area. The
+    Documents tab shows document items with file type icon, name, description, document type, matter name, and
+    timestamp. Both tabs display max 5 items with "View All" footer navigation via postMessage to parent MDA.
+    Wire both tabs to the Xrm.WebApi DataverseService.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 components, React tab content rendering, and Dataverse entity display patterns.</role>
+
+  <goal>
+    Projects and Documents tabs are fully functional within the My Portfolio widget, displaying correctly typed
+    data from the DataverseService, with "View All" footer navigation, loading states, and full dark mode support.
+  </goal>
+
+  <context>
+    <background>
+      Task 005 created the My Portfolio widget with the Matters tab fully functional. This task completes the
+      widget by adding the Projects and Documents tabs. Projects show the user's assigned projects with status
+      badges (Active or Planning). Documents show recently modified documents associated with the user's matters,
+      with file type icons and matter cross-references. Both tabs use Xrm.WebApi via the DataverseService for
+      client-side data access.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/my-portfolio-projects-list_2.jpg</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/my-portfolio-documents-list_3.jpg</file>
+      <file>src/client/pcf/LegalWorkspace/components/MyPortfolio/MyPortfolioWidget.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/services/DataverseService.ts</file>
+      <file>src/client/pcf/LegalWorkspace/types/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">All UI MUST use Fluent UI v9 — Badge for status, makeStyles for all styling, semantic tokens only</constraint>
+    <constraint source="ADR-021">MUST use @fluentui/react-icons for document file type icons</constraint>
+    <constraint source="ADR-021">MUST support light, dark, and high-contrast themes</constraint>
+    <constraint source="spec">Max 5 items per tab with "View All" footer navigation via postMessage</constraint>
+    <constraint source="spec">Data from Xrm.WebApi — use DataverseService.getProjectsByUser and getDocumentsByMatter</constraint>
+    <constraint source="ADR-012">Import from @spaarke/ui-components where reusable components exist</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="matter-item-pattern" location="src/client/pcf/LegalWorkspace/components/MyPortfolio/MatterItem.tsx">Follow the same layout and styling pattern used for MatterItem in task 005</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ProjectItem component (ProjectItem.tsx) in MyPortfolio directory — displays: project name (bold, clickable), status badge (Active=green, Planning=blue using Fluent Badge), project type and owner on second line, practice area and last activity timestamp on third line. Follow the same layout pattern as MatterItem.tsx from task 005.</step>
+    <step order="2">Create DocumentItem component (DocumentItem.tsx) in MyPortfolio directory — displays: file type icon (DocumentPdfRegular for PDF, DocumentTextRegular for DOCX, TableRegular for XLSX, DocumentRegular for other), document name (bold), description text (truncated to 1 line), document type label and matter name on metadata line, timestamp on last line. Follow similar layout pattern.</step>
+    <step order="3">Create useProjectsList hook — fetches projects via DataverseService.getProjectsByUser() with top 5. Returns { projects: IProject[], isLoading: boolean, error: string | null, totalCount: number }.</step>
+    <step order="4">Create useDocumentsList hook — fetches documents via DataverseService with top 5 (across all user's matters). Returns { documents: IDocument[], isLoading: boolean, error: string | null, totalCount: number }.</step>
+    <step order="5">Wire Projects tab content in MyPortfolioWidget.tsx — replace placeholder with ProjectItem list, loading state, empty state, and "View All Projects" footer button with postMessage navigation to sprk_project entity view.</step>
+    <step order="6">Wire Documents tab content in MyPortfolioWidget.tsx — replace placeholder with DocumentItem list, loading state, empty state, and "View All Documents" footer button with postMessage navigation to sprk_document entity view.</step>
+    <step order="7">Verify dark mode rendering — confirm ProjectItem status badges, DocumentItem file icons, and all text render correctly across light/dark/high-contrast themes.</step>
+    <step order="8">Update TASK-INDEX.md — mark task 006 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/components/MyPortfolio/ProjectItem.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/MyPortfolio/DocumentItem.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/hooks/useProjectsList.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/hooks/useDocumentsList.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Projects tab displays up to 5 project items with name, status badge (Active/Planning), type, owner, practice area, and last activity</criterion>
+    <criterion testable="true">Documents tab displays up to 5 document items with file type icon, name, description, document type, matter name, and timestamp</criterion>
+    <criterion testable="true">File type icons correctly map: PDF → DocumentPdfRegular, DOCX → DocumentTextRegular, XLSX → TableRegular, others → DocumentRegular</criterion>
+    <criterion testable="true">Project status badges use correct colors: Active=green, Planning=blue via Fluent semantic tokens</criterion>
+    <criterion testable="true">"View All Projects" footer sends postMessage for sprk_project entity view navigation</criterion>
+    <criterion testable="true">"View All Documents" footer sends postMessage for sprk_document entity view navigation</criterion>
+    <criterion testable="true">Tab count badges update to reflect total record counts from DataverseService queries</criterion>
+    <criterion testable="true">Loading states render Skeleton placeholders while data is loading</criterion>
+    <criterion testable="true">Empty states render a friendly message when no projects or documents exist</criterion>
+    <criterion testable="true">Dark mode renders all elements correctly — no hardcoded colors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Reference screenshots/my-portfolio-projects-list_2.jpg for Projects tab layout
+    - Reference screenshots/my-portfolio-documents-list_3.jpg for Documents tab layout
+    - Follow the same visual rhythm and spacing as MatterItem from task 005
+    - Document descriptions should be truncated with ellipsis (CSS text-overflow) to 1 line
+    - Timestamp formatting should match the relative time format used in MatterItem ("2 hours ago", "3 days ago")
+    - For documents, may need to query across multiple matters — DataverseService should support this
+    - Empty state text: "No projects found" / "No documents found" with a subtle icon
+    - Tab count badges: use Fluent UI Badge or CounterBadge component with the record count
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol.</protocol>
+  </execution>
+</task>

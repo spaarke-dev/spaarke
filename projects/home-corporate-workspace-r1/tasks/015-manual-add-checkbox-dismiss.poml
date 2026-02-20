@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Block 4 - Manual Add, Checkbox, Dismiss</title>
+    <phase>Phase 2: Core Feature Blocks</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>014</dependencies>
+    <blocks>none</blocks>
+    <tags>pcf, react, fluent-ui, frontend, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag with Dataverse persistence (CRUD operations for to-do creation, status updates, dismiss/restore), multiple interactive states, and collapsible dismissed section</rigor-reason>
+    <parallel-group>pg-phase2-todo</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement manual to-do creation, checkbox toggle, and dismiss functionality for the Smart To Do list (Block 4).
+    Manual add: create an AddTodoBar component with plus icon, text input, and Add button. On add, create a new
+    Event record in Dataverse with sprk_todoflag=true, sprk_todosource='User', sprk_todostatus='Open'. Checkbox:
+    toggle sprk_todostatus between 'Open' and 'Completed' with visual feedback (strikethrough text, reduced opacity).
+    Dismiss: move item to a collapsible dismissed section, set sprk_todostatus='Dismissed'. The dismissed section
+    shows a count badge and items can be restored back to the active list.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 form components, React 18, Dataverse Xrm.WebApi CRUD operations, and interactive list management with collapsible sections.</role>
+
+  <goal>
+    AddTodoBar creates new to-do items that appear immediately in the list and persist to Dataverse. Checkbox
+    toggles between Open and Completed with strikethrough visual feedback and Dataverse persistence. Dismiss
+    moves items to a collapsible DismissedSection with count badge. Dismissed items can be restored to active
+    list. All state changes persist to Dataverse via Xrm.WebApi.
+  </goal>
+
+  <context>
+    <background>
+      The Smart To Do list needs three interactive features beyond the base display: 1) Manual creation of new
+      to-do items via a quick-add bar, 2) Marking items as completed via checkbox toggle, and 3) Dismissing items
+      that aren't relevant. Manual creation creates a new Event record in Dataverse with to-do fields set.
+      Completing an item applies visual feedback (strikethrough, reduced opacity) and updates the Dataverse record.
+      Dismissing moves the item to a collapsible section at the bottom of the list where it can be recovered.
+      All three operations require immediate UI feedback followed by Dataverse persistence.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/screenshots/to-do-list_1.jpg</file>
+      <file>src/client/pcf/LegalWorkspace/components/SmartToDo/SmartToDo.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/components/SmartToDo/TodoItem.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/services/DataverseService.ts</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">All UI MUST use Fluent UI v9 (@fluentui/react-components) exclusively</constraint>
+    <constraint source="ADR-021">MUST use makeStyles (Griffel) for all custom styling with Fluent tokens</constraint>
+    <constraint source="ADR-021">MUST support light mode, dark mode, and high-contrast mode</constraint>
+    <constraint source="ADR-021">MUST use @fluentui/react-icons for all icons (plus, dismiss, restore)</constraint>
+    <constraint source="FR-08">Manual to-do creation via add bar MUST create Event with sprk_todoflag=true, sprk_todosource='User'</constraint>
+    <constraint source="FR-09">Checkbox toggle MUST update sprk_todostatus between Open and Completed with visual feedback</constraint>
+    <constraint source="FR-10">Dismiss MUST set sprk_todostatus='Dismissed' and move to collapsible dismissed section</constraint>
+    <constraint source="spec">Hybrid data access — use Xrm.WebApi for CRUD operations</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Xrm.WebApi CRUD patterns — createRecord, updateRecord for Event entity</pattern>
+      <pattern name="todo-visual-reference" location="projects/home-corporate-workspace-r1/screenshots/to-do-list_1.jpg">Visual reference for add bar, checkbox states, dismissed section</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create AddTodoBar component at src/client/pcf/LegalWorkspace/components/SmartToDo/AddTodoBar.tsx — render AddRegular icon, Fluent v9 Input component for title text, and "Add" Button. Use flexbox layout with proper spacing.</step>
+    <step order="2">Implement add handler — on click Add (or Enter key press): create new Event record via Xrm.WebApi.createRecord('sprk_event', { sprk_name: inputText, sprk_todoflag: true, sprk_todosource: 'User', sprk_todostatus: 'Open' }). Clear input field. Optimistically add item to list before Dataverse confirms. Handle error with rollback.</step>
+    <step order="3">Implement checkbox handler in TodoItem — on checkbox change: toggle sprk_todostatus between 'Open' and 'Completed'. Call DataverseService to update the record. Optimistic UI update.</step>
+    <step order="4">Add visual feedback for completed items — apply CSS via makeStyles: textDecoration: 'line-through' on title text, opacity: 0.6 on entire item row. Use conditional class merging with mergeClasses from Griffel. Transition animation for smooth visual change.</step>
+    <step order="5">Implement dismiss handler — add DismissRegular icon button to each TodoItem. On click: set sprk_todostatus='Dismissed' via DataverseService. Remove from active list. Add to dismissed list. Optimistic update.</step>
+    <step order="6">Create DismissedSection component at src/client/pcf/LegalWorkspace/components/SmartToDo/DismissedSection.tsx — collapsible section with header showing "Dismissed" label and count Badge. Uses Fluent v9 Accordion or custom expand/collapse with ChevronDownRegular/ChevronUpRegular icon. Collapsed by default.</step>
+    <step order="7">Implement restore from dismissed — add ArrowUndoRegular icon button on dismissed items. On click: set sprk_todostatus='Open' via DataverseService. Move item back to active list. Re-sort active list.</step>
+    <step order="8">Verify all Dataverse persistence — test createRecord (add), updateRecord (checkbox, dismiss, restore). Ensure optimistic updates roll back correctly on failure. Verify state consistency.</step>
+    <step order="9">Update TASK-INDEX.md — mark task 015 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+    <tool name="terminal">Run shell commands for build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/components/SmartToDo/AddTodoBar.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/SmartToDo/DismissedSection.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/SmartToDo/TodoItem.tsx (updated)</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/SmartToDo/SmartToDo.tsx (updated)</output>
+    <output type="code">src/client/pcf/LegalWorkspace/services/DataverseService.ts (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AddTodoBar renders with plus icon, text input, and Add button</criterion>
+    <criterion testable="true">Clicking Add (or pressing Enter) creates a new Event in Dataverse with sprk_todoflag=true, sprk_todosource='User', sprk_todostatus='Open'</criterion>
+    <criterion testable="true">New item appears immediately in the to-do list (optimistic update) before Dataverse confirms</criterion>
+    <criterion testable="true">Checkbox toggle updates sprk_todostatus between 'Open' and 'Completed' in Dataverse</criterion>
+    <criterion testable="true">Completed items show strikethrough text and reduced opacity (0.6)</criterion>
+    <criterion testable="true">Dismiss button sets sprk_todostatus='Dismissed' and moves item to DismissedSection</criterion>
+    <criterion testable="true">DismissedSection is collapsible with count badge showing number of dismissed items</criterion>
+    <criterion testable="true">Restore button on dismissed items sets sprk_todostatus='Open' and moves item back to active list</criterion>
+    <criterion testable="true">Input field clears after successful add</criterion>
+    <criterion testable="true">Dark mode renders correctly with zero hardcoded color values</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Reference screenshots/to-do-list_1.jpg for add bar placement (top of the to-do list), checkbox states, and visual styling
+    - The add bar should validate that input is not empty before creating a record
+    - Enter key in the input field should trigger Add (same as clicking the button)
+    - Completed items should remain visible in the active list (with strikethrough) until manually dismissed
+    - Dismissed section should be collapsed by default to save vertical space
+    - Consider adding a brief "Item added" or "Item dismissed" feedback toast using Fluent v9 Toast
+    - When creating a new Event, set default priority to Low and effort to Low (can be scored later by the BFF scoring engine)
+    - The DataverseService should have separate methods: createTodoEvent(title), updateTodoStatus(eventId, status)
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 3 and 6.</protocol>
+  </execution>
+</task>

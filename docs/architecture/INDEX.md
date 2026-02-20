@@ -27,6 +27,7 @@ This directory contains comprehensive architecture documentation covering system
 - [sdap-bff-api-patterns.md](sdap-bff-api-patterns.md)
 - [sdap-pcf-patterns.md](sdap-pcf-patterns.md)
 - [sdap-troubleshooting.md](sdap-troubleshooting.md)
+- **[sdap-workspace-integration-patterns.md](sdap-workspace-integration-patterns.md)** - **NEW**: Entity-agnostic creation, document operations, workspace pre-fill, app-only analysis
 
 ### UI Components
 
@@ -50,6 +51,7 @@ This directory contains comprehensive architecture documentation covering system
 **Common scenarios**:
 - Working with authentication → Load auth-boundaries.md, oauth-obo-*.md
 - Working with SDAP → Load sdap-*.md files
+- Workspace integration → Load sdap-workspace-integration-patterns.md
 - Creating new resources → Load AZURE-RESOURCE-NAMING-CONVENTION.md
 - Understanding AI features → Load SPAARKE-AI-STRATEGY.md
 

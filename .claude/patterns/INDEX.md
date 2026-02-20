@@ -150,6 +150,7 @@ patterns/
 
 | Pattern | File | Source ADRs |
 |---------|------|-------------|
+| **Full-Page Custom Page** | [full-page-custom-page.md](webresource/full-page-custom-page.md) | **ADR-006, ADR-021, ADR-022, ADR-026** |
 | Custom Dialogs in Dataverse | [custom-dialogs-in-dataverse.md](webresource/custom-dialogs-in-dataverse.md) | ADR-006, ADR-023 |
 | Subgrid Parent Rollup | [subgrid-parent-rollup.md](webresource/subgrid-parent-rollup.md) | ADR-001, ADR-006 |
 
@@ -170,6 +171,7 @@ patterns/
 | Background jobs | `api/background-workers.md` + `auth/service-principal.md` |
 | Custom dialogs in web resources | `webresource/custom-dialogs-in-dataverse.md` |
 | Subgrid → parent rollup | `webresource/subgrid-parent-rollup.md` |
+| Building full-page Custom Page | `webresource/full-page-custom-page.md` |
 
 ---
 
