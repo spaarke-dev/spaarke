@@ -73,3 +73,63 @@ export function getUserId(): string {
   console.warn("[LegalWorkspace] Unable to resolve userId from Xrm");
   return "";
 }
+
+/**
+ * Look up the SPE Container ID (sprk_containerid) from the user's Business Unit.
+ *
+ * Flow: userId → systemuser.businessunitid → businessunit.sprk_containerid
+ *
+ * Uses the systemuser entity to reliably resolve the BU (Xrm global context
+ * does not always expose businessUnitId on userSettings).
+ *
+ * @param webApi - Xrm.WebApi reference
+ * @returns The container ID string, or empty string if not configured.
+ */
+export async function getSpeContainerIdFromBusinessUnit(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  webApi: any
+): Promise<string> {
+  const userId = getUserId();
+  if (!userId) {
+    console.warn("[LegalWorkspace] No userId — cannot look up SPE container.");
+    return "";
+  }
+
+  try {
+    // Step 1: Get user's business unit ID from systemuser record
+    console.info("[LegalWorkspace] Looking up BU for user:", userId);
+    const userRecord = await webApi.retrieveRecord(
+      "systemuser",
+      userId,
+      "?$select=businessunitid&$expand=businessunitid($select=businessunitid,sprk_containerid)"
+    );
+
+    // The $expand returns the related BU record inline
+    const buRecord = userRecord?.businessunitid;
+    if (buRecord?.sprk_containerid) {
+      const containerId = buRecord.sprk_containerid as string;
+      console.info("[LegalWorkspace] SPE containerId (from BU expand):", containerId);
+      return containerId;
+    }
+
+    // Fallback: if $expand didn't work, try querying BU directly
+    const buId = userRecord?._businessunitid_value || userRecord?.businessunitid?.businessunitid;
+    if (!buId) {
+      console.warn("[LegalWorkspace] Could not resolve businessunitid from systemuser.");
+      return "";
+    }
+
+    console.info("[LegalWorkspace] Looking up SPE container for BU:", buId);
+    const buDirectRecord = await webApi.retrieveRecord(
+      "businessunit",
+      buId,
+      "?$select=sprk_containerid"
+    );
+    const containerId = (buDirectRecord?.sprk_containerid as string) ?? "";
+    console.info("[LegalWorkspace] SPE containerId:", containerId || "(not set)");
+    return containerId;
+  } catch (err) {
+    console.warn("[LegalWorkspace] Failed to look up SPE container:", err);
+    return "";
+  }
+}

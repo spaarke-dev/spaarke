@@ -212,7 +212,8 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
         setResults(items);
         setShowResults(items.length > 0);
         setHighlightedIndex(-1);
-      } catch {
+      } catch (err) {
+        console.error('[LookupField] Search error:', label, err);
         setResults([]);
         setShowResults(false);
       } finally {

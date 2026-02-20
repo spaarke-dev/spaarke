@@ -69,6 +69,13 @@ public static class DocumentOperationsEndpoints
             .ProducesProblem(404)
             .ProducesProblem(401);
 
+        // POST /api/documents/{documentId}/analyze
+        group.MapPost("/analyze", TriggerDocumentAnalysis)
+            .WithName("TriggerDocumentAnalysis")
+            .WithDescription("Queues a document for AI analysis (Document Profile) via Service Bus")
+            .Produces(202)
+            .ProducesProblem(401);
+
         return app;
     }
 
@@ -493,6 +500,71 @@ public static class DocumentOperationsEndpoints
                 {
                     ["correlationId"] = correlationId,
                     ["exceptionType"] = ex.GetType().Name
+                }
+            );
+        }
+    }
+
+    /// <summary>
+    /// POST /api/documents/{documentId}/analyze
+    /// Queues a document for AI analysis (Document Profile) via Service Bus.
+    /// The background handler downloads the file from SPE, runs the AI playbook,
+    /// and populates profile fields (summary, keywords, classification, entities).
+    /// </summary>
+    private static async Task<IResult> TriggerDocumentAnalysis(
+        Guid documentId,
+        HttpContext httpContext,
+        [FromServices] JobSubmissionService jobSubmissionService,
+        [FromServices] ILogger<Program> logger,
+        CancellationToken ct)
+    {
+        var correlationId = httpContext.TraceIdentifier;
+
+        logger.LogInformation(
+            "TriggerDocumentAnalysis endpoint called for document {DocumentId} [{CorrelationId}]",
+            documentId, correlationId);
+
+        try
+        {
+            var analysisJob = new JobContract
+            {
+                JobId = Guid.NewGuid(),
+                JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName,
+                SubjectId = documentId.ToString(),
+                CorrelationId = correlationId,
+                IdempotencyKey = $"analysis-{documentId}-documentprofile",
+                Attempt = 1,
+                MaxAttempts = 3,
+                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new
+                {
+                    DocumentId = documentId,
+                    PlaybookName = "Document Profile",
+                    Source = "MatterCreationWizard",
+                    EnqueuedAt = DateTimeOffset.UtcNow
+                }))
+            };
+
+            await jobSubmissionService.SubmitJobAsync(analysisJob, ct);
+
+            logger.LogInformation(
+                "Document analysis job {JobId} queued for document {DocumentId} [{CorrelationId}]",
+                analysisJob.JobId, documentId, correlationId);
+
+            return TypedResults.Accepted(
+                $"/api/documents/{documentId}",
+                new { jobId = analysisJob.JobId, documentId, status = "queued" });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to queue analysis for document {DocumentId}", documentId);
+
+            return TypedResults.Problem(
+                statusCode: 500,
+                title: "Analysis Queue Failed",
+                detail: $"Failed to queue document analysis: {ex.Message}",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["correlationId"] = correlationId
                 }
             );
         }

@@ -83,38 +83,67 @@ export interface IFollowOnActions {
 // Dataverse entity helpers
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Metadata discovery — find correct OData navigation property names
+// ---------------------------------------------------------------------------
+
 /**
- * Build the Dataverse entity payload for a new sprk_matter record.
- * Maps ICreateMatterFormState fields to Dataverse attribute names.
+ * Query the Dataverse entity metadata API to discover the actual
+ * single-valued navigation property names for lookup columns on an entity.
+ *
+ * Dataverse uses PascalCase navigation property names (e.g. "sprk_MatterType")
+ * which differ from the lowercase column logical names ("sprk_mattertype").
+ * The @odata.bind syntax requires the nav-prop name, not the column name.
+ *
+ * Results are cached per entity to avoid repeated metadata calls.
+ *
+ * @param entityLogicalName - e.g. 'sprk_matter', 'sprk_document'
+ * @returns Map: { columnLogicalName → navigationPropertyName }
  */
-function buildMatterEntity(
-  form: ICreateMatterFormState
-): WebApiEntity {
-  const entity: WebApiEntity = {
-    sprk_name: form.matterName.trim(),
-  };
+const _navPropCache: Record<string, Record<string, string>> = {};
 
-  if (form.matterTypeId) {
-    entity['sprk_mattertype_ref@odata.bind'] = `/sprk_mattertype_refs(${form.matterTypeId})`;
+async function _discoverNavProps(entityLogicalName: string): Promise<Record<string, string>> {
+  if (_navPropCache[entityLogicalName]) {
+    return _navPropCache[entityLogicalName];
   }
 
-  if (form.practiceAreaId) {
-    entity['sprk_practicearea_ref@odata.bind'] = `/sprk_practicearea_refs(${form.practiceAreaId})`;
-  }
+  try {
+    const url =
+      `/api/data/v9.0/EntityDefinitions(LogicalName='${entityLogicalName}')/ManyToOneRelationships` +
+      `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName`;
 
-  if (form.assignedAttorneyId) {
-    entity['sprk_assignedattorney@odata.bind'] = `/contacts(${form.assignedAttorneyId})`;
-  }
+    const resp = await fetch(url, { credentials: 'include' });
+    if (!resp.ok) {
+      console.warn(`[MatterService] Nav-prop discovery failed for ${entityLogicalName}:`, resp.status);
+      return {};
+    }
 
-  if (form.assignedParalegalId) {
-    entity['sprk_assignedparalegal@odata.bind'] = `/contacts(${form.assignedParalegalId})`;
-  }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const json: any = await resp.json();
+    const rels: Array<{ ReferencingAttribute: string; ReferencingEntityNavigationPropertyName: string }> =
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (json as any).value ?? [];
 
-  if (form.summary && form.summary.trim() !== '') {
-    entity['sprk_description'] = form.summary.trim();
-  }
+    const map: Record<string, string> = {};
+    for (const r of rels) {
+      map[r.ReferencingAttribute] = r.ReferencingEntityNavigationPropertyName;
+    }
 
-  return entity;
+    console.info(`[MatterService] Nav-props for ${entityLogicalName}:`, map);
+    _navPropCache[entityLogicalName] = map;
+    return map;
+  } catch (err) {
+    console.warn(`[MatterService] Nav-prop discovery error for ${entityLogicalName}:`, err);
+    return {};
+  }
+}
+
+/**
+ * Resolve a navigation property name for a lookup column.
+ * Uses discovered metadata if available, falls back to column logical name.
+ */
+function _resolveNavProp(navPropMap: Record<string, string>, columnLogical: string): string {
+  return navPropMap[columnLogical] ?? columnLogical;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,15 +177,66 @@ export class MatterService {
   ): Promise<ICreateMatterResult> {
     const warnings: string[] = [];
 
-    // ── Step 1: Create Dataverse record ───────────────────────────────────
+    // ── Step 1: Create Dataverse record ─────────────────────────────────────
     let matterId: string;
 
+    // Discover correct OData navigation property names from entity metadata
+    const navPropMap = await _discoverNavProps('sprk_matter');
+
+    // Build full entity payload with scalar fields + lookup bindings
+    const entity: WebApiEntity = {
+      sprk_mattername: form.matterName.trim(),
+    };
+    if (form.summary && form.summary.trim() !== '') {
+      entity['sprk_matterdescription'] = form.summary.trim();
+    }
+    // Store the SPE container ID on the matter record
+    if (this._containerId) {
+      entity['sprk_containerid'] = this._containerId;
+    }
+
+    // Generate matter number: {matterTypeCode}-{random 6 digits}
+    if (form.matterTypeId) {
+      try {
+        const matterTypeRecord = await this._webApi.retrieveRecord(
+          'sprk_mattertype_ref',
+          form.matterTypeId,
+          '?$select=sprk_mattertypecode'
+        );
+        const typeCode = (matterTypeRecord?.sprk_mattertypecode as string) ?? '';
+        if (typeCode) {
+          const random6 = String(Math.floor(100000 + Math.random() * 900000));
+          entity['sprk_matternumber'] = `${typeCode}-${random6}`;
+          console.info('[MatterService] Generated matter number:', entity['sprk_matternumber']);
+        }
+      } catch (err) {
+        console.warn('[MatterService] Could not look up matter type code for numbering:', err);
+        // Non-fatal — continue without matter number
+      }
+    }
+
+    // Add lookup bindings using discovered nav-prop names
+    const lookups: Array<{ col: string; entitySet: string; guid: string }> = [];
+    if (form.matterTypeId) lookups.push({ col: 'sprk_mattertype', entitySet: 'sprk_mattertype_refs', guid: form.matterTypeId });
+    if (form.practiceAreaId) lookups.push({ col: 'sprk_practicearea', entitySet: 'sprk_practicearea_refs', guid: form.practiceAreaId });
+    if (form.assignedAttorneyId) lookups.push({ col: 'sprk_assignedattorney', entitySet: 'contacts', guid: form.assignedAttorneyId });
+    if (form.assignedParalegalId) lookups.push({ col: 'sprk_assignedparalegal', entitySet: 'contacts', guid: form.assignedParalegalId });
+
+    for (const lk of lookups) {
+      const navProp = navPropMap[lk.col] ?? lk.col;
+      entity[`${navProp}@odata.bind`] = `/${lk.entitySet}(${lk.guid})`;
+    }
+
     try {
-      const entity = buildMatterEntity(form);
+      console.info('[MatterService] createRecord payload:', JSON.stringify(entity, null, 2));
       const result = await this._webApi.createRecord('sprk_matter', entity);
       matterId = result.id;
+      console.info('[MatterService] createRecord success, matterId:', matterId);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
+      console.error('[MatterService] createRecord error:', err);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const errObj = err as any;
+      const message = errObj?.message || (err instanceof Error ? err.message : 'Unknown error');
       return {
         status: 'error',
         errorMessage: `Failed to create matter record: ${message}`,
@@ -178,12 +258,20 @@ export class MatterService {
           'Files can be added from the matter record.'
         );
       } else if (uploadResult.uploadedFiles.length > 0) {
+        // Discover nav-prop for sprk_document → sprk_matter lookup
+        const docNavProps = await _discoverNavProps('sprk_document');
+        const docMatterNavProp = _resolveNavProp(docNavProps, 'sprk_matter');
+
         // Create sprk_document records linking uploaded files to the matter
         const linkResult = await this._entityService.createDocumentRecords(
           'sprk_matters',
           matterId,
-          'sprk_matter',
-          uploadResult.uploadedFiles
+          docMatterNavProp,
+          uploadResult.uploadedFiles,
+          {
+            containerId: this._containerId,
+            parentRecordName: form.matterName.trim(),
+          }
         );
         if (linkResult.warnings.length > 0) {
           warnings.push(...linkResult.warnings);
@@ -204,7 +292,8 @@ export class MatterService {
     if (followOnActions.assignCounsel) {
       const counselResult = await this._assignCounsel(
         matterId,
-        followOnActions.assignCounsel
+        followOnActions.assignCounsel,
+        navPropMap
       );
       if (!counselResult.success) {
         warnings.push(counselResult.warning ?? 'Failed to assign counsel. Please assign manually.');
@@ -244,11 +333,13 @@ export class MatterService {
 
   private async _assignCounsel(
     matterId: string,
-    input: IAssignCounselInput
+    input: IAssignCounselInput,
+    navPropMap: Record<string, string>
   ): Promise<{ success: boolean; warning?: string }> {
     try {
+      const navProp = _resolveNavProp(navPropMap, 'sprk_assignedoutsidecounsel');
       const updatePayload: WebApiEntity = {
-        'sprk_leadattorney@odata.bind': `/contacts(${input.contactId})`,
+        [`${navProp}@odata.bind`]: `/contacts(${input.contactId})`,
       };
       await this._webApi.updateRecord('sprk_matter', matterId, updatePayload);
       return { success: true };
@@ -272,11 +363,15 @@ export class MatterService {
       }
 
       // Create a draft email activity in Dataverse linked to the matter.
-      // No BFF endpoint needed — handled directly via Xrm.WebApi.
+      // "regardingobjectid_sprk_matter" is a polymorphic regarding-object lookup
+      // on the email entity — discover its correct nav-prop name.
+      const emailNavProps = await _discoverNavProps('email');
+      const regardingProp = _resolveNavProp(emailNavProps, 'regardingobjectid_sprk_matter');
+
       const emailEntity: WebApiEntity = {
         subject: `Matter Summary: ${matterName}`,
         description: `Summary distribution for matter "${matterName}" to: ${input.recipientEmails.join(', ')}`,
-        'regardingobjectid_sprk_matter@odata.bind': `/sprk_matters(${matterId})`,
+        [`${regardingProp}@odata.bind`]: `/sprk_matters(${matterId})`,
       };
 
       await this._webApi.createRecord('email', emailEntity);
@@ -295,10 +390,14 @@ export class MatterService {
     input: ISendEmailInput
   ): Promise<{ success: boolean; warning?: string }> {
     try {
+      // Reuse cached email nav-props (already fetched by _distributeSummary if called)
+      const emailNavProps = await _discoverNavProps('email');
+      const regardingProp = _resolveNavProp(emailNavProps, 'regardingobjectid_sprk_matter');
+
       const emailEntity: WebApiEntity = {
         subject: input.subject,
         description: input.body,
-        'regardingobjectid_sprk_matter@odata.bind': `/sprk_matters(${matterId})`,
+        [`${regardingProp}@odata.bind`]: `/sprk_matters(${matterId})`,
       };
 
       await this._webApi.createRecord('email', emailEntity);
@@ -318,7 +417,8 @@ export class MatterService {
 // ---------------------------------------------------------------------------
 
 /**
- * Search sprk_contact records by name fragment.
+ * Search contact records by name fragment.
+ * Uses standard Dataverse contact entity (fullname, emailaddress1).
  * Returns up to 10 matching contacts.
  * Throws on error — callers should handle gracefully.
  */
@@ -330,15 +430,27 @@ export async function searchContacts(
     return [];
   }
 
-  const encodedFilter = encodeURIComponent(nameFilter.trim());
+  const safeFilter = nameFilter.trim().replace(/'/g, "''");
   const query =
-    `?$select=sprk_contactid,sprk_name,sprk_email` +
-    `&$filter=contains(sprk_name,'${encodedFilter}')` +
-    `&$orderby=sprk_name asc` +
+    `?$select=contactid,fullname,emailaddress1` +
+    `&$filter=contains(fullname,'${safeFilter}')` +
+    `&$orderby=fullname asc` +
     `&$top=10`;
 
-  const result = await webApi.retrieveMultipleRecords('sprk_contact', query, 10);
-  return result.entities as unknown as IContact[];
+  console.info('[MatterService] searchContacts query:', 'contact', query);
+  try {
+    const result = await webApi.retrieveMultipleRecords('contact', query, 10);
+    console.info('[MatterService] searchContacts results:', result.entities.length);
+    // Map to IContact shape for backward compatibility
+    return result.entities.map((e) => ({
+      sprk_contactid: e['contactid'] as string,
+      sprk_name: e['fullname'] as string,
+      sprk_email: (e['emailaddress1'] as string) || '',
+    })) as unknown as IContact[];
+  } catch (err) {
+    console.error('[MatterService] searchContacts error:', err);
+    throw err;
+  }
 }
 
 /**
@@ -360,7 +472,7 @@ export async function searchContactsAsLookup(
 // ---------------------------------------------------------------------------
 
 /**
- * Search sprk_mattertype_ref records by name fragment.
+ * Search sprk_mattertype records by name fragment.
  * Returns up to 10 matching matter types as ILookupItem.
  */
 export async function searchMatterTypes(
@@ -371,18 +483,25 @@ export async function searchMatterTypes(
     return [];
   }
 
-  const encodedFilter = encodeURIComponent(nameFilter.trim());
+  const safeFilter = nameFilter.trim().replace(/'/g, "''");
   const query =
-    `?$select=sprk_mattertype_refid,sprk_name` +
-    `&$filter=contains(sprk_name,'${encodedFilter}')` +
-    `&$orderby=sprk_name asc` +
+    `?$select=sprk_mattertype_refid,sprk_mattertypename` +
+    `&$filter=contains(sprk_mattertypename,'${safeFilter}')` +
+    `&$orderby=sprk_mattertypename asc` +
     `&$top=10`;
 
-  const result = await webApi.retrieveMultipleRecords('sprk_mattertype_ref', query, 10);
-  return result.entities.map((e) => ({
-    id: e['sprk_mattertype_refid'] as string,
-    name: e['sprk_name'] as string,
-  }));
+  console.info('[MatterService] searchMatterTypes query:', 'sprk_mattertype_ref', query);
+  try {
+    const result = await webApi.retrieveMultipleRecords('sprk_mattertype_ref', query, 10);
+    console.info('[MatterService] searchMatterTypes results:', result.entities.length, result.entities);
+    return result.entities.map((e) => ({
+      id: e['sprk_mattertype_refid'] as string,
+      name: e['sprk_mattertypename'] as string,
+    }));
+  } catch (err) {
+    console.error('[MatterService] searchMatterTypes error:', err);
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -390,7 +509,7 @@ export async function searchMatterTypes(
 // ---------------------------------------------------------------------------
 
 /**
- * Search sprk_practicearea_ref records by name fragment.
+ * Search sprk_practicearea records by name fragment.
  * Returns up to 10 matching practice areas as ILookupItem.
  */
 export async function searchPracticeAreas(
@@ -401,18 +520,25 @@ export async function searchPracticeAreas(
     return [];
   }
 
-  const encodedFilter = encodeURIComponent(nameFilter.trim());
+  const safeFilter = nameFilter.trim().replace(/'/g, "''");
   const query =
-    `?$select=sprk_practicearea_refid,sprk_name` +
-    `&$filter=contains(sprk_name,'${encodedFilter}')` +
-    `&$orderby=sprk_name asc` +
+    `?$select=sprk_practicearea_refid,sprk_practiceareaname` +
+    `&$filter=contains(sprk_practiceareaname,'${safeFilter}')` +
+    `&$orderby=sprk_practiceareaname asc` +
     `&$top=10`;
 
-  const result = await webApi.retrieveMultipleRecords('sprk_practicearea_ref', query, 10);
-  return result.entities.map((e) => ({
-    id: e['sprk_practicearea_refid'] as string,
-    name: e['sprk_name'] as string,
-  }));
+  console.info('[MatterService] searchPracticeAreas query:', 'sprk_practicearea_ref', query);
+  try {
+    const result = await webApi.retrieveMultipleRecords('sprk_practicearea_ref', query, 10);
+    console.info('[MatterService] searchPracticeAreas results:', result.entities.length, result.entities);
+    return result.entities.map((e) => ({
+      id: e['sprk_practicearea_refid'] as string,
+      name: e['sprk_practiceareaname'] as string,
+    }));
+  } catch (err) {
+    console.error('[MatterService] searchPracticeAreas error:', err);
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------

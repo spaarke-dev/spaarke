@@ -191,6 +191,56 @@ function isFormValid(form: ICreateMatterFormState): boolean {
   );
 }
 
+/**
+ * Fuzzy-match an AI-generated display name against Dataverse lookup results.
+ *
+ * Scoring (highest wins, minimum 0.4 to accept):
+ *   1.0  — exact match (case-insensitive)
+ *   0.8  — one string starts with the other ("Corporate" ↔ "Corporate Law")
+ *   0.7  — one string is contained in the other ("Trans" in "Transactional")
+ *   0.5  — single result from Dataverse contains() filter (already relevant)
+ *
+ * Returns null if no candidate scores above threshold.
+ */
+function findBestLookupMatch(
+  aiValue: string,
+  candidates: ILookupItem[]
+): ILookupItem | null {
+  if (candidates.length === 0) return null;
+
+  const aiLower = aiValue.toLowerCase().trim();
+
+  let bestScore = 0;
+  let bestItem: ILookupItem | null = null;
+
+  for (const item of candidates) {
+    const dbLower = item.name.toLowerCase().trim();
+    let score = 0;
+
+    if (dbLower === aiLower) {
+      score = 1.0;
+    } else if (dbLower.startsWith(aiLower) || aiLower.startsWith(dbLower)) {
+      score = 0.8;
+    } else if (dbLower.includes(aiLower) || aiLower.includes(dbLower)) {
+      score = 0.7;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestItem = item;
+    }
+  }
+
+  // If no strong match but Dataverse contains() returned exactly one result,
+  // trust it — the server-side filter already validated relevance.
+  if (bestScore < 0.4 && candidates.length === 1) {
+    bestScore = 0.5;
+    bestItem = candidates[0];
+  }
+
+  return bestScore >= 0.4 ? bestItem : null;
+}
+
 // ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
@@ -385,10 +435,48 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
         if (cancelled) return;
 
         const fields: IAiPrefillFields = {};
-        if (data.matterTypeName) fields.matterTypeName = data.matterTypeName;
-        if (data.practiceAreaName) fields.practiceAreaName = data.practiceAreaName;
+        // BFF may return either old field names (matterType/practiceArea) or
+        // new names (matterTypeName/practiceAreaName) — handle both
+        const aiMatterType = data.matterTypeName || data.matterType;
+        const aiPracticeArea = data.practiceAreaName || data.practiceArea;
+        if (aiMatterType) fields.matterTypeName = aiMatterType;
+        if (aiPracticeArea) fields.practiceAreaName = aiPracticeArea;
         if (data.matterName) fields.matterName = data.matterName;
         if (data.summary) fields.summary = data.summary;
+
+        // Resolve AI display names to Dataverse lookup IDs so LookupField
+        // renders them as selected chips (LookupField needs both id + name).
+        // Uses fuzzy matching since AI output won't always exactly match
+        // Dataverse values (e.g. AI says "Transactional", DB has "Transactional Law").
+        const resolvePromises: Promise<void>[] = [];
+
+        if (aiMatterType && webApi) {
+          resolvePromises.push(
+            searchMatterTypes(webApi, aiMatterType).then((results) => {
+              const best = findBestLookupMatch(aiMatterType, results);
+              if (best) {
+                fields.matterTypeId = best.id;
+                fields.matterTypeName = best.name;
+              }
+            }).catch(() => { /* keep display name only */ })
+          );
+        }
+
+        if (aiPracticeArea && webApi) {
+          resolvePromises.push(
+            searchPracticeAreas(webApi, aiPracticeArea).then((results) => {
+              const best = findBestLookupMatch(aiPracticeArea, results);
+              if (best) {
+                fields.practiceAreaId = best.id;
+                fields.practiceAreaName = best.name;
+              }
+            }).catch(() => { /* keep display name only */ })
+          );
+        }
+
+        await Promise.all(resolvePromises);
+
+        if (cancelled) return;
 
         if (Object.keys(fields).length > 0) {
           dispatch({ type: 'APPLY_AI_PREFILL', fields });

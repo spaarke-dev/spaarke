@@ -71,6 +71,7 @@ import { MatterService, IFollowOnActions } from './matterService';
 import type { ICreateMatterFormState } from './formTypes';
 import type { IContact } from '../../types/entities';
 import type { IWebApi } from '../../types/xrm';
+import { getSpeContainerIdFromBusinessUnit } from '../../services/xrmProvider';
 
 // ---------------------------------------------------------------------------
 // Extended props interface (exported — used by App to pass webApi)
@@ -91,12 +92,11 @@ export interface IWizardDialogPropsInternal extends IWizardDialogProps {
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  // Override DialogSurface — portrait orientation, resizable
+  // Override DialogSurface — landscape orientation, resizable
   surface: {
-    width: '640px',
-    maxWidth: '90vw',
-    minHeight: '70vh',
-    maxHeight: '95vh',
+    width: '1100px',
+    maxWidth: '95vw',
+    maxHeight: '80vh',
     padding: '0px',
     resize: 'both',
     overflow: 'auto',
@@ -106,7 +106,7 @@ const useStyles = makeStyles({
     padding: '0px',
     display: 'flex',
     flexDirection: 'column',
-    height: '80vh',
+    height: '70vh',
     overflow: 'hidden',
   },
   // Custom title bar (replaces DialogTitle default rendering)
@@ -439,6 +439,17 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
   const [emailSubject, setEmailSubject] = React.useState('');
   const [emailBody, setEmailBody] = React.useState('');
 
+  // ── SPE container ID (resolved from user's Business Unit) ────────────────
+  const [speContainerId, setSpeContainerId] = React.useState('');
+
+  React.useEffect(() => {
+    if (open && webApi) {
+      getSpeContainerIdFromBusinessUnit(webApi).then((id) => {
+        setSpeContainerId(id);
+      });
+    }
+  }, [open, webApi]);
+
   // ── Creation flow state ──────────────────────────────────────────────────
   const [isCreating, setIsCreating] = React.useState(false);
   const [createError, setCreateError] = React.useState<string | null>(null);
@@ -576,7 +587,7 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
       };
     }
 
-    const service = new MatterService(webApi);
+    const service = new MatterService(webApi, speContainerId || undefined);
     const result = await service.createMatter(
       step2FormValues,
       state.uploadedFiles,
@@ -597,6 +608,7 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
     });
   }, [
     webApi,
+    speContainerId,
     step2FormValues,
     state.uploadedFiles,
     selectedActions,

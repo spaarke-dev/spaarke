@@ -47,6 +47,8 @@ export interface ISpeFileMetadata {
 export interface IDocumentLinkResult {
   success: boolean;
   linkedCount: number;
+  /** GUIDs of successfully created sprk_document records. */
+  createdDocumentIds: string[];
   warnings: string[];
 }
 
@@ -79,7 +81,7 @@ export class EntityCreationService {
   /**
    * Upload files to SPE via the BFF OBO upload endpoint.
    *
-   * Uses: PUT /api/obo/drives/{driveId}/upload?fileName={fileName}
+   * Uses: PUT /api/obo/containers/{containerId}/files/{path}
    * Each file is uploaded individually with Bearer token auth.
    *
    * @param containerId SPE container/drive ID for the target storage
@@ -111,8 +113,10 @@ export class EntityCreationService {
       });
 
       try {
+        // BFF OBO endpoint: PUT /api/obo/containers/{containerId}/files/{path}
+        // The {*path} catch-all param is the filename (URL-encoded)
         const response = await authenticatedFetch(
-          `${bffBaseUrl}/obo/drives/${containerId}/upload?fileName=${fileName}`,
+          `${bffBaseUrl}/obo/containers/${containerId}/files/${fileName}`,
           {
             method: 'PUT',
             body: file.file,
@@ -185,29 +189,50 @@ export class EntityCreationService {
    * Create sprk_document records in Dataverse linking uploaded SPE files to a parent entity.
    *
    * Each document record contains:
-   *   - sprk_name: file name
-   *   - sprk_spedriveitemid: SPE drive item ID
+   *   - sprk_documentname / sprk_filename: file name
+   *   - sprk_driveitemid: SPE drive item ID
+   *   - sprk_filepath: web URL to the file
+   *   - sprk_filesize: file size in bytes
    *   - Navigation property @odata.bind to parent entity
    *
    * @param parentEntityName Logical name of the parent entity set (e.g., 'sprk_matters')
    * @param parentEntityId GUID of the parent entity record
-   * @param navigationProperty Navigation property name on sprk_document (e.g., 'sprk_matter')
+   * @param navigationProperty Navigation property name on sprk_document (e.g., 'sprk_Matter')
    * @param uploadedFiles SPE file metadata from uploadFilesToSpe()
+   * @param options Additional context for the document records
    */
   async createDocumentRecords(
     parentEntityName: string,
     parentEntityId: string,
     navigationProperty: string,
-    uploadedFiles: ISpeFileMetadata[]
+    uploadedFiles: ISpeFileMetadata[],
+    options?: {
+      /** SPE container/drive ID — stored as sprk_graphdriveid and sprk_containerid */
+      containerId?: string;
+      /** Parent record display name — stored in sprk_regardingrecordid for resolver queries */
+      parentRecordName?: string;
+    }
   ): Promise<IDocumentLinkResult> {
     const warnings: string[] = [];
     let linkedCount = 0;
+    const createdDocumentIds: string[] = [];
+
+    const containerId = options?.containerId;
 
     for (const file of uploadedFiles) {
       try {
         const documentEntity: WebApiEntity = {
-          sprk_name: file.name,
-          sprk_spedriveitemid: file.id,
+          sprk_documentname: file.name,
+          sprk_filename: file.name,
+          sprk_driveitemid: file.id,
+          // BFF view-url endpoint reads sprk_graphitemid (Graph item ID from upload)
+          sprk_graphitemid: file.id,
+          // Source type: User Upload (659490000)
+          sprk_sourcetype: 659490000,
+          // Mark for Document Profile processing: Pending (100000001)
+          sprk_filesummarystatus: 100000001,
+          // Association resolver: store parent record GUID as text
+          sprk_regardingrecordid: parentEntityId,
         };
 
         // Add @odata.bind navigation property to link document to parent entity
@@ -215,10 +240,20 @@ export class EntityCreationService {
           `/${parentEntityName}(${parentEntityId})`;
 
         if (file.webUrl) {
-          documentEntity['sprk_weburl'] = file.webUrl;
+          documentEntity['sprk_filepath'] = file.webUrl;
+        }
+        if (file.size) {
+          documentEntity['sprk_filesize'] = file.size;
+        }
+        // The BFF view-url endpoint needs sprk_graphdriveid + sprk_graphitemid
+        // to construct download/preview URLs. The SPE container ID IS the Graph drive ID.
+        if (containerId) {
+          documentEntity['sprk_graphdriveid'] = containerId;
+          documentEntity['sprk_containerid'] = containerId;
         }
 
-        await this._webApi.createRecord('sprk_document', documentEntity);
+        const result = await this._webApi.createRecord('sprk_document', documentEntity);
+        createdDocumentIds.push(result.id);
         linkedCount++;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
@@ -226,11 +261,46 @@ export class EntityCreationService {
       }
     }
 
+    // Queue Document Profile analysis for each created document via BFF Service Bus
+    if (createdDocumentIds.length > 0) {
+      await this._triggerDocumentAnalysis(createdDocumentIds, warnings);
+    }
+
     return {
       success: linkedCount > 0 || uploadedFiles.length === 0,
       linkedCount,
+      createdDocumentIds,
       warnings,
     };
+  }
+
+  /**
+   * Trigger Document Profile analysis for created documents via the BFF.
+   * Calls POST /api/documents/{id}/analyze which queues a Service Bus job
+   * for each document. Failures are non-fatal (added as warnings).
+   */
+  private async _triggerDocumentAnalysis(
+    documentIds: string[],
+    warnings: string[]
+  ): Promise<void> {
+    const bffBaseUrl = getBffBaseUrl();
+
+    for (const docId of documentIds) {
+      try {
+        const response = await authenticatedFetch(
+          `${bffBaseUrl}/documents/${docId}/analyze`,
+          { method: 'POST' }
+        );
+        if (response.ok) {
+          console.info(`[EntityCreationService] Document analysis queued for ${docId}`);
+        } else {
+          console.warn(`[EntityCreationService] Failed to queue analysis for ${docId}: HTTP ${response.status}`);
+        }
+      } catch (err) {
+        // Non-fatal — document was created, profiling can be triggered later
+        console.warn(`[EntityCreationService] Could not queue analysis for ${docId}:`, err);
+      }
+    }
   }
 
   /**
