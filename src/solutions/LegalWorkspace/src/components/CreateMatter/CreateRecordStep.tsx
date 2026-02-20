@@ -58,12 +58,14 @@ import {
   fetchAiDraftSummary,
 } from './matterService';
 import type { ILookupItem } from '../../types/entities';
+import { getBffBaseUrl } from '../../config/bffConfig';
+import { authenticatedFetch } from '../../services/bffAuthProvider';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const PREFILL_ENDPOINT = '/api/workspace/matters/pre-fill';
+const PREFILL_PATH = '/workspace/matters/pre-fill';
 
 // ---------------------------------------------------------------------------
 // Initial state factories
@@ -340,7 +342,8 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
       dispatch({ type: 'AI_PREFILL_LOADING' });
 
       try {
-        const response = await fetch(PREFILL_ENDPOINT, {
+        const bffBaseUrl = getBffBaseUrl();
+        const response = await authenticatedFetch(`${bffBaseUrl}${PREFILL_PATH}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fileNames: uploadedFileNames }),
