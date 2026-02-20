@@ -3,30 +3,41 @@
  * MSAL Browser configuration for the Legal Operations Workspace custom page.
  *
  * Uses the same Azure AD app registration as the PCF controls
- * (DocumentRelationshipViewer, AnalysisWorkspace, etc.) — the custom page
- * runs in the same Dataverse origin so the redirect URI matches.
+ * (DocumentRelationshipViewer, AnalysisWorkspace, etc.).
  *
- * Token acquisition order in bffAuthProvider:
- *   1. PCF bridge token (window global — fastest, no network)
- *   2. MSAL ssoSilent (uses existing Azure AD session — iframe, no UI)
- *   3. Empty string (anonymous / dev fallback)
+ * Environment portability:
+ *   - Redirect URI: auto-detected from window.location.origin (works in any
+ *     Dataverse environment as long as the origin is registered as a SPA
+ *     redirect in the app registration).
+ *   - Authority: uses "organizations" endpoint (multi-tenant) so the same
+ *     client ID works across Spaarke environments and customer tenants
+ *     (requires the app registration to be set to "Accounts in any
+ *     organizational directory" in Azure AD).
+ *   - Client ID: defaults to the Spaarke "DSM-SPE Dev 2" app registration.
+ *     Override via window.__SPAARKE_MSAL_CLIENT_ID__ for customer deployments.
  */
 
 import type { Configuration } from '@azure/msal-browser';
 import { LogLevel } from '@azure/msal-browser';
 
 // ---------------------------------------------------------------------------
-// Azure AD App Registration
+// Azure AD App Registration (environment-portable)
 // ---------------------------------------------------------------------------
 
-/** PCF Client App ID — "Sparke DSM-SPE Dev 2" app registration. */
-const CLIENT_ID = '170c98e1-d486-4355-bcbe-170454e0207c';
+/**
+ * Client App ID — defaults to "Sparke DSM-SPE Dev 2" app registration.
+ * Override via window global for customer tenant deployments.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const CLIENT_ID: string = (window as any).__SPAARKE_MSAL_CLIENT_ID__
+  || '170c98e1-d486-4355-bcbe-170454e0207c';
 
-/** Azure AD Tenant (Directory) ID. */
-const TENANT_ID = 'a221a95e-6abc-4434-aecc-e48338a1b2f2';
-
-/** Redirect URI — must match a registered SPA redirect in the app registration. */
-const REDIRECT_URI = 'https://spaarkedev1.crm.dynamics.com';
+/**
+ * Redirect URI — auto-detected from current page origin.
+ * Works for any Dataverse environment (spaarkedev1, staging, prod, customer).
+ * The origin must be registered as a SPA redirect in the app registration.
+ */
+const REDIRECT_URI = window.location.origin;
 
 // ---------------------------------------------------------------------------
 // MSAL Configuration
@@ -35,7 +46,7 @@ const REDIRECT_URI = 'https://spaarkedev1.crm.dynamics.com';
 export const msalConfig: Configuration = {
   auth: {
     clientId: CLIENT_ID,
-    authority: `https://login.microsoftonline.com/${TENANT_ID}`,
+    authority: 'https://login.microsoftonline.com/organizations',
     redirectUri: REDIRECT_URI,
     navigateToLoginRequestUrl: false,
   },
