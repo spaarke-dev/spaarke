@@ -11,6 +11,7 @@
     "lint:fix": "eslint src --ext .ts,.tsx --fix"
   },
   "dependencies": {
+    "@azure/msal-browser": "^4.28.2",
     "@fluentui/react-components": "^9.46.2",
     "@fluentui/react-icons": "^2.0.225"
   },

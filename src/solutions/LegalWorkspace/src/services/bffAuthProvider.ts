@@ -1,22 +1,22 @@
 /**
  * bffAuthProvider.ts
- * Lightweight Bearer token provider for BFF API calls from the workspace custom page.
+ * Bearer token provider for BFF API calls from the workspace custom page.
  *
- * The workspace runs as an HTML web resource inside Dataverse — MSAL is not bundled.
- * This module provides a token acquisition interface that:
- *   1. Uses a pre-set token if provided by the host (PCF bridge pattern)
- *   2. Falls back to no-auth for development (BFF dev endpoints allow anonymous)
+ * Token acquisition order:
+ *   1. In-memory cache (fastest — no I/O)
+ *   2. Window-level global from PCF bridge (__SPAARKE_BFF_TOKEN__)
+ *   3. Parent frame global (custom page iframe inside PCF host)
+ *   4. MSAL ssoSilent (uses existing Azure AD session — hidden iframe)
+ *   5. Empty string (dev fallback — BFF dev endpoints may allow anonymous)
  *
- * When migrating to full MSAL: replace getAccessToken() internals with
- * MsalAuthProvider.getInstance().getToken([BFF_API_SCOPE]).
- *
- * Token lifecycle follows the same pattern as UniversalQuickCreate:
- *   - Singleton instance
- *   - Cache with expiration buffer
- *   - 401 retry with cache clear
+ * MSAL is lazily initialized on first use to avoid blocking the initial render.
+ * The configuration reuses the same Azure AD app registration as the PCF controls
+ * (CLIENT_ID, TENANT_ID, REDIRECT_URI) — see msalConfig.ts.
  */
 
+import { PublicClientApplication } from '@azure/msal-browser';
 import { BFF_API_SCOPE } from '../config/bffConfig';
+import { msalConfig } from '../config/msalConfig';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,6 +43,76 @@ interface TokenCacheEntry {
 const TOKEN_BUFFER_MS = 5 * 60 * 1000; // 5 minutes before expiry
 
 // ---------------------------------------------------------------------------
+// MSAL singleton (lazy init)
+// ---------------------------------------------------------------------------
+
+let _msalInstance: PublicClientApplication | null = null;
+let _msalInitPromise: Promise<void> | null = null;
+
+/**
+ * Lazily initialize the MSAL PublicClientApplication.
+ * Safe to call multiple times — returns the same promise.
+ */
+async function ensureMsalInitialized(): Promise<PublicClientApplication | null> {
+  if (_msalInstance) return _msalInstance;
+
+  if (!_msalInitPromise) {
+    _msalInitPromise = (async () => {
+      try {
+        const instance = new PublicClientApplication(msalConfig);
+        await instance.initialize();
+        await instance.handleRedirectPromise();
+        _msalInstance = instance;
+        console.info('[BffAuth] MSAL initialized successfully');
+      } catch (err) {
+        console.warn('[BffAuth] MSAL initialization failed — falling back to anonymous', err);
+        _msalInstance = null;
+      }
+    })();
+  }
+
+  await _msalInitPromise;
+  return _msalInstance;
+}
+
+/**
+ * Acquire a token via MSAL ssoSilent (hidden iframe).
+ * Returns the access token string or empty string on failure.
+ */
+async function acquireTokenViaMsal(): Promise<string> {
+  const msal = await ensureMsalInitialized();
+  if (!msal) return '';
+
+  const scopes = [BFF_API_SCOPE];
+
+  try {
+    // Try acquireTokenSilent first (uses cached token / refresh token)
+    const accounts = msal.getAllAccounts();
+    if (accounts.length > 0) {
+      const result = await msal.acquireTokenSilent({
+        scopes,
+        account: accounts[0],
+      });
+      if (result?.accessToken) {
+        console.info('[BffAuth] Token acquired via MSAL silent (cached account)');
+        return result.accessToken;
+      }
+    }
+
+    // Fall back to ssoSilent (uses existing Azure AD session cookie)
+    const ssoResult = await msal.ssoSilent({ scopes });
+    if (ssoResult?.accessToken) {
+      console.info('[BffAuth] Token acquired via MSAL ssoSilent');
+      return ssoResult.accessToken;
+    }
+  } catch (err) {
+    console.warn('[BffAuth] MSAL token acquisition failed', err);
+  }
+
+  return '';
+}
+
+// ---------------------------------------------------------------------------
 // Singleton implementation
 // ---------------------------------------------------------------------------
 
@@ -57,7 +127,7 @@ let _cachedToken: TokenCacheEntry | null = null;
 
 /**
  * BFF auth provider singleton.
- * Uses pre-set tokens from the PCF host or operates without auth in development.
+ * Uses pre-set tokens from the PCF host, then MSAL ssoSilent, then anonymous.
  */
 export const bffAuthProvider: IBffAuthProvider = {
   async getAccessToken(): Promise<string> {
@@ -70,10 +140,9 @@ export const bffAuthProvider: IBffAuthProvider = {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const bridgeToken = (window as any)[GLOBAL_TOKEN_KEY] as string | undefined;
     if (bridgeToken) {
-      // Bridge tokens are typically valid for ~1 hour
       _cachedToken = {
         token: bridgeToken,
-        expiresAt: Date.now() + 55 * 60 * 1000, // assume 55 min validity
+        expiresAt: Date.now() + 55 * 60 * 1000,
       };
       return bridgeToken;
     }
@@ -93,8 +162,17 @@ export const bffAuthProvider: IBffAuthProvider = {
       /* cross-origin — swallow */
     }
 
-    // 4. No token available — return empty (dev mode / anonymous)
-    // In production, the PCF host MUST set the token via bridge pattern.
+    // 4. Acquire token via MSAL (ssoSilent — uses existing Azure AD session)
+    const msalToken = await acquireTokenViaMsal();
+    if (msalToken) {
+      _cachedToken = {
+        token: msalToken,
+        expiresAt: Date.now() + 55 * 60 * 1000,
+      };
+      return msalToken;
+    }
+
+    // 5. No token available — return empty (dev mode / anonymous)
     return '';
   },
 
