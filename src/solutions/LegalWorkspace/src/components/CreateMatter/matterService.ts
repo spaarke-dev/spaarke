@@ -19,6 +19,10 @@ import type { ICreateMatterFormState } from './formTypes';
 import type { IUploadedFile } from './wizardTypes';
 import type { IContact, ILookupItem } from '../../types/entities';
 import type { IWebApi, WebApiEntity } from '../../types/xrm';
+import { EntityCreationService } from '../../services/EntityCreationService';
+import type { IUploadProgress } from '../../services/EntityCreationService';
+import { getBffBaseUrl } from '../../config/bffConfig';
+import { authenticatedFetch } from '../../services/bffAuthProvider';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -71,11 +75,9 @@ export interface IFollowOnActions {
 }
 
 // ---------------------------------------------------------------------------
-// BFF endpoints
+// BFF endpoints — file upload uses existing SPE endpoint via SdapApiClient (Task 6),
+// draft summary handled by front-end Xrm.WebApi email activity (no BFF needed).
 // ---------------------------------------------------------------------------
-
-const BFF_FILE_UPLOAD_ENDPOINT = '/api/workspace/matters/files';
-const BFF_DRAFT_SUMMARY_ENDPOINT = '/api/workspace/matters/draft-summary';
 
 // ---------------------------------------------------------------------------
 // Dataverse entity helpers
@@ -120,20 +122,29 @@ function buildMatterEntity(
 // ---------------------------------------------------------------------------
 
 export class MatterService {
-  constructor(private readonly _webApi: IWebApi) {}
+  private readonly _entityService: EntityCreationService;
+
+  constructor(
+    private readonly _webApi: IWebApi,
+    private readonly _containerId?: string
+  ) {
+    this._entityService = new EntityCreationService(_webApi);
+  }
 
   /**
    * Full matter creation flow:
    *   1. Create sprk_matter record
-   *   2. Upload files to SPE via BFF
-   *   3. Execute selected follow-on actions
+   *   2. Upload files to SPE via BFF (using EntityCreationService)
+   *   3. Create sprk_document records linking files to the matter
+   *   4. Execute selected follow-on actions
    *
    * Returns ICreateMatterResult — never throws.
    */
   async createMatter(
     form: ICreateMatterFormState,
     uploadedFiles: IUploadedFile[],
-    followOnActions: IFollowOnActions
+    followOnActions: IFollowOnActions,
+    onUploadProgress?: (progress: IUploadProgress) => void
   ): Promise<ICreateMatterResult> {
     const warnings: string[] = [];
 
@@ -153,12 +164,40 @@ export class MatterService {
       };
     }
 
-    // ── Step 2: Upload files to SPE via BFF ───────────────────────────────
-    if (uploadedFiles.length > 0) {
-      const uploadResult = await this._uploadFiles(matterId, uploadedFiles);
+    // ── Step 2: Upload files to SPE via BFF + create document records ─────
+    if (uploadedFiles.length > 0 && this._containerId) {
+      const uploadResult = await this._entityService.uploadFilesToSpe(
+        this._containerId,
+        uploadedFiles,
+        onUploadProgress
+      );
+
       if (!uploadResult.success) {
-        warnings.push(uploadResult.warning ?? 'File upload failed. Files can be added later.');
+        warnings.push(
+          `File upload failed (${uploadResult.failureCount} of ${uploadedFiles.length}). ` +
+          'Files can be added from the matter record.'
+        );
+      } else if (uploadResult.uploadedFiles.length > 0) {
+        // Create sprk_document records linking uploaded files to the matter
+        const linkResult = await this._entityService.createDocumentRecords(
+          'sprk_matters',
+          matterId,
+          'sprk_matter',
+          uploadResult.uploadedFiles
+        );
+        if (linkResult.warnings.length > 0) {
+          warnings.push(...linkResult.warnings);
+        }
       }
+
+      if (uploadResult.failureCount > 0 && uploadResult.successCount > 0) {
+        warnings.push(
+          `${uploadResult.failureCount} file(s) failed to upload: ` +
+          uploadResult.errors.map((e) => e.fileName).join(', ')
+        );
+      }
+    } else if (uploadedFiles.length > 0 && !this._containerId) {
+      warnings.push('File upload skipped — no SPE container configured. Files can be added later.');
     }
 
     // ── Step 3: Follow-on actions ─────────────────────────────────────────
@@ -203,36 +242,6 @@ export class MatterService {
 
   // ── Private helpers ────────────────────────────────────────────────────────
 
-  private async _uploadFiles(
-    matterId: string,
-    files: IUploadedFile[]
-  ): Promise<{ success: boolean; warning?: string }> {
-    try {
-      const formData = new FormData();
-      formData.append('matterId', matterId);
-      files.forEach((f) => formData.append('files', f.file, f.name));
-
-      const response = await fetch(BFF_FILE_UPLOAD_ENDPOINT, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        return {
-          success: false,
-          warning: `File upload failed (HTTP ${response.status}). Files can be added from the matter record.`,
-        };
-      }
-
-      return { success: true };
-    } catch {
-      return {
-        success: false,
-        warning: 'File upload could not complete. Files can be added from the matter record.',
-      };
-    }
-  }
-
   private async _assignCounsel(
     matterId: string,
     input: IAssignCounselInput
@@ -262,28 +271,21 @@ export class MatterService {
         return { success: true };
       }
 
-      const response = await fetch(BFF_DRAFT_SUMMARY_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          matterId,
-          matterName,
-          recipientEmails: input.recipientEmails,
-        }),
-      });
+      // Create a draft email activity in Dataverse linked to the matter.
+      // No BFF endpoint needed — handled directly via Xrm.WebApi.
+      const emailEntity: WebApiEntity = {
+        subject: `Matter Summary: ${matterName}`,
+        description: `Summary distribution for matter "${matterName}" to: ${input.recipientEmails.join(', ')}`,
+        'regardingobjectid_sprk_matter@odata.bind': `/sprk_matters(${matterId})`,
+      };
 
-      if (!response.ok) {
-        return {
-          success: false,
-          warning: `Summary distribution failed (HTTP ${response.status}). Please send manually.`,
-        };
-      }
-
+      await this._webApi.createRecord('email', emailEntity);
       return { success: true };
-    } catch {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
       return {
         success: false,
-        warning: 'Could not send summary email. Please distribute manually.',
+        warning: `Could not create summary email (${message}). Please distribute manually.`,
       };
     }
   }
@@ -422,11 +424,10 @@ export interface IAiDraftSummaryResponse {
   summary: string;
 }
 
-const BFF_AI_SUMMARY_ENDPOINT = '/api/workspace/matters/ai-summary';
-
 /**
  * Calls the BFF AI endpoint to generate a draft matter summary.
- * Returns a mock response if the endpoint is unavailable (graceful fallback).
+ * Uses authenticated fetch with Bearer token for BFF API.
+ * Returns a fallback response if the endpoint is unavailable (graceful degradation).
  */
 export async function fetchAiDraftSummary(
   matterName: string,
@@ -434,11 +435,15 @@ export async function fetchAiDraftSummary(
   practiceArea: string
 ): Promise<IAiDraftSummaryResponse> {
   try {
-    const response = await fetch(BFF_AI_SUMMARY_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ matterName, matterType, practiceArea }),
-    });
+    const bffBaseUrl = getBffBaseUrl();
+    const response = await authenticatedFetch(
+      `${bffBaseUrl}/workspace/matters/ai-summary`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matterName, matterType, practiceArea }),
+      }
+    );
 
     if (!response.ok) {
       return buildFallbackSummary(matterName, matterType, practiceArea);

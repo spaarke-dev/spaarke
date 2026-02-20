@@ -8,6 +8,7 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// <remarks>
 /// Follows ADR-010: DI minimalism — concrete type registrations only, no unnecessary interfaces.
 /// Registration count: 8 (PortfolioService, PriorityScoringService, EffortScoringService, WorkspaceAiService, BriefingService, MatterPreFillService, TodoGenerationOptions, TodoGenerationService).
+/// MatterPreFillService now uses IPlaybookOrchestrationService (registered in AiModule) instead of IOpenAiClient.
 ///
 /// Prerequisites (must already be registered before calling AddWorkspaceServices):
 /// - <c>IDistributedCache</c> — registered via <c>AddStackExchangeRedisCache</c> in Program.cs
@@ -51,8 +52,8 @@ public static class WorkspaceModule
         // Concrete registration per ADR-010 (no interface seam needed).
         services.AddSingleton<EffortScoringService>();
 
-        // WorkspaceAiService: Scoped because it will eventually hold per-request Dataverse
-        // query context and AI Playbook orchestration state.
+        // WorkspaceAiService: Scoped because it depends on IPlaybookOrchestrationService (scoped)
+        // and will hold per-request Dataverse query context.
         // Concrete registration per ADR-010 (no interface seam needed).
         services.AddScoped<WorkspaceAiService>();
 
@@ -63,7 +64,8 @@ public static class WorkspaceModule
         services.AddScoped<BriefingService>();
 
         // MatterPreFillService: Scoped to match HttpContext lifetime used for OBO file uploads.
-        // Depends on SpeFileStore (singleton), ITextExtractor (singleton), IOpenAiClient (singleton).
+        // Depends on SpeFileStore (singleton), ITextExtractor (singleton),
+        // IPlaybookOrchestrationService (scoped) for AI extraction via playbook system (ADR-013).
         // Concrete registration per ADR-010 (no interface seam needed for single implementation).
         services.AddScoped<MatterPreFillService>();
 

@@ -138,7 +138,7 @@ public static class WorkspaceAiEndpoints
 
         try
         {
-            var result = await aiService.GenerateAiSummaryAsync(request, userId, ct);
+            var result = await aiService.GenerateAiSummaryAsync(request, userId, httpContext, ct);
 
             logger.LogInformation(
                 "AI summary completed. UserId={UserId}, EntityType={EntityType}, EntityId={EntityId}, " +

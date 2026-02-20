@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Sprk.Bff.Api.Api.Workspace.Models;
 using Sprk.Bff.Api.Services.Ai;
 
@@ -18,20 +19,43 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// Supported entity types:
 /// - <c>sprk_event</c>  — Updates Feed items and To-Do items
 /// - <c>sprk_matter</c> — Matter-level context
+/// - <c>sprk_project</c> — Project-level context
+/// - <c>sprk_document</c> — Document analysis
 ///
 /// TODO (future tasks): Replace mock Dataverse fetch with real IDataverseService queries.
 /// </remarks>
 public class WorkspaceAiService
 {
+    private readonly IPlaybookOrchestrationService _playbookService;
     private readonly ILogger<WorkspaceAiService> _logger;
+    private readonly IConfiguration _configuration;
+
+    /// <summary>
+    /// Default playbook ID for workspace AI summaries. Override via Workspace:AiSummaryPlaybookId.
+    /// </summary>
+    private static readonly Guid DefaultAiSummaryPlaybookId =
+        Guid.Parse("18cf3cc8-02ec-f011-8406-7c1e520aa4df");
+
+    private static readonly HashSet<string> SupportedEntityTypes =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "sprk_event",
+            "sprk_matter",
+            "sprk_project",
+            "sprk_document"
+        };
 
     /// <summary>
     /// Initializes a new instance of <see cref="WorkspaceAiService"/>.
     /// </summary>
-    /// <param name="logger">Logger for diagnostics.</param>
-    public WorkspaceAiService(ILogger<WorkspaceAiService> logger)
+    public WorkspaceAiService(
+        IPlaybookOrchestrationService playbookService,
+        ILogger<WorkspaceAiService> logger,
+        IConfiguration configuration)
     {
+        _playbookService = playbookService ?? throw new ArgumentNullException(nameof(playbookService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
     }
 
     /// <summary>
@@ -39,6 +63,7 @@ public class WorkspaceAiService
     /// </summary>
     /// <param name="request">Summary request containing entity type, entity ID, and optional context.</param>
     /// <param name="userId">Entra ID object ID of the authenticated user (for audit logging).</param>
+    /// <param name="httpContext">HTTP context for OBO authentication in playbook execution.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>AI summary response with analysis text and suggested actions.</returns>
     /// <exception cref="KeyNotFoundException">
@@ -53,6 +78,7 @@ public class WorkspaceAiService
     public async Task<AiSummaryResponse> GenerateAiSummaryAsync(
         AiSummaryRequest request,
         string userId,
+        HttpContext httpContext,
         CancellationToken ct)
     {
         _logger.LogInformation(
@@ -61,16 +87,7 @@ public class WorkspaceAiService
             request.EntityType,
             request.EntityId);
 
-        // Validate entity type — only known workspace entities are supported.
-        var supportedEntityTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "sprk_event",
-            "sprk_matter",
-            "sprk_project",
-            "sprk_document"
-        };
-
-        if (!supportedEntityTypes.Contains(request.EntityType))
+        if (!SupportedEntityTypes.Contains(request.EntityType))
         {
             _logger.LogWarning(
                 "Unsupported entity type requested. EntityType={EntityType}, UserId={UserId}",
@@ -79,43 +96,15 @@ public class WorkspaceAiService
 
             throw new InvalidOperationException(
                 $"Entity type '{request.EntityType}' is not supported for AI summary. " +
-                $"Supported types: {string.Join(", ", supportedEntityTypes)}.");
+                $"Supported types: {string.Join(", ", SupportedEntityTypes)}.");
         }
 
         // --- Fetch entity from Dataverse ---
         // TODO: Replace with real IDataverseService query.
-        // Query pattern (sprk_event example):
-        //   GET /api/data/v9.2/sprk_events({entityId})?$select=sprk_name,sprk_description,
-        //       sprk_todostatus,sprk_priority,sprk_effort,sprk_estimatedminutes
-        // Return KeyNotFoundException if entity not found (HTTP 404 from Dataverse).
-        _logger.LogDebug(
-            "TODO: Fetching entity from Dataverse. EntityType={EntityType}, EntityId={EntityId}",
-            request.EntityType,
-            request.EntityId);
-
         var entityDescription = await FetchEntityDescriptionAsync(request, ct);
 
         // --- Invoke AI Playbook for analysis ---
-        // TODO: Replace mock with IPlaybookOrchestrationService.ExecuteAsync() call.
-        //
-        // Pattern (follows AnalysisEndpoints.cs / AnalysisOrchestrationService):
-        //   var playbookRequest = new PlaybookRunRequest
-        //   {
-        //       PlaybookId = <workspace-summary-playbook-id from config>,
-        //       DocumentIds = [],
-        //       UserContext = BuildContextPrompt(request, entityDescription)
-        //   };
-        //   await foreach (var evt in _orchestrationService.ExecuteAsync(playbookRequest, httpContext, ct))
-        //   {
-        //       // Accumulate NodeProgress content chunks
-        //       // Extract suggested actions from NodeCompleted events
-        //   }
-        _logger.LogDebug(
-            "TODO: Invoking AI Playbook for analysis. EntityType={EntityType}, EntityId={EntityId}",
-            request.EntityType,
-            request.EntityId);
-
-        var result = await GenerateAnalysisAsync(request, entityDescription, ct);
+        var result = await ExecutePlaybookAnalysisAsync(request, entityDescription, httpContext, ct);
 
         _logger.LogInformation(
             "AI summary generated. UserId={UserId}, EntityType={EntityType}, EntityId={EntityId}, " +
@@ -133,7 +122,11 @@ public class WorkspaceAiService
     /// Fetches a human-readable description of the entity from Dataverse.
     /// </summary>
     /// <remarks>
-    /// TODO: Replace mock with real Dataverse Web API call.
+    /// TODO: Replace mock with real Dataverse Web API call via IDataverseService.
+    /// Query pattern (sprk_event example):
+    ///   GET /api/data/v9.2/sprk_events({entityId})?$select=sprk_name,sprk_description,
+    ///       sprk_todostatus,sprk_priority,sprk_effort,sprk_estimatedminutes
+    /// Return KeyNotFoundException if entity not found (HTTP 404 from Dataverse).
     /// </remarks>
     private Task<string> FetchEntityDescriptionAsync(AiSummaryRequest request, CancellationToken ct)
     {
@@ -168,78 +161,166 @@ public class WorkspaceAiService
     }
 
     /// <summary>
-    /// Invokes the AI Playbook platform to generate analysis and suggested actions.
+    /// Executes the AI Playbook to generate analysis and suggested actions.
+    /// Consumes the playbook stream and extracts the final analysis from NodeCompleted events.
+    /// Falls back to a template response if the playbook fails or times out.
     /// </summary>
-    /// <remarks>
-    /// TODO: Replace mock with IPlaybookOrchestrationService.ExecuteAsync() streaming call.
-    /// The real implementation should:
-    /// 1. Look up the "Workspace AI Summary" playbook by name via IPlaybookService.GetByNameAsync
-    /// 2. Build a context prompt from entityDescription + request.Context
-    /// 3. Stream execution events via IPlaybookOrchestrationService.ExecuteAsync
-    /// 4. Accumulate NodeProgress content into analysis text
-    /// 5. Extract suggested actions from NodeCompleted output fields
-    /// 6. Map confidence from PlaybookRunMetrics
-    /// </remarks>
-    private Task<AiSummaryResponse> GenerateAnalysisAsync(
+    private async Task<AiSummaryResponse> ExecutePlaybookAnalysisAsync(
         AiSummaryRequest request,
         string entityDescription,
+        HttpContext httpContext,
         CancellationToken ct)
     {
-        // Mock AI analysis — replace with real PlaybookOrchestrationService call.
-        // The mock returns plausible analysis text and suggested actions for the entity type.
+        var playbookIdStr = _configuration["Workspace:AiSummaryPlaybookId"];
+        var playbookId = !string.IsNullOrEmpty(playbookIdStr) && Guid.TryParse(playbookIdStr, out var parsed)
+            ? parsed
+            : DefaultAiSummaryPlaybookId;
 
+        var playbookRequest = new PlaybookRunRequest
+        {
+            PlaybookId = playbookId,
+            DocumentIds = [],
+            UserContext = entityDescription,
+            Parameters = new Dictionary<string, string>
+            {
+                ["entity_type"] = request.EntityType,
+                ["entity_id"] = request.EntityId.ToString(),
+                ["analysis_mode"] = "workspace_summary"
+            }
+        };
+
+        string? analysisText = null;
+        string[]? suggestedActions = null;
+        double confidence = 0;
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(45));
+
+        try
+        {
+            await foreach (var evt in _playbookService.ExecuteAsync(playbookRequest, httpContext, timeoutCts.Token))
+            {
+                if (evt.Type == PlaybookEventType.NodeCompleted && evt.NodeOutput != null)
+                {
+                    // Extract analysis from the last completed node's output
+                    if (evt.NodeOutput.StructuredData.HasValue)
+                    {
+                        try
+                        {
+                            var data = evt.NodeOutput.StructuredData.Value;
+                            analysisText = data.TryGetProperty("analysis", out var analysisProp)
+                                ? analysisProp.GetString()
+                                : evt.NodeOutput.TextContent;
+
+                            if (data.TryGetProperty("suggestedActions", out var actionsProp) &&
+                                actionsProp.ValueKind == JsonValueKind.Array)
+                            {
+                                suggestedActions = actionsProp.EnumerateArray()
+                                    .Select(a => a.GetString() ?? string.Empty)
+                                    .Where(s => !string.IsNullOrEmpty(s))
+                                    .ToArray();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex,
+                                "Failed to parse structured data from playbook node output. " +
+                                "Falling back to text content. NodeId={NodeId}",
+                                evt.NodeId);
+                            analysisText = evt.NodeOutput.TextContent;
+                        }
+                    }
+                    else if (!string.IsNullOrWhiteSpace(evt.NodeOutput.TextContent))
+                    {
+                        analysisText = evt.NodeOutput.TextContent;
+                    }
+
+                    confidence = evt.NodeOutput.Confidence ?? confidence;
+                }
+
+                if (evt.Type == PlaybookEventType.RunFailed)
+                {
+                    _logger.LogWarning(
+                        "AI summary playbook failed. EntityType={EntityType}, EntityId={EntityId}, Error={Error}",
+                        request.EntityType, request.EntityId, evt.Error);
+
+                    return BuildFallbackResponse(request);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "AI summary playbook timed out (45s). EntityType={EntityType}, EntityId={EntityId}",
+                request.EntityType, request.EntityId);
+
+            return BuildFallbackResponse(request);
+        }
+
+        if (string.IsNullOrWhiteSpace(analysisText))
+        {
+            return BuildFallbackResponse(request);
+        }
+
+        return new AiSummaryResponse(
+            Analysis: analysisText,
+            SuggestedActions: suggestedActions ?? ["Review entity details and current status"],
+            Confidence: confidence,
+            GeneratedAt: DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>
+    /// Builds a fallback response when the playbook is unavailable or fails.
+    /// </summary>
+    private static AiSummaryResponse BuildFallbackResponse(AiSummaryRequest request)
+    {
         var entityType = request.EntityType.ToLowerInvariant();
 
-        var (analysis, suggestedActions, confidence) = entityType switch
+        var (analysis, actions, conf) = entityType switch
         {
             "sprk_event" => (
-                Analysis: "This event represents a high-priority deadline with significant time investment required. " +
-                          "Based on the current workload and matter status, immediate attention is recommended. " +
-                          "The estimated effort of 3 hours aligns with similar past events in this matter portfolio.",
-                SuggestedActions: new[]
+                "This event represents a high-priority deadline with significant time investment required. " +
+                "Based on the current workload and matter status, immediate attention is recommended.",
+                new[]
                 {
-                    "Schedule a 30-minute preparation block before the deadline",
+                    "Schedule a preparation block before the deadline",
                     "Review related documents and correspondence",
                     "Coordinate with team members on shared dependencies",
                     "Update matter timeline if deadline is adjusted"
                 },
-                Confidence: 0.82
+                0.50
             ),
 
             "sprk_matter" => (
-                Analysis: "This matter is currently over 85% budget utilization with active overdue events. " +
-                          "Risk level is elevated and proactive client communication is recommended. " +
-                          "Consider reviewing billing arrangements and scope alignment with the client.",
-                SuggestedActions: new[]
+                "This matter requires attention based on current status indicators. " +
+                "Consider reviewing billing arrangements and scope alignment with the client.",
+                new[]
                 {
                     "Schedule client status call to review progress",
-                    "Review and resolve overdue events this week",
+                    "Review and resolve overdue events",
                     "Prepare budget status summary for partner review",
                     "Evaluate whether scope adjustments are needed"
                 },
-                Confidence: 0.88
+                0.50
             ),
 
             _ => (
-                Analysis: $"AI analysis of {request.EntityType} entity. " +
-                          "Contextual review indicates this item warrants your attention. " +
-                          "Review the associated timeline and dependencies to determine next steps.",
-                SuggestedActions: new[]
+                $"AI analysis of {request.EntityType} entity. " +
+                "Review the associated timeline and dependencies to determine next steps.",
+                new[]
                 {
                     "Review entity details and current status",
                     "Identify any blocked dependencies",
                     "Update status and communicate with stakeholders"
                 },
-                Confidence: 0.70
+                0.40
             )
         };
 
-        var response = new AiSummaryResponse(
+        return new AiSummaryResponse(
             Analysis: analysis,
-            SuggestedActions: suggestedActions,
-            Confidence: confidence,
+            SuggestedActions: actions,
+            Confidence: conf,
             GeneratedAt: DateTimeOffset.UtcNow);
-
-        return Task.FromResult(response);
     }
 }

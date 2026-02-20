@@ -1,4 +1,4 @@
-# Task Index — Legal Operations Workspace (Home Corporate) R1
+ # Task Index — Legal Operations Workspace (Home Corporate) R1
 
 > **Last Updated**: 2026-02-18
 > **Total Tasks**: 42
