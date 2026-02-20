@@ -47,7 +47,6 @@ import {
   IAiPrefillState,
   IAiPrefillFields,
   FormAction,
-  IAiPrefillResponse,
 } from './formTypes';
 import { AiFieldTag } from './AiFieldTag';
 import { LookupField } from './LookupField';
@@ -297,6 +296,7 @@ const FieldSkeleton: React.FC<{ large?: boolean }> = ({ large }) => {
 export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
   webApi,
   uploadedFileNames,
+  uploadedFiles,
   onValidChange,
   onSubmit,
 }) => {
@@ -332,7 +332,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
 
   // ── AI Pre-fill on mount ───────────────────────────────────────────────────
   React.useEffect(() => {
-    if (uploadedFileNames.length === 0) {
+    if (uploadedFiles.length === 0) {
       return;
     }
 
@@ -342,11 +342,17 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
       dispatch({ type: 'AI_PREFILL_LOADING' });
 
       try {
+        // Send actual files as multipart/form-data (BFF expects IFormFileCollection)
         const bffBaseUrl = getBffBaseUrl();
+        const formData = new FormData();
+        for (const f of uploadedFiles) {
+          formData.append('files', f.file, f.name);
+        }
+
         const response = await authenticatedFetch(`${bffBaseUrl}${PREFILL_PATH}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fileNames: uploadedFileNames }),
+          body: formData,
+          // Note: do NOT set Content-Type header — browser sets it with boundary
         });
 
         if (cancelled) return;
@@ -356,12 +362,19 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
           return;
         }
 
-        const data: IAiPrefillResponse = await response.json();
+        // BFF returns flat PreFillResponse; map to IAiPrefillFields
+        const data = await response.json();
 
         if (cancelled) return;
 
-        if (data.fields && Object.keys(data.fields).length > 0) {
-          dispatch({ type: 'APPLY_AI_PREFILL', fields: data.fields });
+        const fields: IAiPrefillFields = {};
+        if (data.matterTypeName) fields.matterTypeName = data.matterTypeName;
+        if (data.practiceAreaName) fields.practiceAreaName = data.practiceAreaName;
+        if (data.matterName) fields.matterName = data.matterName;
+        if (data.summary) fields.summary = data.summary;
+
+        if (Object.keys(fields).length > 0) {
+          dispatch({ type: 'APPLY_AI_PREFILL', fields });
         }
 
         dispatch({ type: 'AI_PREFILL_SUCCESS' });

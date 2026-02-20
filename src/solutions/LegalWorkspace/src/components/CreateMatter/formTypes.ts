@@ -12,6 +12,7 @@
  */
 
 import type { IWebApi } from '../../types/xrm';
+import type { IUploadedFile } from './wizardTypes';
 
 // ---------------------------------------------------------------------------
 // Form state
@@ -163,6 +164,12 @@ export interface ICreateRecordStepProps {
    * the BFF AI pre-fill call on mount when files are present.
    */
   uploadedFileNames: string[];
+
+  /**
+   * Actual uploaded file objects from Step 1. Needed for multipart/form-data
+   * upload to the BFF AI pre-fill endpoint.
+   */
+  uploadedFiles: IUploadedFile[];
 
   /**
    * Called by the step when form validity changes.  The parent wizard uses

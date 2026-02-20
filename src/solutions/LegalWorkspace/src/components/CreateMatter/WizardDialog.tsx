@@ -689,6 +689,7 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
           <CreateRecordStep
             webApi={webApi!}
             uploadedFileNames={state.uploadedFiles.map((f) => f.name)}
+            uploadedFiles={state.uploadedFiles}
             onValidChange={setStep2Valid}
             onSubmit={(values) => setStep2FormValues(values)}
           />
