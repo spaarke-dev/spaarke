@@ -24,3 +24,6 @@ export * from "./ChoiceDialog";
 
 // Event Due Date Card
 export * from "./EventDueDateCard";
+
+// Side Pane components (reusable across entity detail side panes)
+export * from "./SidePane";

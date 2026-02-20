@@ -160,6 +160,10 @@ export const HeaderSection: React.FC<IHeaderSectionProps> = ({
   const [editingName, setEditingName] = React.useState<string>("");
   const [isSavingName, setIsSavingName] = React.useState(false);
 
+  // Stable ref for onEventLoaded callback (prevents re-fetch loops)
+  const onEventLoadedRef = React.useRef(onEventLoaded);
+  React.useEffect(() => { onEventLoadedRef.current = onEventLoaded; });
+
   // ─────────────────────────────────────────────────────────────────────────
   // Load Event Data
   // ─────────────────────────────────────────────────────────────────────────
@@ -184,7 +188,7 @@ export const HeaderSection: React.FC<IHeaderSectionProps> = ({
       if (result.success && result.event) {
         setEvent(result.event);
         setEditingName(result.event.sprk_eventname || "");
-        onEventLoaded?.(result.event);
+        onEventLoadedRef.current?.(result.event);
       } else {
         setError(result.error || "Failed to load event");
       }
@@ -197,7 +201,7 @@ export const HeaderSection: React.FC<IHeaderSectionProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [eventId, onEventLoaded]);
+  }, [eventId]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Event Handlers

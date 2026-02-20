@@ -4,13 +4,18 @@
  * Displays status reason options as radio buttons for quick status changes.
  * Uses Fluent UI v9 RadioGroup component with proper theming.
  *
- * Status Reason Values:
- * - 1: Draft
- * - 2: Planned
- * - 3: Open
- * - 4: On Hold
- * - 5: Completed
- * - 6: Cancelled
+ * Status Reason Values (from Dataverse sprk_event.statuscode):
+ * Active (statecode 0):
+ *   1           = Draft
+ *   659,490,001 = Open
+ *   659,490,002 = Completed
+ *   659,490,003 = Closed
+ *   659,490,006 = On Hold
+ *   659,490,007 = Reassigned
+ * Inactive (statecode 1):
+ *   2           = No Further Action
+ *   659,490,004 = Cancelled
+ *   659,490,005 = Transferred
  *
  * @see projects/events-workspace-apps-UX-r1/tasks/033-create-status-section.poml
  */
@@ -30,9 +35,9 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Status reason values from Dataverse sprk_event entity
+ * Status reason values from Dataverse sprk_event.statuscode
  */
-export type StatusReasonValue = 1 | 2 | 3 | 4 | 5 | 6;
+export type StatusReasonValue = number;
 
 /**
  * Status reason option definition
@@ -62,15 +67,16 @@ export interface StatusSectionProps {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Status reason options mapped from Dataverse statuscode values
+ * Status reason options mapped from Dataverse sprk_event.statuscode values
+ * Active (statecode 0)
  */
 export const STATUS_REASON_OPTIONS: StatusReasonOption[] = [
-  { value: 1, label: "Draft", description: "Event is in draft state" },
-  { value: 2, label: "Planned", description: "Event is planned for future" },
-  { value: 3, label: "Open", description: "Event is currently active" },
-  { value: 4, label: "On Hold", description: "Event is temporarily paused" },
-  { value: 5, label: "Completed", description: "Event has been completed" },
-  { value: 6, label: "Cancelled", description: "Event has been cancelled" },
+  { value: 1, label: "Draft" },
+  { value: 659490001, label: "Open" },
+  { value: 659490002, label: "Completed" },
+  { value: 659490003, label: "Closed" },
+  { value: 659490006, label: "On Hold" },
+  { value: 659490004, label: "Cancelled" },
 ];
 
 /**
@@ -190,8 +196,8 @@ export function getStatusReasonLabel(value: StatusReasonValue): string {
 /**
  * Check if a number is a valid status reason value
  */
-export function isValidStatusReason(value: number): value is StatusReasonValue {
-  return [1, 2, 3, 4, 5, 6].includes(value);
+export function isValidStatusReason(value: number): boolean {
+  return STATUS_REASON_OPTIONS.some((opt) => opt.value === value);
 }
 
 export default StatusSection;

@@ -1,7 +1,7 @@
 # Relationship Navigation Pattern
 
 > **Domain**: Dataverse Lookups and Relationships
-> **Last Validated**: 2025-12-19
+> **Last Validated**: 2026-02-19
 > **Source ADRs**: ADR-007
 
 ---
@@ -171,13 +171,88 @@ public class LookupNavigationMetadata
 
 ---
 
+## Name Casing Rules: SDK vs Web API vs Xrm.WebApi
+
+**This is a critical distinction that causes silent save failures if violated.**
+
+### The Rule
+
+| API Layer | Scalar Fields | Lookup Fields (Set) | Lookup Fields (Read/Filter) |
+|-----------|--------------|--------------------|-----------------------------|
+| **SDK (ServiceClient)** | Logical name (lowercase) | Logical name via `EntityReference` | Logical name via `GetAttributeValue<EntityReference>` |
+| **Web API (REST)** | Logical name (case-insensitive) | **SchemaName (CASE-SENSITIVE)** via `@odata.bind` | `_fieldname_value` (logical, lowercase) |
+| **Xrm.WebApi (client JS/TS)** | Logical name (case-insensitive) | **SchemaName (CASE-SENSITIVE)** via `@odata.bind` | `_fieldname_value` (logical, lowercase) |
+
+### Why This Matters
+
+- The **SDK** handles name resolution internally — you always use logical names (lowercase)
+- The **Web API** is OData-based — navigation properties are defined by SchemaName in the EDMX model and are **case-sensitive**
+- **Xrm.WebApi** (used in Custom Pages, form scripts, PCF) is a thin wrapper around the Web API — it inherits the same case sensitivity for `@odata.bind`
+
+### When We Use Each in Spaarke
+
+| Context | Technology | Name Casing for Lookups |
+|---------|-----------|------------------------|
+| BFF API via `DataverseServiceClientImpl.cs` | SDK (ServiceClient) | Logical name: `document["sprk_matter"] = new EntityReference(...)` |
+| BFF API via `DataverseWebApiService.cs` | Web API (REST) | SchemaName: `payload["sprk_Matter@odata.bind"] = "/sprk_matters(guid)"` |
+| Plugins (server C#) | SDK only | Logical name always |
+| Custom Pages (client TS) | Xrm.WebApi | SchemaName: `"sprk_CompletedBy@odata.bind": "/contacts(guid)"` |
+| PCF Controls (client TS) | Xrm.WebApi | SchemaName for `@odata.bind` |
+
+### Example: Same Lookup, Three Contexts
+
+```
+Column logical name:    sprk_completedby     (always lowercase)
+Column schema name:     sprk_CompletedBy     (PascalCase after prefix)
+Navigation property:    sprk_CompletedBy     (matches SchemaName)
+```
+
+```csharp
+// SDK (server) — logical name, EntityReference handles the rest
+entity["sprk_completedby"] = new EntityReference("contact", contactGuid);
+
+// Web API REST (server) — SchemaName for @odata.bind key
+payload["sprk_CompletedBy@odata.bind"] = $"/contacts({contactGuid})";
+```
+
+```typescript
+// Xrm.WebApi (client) — SchemaName for @odata.bind key
+await Xrm.WebApi.updateRecord("sprk_event", eventId, {
+  "sprk_CompletedBy@odata.bind": `/contacts(${contactGuid})`
+});
+```
+
+### How to Find the SchemaName
+
+1. **make.powerapps.com** → Tables → Entity → Columns → Click column → "Schema name" field
+2. **Metadata API**: `RetrieveEntityRequest` → `Attributes.OfType<LookupAttributeMetadata>().SchemaName`
+3. **Convention**: Publisher prefix + PascalCase (e.g., `sprk_` + `CompletedBy`)
+
+### For Approach A Dynamic Form Configs
+
+Lookup fields in `sprk_fieldconfigjson` MUST include `navigationProperty` with the correct SchemaName:
+
+```json
+{
+  "name": "sprk_completedby",
+  "type": "lookup",
+  "label": "Completed By",
+  "targets": ["contact"],
+  "navigationProperty": "sprk_CompletedBy"
+}
+```
+
+The `name` field (logical name) is used for reading values. The `navigationProperty` (SchemaName) is used for saving via `@odata.bind`.
+
+---
+
 ## Key Points
 
-1. **EntityReference for SDK** - Wrap GUID with entity logical name
-2. **@odata.bind for REST** - Use navigation property with entity set path
+1. **EntityReference for SDK** - Wrap GUID with entity logical name (lowercase)
+2. **@odata.bind for Web API / Xrm.WebApi** - Use **SchemaName** (CASE-SENSITIVE) with entity set path
 3. **Underscore prefix for filters** - `_fieldname_value` not `fieldname`
 4. **Metadata discovery** - Query relationships dynamically if needed
-5. **SchemaName vs LogicalName** - Web API uses SchemaName, SDK uses LogicalName
+5. **SchemaName vs LogicalName** - Web API / Xrm.WebApi use SchemaName for `@odata.bind`; SDK uses LogicalName for everything
 
 ---
 
@@ -188,4 +263,4 @@ public class LookupNavigationMetadata
 
 ---
 
-**Lines**: ~100
+**Lines**: ~180

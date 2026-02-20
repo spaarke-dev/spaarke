@@ -83,13 +83,13 @@ import {
   useViewSelection,
 } from "./components";
 import {
-  getFormGuidForEventType,
   EVENT_DETAIL_PANE_ID,
   CALENDAR_PANE_ID,
   PANE_WIDTH,
   CALENDAR_PANE_WIDTH,
   EVENT_ENTITY_NAME,
   CALENDAR_WEB_RESOURCE_NAME,
+  EVENT_DETAIL_WEB_RESOURCE_NAME,
 } from "./config";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -322,23 +322,22 @@ function getXrm(): any | null {
 
 /**
  * Open the Event Detail Side Pane for a specific event.
- * Uses native Dataverse form for editing, selecting the appropriate form
- * based on the Event Type.
+ * Uses React HTML web resource (EventDetailSidePane) for editing,
+ * with Event Type-driven field configuration via sprk_fieldconfigjson.
  *
- * Task 089: Now uses Event Type → Form GUID mapping from configuration.
+ * Task 089: Event Type mapping (originally form GUID, now passed as param).
  * Task 096: Implements mutual exclusivity with Calendar pane.
  *           Re-registers Calendar pane if it was closed with 'x'.
+ * Task 100: Switched from entityrecord (OOB form) to webresource (React).
  *
  * @param eventId - GUID of the Event record
- * @param eventTypeId - GUID of the Event Type (determines which form to use)
+ * @param eventTypeId - GUID of the Event Type (passed to side pane for config lookup)
  */
 async function openEventDetailPane(
   eventId: string,
   eventTypeId?: string
 ): Promise<void> {
-  // Get the appropriate form based on Event Type (Task 089)
-  const formId = getFormGuidForEventType(eventTypeId);
-  console.log("[EventsPage] Opening side pane for event:", eventId, "eventTypeId:", eventTypeId, "formId:", formId);
+  console.log("[EventsPage] Opening side pane for event:", eventId, "eventTypeId:", eventTypeId);
 
   const xrm = getXrm();
   if (!xrm) {
@@ -350,23 +349,20 @@ async function openEventDetailPane(
 
   try {
     const sidePanes = xrm.App.sidePanes;
-    console.log("[EventsPage] sidePanes object:", sidePanes);
 
     // Task 096: Re-register Date Filter pane if it was closed with 'x'
     // This ensures Date Filter icon stays in the menu when opening Event pane
     const calendarPane = sidePanes.getPane(CALENDAR_PANE_ID);
     if (!calendarPane) {
       console.log("[EventsPage] Date Filter pane was closed, re-registering");
-      // Re-register Date Filter pane (but don't select it - Event pane will be selected)
       await sidePanes.createPane({
         title: "Date Filter: Event",
         paneId: CALENDAR_PANE_ID,
         canClose: true,
         width: CALENDAR_PANE_WIDTH,
-        isSelected: false, // Don't select - Event pane will be selected
-        imageSrc: "WebResources/sprk_calendarline_24", // Calendar icon web resource
+        isSelected: false,
+        imageSrc: "WebResources/sprk_calendarline_24",
       });
-      // Navigate to the CalendarSidePane web resource
       const newCalendarPane = sidePanes.getPane(CALENDAR_PANE_ID);
       if (newCalendarPane) {
         await newCalendarPane.navigate({
@@ -375,34 +371,29 @@ async function openEventDetailPane(
         });
       }
       console.log("[EventsPage] Calendar pane re-registered");
-    } else {
-      console.log("[EventsPage] Calendar pane exists, will deselect for Event pane");
     }
 
     // Clean the event ID (remove braces if present)
     const cleanEventId = eventId.replace(/[{}]/g, "");
 
-    // Check for existing pane
-    console.log("[EventsPage] Checking for existing pane with ID:", EVENT_DETAIL_PANE_ID);
-    const existingPane = sidePanes.getPane(EVENT_DETAIL_PANE_ID);
-    console.log("[EventsPage] existingPane:", existingPane);
-
-    // Navigation options for native Event form
-    // Task 089: Form ID is now determined by Event Type
+    // Task 100: Navigation via React HTML web resource (replaces OOB entityrecord)
+    // Parameters passed via data= query string, parsed by EventDetailSidePane's parseParams.ts
     const navigationOptions = {
-      pageType: "entityrecord",
-      entityName: EVENT_ENTITY_NAME,
-      entityId: cleanEventId,
-      formId: formId,
+      pageType: "webresource",
+      webresourceName: EVENT_DETAIL_WEB_RESOURCE_NAME,
+      data: `eventId=${cleanEventId}&eventType=${eventTypeId || ""}`,
     };
 
+    const existingPane = sidePanes.getPane(EVENT_DETAIL_PANE_ID);
+
     if (existingPane) {
-      // Navigate existing pane to new event
+      // Clear persisted state for the previous event before switching
+      try { sessionStorage.removeItem("sprk_eventdetail_state"); } catch { /* ignore */ }
+
       console.log("[EventsPage] Reusing existing side pane, navigating to:", cleanEventId);
       await existingPane.navigate(navigationOptions);
       existingPane.select();
     } else {
-      // Create new pane
       console.log("[EventsPage] Creating new side pane");
       const newPane = await sidePanes.createPane({
         title: "Event",
@@ -410,13 +401,13 @@ async function openEventDetailPane(
         canClose: true,
         width: PANE_WIDTH,
         isSelected: true,
-        imageSrc: "WebResources/sprk_tabaddline_24", // Event icon web resource
+        imageSrc: "WebResources/sprk_tabaddline_24",
       });
 
       await newPane.navigate(navigationOptions);
     }
 
-    console.log("[EventsPage] Side pane opened successfully with form:", formId);
+    console.log("[EventsPage] Side pane opened successfully for event:", cleanEventId);
   } catch (error) {
     console.error("[EventsPage] Failed to open side pane:", error);
   }
@@ -476,6 +467,15 @@ const CALENDAR_MESSAGE_TYPES = {
   CALENDAR_EVENTS_UPDATE: "CALENDAR_EVENTS_UPDATE",
   CALENDAR_CLOSE: "CALENDAR_CLOSE",
   CALENDAR_READY: "CALENDAR_READY",
+} as const;
+
+/**
+ * Message types for EventDetailSidePane communication (Task 100)
+ */
+const EVENT_DETAIL_MESSAGE_TYPES = {
+  EVENT_SAVED: "EVENT_DETAIL_SAVED",
+  EVENT_OPENED: "EVENT_DETAIL_OPENED",
+  EVENT_CLOSED: "EVENT_DETAIL_CLOSED",
 } as const;
 
 /**
@@ -1204,12 +1204,13 @@ const EventsPageContent: React.FC = () => {
       } else {
         console.log("[EventsPage] v2.14.0 Xrm.App.sidePanes not available");
       }
-      // Clear calendar filter session storage when navigating away from Events page
+      // Clear session storage when navigating away from Events page
       try {
         sessionStorage.removeItem(CALENDAR_FILTER_STATE_KEY);
-        console.log("[EventsPage] Cleared calendar filter state on navigation away");
+        sessionStorage.removeItem("sprk_eventdetail_state");
+        console.log("[EventsPage] Cleared calendar + event detail state on navigation away");
       } catch (err) {
-        console.warn("[EventsPage] Could not clear filter state:", err);
+        console.warn("[EventsPage] Could not clear session state:", err);
       }
     };
 
@@ -1317,13 +1318,15 @@ const EventsPageContent: React.FC = () => {
     }
   }, [eventDates]);
 
-  // Listen for messages from CalendarSidePane via BroadcastChannel and postMessage
+  // Listen for messages from side panes via BroadcastChannel and postMessage
+  // Handles both CalendarSidePane and EventDetailSidePane messages
   React.useEffect(() => {
     /**
-     * Handle incoming calendar messages
+     * Handle incoming side pane messages (Calendar + Event Detail)
      */
-    const handleCalendarMessage = (data: { type?: string; payload?: unknown }) => {
+    const handleSidePaneMessage = (data: { type?: string; payload?: unknown }) => {
       switch (data.type) {
+        // Calendar messages
         case CALENDAR_MESSAGE_TYPES.CALENDAR_FILTER_CHANGED: {
           const payload = data.payload as { filter?: CalendarFilterOutput | null };
           console.log("[EventsPage] Received calendar filter change:", payload.filter);
@@ -1331,7 +1334,6 @@ const EventsPageContent: React.FC = () => {
           break;
         }
         case CALENDAR_MESSAGE_TYPES.CALENDAR_READY: {
-          // Calendar is ready, send current event dates
           console.log("[EventsPage] Calendar side pane ready, sending event dates");
           if (eventDates && eventDates.length > 0) {
             const dateInfo = eventDates.map((date) => ({
@@ -1343,22 +1345,36 @@ const EventsPageContent: React.FC = () => {
           break;
         }
         case CALENDAR_MESSAGE_TYPES.CALENDAR_CLOSE: {
-          // Calendar requested close - no action needed, handled by Xrm
           console.log("[EventsPage] Calendar close request received");
+          break;
+        }
+        // Event Detail messages (Task 105)
+        case EVENT_DETAIL_MESSAGE_TYPES.EVENT_SAVED: {
+          console.log("[EventsPage] Event saved in side pane, refreshing grid");
+          refreshGrid();
+          break;
+        }
+        case EVENT_DETAIL_MESSAGE_TYPES.EVENT_OPENED: {
+          const payload = data.payload as { eventId?: string };
+          console.log("[EventsPage] Event detail pane opened:", payload?.eventId);
+          break;
+        }
+        case EVENT_DETAIL_MESSAGE_TYPES.EVENT_CLOSED: {
+          console.log("[EventsPage] Event detail pane closed");
           break;
         }
       }
     };
 
     // PRIMARY: BroadcastChannel listener for cross-iframe communication
-    // (CalendarSidePane and EventsPage are sibling iframes under Dataverse shell)
+    // (CalendarSidePane, EventDetailSidePane, and EventsPage are sibling iframes)
     let broadcastChannel: BroadcastChannel | null = null;
     if (typeof BroadcastChannel !== "undefined") {
       broadcastChannel = new BroadcastChannel(EVENTS_CHANNEL_NAME);
       broadcastChannel.onmessage = (event) => {
         if (event.data && typeof event.data === "object") {
           console.log("[EventsPage] BroadcastChannel message received:", event.data.type);
-          handleCalendarMessage(event.data);
+          handleSidePaneMessage(event.data);
         }
       };
       console.log("[EventsPage] BroadcastChannel listener registered");
@@ -1369,7 +1385,7 @@ const EventsPageContent: React.FC = () => {
       if (!event.data || typeof event.data !== "object") {
         return;
       }
-      handleCalendarMessage(event.data);
+      handleSidePaneMessage(event.data);
     };
     window.addEventListener("message", handlePostMessage);
 
@@ -1395,7 +1411,7 @@ const EventsPageContent: React.FC = () => {
         handleCustomFilterEvent as EventListener
       );
     };
-  }, [eventDates, setCalendarFilter]);
+  }, [eventDates, setCalendarFilter, refreshGrid]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // CommandBar Handlers (Task 089)
