@@ -337,9 +337,13 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
     }
 
     let cancelled = false;
+    const abortController = new AbortController();
 
     const runPrefill = async (): Promise<void> => {
       dispatch({ type: 'AI_PREFILL_LOADING' });
+
+      // Client-side timeout: 60s (BFF has 45s playbook timeout + text extraction time)
+      const timeoutId = window.setTimeout(() => abortController.abort(), 60_000);
 
       try {
         // Send actual files as multipart/form-data (BFF expects IFormFileCollection)
@@ -352,12 +356,16 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
         const response = await authenticatedFetch(`${bffBaseUrl}${PREFILL_PATH}`, {
           method: 'POST',
           body: formData,
+          signal: abortController.signal,
           // Note: do NOT set Content-Type header — browser sets it with boundary
         });
+
+        clearTimeout(timeoutId);
 
         if (cancelled) return;
 
         if (!response.ok) {
+          console.warn(`[CreateMatter] Pre-fill returned ${response.status}`);
           dispatch({ type: 'AI_PREFILL_ERROR' });
           return;
         }
@@ -378,8 +386,12 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
         }
 
         dispatch({ type: 'AI_PREFILL_SUCCESS' });
-      } catch {
+      } catch (err) {
+        clearTimeout(timeoutId);
         if (!cancelled) {
+          if (abortController.signal.aborted) {
+            console.warn('[CreateMatter] Pre-fill timed out after 60s');
+          }
           dispatch({ type: 'AI_PREFILL_ERROR' });
         }
       }
@@ -389,6 +401,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
 
     return () => {
       cancelled = true;
+      abortController.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadedFileNames]);
