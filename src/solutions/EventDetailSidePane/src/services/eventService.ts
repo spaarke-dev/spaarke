@@ -239,8 +239,9 @@ export async function updateEventName(
 /**
  * Map of field names to their dirty (changed) values.
  * Only fields that have been modified are included.
+ * Uses generic Record to support dynamic form fields from Approach A config.
  */
-export type DirtyFields = Partial<Record<keyof IEventRecord, unknown>>;
+export type DirtyFields = Record<string, unknown>;
 
 /**
  * Result of saveEvent operation
@@ -350,14 +351,21 @@ export async function saveEvent(
   try {
     const normalizedId = eventId.replace(/[{}]/g, "");
 
-    // Build the update payload with only dirty fields
-    const updatePayload: Record<string, unknown> = {};
+    // Split payload into scalar fields and lookup bindings.
+    // Lookups use @odata.bind which can require separate handling.
+    const scalarPayload: Record<string, unknown> = {};
+    const lookupPayload: Record<string, unknown> = {};
     const savedFieldNames: string[] = [];
 
     for (const [field, value] of Object.entries(dirtyFields)) {
-      // Convert undefined to null for WebAPI
-      updatePayload[field] = value === undefined ? null : value;
+      const val = value === undefined ? null : value;
       savedFieldNames.push(field);
+
+      if (field.endsWith("@odata.bind")) {
+        lookupPayload[field] = val;
+      } else {
+        scalarPayload[field] = val;
+      }
     }
 
     console.log(
@@ -365,8 +373,32 @@ export async function saveEvent(
       savedFieldNames
     );
 
-    // PATCH request to update only changed fields
-    await webApi.updateRecord(EVENT_ENTITY, normalizedId, updatePayload);
+    // Save scalar fields first (statuscode, dates, text, choice)
+    if (Object.keys(scalarPayload).length > 0) {
+      console.log("[EventService] Scalar payload:", JSON.stringify(scalarPayload, null, 2));
+      await webApi.updateRecord(EVENT_ENTITY, normalizedId, scalarPayload);
+      console.log("[EventService] Scalar fields saved");
+    }
+
+    // Save lookup bindings separately
+    if (Object.keys(lookupPayload).length > 0) {
+      console.log("[EventService] Lookup payload:", JSON.stringify(lookupPayload, null, 2));
+      try {
+        await webApi.updateRecord(EVENT_ENTITY, normalizedId, lookupPayload);
+        console.log("[EventService] Lookup fields saved");
+      } catch (lookupError) {
+        const lookupMsg = lookupError instanceof Error
+          ? lookupError.message
+          : (typeof lookupError === "object" ? JSON.stringify(lookupError) : String(lookupError));
+        console.error("[EventService] Lookup save failed:", lookupMsg);
+        // Scalar fields already saved — report partial success
+        return {
+          success: false,
+          error: `Scalar fields saved but lookup update failed: ${lookupMsg}`,
+          savedFields: Object.keys(scalarPayload),
+        };
+      }
+    }
 
     console.log("[EventService] Save successful");
 
@@ -375,12 +407,14 @@ export async function saveEvent(
       savedFields: savedFieldNames,
     };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error("[EventService] Failed to save event:", errorMessage);
+    const errorMsg = error instanceof Error
+      ? error.message
+      : (typeof error === "object" ? JSON.stringify(error) : String(error));
+    console.error("[EventService] Failed to save event:", errorMsg);
 
     return {
       success: false,
-      error: errorMessage,
+      error: errorMsg,
     };
   }
 }

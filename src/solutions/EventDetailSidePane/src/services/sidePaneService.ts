@@ -109,6 +109,63 @@ export function closeSidePane(): boolean {
  * @param url - Full URL to the parent record
  * @returns true if navigation was initiated, false if URL invalid or API not available
  */
+// ─────────────────────────────────────────────────────────────────────────────
+// Open Event Record (Modal)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Event modal form GUID for opening full record */
+const EVENT_MODAL_FORM_ID = "90d2eff7-6703-f111-8407-7ced8d1dc988";
+
+/**
+ * Open the full Event record in a modal dialog.
+ * Uses Xrm.Navigation.navigateTo with target: 2 (modal dialog).
+ */
+export function openEventRecord(eventId: string): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm = (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
+
+    if (!xrm?.Navigation?.navigateTo) {
+      console.warn("[SidePaneService] Xrm.Navigation.navigateTo not available, falling back to openForm");
+      if (xrm?.Navigation?.openForm) {
+        xrm.Navigation.openForm({
+          entityName: "sprk_event",
+          entityId: eventId,
+          formId: EVENT_MODAL_FORM_ID,
+        });
+      } else {
+        console.error("[SidePaneService] Cannot open form - Xrm.Navigation not available");
+      }
+      return;
+    }
+
+    const pageInput = {
+      pageType: "entityrecord",
+      entityName: "sprk_event",
+      entityId: eventId,
+      formId: EVENT_MODAL_FORM_ID,
+    };
+
+    const navigationOptions = {
+      target: 2,
+      width: { value: 80, unit: "%" },
+      height: { value: 80, unit: "%" },
+      position: 1,
+    };
+
+    xrm.Navigation.navigateTo(pageInput, navigationOptions).then(
+      () => console.log("[SidePaneService] Modal closed"),
+      (error: unknown) => console.error("[SidePaneService] Error opening modal:", error)
+    );
+  } catch (error) {
+    console.error("[SidePaneService] Exception opening modal:", error);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Navigate to Parent Record
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function navigateToParentRecord(url: string): boolean {
   if (!url) {
     console.warn("[SidePaneService] Cannot navigate - URL is empty");

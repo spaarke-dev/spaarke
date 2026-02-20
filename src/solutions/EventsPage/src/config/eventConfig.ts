@@ -196,3 +196,10 @@ export const EVENT_ENTITY_NAME = "sprk_event";
  * This is the deployed HTML web resource for CalendarSidePane.
  */
 export const CALENDAR_WEB_RESOURCE_NAME = "sprk_calendarsidepane.html";
+
+/**
+ * Event detail side pane web resource name.
+ * This is the deployed HTML web resource for EventDetailSidePane.
+ * Replaces the OOB entityrecord approach with a React-based side pane.
+ */
+export const EVENT_DETAIL_WEB_RESOURCE_NAME = "sprk_eventdetailsidepane.html";

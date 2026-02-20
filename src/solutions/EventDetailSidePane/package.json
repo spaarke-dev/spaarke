@@ -1,6 +1,6 @@
 {
   "name": "event-detail-sidepane",
-  "version": "1.0.6",
+  "version": "2.0.0",
   "private": true,
   "description": "EventDetailSidePane Custom Page for Dataverse side pane - Event details view/edit",
   "scripts": {

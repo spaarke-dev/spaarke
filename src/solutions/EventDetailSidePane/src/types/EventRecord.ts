@@ -166,6 +166,7 @@ export const EVENT_HEADER_SELECT_FIELDS = [
   "sprk_eventname",
   "sprk_eventstatus",
   "statecode", // Keep for backward compatibility / archive detection
+  "statuscode", // OOB status reason — used by StatusSection
   "_sprk_eventtype_ref_value",
   "sprk_regardingrecordname",
   "sprk_regardingrecordurl",
@@ -188,6 +189,7 @@ export const EVENT_FULL_SELECT_FIELDS = [
   "sprk_remindat",
   "sprk_eventstatus",
   "statecode", // Keep for backward compatibility / archive detection
+  "statuscode", // OOB status reason — used by StatusSection
   "sprk_priority",
   "sprk_source",
   "_sprk_eventtype_ref_value",

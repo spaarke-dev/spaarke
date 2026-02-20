@@ -19,6 +19,7 @@ export {
   CALENDAR_PANE_WIDTH,
   EVENT_ENTITY_NAME,
   CALENDAR_WEB_RESOURCE_NAME,
+  EVENT_DETAIL_WEB_RESOURCE_NAME,
 } from "./eventConfig";
 
 export type { IEventTypeFormMapping, IEventViewConfig } from "./eventConfig";
