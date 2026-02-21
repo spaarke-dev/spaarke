@@ -1,0 +1,87 @@
+<task id="037" project="email-communication-solution-r1">
+  <metadata>
+    <title>Implement POST /api/communications/send-bulk endpoint</title>
+    <phase>4: Attachments + Archival</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>032</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New endpoint implementation, code implementation</rigor-reason>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Add POST /api/communications/send-bulk to CommunicationEndpoints. The endpoint accepts an array of recipients with individual templateData, creates one sprk_communication per recipient, sends emails sequentially with Graph rate awareness, returns individual statuses per recipient, shares attachments across all sends, and handles partial failure scenarios.</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8 Minimal API, bulk email operations, Graph API rate management, and partial failure handling</role>
+
+  <goal>A working POST /api/communications/send-bulk endpoint that sends individualized emails to multiple recipients, creates per-recipient communication records, shares attachment downloads, handles partial failures with per-recipient status reporting, and respects Graph API rate limits.</goal>
+
+  <context>
+    <background>The bulk send endpoint enables sending similar communications to multiple recipients at once — for example, sending engagement letters to all parties on a matter. Each recipient gets their own email and their own sprk_communication record, but the base template (subject, body, attachments) is shared. Template data allows per-recipient customization (e.g., name, title). Attachments are downloaded once from SPE and reused across all sends to avoid redundant file operations. Partial failure is expected — some sends may succeed while others fail.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API endpoint. No Azure Functions.</constraint>
+    <constraint source="ADR-008">Use endpoint filter for authorization. No global middleware.</constraint>
+    <constraint source="ADR-010">Concrete DI. Reuse CommunicationService, not new service class.</constraint>
+    <constraint source="ADR-019">Return ProblemDetails for validation errors. Partial failure returns 207 Multi-Status with per-recipient results.</constraint>
+    <constraint source="Graph API">Send emails sequentially, not in parallel, to respect Graph rate limits. Include small delay between sends.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="BFF endpoint MUST/MUST NOT rules"/>
+      <file path=".claude/adr/ADR-019-problemdetails.md" reason="Error response format for partial failures"/>
+      <file path=".claude/patterns/api/endpoint-definition.md" reason="Minimal API endpoint structure pattern"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing CommunicationEndpoints.cs and endpoint-definition.md pattern.</step>
+    <step order="2">Create BulkSendRequest DTO: subject (string), body (string), bodyFormat (BodyFormat), fromMailbox (string?, optional), communicationType (CommunicationType), attachmentDocumentIds (Guid[]?, optional), archiveToSpe (bool, default false), associations (CommunicationAssociation[]?, optional), recipients (BulkRecipient[]).</step>
+    <step order="3">Create BulkRecipient DTO: to (string), cc (string[]?, optional), templateData (Dictionary&lt;string, string&gt;?, optional for future template substitution).</step>
+    <step order="4">Create BulkSendResponse DTO: totalRecipients (int), succeeded (int), failed (int), results (BulkSendResult[]).</step>
+    <step order="5">Create BulkSendResult DTO: recipientEmail (string), status (string: "sent" or "failed"), communicationId (Guid?), error (string?, null on success).</step>
+    <step order="6">Add POST /api/communications/send-bulk endpoint to CommunicationEndpoints with authorization filter.</step>
+    <step order="7">Implement bulk send logic: download attachments once (if any), then iterate recipients sequentially. For each recipient: build SendCommunicationRequest, call CommunicationService.SendAsync(), collect result. Include ~100ms delay between sends for Graph rate awareness.</step>
+    <step order="8">Handle partial failure: if some sends succeed and some fail, return 207 Multi-Status with BulkSendResponse containing individual results.</step>
+    <step order="9">Return 200 OK if all succeed, 207 Multi-Status if partial, 400 Bad Request for validation errors.</step>
+    <step order="10">Run dotnet build to verify compilation.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing endpoint patterns and CommunicationService</tool>
+    <tool name="Write">Create new DTOs and endpoint code</tool>
+    <tool name="Edit">Modify CommunicationEndpoints.cs to add bulk endpoint</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Updated src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs with send-bulk endpoint</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/BulkSendRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/BulkSendResponse.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/communications/send-bulk endpoint exists and accepts BulkSendRequest.</criterion>
+    <criterion testable="true">One sprk_communication record is created per recipient.</criterion>
+    <criterion testable="true">Emails are sent sequentially with delay for Graph rate awareness.</criterion>
+    <criterion testable="true">Attachments are downloaded once and shared across all sends.</criterion>
+    <criterion testable="true">Partial failure returns 207 Multi-Status with per-recipient results.</criterion>
+    <criterion testable="true">All recipients succeeding returns 200 OK.</criterion>
+    <criterion testable="true">dotnet build completes without errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load API constraints and endpoint pattern before starting. Follow existing CommunicationEndpoints structure. Test partial failure scenarios.</protocol>
+  </execution>
+</task>

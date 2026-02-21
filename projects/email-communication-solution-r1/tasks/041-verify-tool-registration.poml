@@ -1,0 +1,73 @@
+<task id="041" project="email-communication-solution-r1">
+  <metadata>
+    <title>Verify tool registration and discovery</title>
+    <phase>5: Playbook Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification and testing task</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Verify that SendCommunicationToolHandler is auto-discovered by IToolHandlerRegistry and can be resolved by tool name "send_communication". Write a unit test that resolves the tool by name and verifies the tool definition includes correct parameters and descriptions.</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8 testing, AI tool framework verification, and DI container validation</role>
+
+  <goal>Verified and tested that SendCommunicationToolHandler is auto-discovered, registered in IToolHandlerRegistry, resolvable by name "send_communication", and returns a correct tool definition with all expected parameters.</goal>
+
+  <context>
+    <background>The AI tool framework uses assembly scanning to auto-discover IAiToolHandler implementations. This task verifies that SendCommunicationToolHandler (created in task 040) is properly discovered and registered. The IToolHandlerRegistry should be able to resolve the handler by its tool name "send_communication". The tool definition must include all required parameters with correct types and descriptions.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SendCommunicationToolHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IToolHandlerRegistry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Extensions/ToolFrameworkExtensions.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Tool must be auto-discovered by assembly scanning, not manually registered.</constraint>
+    <constraint source="Testing">Use xUnit. Follow existing test patterns for tool handler verification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/ai.md" reason="AI tool framework rules and registration requirements"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read IToolHandlerRegistry.cs to understand the resolution API (e.g., GetHandler, TryGetHandler by tool name).</step>
+    <step order="2">Read ToolFrameworkExtensions.cs to understand how auto-discovery populates the registry.</step>
+    <step order="3">Write unit test: create a service collection, call AddToolFramework(), build service provider, resolve IToolHandlerRegistry.</step>
+    <step order="4">Assert that registry.GetHandler("send_communication") returns a non-null SendCommunicationToolHandler instance.</step>
+    <step order="5">Call GetToolDefinition() on the resolved handler and verify: tool name is "send_communication", parameters include "to" (required), "subject" (required), "body" (required), "cc" (optional), "regardingEntity" (optional), "regardingId" (optional), "attachmentDocumentIds" (optional).</step>
+    <step order="6">Verify parameter descriptions are non-empty strings.</step>
+    <step order="7">Run dotnet test to verify the test passes.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read tool framework source and existing tests</tool>
+    <tool name="Write">Create verification test file</tool>
+    <tool name="Bash">Run dotnet test to verify tests pass</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/SendCommunicationToolHandler.Registration.Tests.cs (or matching project structure)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Test verifies SendCommunicationToolHandler is resolved by IToolHandlerRegistry with tool name "send_communication".</criterion>
+    <criterion testable="true">Test verifies tool definition includes all required parameters (to, subject, body).</criterion>
+    <criterion testable="true">Test verifies tool definition includes all optional parameters (cc, regardingEntity, regardingId, attachmentDocumentIds).</criterion>
+    <criterion testable="true">All tests pass with dotnet test.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load AI constraints first. Follow existing test patterns for tool handler tests. Verify auto-discovery mechanism works end-to-end.</protocol>
+  </execution>
+</task>

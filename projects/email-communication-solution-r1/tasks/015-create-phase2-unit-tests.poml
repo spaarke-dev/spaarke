@@ -1,0 +1,81 @@
+<task id="015" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create unit tests for Phase 2</title>
+    <phase>2: Entity + Tracking</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>010, 013</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, unit-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with explicit constraints</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Create unit tests for Phase 2: Dataverse record creation (verify all field values match actual schema), association mapping (test all 8 entity types), status endpoint (200 and 404), and approved sender merge logic (config-only, Dataverse-only, merged, cache hit, Dataverse unavailable).</prompt>
+
+  <role>SPAARKE platform developer expert in xUnit testing, Moq mocking, Dataverse mocking, and Redis cache testing</role>
+
+  <goal>Comprehensive unit test coverage for all Phase 2 functionality. All tests pass with dotnet test. Tests verify correct Dataverse field names and values, association mapping for all entity types, status endpoint responses, and sender merge scenarios.</goal>
+
+  <context>
+    <background>Phase 2 extends the communication service with Dataverse integration, association mapping, a status endpoint, and approved sender merging with cache. Each of these needs thorough testing, especially the Dataverse field mapping which uses actual schema names (including the sprk_communiationtype typo). The association mapping tests must cover all 8 entity types including the non-obvious sprk_regardingorganization and sprk_regardingperson field names.</background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/ApprovedSenderValidatorTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Mocks/FakeGraphClientFactory.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Testing">Use xUnit with FluentAssertions. Follow existing test file naming.</constraint>
+    <constraint source="Dataverse Schema">Tests must verify actual field names: sprk_communiationtype (not sprk_communicationtype), statuscode, sprk_direction.</constraint>
+    <constraint source="Dataverse Schema">Tests must verify sprk_regardingorganization (not sprk_regardingaccount) and sprk_regardingperson (not sprk_regardingcontact).</constraint>
+    <constraint source="Testing">Mock Dataverse and Redis. No real external calls in unit tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/testing.md" reason="Unit test MUST/MUST NOT rules"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing Phase 1 tests to understand established patterns.</step>
+    <step order="2">Create Dataverse record creation tests: verify sprk_communiationtype=100000000, statuscode=659490002, sprk_direction=100000001, all text fields set, metadata fields set, Dataverse failure logged but send succeeds.</step>
+    <step order="3">Create association mapping tests for each entity type: matter (sprk_regardingmatter), organization (sprk_regardingorganization), person (sprk_regardingperson), project (sprk_regardingproject), and other supported types. Verify @odata.bind format and denormalized field values.</step>
+    <step order="4">Create association edge case tests: null associations, empty array, unknown entityType.</step>
+    <step order="5">Create status endpoint tests: GetStatus_WithExistingId_ReturnsStatus, GetStatus_WithNonExistentId_Returns404ProblemDetails.</step>
+    <step order="6">Create approved sender merge tests: ConfigOnly_WhenDataverseUnavailable, DataverseOnly_OverridesConfig, MergedList_DataverseTakesPrecedence, CacheHit_SkipsDataverseQuery, InactiveDataverseEntry_RemovesConfigEntry.</step>
+    <step order="7">Run dotnet test to verify all tests pass.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing test patterns and Phase 1 tests</tool>
+    <tool name="Write">Create Phase 2 test files</tool>
+    <tool name="Bash">Run dotnet test to verify all tests pass</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/DataverseRecordCreationTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/AssociationMappingTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationStatusEndpointTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/ApprovedSenderMergeTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dataverse record creation tests verify actual field names (sprk_communiationtype, not sprk_communicationtype).</criterion>
+    <criterion testable="true">Dataverse record creation tests verify all choice values (Email=100000000, Send=659490002, Outgoing=100000001).</criterion>
+    <criterion testable="true">Association mapping tests cover all 8 entity types including sprk_regardingorganization and sprk_regardingperson.</criterion>
+    <criterion testable="true">Association mapping tests verify @odata.bind format and denormalized field values.</criterion>
+    <criterion testable="true">Status endpoint tests cover 200 (found) and 404 (not found with ProblemDetails).</criterion>
+    <criterion testable="true">Approved sender merge tests cover: config-only fallback, Dataverse override, merged precedence, cache hit, inactive removal.</criterion>
+    <criterion testable="true">dotnet test completes with all tests passing (zero failures).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Verify test assertions use actual Dataverse field names and values from the schema doc.</protocol>
+  </execution>
+</task>

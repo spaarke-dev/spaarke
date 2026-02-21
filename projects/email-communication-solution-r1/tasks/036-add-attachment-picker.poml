@@ -1,0 +1,75 @@
+<task id="036" project="email-communication-solution-r1">
+  <metadata>
+    <title>Add document attachment picker to communication form</title>
+    <phase>4: Attachments + Archival</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030, 031, 033</dependencies>
+    <blocks>none</blocks>
+    <tags>dataverse, form-config, pcf</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Form configuration with subgrid, constrained patterns</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Add the sprk_communicationattachment subgrid to the communication form for managing document attachments. Configure "Add Existing" to query sprk_document records linked to the associated entity. Add quick view for attachment details and show attachment count on the form header.</prompt>
+
+  <role>SPAARKE platform developer expert in Dataverse form customization, subgrid configuration, and document management UX</role>
+
+  <goal>Communication form has a functional attachment subgrid showing linked sprk_communicationattachment records, with "Add Existing" filtered to documents from the associated entity, quick view for attachment details, and attachment count visible on the form header.</goal>
+
+  <context>
+    <background>Users need to attach documents from SPE to their communications before sending. The communication form needs an Attachments section (placeholder created in task 020) that shows a subgrid of sprk_communicationattachment records. The "Add Existing" button should filter sprk_document records to those linked to the same associated entity (e.g., documents from the same Matter). After send, the subgrid becomes read-only showing which documents were attached. The attachment count (sprk_attachmentcount) should be visible on the form header for quick reference.</background>
+    <relevant-files>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Dataverse Schema">sprk_communicationattachment entity with sprk_communication and sprk_document lookups.</constraint>
+    <constraint source="Dataverse Schema">sprk_hasattachments (Boolean) and sprk_attachmentcount (Whole Number) on sprk_communication.</constraint>
+    <constraint source="ADR-006">Use subgrid configuration, not custom webresources, for attachment display.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Dataverse subgrid and form customization patterns"/>
+      <file path="docs/data-model/sprk_communication-data-schema.md" reason="Attachment entity and field schemas"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read data schema to confirm sprk_communicationattachment entity fields and relationships.</step>
+    <step order="2">Add sprk_communicationattachment subgrid to the Attachments section of the communication form. Columns: sprk_name (document name), sprk_attachmenttype (type), sprk_document (linked document).</step>
+    <step order="3">Configure "Add Existing" button to open a lookup for sprk_document records. Filter to documents linked to the same associated entity when possible.</step>
+    <step order="4">Add quick view form for sprk_communicationattachment showing document name, type, and link to the document record.</step>
+    <step order="5">Add sprk_attachmentcount field to the form header for quick reference.</step>
+    <step order="6">Configure visibility: Attachments section editable in Draft status, read-only after send.</step>
+    <step order="7">Document the complete subgrid configuration for implementation.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read data schema and form configuration docs</tool>
+    <tool name="Write">Create form configuration documentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">Attachment subgrid configuration documentation for communication form</output>
+    <output type="documentation">Quick view form specification for sprk_communicationattachment</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_communicationattachment subgrid is present in the Attachments section of the form.</criterion>
+    <criterion testable="true">Subgrid columns include document name, attachment type, and document link.</criterion>
+    <criterion testable="true">"Add Existing" queries sprk_document records.</criterion>
+    <criterion testable="true">sprk_attachmentcount is displayed on the form header.</criterion>
+    <criterion testable="true">Attachments section is editable in Draft status, read-only after send.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load data schema first. Verify attachment entity relationships. Ensure form section visibility rules align with task 020.</protocol>
+  </execution>
+</task>

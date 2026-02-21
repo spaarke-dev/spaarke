@@ -1,0 +1,80 @@
+<task id="024" project="email-communication-solution-r1">
+  <metadata>
+    <title>Configure communication subgrids on entity forms</title>
+    <phase>3: Communication Application</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>016</dependencies>
+    <blocks>none</blocks>
+    <tags>dataverse, form-config</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Configuration documentation, no code implementation</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Document the subgrid configuration for displaying related communications on entity forms. Each of the 7 entity types (Project, Invoice, Analysis, Organization, Person, Work Assignment, Budget) needs a communication subgrid filtered by its respective regarding lookup field. Standard columns: Subject, Status, To, Sent At.</prompt>
+
+  <role>SPAARKE platform developer expert in Dataverse form customization, subgrid configuration, and related entity display patterns</role>
+
+  <goal>Complete subgrid configuration documentation for all 7 entity forms, each showing filtered communications via the respective regarding lookup field with consistent column layout.</goal>
+
+  <context>
+    <background>Each entity type that can be associated with a communication (via the regarding lookup fields) should display a subgrid of related communications on its form. This allows users to see all communications associated with a specific matter, project, invoice, etc. directly from the entity form. The subgrids filter by the respective sprk_regarding* lookup field on sprk_communication.</background>
+    <relevant-files>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Dataverse Schema">Regarding lookup fields: sprk_regardingmatter, sprk_regardingproject, sprk_regardinginvoice, sprk_regardinganalysis, sprk_regardingorganization, sprk_regardingperson, sprk_regardingworkassignment, sprk_regardingbudget.</constraint>
+    <constraint source="Dataverse Schema">sprk_regardingorganization (not account), sprk_regardingperson (not contact) — actual Dataverse field names.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Dataverse subgrid and related entity patterns"/>
+      <file path="docs/data-model/sprk_communication-data-schema.md" reason="Source of truth for regarding lookup field names"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read data schema to confirm all regarding lookup field logical names.</step>
+    <step order="2">Document subgrid configuration for Project form (sprk_project): subgrid name "Communications", entity sprk_communication, relationship sprk_regardingproject. Columns: sprk_subject, statuscode, sprk_to, sprk_sentat. Sort: sprk_sentat descending.</step>
+    <step order="3">Document subgrid configuration for Invoice form (sprk_invoice): filtered by sprk_regardinginvoice. Same column layout.</step>
+    <step order="4">Document subgrid configuration for Analysis form (sprk_analysis): filtered by sprk_regardinganalysis. Same column layout.</step>
+    <step order="5">Document subgrid configuration for Organization form (sprk_organization): filtered by sprk_regardingorganization. Same column layout.</step>
+    <step order="6">Document subgrid configuration for Person form (sprk_person): filtered by sprk_regardingperson. Same column layout.</step>
+    <step order="7">Document subgrid configuration for Work Assignment form (sprk_workassignment): filtered by sprk_regardingworkassignment. Same column layout.</step>
+    <step order="8">Document subgrid configuration for Budget form (sprk_budget): filtered by sprk_regardingbudget. Same column layout.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read data schema and entity form patterns</tool>
+    <tool name="Write">Create subgrid configuration documentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">Subgrid configuration documentation for Project form</output>
+    <output type="documentation">Subgrid configuration documentation for Invoice form</output>
+    <output type="documentation">Subgrid configuration documentation for Analysis form</output>
+    <output type="documentation">Subgrid configuration documentation for Organization form</output>
+    <output type="documentation">Subgrid configuration documentation for Person form</output>
+    <output type="documentation">Subgrid configuration documentation for Work Assignment form</output>
+    <output type="documentation">Subgrid configuration documentation for Budget form</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 7 entity forms have documented subgrid configurations for sprk_communication.</criterion>
+    <criterion testable="true">Each subgrid filters by the correct regarding lookup field for that entity type.</criterion>
+    <criterion testable="true">Standard columns: sprk_subject, statuscode, sprk_to, sprk_sentat on all subgrids.</criterion>
+    <criterion testable="true">Sort order is sprk_sentat descending on all subgrids.</criterion>
+    <criterion testable="true">Uses sprk_regardingorganization (not account) and sprk_regardingperson (not contact).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load data schema first. Verify all regarding lookup field names match actual Dataverse schema before documenting.</protocol>
+  </execution>
+</task>

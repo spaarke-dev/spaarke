@@ -1,0 +1,87 @@
+<task id="090" project="email-communication-solution-r1">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>043</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, cleanup</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation and cleanup, no code implementation</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Complete project wrap-up for the Email Communication Solution R1. Run code review and ADR compliance checks on all changes. Update README.md status to Complete. Update plan.md with implementation summary. Create lessons-learned.md. Run repo cleanup for structure validation. Finalize TASK-INDEX.md and current-task.md. Prompt user to run /merge-to-master.</prompt>
+
+  <role>SPAARKE platform developer expert in project completion, documentation, code review, ADR compliance, and repository hygiene</role>
+
+  <goal>All project artifacts are finalized: code review and ADR check pass, README and plan updated to reflect completion, lessons learned documented, TASK-INDEX shows all tasks complete, current-task.md cleared, and repository is clean and ready for merge to master.</goal>
+
+  <context>
+    <background>The Email Communication Solution R1 project is complete with all phases implemented: Phase 1 (BFF Email Service), Phase 2 (Dataverse Integration), Phase 3 (Communication Application), Phase 4 (Attachments + Archival), and Phase 5 (Playbook Integration). This wrap-up task ensures all documentation is finalized, quality gates pass, and the branch is ready to merge into master. This is the final task in the project.</background>
+    <relevant-files>
+      <file>projects/email-communication-solution-r1/README.md</file>
+      <file>projects/email-communication-solution-r1/plan.md</file>
+      <file>projects/email-communication-solution-r1/tasks/TASK-INDEX.md</file>
+      <file>projects/email-communication-solution-r1/current-task.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Project">All previous tasks (001-043) must be completed before running wrap-up.</constraint>
+    <constraint source="Quality">Code review and ADR check must pass before marking project complete.</constraint>
+    <constraint source="Repository">Repository must pass /repo-cleanup structure validation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="API constraints for code review validation"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run /code-review on all changes made across the project. Review all modified/created files for code quality, patterns compliance, and best practices. Document findings.</step>
+    <step order="2">Run /adr-check to validate ADR compliance across all implemented code. Verify: ADR-001 (Minimal API), ADR-007 (SpeFileStore), ADR-008 (endpoint filters), ADR-010 (DI minimalism), ADR-013 (AI architecture), ADR-019 (ProblemDetails). Document compliance status.</step>
+    <step order="3">Update projects/email-communication-solution-r1/README.md: set project status to "Complete", add completion date, summarize delivered features per phase.</step>
+    <step order="4">Update projects/email-communication-solution-r1/plan.md: add implementation summary section with actual hours vs estimated, any scope changes, deferred items.</step>
+    <step order="5">Create projects/email-communication-solution-r1/notes/lessons-learned.md: document what went well, what could be improved, patterns discovered, and recommendations for future projects.</step>
+    <step order="6">Run /repo-cleanup for repository structure validation. Fix any issues found.</step>
+    <step order="7">Update TASK-INDEX.md: mark all tasks (001-043, 090) as complete (status emoji from pencil/circle to checkmark).</step>
+    <step order="8">Clear current-task.md: set active task to "none", clear all working state (steps, files, decisions).</step>
+    <step order="9">Prompt user to run /merge-to-master to merge the work/email-communication-solution-r1 branch into master.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read project artifacts for review</tool>
+    <tool name="Edit">Update README, plan, TASK-INDEX, current-task</tool>
+    <tool name="Write">Create lessons-learned.md</tool>
+    <tool name="Skill">Run code-review, adr-check, repo-cleanup skills</tool>
+    <tool name="Bash">Git operations for branch status</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">Updated projects/email-communication-solution-r1/README.md (status=Complete)</output>
+    <output type="documentation">Updated projects/email-communication-solution-r1/plan.md (implementation summary)</output>
+    <output type="documentation">projects/email-communication-solution-r1/notes/lessons-learned.md</output>
+    <output type="documentation">Updated projects/email-communication-solution-r1/tasks/TASK-INDEX.md (all tasks complete)</output>
+    <output type="documentation">Cleared projects/email-communication-solution-r1/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Code review passes with no critical or high-severity findings.</criterion>
+    <criterion testable="true">ADR compliance check passes for all 6 applicable ADRs.</criterion>
+    <criterion testable="true">README.md status is set to "Complete" with completion date.</criterion>
+    <criterion testable="true">plan.md has implementation summary with actual vs estimated hours.</criterion>
+    <criterion testable="true">lessons-learned.md exists in notes/ folder with meaningful content.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows all tasks with complete status.</criterion>
+    <criterion testable="true">current-task.md is cleared (no active task).</criterion>
+    <criterion testable="true">Repository passes /repo-cleanup structure validation.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Run code-review and adr-check skills first. Fix any issues before updating documentation. Clear working state last after all artifacts are finalized.</protocol>
+  </execution>
+</task>

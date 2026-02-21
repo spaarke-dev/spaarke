@@ -1,0 +1,80 @@
+<task id="020" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create model-driven form for sprk_communication</title>
+    <phase>3: Communication Application</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>016</dependencies>
+    <blocks>022, 025</blocks>
+    <tags>dataverse, form-config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New form creation, Dataverse configuration task</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Create the model-driven form layout for the sprk_communication entity. The form must support two modes: compose mode (new record, Draft status) for creating and sending new communications, and read mode (sent record) for viewing sent communications with all fields read-only and tracking details visible.</prompt>
+
+  <role>SPAARKE platform developer expert in Dataverse model-driven forms, form sections, business rules, and UX design for communication workflows</role>
+
+  <goal>A fully configured model-driven form for sprk_communication that supports compose mode for drafting new communications and read mode for viewing sent communications. Business rules auto-set sprk_name from Type and Subject. Form sections match design.md wireframes.</goal>
+
+  <context>
+    <background>Phase 3 builds the Communication Application — the standalone compose/view experience for communications in the model-driven app. The sprk_communication entity already exists with all fields from Phase 2. This task creates the primary form used by end users to compose and view email communications. The form must handle two distinct UX modes: compose (editable, Draft status) and read (read-only, after send).</background>
+    <relevant-files>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+      <file>projects/email-communication-solution-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Dataverse Schema">Type field is sprk_communiationtype (typo is intentional — actual Dataverse logical name).</constraint>
+    <constraint source="Dataverse Schema">Status uses standard statuscode: Draft=1, Queued=659490001, Send=659490002, Delivered=659490003, Failed=659490004.</constraint>
+    <constraint source="Dataverse Schema">Direction is sprk_direction: Incoming=100000000, Outgoing=100000001.</constraint>
+    <constraint source="Dataverse Schema">Regarding fields: sprk_regardingorganization (not account), sprk_regardingperson (not contact).</constraint>
+    <constraint source="ADR-006">PCF over webresources. No new legacy JS webresources for form behavior.</constraint>
+    <constraint source="ADR-021">All UI must use Fluent v9 design patterns where applicable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Dataverse form and entity configuration patterns"/>
+      <file path="docs/data-model/sprk_communication-data-schema.md" reason="Source of truth for all field names and choice values"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read docs/data-model/sprk_communication-data-schema.md and design.md wireframes to confirm form layout requirements.</step>
+    <step order="2">Document the compose mode form layout: Header section with sprk_communiationtype (Type) field. Association section with sprk_regardingrecordtype lookup for entity selection. Email Details section with sprk_to, sprk_cc, sprk_subject, sprk_body fields. Attachments section placeholder for Phase 4.</step>
+    <step order="3">Document the read mode form layout: All fields set to read-only when statuscode != Draft. Tracking Details section visible showing sprk_sentby, sprk_sentat, sprk_graphmessageid, statuscode, sprk_direction.</step>
+    <step order="4">Configure form sections per design.md wireframes: General section, Association section, Email Details section, Attachments section, Tracking section.</step>
+    <step order="5">Create business rule: auto-set sprk_name = "{Type}: {Subject}" when Type or Subject changes. This provides a meaningful record name in views and lookups.</step>
+    <step order="6">Configure form visibility rules: hide Tracking section when statuscode = Draft. Show Tracking section when statuscode != Draft.</step>
+    <step order="7">Set default values: sprk_communiationtype = Email (100000000), sprk_direction = Outgoing (100000001), statuscode = Draft (1).</step>
+    <step order="8">Document form tab and section layout with field placements, widths, and labels for implementation.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read data schema and design wireframes</tool>
+    <tool name="Write">Create form configuration documentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">Form configuration documentation for sprk_communication main form</output>
+    <output type="documentation">Business rule specifications for auto-naming and visibility</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Form includes compose mode with Type, Association, Email Details (To, CC, Subject, Body), and Attachments sections.</criterion>
+    <criterion testable="true">Form includes read mode with all fields read-only and Tracking Details section visible.</criterion>
+    <criterion testable="true">Business rule auto-sets sprk_name to "{Type}: {Subject}" format.</criterion>
+    <criterion testable="true">Default values set: Type=Email, Direction=Outgoing, Status=Draft.</criterion>
+    <criterion testable="true">Tracking section hidden in Draft status, visible in all other statuses.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Verify field names against data schema doc. Reference design.md wireframes for layout.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,87 @@
+<task id="010" project="email-communication-solution-r1">
+  <metadata>
+    <title>Implement Dataverse communication record creation</title>
+    <phase>2: Entity + Tracking</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>006</dependencies>
+    <blocks>011, 012, 015</blocks>
+    <tags>bff-api, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation with Dataverse integration; extends core CommunicationService; critical path task</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Extend CommunicationService to create a sprk_communication Dataverse record after a successful Graph send. Set all fields per the actual schema: sprk_communiationtype (Email=100000000), statuscode (Send=659490002), sprk_direction (Outgoing=100000001), sprk_to, sprk_cc, sprk_bcc, sprk_from, sprk_subject, sprk_body, sprk_bodyformat, sprk_graphmessageid, sprk_sentat, sprk_sentby, sprk_correlationid. Use IDataverseService for record creation.</prompt>
+
+  <role>SPAARKE platform developer expert in Dataverse Web API, .NET 8 service architecture, and entity record creation with choice columns and lookup fields</role>
+
+  <goal>After a successful Graph sendMail, CommunicationService creates a sprk_communication record in Dataverse with all fields correctly mapped. The Dataverse record ID is returned in SendCommunicationResponse.communicationId. Dataverse failures are logged but do not fail the send operation.</goal>
+
+  <context>
+    <background>Phase 2 extends the Phase 1 CommunicationService to persist communication records in Dataverse for tracking, audit, and display in model-driven apps. The sprk_communication entity already exists in Dataverse. All field names and choice values must use the actual schema (including the sprk_communiationtype typo). The DataverseWebApiService in the shared library provides the HTTP client for Dataverse operations.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs</file>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Dataverse Schema">Type field: sprk_communiationtype (typo is intentional — actual Dataverse logical name, missing 'c').</constraint>
+    <constraint source="Dataverse Schema">Status: statuscode (standard): Draft=1, Deleted=2, Queued=659490001, Send=659490002, Delivered=659490003, Failed=659490004, Bounded=659490005, Recalled=659490006.</constraint>
+    <constraint source="Dataverse Schema">Direction: sprk_direction: Incoming=100000000, Outgoing=100000001.</constraint>
+    <constraint source="Dataverse Schema">Body Format: sprk_bodyformat: PlainText=100000000, HTML=100000001.</constraint>
+    <constraint source="Design">Dataverse record creation is best-effort after send. Graph send success is the primary outcome; Dataverse failure is logged but does not cause the API to return an error.</constraint>
+    <constraint source="ADR-010">If adding a new DI registration for IDataverseService, verify total remains at 15 or fewer.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Dataverse CRUD operation patterns"/>
+      <file path="docs/data-model/sprk_communication-data-schema.md" reason="Source of truth for all field names and choice values"/>
+      <file path=".claude/constraints/api.md" reason="BFF service implementation rules"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read docs/data-model/sprk_communication-data-schema.md to confirm all field names and types.</step>
+    <step order="2">Read DataverseWebApiService.cs to understand the Dataverse HTTP client pattern.</step>
+    <step order="3">Read .claude/patterns/dataverse/entity-operations.md for the CRUD pattern.</step>
+    <step order="4">Read existing CommunicationService.cs to understand the extension point after Graph send.</step>
+    <step order="5">Add IDataverseService (or DataverseWebApiService) injection to CommunicationService constructor.</step>
+    <step order="6">After successful Graph sendMail, build the Dataverse record payload as a dictionary/JObject with: sprk_communiationtype (100000000 for Email), statuscode (659490002 for Send), sprk_direction (100000001 for Outgoing), sprk_to (comma-separated), sprk_cc, sprk_bcc, sprk_from, sprk_subject, sprk_body, sprk_bodyformat, sprk_graphmessageid, sprk_sentat, sprk_sentby (systemuser lookup), sprk_correlationid.</step>
+    <step order="7">Call Dataverse create operation for sprk_communications entity set.</step>
+    <step order="8">On success, set SendCommunicationResponse.communicationId to the new record ID.</step>
+    <step order="9">On Dataverse failure, log warning with full details but return success response (Graph send succeeded).</step>
+    <step order="10">Update DI registration if needed and verify ADR-010 compliance.</step>
+    <step order="11">Verify compilation with dotnet build.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read data schema, Dataverse service, and existing CommunicationService</tool>
+    <tool name="Edit">Extend CommunicationService with Dataverse record creation</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (extended with Dataverse integration)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">After successful Graph send, a sprk_communication record is created in Dataverse.</criterion>
+    <criterion testable="true">Record uses actual field names: sprk_communiationtype (not sprk_communicationtype), statuscode (not custom), sprk_direction.</criterion>
+    <criterion testable="true">Choice values match exactly: Email=100000000, Send=659490002, Outgoing=100000001.</criterion>
+    <criterion testable="true">All text fields are set: sprk_to, sprk_cc, sprk_bcc, sprk_from, sprk_subject, sprk_body.</criterion>
+    <criterion testable="true">Metadata fields are set: sprk_graphmessageid, sprk_sentat, sprk_sentby, sprk_correlationid, sprk_bodyformat.</criterion>
+    <criterion testable="true">Dataverse failure is logged but does not cause the send operation to fail.</criterion>
+    <criterion testable="true">SendCommunicationResponse.communicationId is populated on Dataverse success.</criterion>
+    <criterion testable="true">dotnet build completes without errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Verify every field name against data schema doc. Use exact choice values from Dataverse.</protocol>
+  </execution>
+</task>

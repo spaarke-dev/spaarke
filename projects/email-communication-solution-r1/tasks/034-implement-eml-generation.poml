@@ -1,0 +1,79 @@
+<task id="034" project="email-communication-solution-r1">
+  <metadata>
+    <title>Implement .eml generation service</title>
+    <phase>4: Attachments + Archival</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>035</blocks>
+    <tags>bff-api, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation, new service, email format handling</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Create EmlGenerationService that converts a SendCommunicationRequest and response data into RFC 2822 .eml format. Include email headers (From, To, CC, BCC, Subject, Date, Message-ID), HTML body as MIME multipart, and attachments as MIME attachments. Reference existing email-to-document patterns in the codebase.</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8, RFC 2822 email format, MIME multipart encoding, and email archival patterns</role>
+
+  <goal>A working EmlGenerationService that produces valid RFC 2822 .eml files from communication request/response data, including headers, HTML body, and MIME-encoded attachments.</goal>
+
+  <context>
+    <background>Sent communications should be archivable as .eml files in SharePoint Embedded for long-term record keeping. The .eml format (RFC 2822) is the standard for email archival and can be opened by email clients. The service takes the communication request (recipients, subject, body), response data (from address, sent timestamp, message ID), and optional attachment data to generate a complete .eml file as a byte stream. Existing email conversion patterns in the codebase may provide reference for MIME handling.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationResponse.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Register EmlGenerationService as concrete type. No interface unless seam is needed for testing.</constraint>
+    <constraint source="ADR-001">Keep in BFF service layer. No separate Azure Function for .eml generation.</constraint>
+    <constraint source="RFC 2822">Generated .eml must be valid RFC 2822 format, openable by standard email clients.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="BFF service MUST/MUST NOT rules"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing email conversion patterns in src/server/api/Sprk.Bff.Api/Services/Email/ for reference on MIME handling.</step>
+    <step order="2">Create EmlGenerationService class in Services/Communication/ folder.</step>
+    <step order="3">Implement GenerateEmlAsync method accepting: SendCommunicationRequest request, SendCommunicationResponse response, optional attachment data (name, contentType, content bytes).</step>
+    <step order="4">Generate RFC 2822 headers: From (response.from), To (request.to), CC (request.cc), BCC (request.bcc), Subject (request.subject), Date (response.sentAt formatted per RFC 2822), Message-ID (response.graphMessageId or generated).</step>
+    <step order="5">Create MIME multipart structure: Content-Type multipart/mixed with boundary. First part: HTML body as text/html with UTF-8 encoding. Subsequent parts: attachments as base64-encoded MIME parts with Content-Disposition: attachment.</step>
+    <step order="6">For messages without attachments: use simpler single-part structure with just the HTML body.</step>
+    <step order="7">Return the .eml content as a byte array (UTF-8 encoded) and a suggested filename (e.g., "{Subject}_{SentAt:yyyyMMdd}.eml").</step>
+    <step order="8">Add unit test for .eml generation verifying headers, body, and attachment encoding.</step>
+    <step order="9">Run dotnet build to verify compilation.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing email patterns and service code</tool>
+    <tool name="Write">Create EmlGenerationService</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/EmlGenerationService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">EmlGenerationService generates valid RFC 2822 .eml content.</criterion>
+    <criterion testable="true">.eml includes correct headers: From, To, CC, BCC, Subject, Date, Message-ID.</criterion>
+    <criterion testable="true">HTML body is encoded as MIME multipart text/html part.</criterion>
+    <criterion testable="true">Attachments are encoded as base64 MIME attachment parts with correct Content-Disposition.</criterion>
+    <criterion testable="true">Messages without attachments use simpler single-part structure.</criterion>
+    <criterion testable="true">dotnet build completes without errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load api constraints before starting. Reference existing email patterns. Test generated .eml format validity.</protocol>
+  </execution>
+</task>

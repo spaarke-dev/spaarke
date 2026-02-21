@@ -1,0 +1,82 @@
+<task id="013" project="email-communication-solution-r1">
+  <metadata>
+    <title>Implement approved sender Dataverse entity and merge logic</title>
+    <phase>2: Entity + Tracking</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>015</blocks>
+    <tags>bff-api, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New code following constrained pattern; extends existing service with cache layer</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Document the sprk_approvedsender entity schema. Extend ApprovedSenderValidator to query Dataverse for sprk_approvedsender records, merge with BFF config (Dataverse entries take precedence), cache the merged list in Redis with 5-minute TTL, and handle the case where the entity does not yet exist (config-only fallback).</prompt>
+
+  <role>SPAARKE platform developer expert in Dataverse entity queries, Redis caching, two-tier configuration merge, and resilient service patterns</role>
+
+  <goal>ApprovedSenderValidator merges BFF config and Dataverse sprk_approvedsender records. Dataverse entries take precedence over config. Merged list is cached in Redis with 5-minute TTL. Gracefully falls back to config-only when Dataverse entity is unavailable.</goal>
+
+  <context>
+    <background>Phase 1 created ApprovedSenderValidator reading from CommunicationOptions only. Phase 2 extends it with a two-tier model: BFF config provides the baseline, Dataverse sprk_approvedsender records can override or extend the list. This allows admins to manage approved senders from the model-driven app without redeploying the BFF. The merged list is cached in Redis to avoid repeated Dataverse queries. If the sprk_approvedsender entity doesn't exist yet, the service falls back to config-only mode.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ApprovedSenderValidator.cs</file>
+      <file>src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-009">Redis-first caching. Use Redis for merged sender list with 5-minute TTL.</constraint>
+    <constraint source="Design">Dataverse entries take precedence over BFF config entries (matched by email, case-insensitive).</constraint>
+    <constraint source="Design">If sprk_approvedsender entity does not exist in Dataverse (404), fall back to config-only mode silently.</constraint>
+    <constraint source="Design">sprk_approvedsender fields: sprk_name (display name), sprk_email, sprk_isdefault (bool), statecode (0=Active, 1=Inactive).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/data.md" reason="Redis caching constraints and patterns"/>
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Dataverse query patterns"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing ApprovedSenderValidator.cs to understand Phase 1 implementation.</step>
+    <step order="2">Read DataverseWebApiService.cs for query patterns.</step>
+    <step order="3">Document sprk_approvedsender entity schema: sprk_name (string), sprk_email (string), sprk_isdefault (bool), statecode (Active=0/Inactive=1).</step>
+    <step order="4">Add IDataverseService and IDistributedCache (or Redis cache wrapper) injections to ApprovedSenderValidator.</step>
+    <step order="5">Implement GetMergedSendersAsync() that: (a) checks Redis cache for "communication:approved-senders", (b) if cached, deserialize and return, (c) if not cached, query Dataverse for active sprk_approvedsender records.</step>
+    <step order="6">Implement merge logic: start with BFF config list, overlay Dataverse entries (Dataverse wins on email match, case-insensitive). New Dataverse-only entries are added. Inactive Dataverse entries remove matching config entries.</step>
+    <step order="7">Cache merged list in Redis with 5-minute TTL (key: "communication:approved-senders").</step>
+    <step order="8">Handle Dataverse 404 (entity not found) gracefully: log info message, fall back to config-only, still cache the config-only list.</step>
+    <step order="9">Update ResolveAsync to use GetMergedSendersAsync() instead of reading config directly.</step>
+    <step order="10">Verify compilation with dotnet build.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing validator and Dataverse service</tool>
+    <tool name="Edit">Extend ApprovedSenderValidator with Dataverse merge and caching</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ApprovedSenderValidator.cs (extended with Dataverse merge + Redis cache)</output>
+    <output type="docs">Documentation of sprk_approvedsender entity schema (in code comments or notes/)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ApprovedSenderValidator queries Dataverse for sprk_approvedsender records when cache is empty.</criterion>
+    <criterion testable="true">Dataverse entries take precedence over BFF config entries (matched by email, case-insensitive).</criterion>
+    <criterion testable="true">Merged list is cached in Redis with key "communication:approved-senders" and 5-minute TTL.</criterion>
+    <criterion testable="true">When Dataverse entity does not exist (404), falls back to config-only mode silently.</criterion>
+    <criterion testable="true">Only active Dataverse records (statecode=0) are included in the merged list.</criterion>
+    <criterion testable="true">Cache hit returns merged list without querying Dataverse.</criterion>
+    <criterion testable="true">dotnet build completes without errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Design for resilience — Dataverse unavailability must not break email sending.</protocol>
+  </execution>
+</task>

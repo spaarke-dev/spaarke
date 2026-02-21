@@ -1,0 +1,76 @@
+<task id="031" project="email-communication-solution-r1">
+  <metadata>
+    <title>Document sprk_communicationattachment entity schema</title>
+    <phase>4: Attachments + Archival</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>033</blocks>
+    <tags>dataverse, fields</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation for manual entity creation, no code</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Document the sprk_communicationattachment intersection entity schema for linking communications to their document attachments. This entity does not exist yet and must be created manually in Dataverse. Provide complete entity and field specifications including relationships and security roles.</prompt>
+
+  <role>SPAARKE platform developer expert in Dataverse entity modeling, relationship configuration, and security role design</role>
+
+  <goal>Complete entity schema documentation for sprk_communicationattachment with all fields, relationships, and security roles defined and ready for manual creation in Dataverse.</goal>
+
+  <context>
+    <background>Communications can have file attachments sourced from SPE (SharePoint Embedded). The sprk_communicationattachment entity serves as an intersection table linking a sprk_communication record to one or more sprk_document records. Each record also tracks the attachment type (file or inline image) and carries the document name for display.</background>
+    <relevant-files>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Dataverse Schema">Entity must follow sprk_ prefix naming convention.</constraint>
+    <constraint source="Dataverse Schema">Lookups must use N:1 relationships to parent entities.</constraint>
+    <constraint source="ADR-002">No plugin logic on this entity — it is a simple intersection table.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Dataverse entity creation patterns"/>
+      <file path="docs/data-model/sprk_communication-data-schema.md" reason="Parent entity schema for consistency"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read docs/data-model/sprk_communication-data-schema.md for naming and schema conventions.</step>
+    <step order="2">Document entity definition: Display Name = "Communication Attachment", Plural Name = "Communication Attachments", Logical Name = sprk_communicationattachment, Ownership = Organization, Primary Name = sprk_name.</step>
+    <step order="3">Document sprk_communication field: Type = Lookup (N:1 to sprk_communication), Required Level = Business Required, Description = "Parent communication record".</step>
+    <step order="4">Document sprk_document field: Type = Lookup (N:1 to sprk_document), Required Level = Business Required, Description = "Attached document from SPE".</step>
+    <step order="5">Document sprk_attachmenttype field: Type = Choice, Values: File=100000000, InlineImage=100000001, Default = File (100000000), Description = "Type of attachment".</step>
+    <step order="6">Document sprk_name field: Type = Single Line of Text, Max Length = 200, Description = "Auto-populated from document name", Required Level = Business Required.</step>
+    <step order="7">Document relationships: N:1 to sprk_communication (cascade delete), N:1 to sprk_document (cascade restrict).</step>
+    <step order="8">Document security roles: inherit from parent sprk_communication entity security. Users with read access to communication can read its attachments.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing entity schemas for consistency</tool>
+    <tool name="Write">Create entity schema documentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">Complete entity schema documentation for sprk_communicationattachment</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Entity documented with logical name sprk_communicationattachment.</criterion>
+    <criterion testable="true">sprk_communication lookup field documented as N:1 relationship to sprk_communication.</criterion>
+    <criterion testable="true">sprk_document lookup field documented as N:1 relationship to sprk_document.</criterion>
+    <criterion testable="true">sprk_attachmenttype choice field documented with File=100000000, InlineImage=100000001.</criterion>
+    <criterion testable="true">Cascade delete documented for communication relationship.</criterion>
+    <criterion testable="true">Security role inheritance documented.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load data schema and entity-operations pattern first. Ensure naming consistency with existing entities.</protocol>
+  </execution>
+</task>

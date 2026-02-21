@@ -1,0 +1,79 @@
+<task id="042" project="email-communication-solution-r1">
+  <metadata>
+    <title>Test playbook email scenarios</title>
+    <phase>5: Playbook Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>043</blocks>
+    <tags>testing, ai, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration testing with explicit AI constraints</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Test playbook email scenarios using SendCommunicationToolHandler. Simulate the scenario "Send introductory email after matter creation" with a mock playbook context containing matter ID, client email, and engagement letter document ID. Verify email is sent, communication record created, and attachment linked. Test error scenarios including invalid recipients.</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8 testing, AI playbook scenario testing, tool handler invocation patterns, and end-to-end flow verification</role>
+
+  <goal>Playbook email scenarios are tested with both success and failure cases. The "Send introductory email after matter creation" scenario sends an email with attachment, creates a communication record, and links the attachment. Error scenarios return structured PlaybookToolResult errors.</goal>
+
+  <context>
+    <background>AI playbooks orchestrate multi-step workflows. A common scenario is sending an introductory email after creating a matter — the playbook has context about the matter (ID, name), the client's email, and an engagement letter document stored in SPE. The SendCommunicationToolHandler receives these as tool parameters and orchestrates the send. This task tests both the happy path and error paths to ensure the tool handler behaves correctly in playbook contexts.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SendCommunicationToolHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAiToolHandler.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Testing">Mock CommunicationService and SpeFileStore for unit-level scenario tests. No real Graph or SPE calls.</constraint>
+    <constraint source="ADR-013">Tool handler must return PlaybookToolResult — test that result structure is correct.</constraint>
+    <constraint source="ADR-019">Error scenarios must return structured errors in PlaybookToolResult, not throw exceptions.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/testing.md" reason="Testing MUST/MUST NOT rules"/>
+      <file path=".claude/constraints/ai.md" reason="AI tool framework rules and PlaybookToolResult format"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SendCommunicationToolHandler.cs to understand the ExecuteAsync signature and parameter extraction.</step>
+    <step order="2">Create test scenario: "Send introductory email after matter creation". Set up mock playbook context with: matterId (Guid), clientEmail ("client@example.com"), engagementLetterDocumentId (Guid), subject ("Welcome to {MatterName}"), body (HTML welcome message).</step>
+    <step order="3">Build tool invocation parameters: to=["client@example.com"], subject="Welcome to Smith v. Jones", body="<p>Welcome...</p>", regardingEntity="sprk_matter", regardingId=matterId, attachmentDocumentIds=[engagementLetterDocumentId].</step>
+    <step order="4">Mock CommunicationService.SendAsync() to return a successful SendCommunicationResponse with communicationId, status=Send, sentAt.</step>
+    <step order="5">Execute SendCommunicationToolHandler.ExecuteAsync() with the test parameters.</step>
+    <step order="6">Assert PlaybookToolResult: success=true, communicationId matches response, status is "Send".</step>
+    <step order="7">Test error scenario: invalid recipient. Mock CommunicationService.SendAsync() to throw with ProblemDetails (invalid email). Execute handler, assert PlaybookToolResult: success=false, error contains structured error details.</step>
+    <step order="8">Test error scenario: missing required parameter (no "to" field). Assert handler returns PlaybookToolResult with validation error.</step>
+    <step order="9">Run dotnet test to verify all scenario tests pass.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read tool handler source and existing test patterns</tool>
+    <tool name="Write">Create playbook scenario test files</tool>
+    <tool name="Bash">Run dotnet test to verify tests pass</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/SendCommunicationToolHandler.Scenarios.Tests.cs (or matching project structure)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Happy path test: "Send introductory email" scenario sends email and returns successful PlaybookToolResult with communicationId.</criterion>
+    <criterion testable="true">Attachment test: engagement letter document ID is passed through to CommunicationService.</criterion>
+    <criterion testable="true">Association test: regardingEntity and regardingId are mapped to CommunicationAssociation.</criterion>
+    <criterion testable="true">Error test: invalid recipient returns PlaybookToolResult with success=false and structured error.</criterion>
+    <criterion testable="true">Validation test: missing required parameters return structured validation errors.</criterion>
+    <criterion testable="true">All tests pass with dotnet test.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load AI and testing constraints before starting. Mock all external dependencies. Verify PlaybookToolResult structure matches framework expectations.</protocol>
+  </execution>
+</task>

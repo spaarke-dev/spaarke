@@ -1,0 +1,80 @@
+<task id="025" project="email-communication-solution-r1">
+  <metadata>
+    <title>End-to-end communication form testing</title>
+    <phase>3: Communication Application</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020, 021, 022</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, e2e-test, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>End-to-end testing with explicit constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Perform end-to-end testing of the communication form, including compose mode, read mode, Send button functionality, and AssociationResolver PCF integration. Verify the complete workflow from creating a new communication through sending and viewing the sent record.</prompt>
+
+  <role>SPAARKE platform developer expert in Dataverse form testing, end-to-end verification, PCF control validation, and BFF API integration testing</role>
+
+  <goal>All communication form workflows are tested end-to-end: compose mode creates records correctly, Send button calls BFF endpoint and updates status, read mode displays sent communications, and AssociationResolver populates denormalized fields. Test results documented with pass/fail for each scenario.</goal>
+
+  <context>
+    <background>Phase 3 delivers the Communication Application — the model-driven form, AssociationResolver PCF, Send button, views, and subgrids. This task validates the complete user workflow end-to-end before moving to Phase 4. Testing covers compose mode (creating a new communication), the send flow (BFF API call), read mode (viewing sent records), and the AssociationResolver PCF (entity selection and denormalized field population).</background>
+    <relevant-files>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Dataverse Schema">Status uses statuscode: Draft=1, Send=659490002, Failed=659490004.</constraint>
+    <constraint source="Dataverse Schema">Regarding fields: sprk_regardingorganization (not account), sprk_regardingperson (not contact).</constraint>
+    <constraint source="Testing">All test scenarios must be documented with expected vs actual results.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/testing.md" reason="Testing MUST/MUST NOT rules and patterns"/>
+      <file path="docs/data-model/sprk_communication-data-schema.md" reason="Field names for verification"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Test compose mode: open new sprk_communication form, verify default values (Type=Email, Direction=Outgoing, Status=Draft), verify all compose sections are visible and editable.</step>
+    <step order="2">Test association selection: use AssociationResolver to select a Matter, verify sprk_regardingmatter lookup is populated, verify denormalized regarding fields are set correctly.</step>
+    <step order="3">Test email details: fill in sprk_to, sprk_cc, sprk_subject, sprk_body fields. Verify sprk_name auto-sets to "{Type}: {Subject}" via business rule.</step>
+    <step order="4">Test Send button: click Send on a Draft record, verify BFF POST /api/communications/send endpoint is called with correct payload.</step>
+    <step order="5">Verify post-send state: statuscode updated from Draft to Send/Delivered, form transitions to read mode, success notification displayed, Send button disabled.</step>
+    <step order="6">Test read mode: open a previously sent communication, verify all fields are read-only, Tracking Details section visible with sprk_sentby, sprk_sentat, sprk_graphmessageid.</step>
+    <step order="7">Test Send button error handling: trigger a failure scenario (e.g., invalid recipient), verify ProblemDetails error is parsed and displayed as user-friendly notification.</step>
+    <step order="8">Test AssociationResolver with multiple entity types: select Organization (verify sprk_regardingorganization populated), select Person (verify sprk_regardingperson populated).</step>
+    <step order="9">Document all test results with pass/fail status and any issues discovered.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read form configuration and endpoint code</tool>
+    <tool name="Write">Document test results</tool>
+    <tool name="Bash">Execute API calls for verification if applicable</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">End-to-end test results documentation with pass/fail for each scenario</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Compose mode: new form opens with correct defaults (Type=Email, Direction=Outgoing, Status=Draft).</criterion>
+    <criterion testable="true">AssociationResolver: selecting a Matter populates sprk_regardingmatter and denormalized fields.</criterion>
+    <criterion testable="true">Send button: calls BFF POST /api/communications/send with correct payload.</criterion>
+    <criterion testable="true">Post-send: status updates, form transitions to read mode, Send button disabled.</criterion>
+    <criterion testable="true">Read mode: all fields read-only, Tracking Details section visible.</criterion>
+    <criterion testable="true">Error handling: ProblemDetails errors are parsed and displayed as notifications.</criterion>
+    <criterion testable="true">All test scenarios documented with expected vs actual results.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Execute tests in Dataverse environment. Document each test scenario with screenshots or field values. Report any blocking issues.</protocol>
+  </execution>
+</task>

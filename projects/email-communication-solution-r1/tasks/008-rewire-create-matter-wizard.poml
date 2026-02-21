@@ -1,0 +1,77 @@
+<task id="008" project="email-communication-solution-r1">
+  <metadata>
+    <title>Rewire Create Matter wizard email code</title>
+    <phase>1: BFF Email Service</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, pcf, workspace</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies existing code in cross-worktree; deletes ~200 lines and replaces with BFF call; high impact change</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>In the workspace worktree, modify matterService.ts to replace ~200 lines of Dataverse email activity code with a single authenticatedFetch call to POST /api/communications/send. Delete _buildEmailEntity, _resolveEmailToContact, _resolveToParties, _sendEmail, _createAndSendEmail. Keep _discoverNavProps and _navPropCache (still needed for matter creation).</prompt>
+
+  <role>SPAARKE platform developer expert in TypeScript, PCF controls, Dataverse Web API, and BFF API integration</role>
+
+  <goal>matterService.ts is simplified: ~200 lines of Dataverse email code replaced with a single authenticatedFetch POST to /api/communications/send. All email-related private methods are removed. Matter creation and navigation property discovery remain intact.</goal>
+
+  <context>
+    <background>The Create Matter wizard currently constructs Dataverse email activities directly, including party resolution, entity building, and sending. This is complex, fragile, and bypasses the BFF. By switching to the new POST /api/communications/send endpoint, the wizard delegates all email logic to the BFF CommunicationService. This is a cross-worktree change — the file lives in the home-corporate-workspace-r1 worktree.</background>
+    <relevant-files>
+      <file>c:\code_files\spaarke-wt-home-corporate-workspace-r1\src\solutions\LegalWorkspace\src\components\CreateMatter\matterService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">PCF over webresources. The wizard is a PCF control.</constraint>
+    <constraint source="Design">Use authenticatedFetch (existing BFF fetch utility) to call POST /api/communications/send.</constraint>
+    <constraint source="Design">Keep _discoverNavProps() and _navPropCache — still used for matter creation, not email.</constraint>
+    <constraint source="Cross-worktree">File is in c:\code_files\spaarke-wt-home-corporate-workspace-r1, not this worktree.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="BFF endpoint call patterns from PCF"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read matterService.ts fully to understand the current email flow and identify all methods to delete.</step>
+    <step order="2">Identify the exact methods to delete: _buildEmailEntity(), _resolveEmailToContact(), _resolveToParties(), _sendEmail(), _createAndSendEmail().</step>
+    <step order="3">Identify the methods to KEEP: _discoverNavProps(), _navPropCache, and all matter creation logic.</step>
+    <step order="4">Identify where the email send is called (likely from a public method like createMatterWithEmail or similar).</step>
+    <step order="5">Replace the email send call site with authenticatedFetch to POST /api/communications/send, constructing SendCommunicationRequest with: to, subject, body, bodyFormat, associations (matter entity).</step>
+    <step order="6">Delete the five identified private methods.</step>
+    <step order="7">Remove any imports that are no longer needed after the deletion.</step>
+    <step order="8">Verify TypeScript compiles (if build tooling is available in that worktree).</step>
+    <step order="9">Review the diff to ensure no matter creation logic was accidentally removed.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read matterService.ts to understand current code</tool>
+    <tool name="Edit">Remove email methods and replace with BFF call</tool>
+    <tool name="Bash">Verify TypeScript compilation if build tooling available</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">c:\code_files\spaarke-wt-home-corporate-workspace-r1\src\solutions\LegalWorkspace\src\components\CreateMatter\matterService.ts (simplified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">_buildEmailEntity, _resolveEmailToContact, _resolveToParties, _sendEmail, _createAndSendEmail methods are deleted.</criterion>
+    <criterion testable="true">Email sending now calls POST /api/communications/send via authenticatedFetch.</criterion>
+    <criterion testable="true">SendCommunicationRequest includes correct to, subject, body, bodyFormat, and associations fields.</criterion>
+    <criterion testable="true">_discoverNavProps() and _navPropCache are preserved and functional.</criterion>
+    <criterion testable="true">All matter creation logic remains intact and unmodified.</criterion>
+    <criterion testable="true">Net reduction of approximately 150-200 lines of code.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Read the entire matterService.ts before making any changes. Take extra care with cross-worktree edits.</protocol>
+  </execution>
+</task>

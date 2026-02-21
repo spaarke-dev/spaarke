@@ -1,0 +1,78 @@
+<task id="021" project="email-communication-solution-r1">
+  <metadata>
+    <title>Configure AssociationResolver PCF on communication form</title>
+    <phase>3: Communication Application</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>016</dependencies>
+    <blocks>025</blocks>
+    <tags>dataverse, pcf, form-config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration of existing PCF control, constrained pattern</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Configure the existing AssociationResolver PCF control on the sprk_communication model-driven form. The control must be bound to the sprk_regardingrecordtype lookup field and configured to resolve across all 8 supported entity types, populating denormalized regarding fields automatically.</prompt>
+
+  <role>SPAARKE platform developer expert in PCF control configuration, Dataverse form customization, and polymorphic association patterns</role>
+
+  <goal>AssociationResolver PCF is properly placed and configured on the sprk_communication form, bound to sprk_regardingrecordtype, with entity-specific lookup fields configured for all 8 entity types. Denormalized fields auto-populate when an entity is selected.</goal>
+
+  <context>
+    <background>The AssociationResolver PCF control is a production-ready component that handles polymorphic entity resolution. It allows users to first select an entity type (Matter, Project, Invoice, etc.) and then search for a specific record of that type. When a record is selected, it populates the sprk_regardingrecordtype lookup and the appropriate denormalized regarding fields (sprk_regardingmatter, sprk_regardingproject, etc.). The control reads its entity configuration from the sprk_recordtype_ref entity.</background>
+    <relevant-files>
+      <file>src/client/pcf/AssociationResolver/AssociationResolverApp.tsx</file>
+      <file>src/client/pcf/AssociationResolver/RecordSelectionHandler.ts</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Use PCF control (AssociationResolver), not legacy webresources.</constraint>
+    <constraint source="ADR-022">PCF uses React 16 APIs only; unmanaged solutions only.</constraint>
+    <constraint source="Dataverse Schema">Regarding fields: sprk_regardingorganization (not account), sprk_regardingperson (not contact).</constraint>
+    <constraint source="Dataverse Schema">8 entity types: Matter, Project, Invoice, Analysis, Organization, Person, Work Assignment, Budget.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/polymorphic-resolver.md" reason="AssociationResolver configuration pattern"/>
+      <file path="docs/data-model/sprk_communication-data-schema.md" reason="Entity field names for regarding lookups"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read .claude/patterns/dataverse/polymorphic-resolver.md to understand AssociationResolver configuration requirements.</step>
+    <step order="2">Read AssociationResolverApp.tsx and RecordSelectionHandler.ts to understand the control's input properties and binding requirements.</step>
+    <step order="3">Document placement of AssociationResolver PCF control on the communication form's Association section, bound to sprk_regardingrecordtype lookup field.</step>
+    <step order="4">Configure entity-specific lookup fields for all 8 entity types: sprk_regardingmatter (sprk_matter), sprk_regardingproject (sprk_project), sprk_regardinginvoice (sprk_invoice), sprk_regardinganalysis (sprk_analysis), sprk_regardingorganization (sprk_organization), sprk_regardingperson (sprk_person), sprk_regardingworkassignment (sprk_workassignment), sprk_regardingbudget (sprk_budget).</step>
+    <step order="5">Verify sprk_recordtype_ref entity has configuration rows for all 8 entity types that the control will query.</step>
+    <step order="6">Document the control property bindings: bound field, entity type list, denormalized field mappings.</step>
+    <step order="7">Verify control loads with correct entity configs from sprk_recordtype_ref and denormalized fields auto-populate on record selection.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read PCF source and pattern documentation</tool>
+    <tool name="Write">Create configuration documentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">AssociationResolver PCF configuration documentation for communication form</output>
+    <output type="documentation">Entity-to-lookup field mapping reference</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AssociationResolver PCF is bound to sprk_regardingrecordtype lookup field on communication form.</criterion>
+    <criterion testable="true">All 8 entity types are configured with correct lookup field mappings.</criterion>
+    <criterion testable="true">Control loads entity configurations from sprk_recordtype_ref entity.</criterion>
+    <criterion testable="true">Selecting an entity record populates the correct denormalized regarding field (e.g., sprk_regardingmatter for Matter).</criterion>
+    <criterion testable="true">Uses sprk_regardingorganization (not account) and sprk_regardingperson (not contact).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load polymorphic-resolver pattern first. Cross-reference PCF source to confirm property names. Verify all 8 entity types against data schema.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,73 @@
+<task id="014" project="email-communication-solution-r1">
+  <metadata>
+    <title>Configure communication subgrid on Matter form</title>
+    <phase>2: Entity + Tracking</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>none</blocks>
+    <tags>dataverse, form-config</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Configuration and documentation only; no code implementation</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Document the subgrid configuration needed for the Matter form to display related communications. The subgrid filters by _sprk_regardingmatter_value eq matterId. Columns: Subject, Status, To, Sent At, From. Sort by Sent At descending. This is manual Dataverse configuration, not code.</prompt>
+
+  <role>SPAARKE platform developer expert in Dataverse model-driven app form configuration, subgrid setup, and FetchXML filtering</role>
+
+  <goal>Complete documentation specifying how to configure a communication subgrid on the Matter form, including the exact filter, columns, sort order, and any form XML needed. Documentation is actionable for manual Dataverse configuration.</goal>
+
+  <context>
+    <background>With communication records now linked to matters via sprk_regardingmatter, a subgrid on the Matter form displays related communications. This is a Dataverse configuration task, not a code task. The subgrid uses the standard model-driven app subgrid component with a filtered view of sprk_communication records related to the current matter. This documentation guides the admin through manual setup.</background>
+    <relevant-files>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Dataverse Schema">Filter: _sprk_regardingmatter_value eq {matterId} (underscore prefix for lookup, _value suffix).</constraint>
+    <constraint source="Design">Columns: sprk_subject, statuscode, sprk_to, sprk_sentat, sprk_from.</constraint>
+    <constraint source="Design">Sort: sprk_sentat descending (newest first).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Dataverse entity relationship patterns"/>
+      <file path="docs/data-model/sprk_communication-data-schema.md" reason="Entity schema for column references"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read docs/data-model/sprk_communication-data-schema.md to confirm field names for subgrid columns.</step>
+    <step order="2">Document subgrid configuration: entity=sprk_communication, relationship=sprk_regardingmatter, display name="Communications".</step>
+    <step order="3">Document view columns: Subject (sprk_subject), Status (statuscode), To (sprk_to), Sent At (sprk_sentat), From (sprk_from).</step>
+    <step order="4">Document FetchXML filter: condition attribute="_sprk_regardingmatter_value" operator="eq" value="{matterId}".</step>
+    <step order="5">Document sort order: sprk_sentat descending.</step>
+    <step order="6">Document the view definition that the subgrid should use (or create a new "Matter Communications" view).</step>
+    <step order="7">Write configuration guide to projects/email-communication-solution-r1/notes/matter-subgrid-config.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read data schema for field references</tool>
+    <tool name="Write">Create configuration documentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r1/notes/matter-subgrid-config.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Documentation specifies the subgrid entity (sprk_communication) and relationship (sprk_regardingmatter).</criterion>
+    <criterion testable="true">Documentation lists all 5 columns with correct logical names.</criterion>
+    <criterion testable="true">Documentation includes FetchXML filter using _sprk_regardingmatter_value.</criterion>
+    <criterion testable="true">Documentation specifies sort order (sprk_sentat descending).</criterion>
+    <criterion testable="true">Documentation is actionable for manual Dataverse form configuration.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. This is documentation-only — no code changes.</protocol>
+  </execution>
+</task>

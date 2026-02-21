@@ -1,0 +1,81 @@
+<task id="022" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create Send command bar button</title>
+    <phase>3: Communication Application</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>025</blocks>
+    <tags>dataverse, ribbon, javascript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New JavaScript web resource + ribbon customization, code implementation</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Create a JavaScript web resource for the Send command bar button on the sprk_communication form. The button collects form data, builds a SendCommunicationRequest, calls the BFF POST /api/communications/send endpoint via authenticatedFetch, and updates the form status on success or shows a ProblemDetails error on failure. The button is only enabled on Draft records.</prompt>
+
+  <role>SPAARKE platform developer expert in Dataverse ribbon customization, JavaScript web resources, BFF API integration, and ProblemDetails error handling</role>
+
+  <goal>A working Send button on the communication form command bar that sends the communication via the BFF endpoint, updates form status on success, displays structured errors on failure, and is only enabled when the record is in Draft status.</goal>
+
+  <context>
+    <background>The communication form needs a Send button on the command bar that triggers the BFF email send flow. When clicked, it collects form field values (To, CC, Subject, Body, associations, attachments), constructs a SendCommunicationRequest payload, and calls POST /api/communications/send using authenticatedFetch (already available in the workspace). On success, the form status is updated to reflect the sent state. On failure, the ProblemDetails response is parsed and displayed as a user-friendly notification.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-019">Error responses use ProblemDetails (RFC 7807) with errorCode extension. Parse and display these on failure.</constraint>
+    <constraint source="Dataverse Schema">Status uses statuscode: Draft=1. Button should only be enabled when statuscode=1 (Draft).</constraint>
+    <constraint source="Dataverse Schema">Type field is sprk_communiationtype (typo is intentional).</constraint>
+    <constraint source="API">BFF endpoint: POST /api/communications/send. Request/response DTOs defined in task 001.</constraint>
+    <constraint source="ribbon-edit">Ribbon customization must follow the ribbon-edit skill procedure for XML modifications.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="BFF endpoint MUST/MUST NOT rules"/>
+      <file path=".claude/adr/ADR-019-problemdetails.md" reason="ProblemDetails error format for UI display"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create JavaScript web resource file for the Send button handler (e.g., sprk_communication_send.js).</step>
+    <step order="2">Implement the Send button click handler: collect form data from Xrm.Page (sprk_to, sprk_cc, sprk_subject, sprk_body, sprk_communiationtype, association fields).</step>
+    <step order="3">Build SendCommunicationRequest payload from collected form data, including associations from the regarding lookup fields.</step>
+    <step order="4">Call BFF POST /api/communications/send via authenticatedFetch with the request payload.</step>
+    <step order="5">On success: update form statuscode field, show success notification via Xrm.Page.ui.setFormNotification, refresh the form to show read mode.</step>
+    <step order="6">On failure: parse ProblemDetails response, extract title, detail, and errorCode fields, show error notification with user-friendly message.</step>
+    <step order="7">Create enable rule function: return true only when statuscode = 1 (Draft). This controls button visibility.</step>
+    <step order="8">Document ribbon XML customization to add the Send button to the sprk_communication form command bar, bound to the JavaScript web resource and enable rule.</step>
+    <step order="9">Test button enable/disable behavior across status transitions (Draft=enabled, all others=disabled).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing patterns, API endpoint definitions, and ribbon patterns</tool>
+    <tool name="Write">Create JavaScript web resource and ribbon documentation</tool>
+    <tool name="Bash">Validate JavaScript syntax</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">JavaScript web resource for Send button (sprk_communication_send.js)</output>
+    <output type="documentation">Ribbon XML customization documentation for command bar button</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Send button is visible on sprk_communication form command bar.</criterion>
+    <criterion testable="true">Button is enabled only when statuscode = 1 (Draft).</criterion>
+    <criterion testable="true">Clicking Send collects form data and calls POST /api/communications/send.</criterion>
+    <criterion testable="true">On success: form status updates and success notification is shown.</criterion>
+    <criterion testable="true">On failure: ProblemDetails error is parsed and displayed as user-friendly notification.</criterion>
+    <criterion testable="true">Button is disabled after successful send (status no longer Draft).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load ADR-019 for ProblemDetails format. Load ribbon-edit skill if modifying ribbon XML. Verify endpoint path matches CommunicationEndpoints.cs.</protocol>
+  </execution>
+</task>

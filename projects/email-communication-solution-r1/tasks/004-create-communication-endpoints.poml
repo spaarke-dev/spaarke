@@ -1,0 +1,82 @@
+<task id="004" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create CommunicationEndpoints (POST /api/communications/send)</title>
+    <phase>1: BFF Email Service</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>005, 006</blocks>
+    <tags>bff-api, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation creating a new API endpoint; follows Minimal API pattern from ADR-001</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Create CommunicationEndpoints with a MapGroup("/api/communications") and a POST /send handler that deserializes the request, calls CommunicationService.SendAsync(), and returns the response. Follow the Minimal API pattern from EmailEndpoints.cs.</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8 Minimal API endpoints, endpoint groups, authorization, and ProblemDetails responses</role>
+
+  <goal>CommunicationEndpoints is created with POST /api/communications/send endpoint that accepts SendCommunicationRequest, calls CommunicationService, returns SendCommunicationResponse on success and ProblemDetails on failure. Endpoint requires authorization.</goal>
+
+  <context>
+    <background>The BFF needs a REST endpoint for sending communications. This replaces the Dataverse email activity pattern used by the Create Matter wizard and other clients. The endpoint group /api/communications will grow in Phase 2 with GET /{id}/status. The pattern follows existing endpoints like EmailEndpoints.cs which use MapGroup with RequireAuthorization.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/DocumentsEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API MapGroup pattern. Static class with static handler methods.</constraint>
+    <constraint source="ADR-008">Use endpoint filters for resource authorization (not global middleware). Apply via .AddEndpointFilter().</constraint>
+    <constraint source="ADR-019">Produce ProblemDetails for 400, 403, 500 responses.</constraint>
+    <constraint source="Design">Endpoint group: /api/communications. POST /send is the first endpoint.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="BFF endpoint MUST/MUST NOT rules"/>
+      <file path=".claude/adr/ADR-001-minimal-api.md" reason="Minimal API architecture pattern"/>
+      <file path=".claude/adr/ADR-008-endpoint-filters.md" reason="Endpoint filter pattern for authorization"/>
+      <file path=".claude/patterns/api/endpoint-definition.md" reason="Canonical endpoint structure"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EmailEndpoints.cs to understand the canonical endpoint pattern (MapGroup, RequireAuthorization, WithTags, handler methods).</step>
+    <step order="2">Read .claude/patterns/api/endpoint-definition.md for the standard endpoint structure.</step>
+    <step order="3">Create CommunicationEndpoints static class in Api/ folder.</step>
+    <step order="4">Implement MapCommunicationEndpoints extension method on IEndpointRouteBuilder.</step>
+    <step order="5">Create MapGroup("/api/communications") with .RequireAuthorization() and .WithTags("Communications").</step>
+    <step order="6">Add POST /send endpoint: group.MapPost("/send", SendCommunicationAsync) with .WithName("SendCommunication"), .WithDescription(), .Produces&lt;SendCommunicationResponse&gt;(200), .Produces&lt;ProblemDetails&gt;(400), .Produces&lt;ProblemDetails&gt;(403), .Produces&lt;ProblemDetails&gt;(500).</step>
+    <step order="7">Implement SendCommunicationAsync handler: accept SendCommunicationRequest from body, CommunicationService from DI, HttpContext. Call service.SendAsync(). Return Results.Ok(response) on success or Results.Problem() on failure.</step>
+    <step order="8">Add correlation ID from request or generate new one if not provided.</step>
+    <step order="9">Verify compilation with dotnet build.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing endpoint patterns</tool>
+    <tool name="Write">Create CommunicationEndpoints.cs</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/communications/send endpoint exists and accepts SendCommunicationRequest body.</criterion>
+    <criterion testable="true">Endpoint requires authorization via .RequireAuthorization().</criterion>
+    <criterion testable="true">Endpoint follows MapGroup pattern consistent with EmailEndpoints.cs.</criterion>
+    <criterion testable="true">Handler delegates to CommunicationService.SendAsync() (thin endpoint).</criterion>
+    <criterion testable="true">Success returns 200 with SendCommunicationResponse. Failures return ProblemDetails.</criterion>
+    <criterion testable="true">dotnet build completes without errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow EmailEndpoints.cs as canonical reference.</protocol>
+  </execution>
+</task>
