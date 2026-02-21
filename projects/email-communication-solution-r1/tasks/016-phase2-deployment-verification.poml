@@ -2,7 +2,7 @@
   <metadata>
     <title>Phase 2 deployment and verification</title>
     <phase>2: Entity + Tracking</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>010, 011, 012, 013, 014, 015</dependencies>
     <blocks>020</blocks>

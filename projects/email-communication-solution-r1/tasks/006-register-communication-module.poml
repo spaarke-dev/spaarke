@@ -2,7 +2,7 @@
   <metadata>
     <title>Register AddCommunicationModule in Program.cs</title>
     <phase>1: BFF Email Service</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>003, 004, 005</dependencies>
     <blocks>007, 010</blocks>

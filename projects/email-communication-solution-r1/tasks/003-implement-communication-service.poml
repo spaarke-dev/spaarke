@@ -2,7 +2,7 @@
   <metadata>
     <title>Implement CommunicationService with Graph sendMail</title>
     <phase>1: BFF Email Service</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>001, 002</dependencies>
     <blocks>004, 006, 007, 010</blocks>

@@ -2,7 +2,7 @@
   <metadata>
     <title>Create CommunicationEndpoints (POST /api/communications/send)</title>
     <phase>1: BFF Email Service</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>003</dependencies>
     <blocks>005, 006</blocks>

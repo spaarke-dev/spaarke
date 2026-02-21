@@ -2,7 +2,7 @@
   <metadata>
     <title>Add attachment fields to sprk_communication entity</title>
     <phase>4: Attachments + Archival</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>016</dependencies>
     <blocks>031, 033, 036</blocks>

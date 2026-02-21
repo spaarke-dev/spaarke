@@ -2,7 +2,7 @@
   <metadata>
     <title>Implement primary association field mapping</title>
     <phase>2: Entity + Tracking</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>014, 020</blocks>

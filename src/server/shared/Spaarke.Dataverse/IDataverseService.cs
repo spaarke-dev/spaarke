@@ -462,4 +462,16 @@ public interface IDataverseService
         int? performanceArea = null,
         int top = 0,
         CancellationToken ct = default);
+
+    // ========================================
+    // Approved Sender Operations (Email Communication R1)
+    // ========================================
+
+    /// <summary>
+    /// Query all active sprk_approvedsender records from Dataverse.
+    /// Returns records where statecode eq 0 (Active).
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Array of Entity objects with sprk_name, sprk_email, sprk_isdefault attributes</returns>
+    Task<Entity[]> QueryApprovedSendersAsync(CancellationToken ct = default);
 }

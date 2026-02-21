@@ -2,7 +2,7 @@
   <metadata>
     <title>Test playbook email scenarios</title>
     <phase>5: Playbook Integration</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>040</dependencies>
     <blocks>043</blocks>

@@ -2,7 +2,7 @@
   <metadata>
     <title>Create SendCommunicationToolHandler</title>
     <phase>5: Playbook Integration</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>006</dependencies>
     <blocks>041, 042</blocks>

@@ -2,7 +2,7 @@
   <metadata>
     <title>Create approved sender validation service</title>
     <phase>1: BFF Email Service</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>003</blocks>

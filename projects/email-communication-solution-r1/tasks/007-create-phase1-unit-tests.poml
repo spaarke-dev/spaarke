@@ -2,7 +2,7 @@
   <metadata>
     <title>Create unit tests for Phase 1 services</title>
     <phase>1: BFF Email Service</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <dependencies>003, 006</dependencies>
     <blocks>none</blocks>

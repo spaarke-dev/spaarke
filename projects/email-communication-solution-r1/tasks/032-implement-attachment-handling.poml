@@ -2,7 +2,7 @@
   <metadata>
     <title>Implement attachment download and Graph sendMail payload</title>
     <phase>4: Attachments + Archival</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>030</dependencies>
     <blocks>033, 038</blocks>

@@ -2,7 +2,7 @@
   <metadata>
     <title>Create communication endpoint authorization filter</title>
     <phase>1: BFF Email Service</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>004</dependencies>
     <blocks>006</blocks>

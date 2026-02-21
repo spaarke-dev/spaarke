@@ -2,7 +2,7 @@
   <metadata>
     <title>Create sprk_communicationattachment records after send</title>
     <phase>4: Attachments + Archival</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>031, 032</dependencies>
     <blocks>036</blocks>

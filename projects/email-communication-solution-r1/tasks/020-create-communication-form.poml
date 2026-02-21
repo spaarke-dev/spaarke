@@ -2,7 +2,7 @@
   <metadata>
     <title>Create model-driven form for sprk_communication</title>
     <phase>3: Communication Application</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>016</dependencies>
     <blocks>022, 025</blocks>

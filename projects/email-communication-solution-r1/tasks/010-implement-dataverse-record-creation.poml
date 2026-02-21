@@ -2,7 +2,7 @@
   <metadata>
     <title>Implement Dataverse communication record creation</title>
     <phase>2: Entity + Tracking</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <dependencies>006</dependencies>
     <blocks>011, 012, 015</blocks>

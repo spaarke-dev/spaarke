@@ -2,7 +2,7 @@
   <metadata>
     <title>Implement .eml generation service</title>
     <phase>4: Attachments + Archival</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>035</blocks>

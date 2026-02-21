@@ -2,7 +2,7 @@
   <metadata>
     <title>Create Send command bar button</title>
     <phase>3: Communication Application</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>020</dependencies>
     <blocks>025</blocks>

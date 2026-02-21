@@ -2,7 +2,7 @@
   <metadata>
     <title>Configure communication subgrid on Matter form</title>
     <phase>2: Entity + Tracking</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>011</dependencies>
     <blocks>none</blocks>

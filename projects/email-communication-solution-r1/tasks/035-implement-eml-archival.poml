@@ -2,7 +2,7 @@
   <metadata>
     <title>Implement .eml archival to SPE</title>
     <phase>4: Attachments + Archival</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <dependencies>034</dependencies>
     <blocks>036</blocks>

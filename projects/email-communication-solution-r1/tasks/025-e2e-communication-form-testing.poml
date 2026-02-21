@@ -2,7 +2,7 @@
   <metadata>
     <title>End-to-end communication form testing</title>
     <phase>3: Communication Application</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>020, 021, 022</dependencies>
     <blocks>none</blocks>

@@ -1754,6 +1754,33 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             .ToArray();
     }
 
+    // ========================================
+    // Approved Sender Operations (Email Communication R1)
+    // ========================================
+
+    public async Task<Entity[]> QueryApprovedSendersAsync(CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying active approved senders from Dataverse");
+
+        var query = new QueryExpression("sprk_approvedsender")
+        {
+            ColumnSet = new ColumnSet("sprk_name", "sprk_email", "sprk_isdefault"),
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression("statecode", ConditionOperator.Equal, 0) // Active only
+                }
+            }
+        };
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+
+        _logger.LogDebug("Found {Count} active approved senders", results.Entities.Count);
+
+        return results.Entities.ToArray();
+    }
+
     public void Dispose()
     {
         if (!_disposed)

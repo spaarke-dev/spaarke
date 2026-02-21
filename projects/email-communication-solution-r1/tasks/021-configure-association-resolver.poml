@@ -2,7 +2,7 @@
   <metadata>
     <title>Configure AssociationResolver PCF on communication form</title>
     <phase>3: Communication Application</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>016</dependencies>
     <blocks>025</blocks>

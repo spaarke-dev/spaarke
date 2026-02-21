@@ -2,7 +2,7 @@
   <metadata>
     <title>Create unit tests for Phase 2</title>
     <phase>2: Entity + Tracking</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <dependencies>010, 013</dependencies>
     <blocks>none</blocks>

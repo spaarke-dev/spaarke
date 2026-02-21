@@ -2,7 +2,7 @@
   <metadata>
     <title>Create unit/integration tests for Phase 4</title>
     <phase>4: Attachments + Archival</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <dependencies>032</dependencies>
     <blocks>none</blocks>

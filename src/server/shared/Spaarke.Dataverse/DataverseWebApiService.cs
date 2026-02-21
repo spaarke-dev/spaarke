@@ -1820,4 +1820,11 @@ public class DataverseWebApiService : IDataverseService
             "RetrieveByAlternateKeyAsync is implemented in DataverseServiceClientImpl. " +
             "Configure DI to use ServiceClient implementation for alternate key lookups.");
     }
+
+    public Task<Entity[]> QueryApprovedSendersAsync(CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "QueryApprovedSendersAsync is implemented in DataverseServiceClientImpl. " +
+            "Configure DI to use ServiceClient implementation for approved sender queries.");
+    }
 }

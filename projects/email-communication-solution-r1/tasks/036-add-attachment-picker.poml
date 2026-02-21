@@ -2,7 +2,7 @@
   <metadata>
     <title>Add document attachment picker to communication form</title>
     <phase>4: Attachments + Archival</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>030, 031, 033</dependencies>
     <blocks>none</blocks>

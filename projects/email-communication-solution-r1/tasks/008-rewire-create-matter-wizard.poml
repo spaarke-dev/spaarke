@@ -2,7 +2,7 @@
   <metadata>
     <title>Rewire Create Matter wizard email code</title>
     <phase>1: BFF Email Service</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <dependencies>004</dependencies>
     <blocks>none</blocks>

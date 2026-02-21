@@ -2,7 +2,7 @@
   <metadata>
     <title>End-to-end integration testing</title>
     <phase>5: Playbook Integration</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>041, 042</dependencies>
     <blocks>090</blocks>

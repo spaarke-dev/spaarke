@@ -2,7 +2,7 @@
   <metadata>
     <title>Create GET /api/communications/{id}/status endpoint</title>
     <phase>2: Entity + Tracking</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>none</blocks>
