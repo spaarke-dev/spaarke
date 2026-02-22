@@ -2,7 +2,7 @@
   <metadata>
     <title>Unit tests for inbound pipeline</title>
     <phase>8</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>3h</estimate>
     <tags>testing, unit-test</tags>
     <dependencies>070, 071, 072, 073</dependencies>

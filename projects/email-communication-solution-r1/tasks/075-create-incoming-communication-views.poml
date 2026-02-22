@@ -2,7 +2,7 @@
   <metadata>
     <title>Create incoming communication views</title>
     <phase>8</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>2h</estimate>
     <tags>dataverse, solution</tags>
     <dependencies>072</dependencies>

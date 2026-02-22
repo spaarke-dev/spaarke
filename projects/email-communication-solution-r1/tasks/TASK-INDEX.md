@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-02-22
 > **Total Tasks**: 55
-> **Overall Status**: IN PROGRESS — Extended (50/55 complete, Phases 1-7 and 9 done, Phase 8 in progress)
+> **Overall Status**: IN PROGRESS — Extended (52/55 complete, Phases 1-7 and 9 done, Phase 8 nearly done)
 
 ## Task Registry
 
@@ -95,8 +95,8 @@
 | 072 | Create IncomingCommunicationProcessor job handler | ✅ | 5h | 071 | 077 | FULL | — |
 | 073 | Implement backup polling for missed webhooks | ✅ | 3h | 070 | 077 | FULL | N |
 | 074 | Update sprk_communicationaccount form with inbound fields | ✅ | 1h | 070 | none | MINIMAL | N |
-| 075 | Create incoming communication views | 🔲 | 2h | 072 | none | MINIMAL | O |
-| 076 | Unit tests for inbound pipeline | 🔲 | 3h | 070-073 | none | STANDARD | O |
+| 075 | Create incoming communication views | ✅ | 2h | 072 | none | MINIMAL | O |
+| 076 | Unit tests for inbound pipeline | ✅ | 3h | 070-073 | none | STANDARD | O |
 | 077 | End-to-end inbound monitoring testing | 🔲 | 2h | 070-076 | 080 | STANDARD | — |
 
 ### Phase 9: Verification & Admin UX (3 tasks, ~8h)
@@ -124,10 +124,10 @@
 | 5: Playbook Integration | 4 | 1 | 2 | 0 | 12h | ✅ |
 | 6: Communication Accounts | 6 | 2 | 2 | 1 | 16h | ✅ |
 | 7: Individual User Outbound | 5 | 2 | 2 | 0 | 12h | ✅ |
-| 8: Inbound Monitoring | 8 | 4 | 1 | 2 | 24h | 🔨 (5/8) |
+| 8: Inbound Monitoring | 8 | 4 | 1 | 2 | 24h | 🔨 (7/8) |
 | 9: Verification & Admin | 3 | 1 | 1 | 1 | 8h | ✅ |
 | Wrap-up (reset) | 1 | 0 | 0 | 1 | 4h | 🔲 |
-| **Total** | **57** | **22** | **18** | **12** | **~180h** | **50/57** |
+| **Total** | **57** | **22** | **18** | **12** | **~180h** | **52/57** |
 
 ## Dependency Graph
 
