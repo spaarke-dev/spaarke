@@ -2,7 +2,7 @@
   <metadata>
     <title>Admin documentation and deployment guide updates</title>
     <phase>9</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>3h</estimate>
     <tags>documentation</tags>
     <dependencies>080, 081</dependencies>

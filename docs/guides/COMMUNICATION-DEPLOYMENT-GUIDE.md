@@ -19,6 +19,9 @@
 - [Exchange Online Application Access Policy Setup](#exchange-online-application-access-policy-setup)
 - [Rollback Procedures](#rollback-procedures)
 - [Troubleshooting](#troubleshooting)
+- [Phase 6-9 API Endpoints](#phase-6-9-api-endpoints)
+- [Phase 6-9 Deployment Sequence](#phase-6-9-deployment-sequence)
+- [Phase 6-9 Background Services](#phase-6-9-background-services)
 - [Environment-Specific Configuration](#environment-specific-configuration)
 
 ---
@@ -687,6 +690,183 @@ pac solution publish
 
 ---
 
+## Phase 6-9 API Endpoints
+
+Phases 6-9 add the following endpoints to the BFF API. These are in addition to the original Phase 1-5 endpoints (`POST /api/communications/send`, `POST /api/communications/send-bulk`, `GET /api/communications/{id}/status`).
+
+| Endpoint | Method | Auth | Purpose | Phase |
+|----------|--------|------|---------|-------|
+| `/api/communications/send` | POST | Authenticated | Send email — now supports `sendMode` for shared or individual (OBO) | 7 (updated) |
+| `/api/communications/incoming-webhook` | POST | Anonymous | Graph change notification webhook receiver | 8 |
+| `/api/communications/accounts/{id}/verify` | POST | Authenticated | Run mailbox verification (test send/read) | 9 |
+
+### Endpoint Details
+
+**POST /api/communications/send** (Phase 7 Update)
+
+The send endpoint now accepts an optional `sendMode` field in the request body:
+- `SharedMailbox` (default): Sends from a shared mailbox via app-only auth
+- `User`: Sends from the authenticated user's mailbox via OBO delegated auth
+
+**POST /api/communications/incoming-webhook** (Phase 8)
+
+Receives Graph subscription change notifications. This endpoint:
+- Handles subscription validation requests (returns `validationToken` as plain text)
+- Validates notifications via `clientState` HMAC
+- Enqueues `IncomingCommunicationJob` for asynchronous processing
+- Does NOT require authentication (Graph sends notifications without a bearer token)
+
+**POST /api/communications/accounts/{id}/verify** (Phase 9)
+
+Tests mailbox connectivity for a communication account:
+- If send-enabled: sends a test email from the mailbox
+- If receive-enabled: reads recent messages from the mailbox
+- Updates `sprk_verificationstatus` and `sprk_lastverified` on the account record
+- Returns verification result with details
+
+---
+
+## Phase 6-9 Deployment Sequence
+
+After deploying the original Phases 1-5 components (Steps 1-6 above), follow this sequence for Phases 6-9.
+
+### Step 7: Deploy BFF API with Phase 6-9 Services
+
+Build and deploy the BFF API with all new services. Follow the same process as [Step 1](#step-1-build-and-verify-bff-api) and [Step 2](#step-2-deploy-bff-api-to-azure-app-service).
+
+**New services included in the deployment**:
+
+| Service | Type | Purpose |
+|---------|------|---------|
+| `CommunicationAccountService` | Singleton | Queries `sprk_communicationaccount` from Dataverse with Redis cache |
+| `GraphSubscriptionManager` | BackgroundService | Creates/renews/recreates Graph webhook subscriptions |
+| `InboundPollingBackupService` | BackgroundService | Polls for messages missed by webhooks |
+| `MailboxVerificationService` | Singleton | Tests mailbox connectivity (send + read) |
+| `IncomingCommunicationProcessor` | Job Handler | Processes incoming email notifications into `sprk_communication` records |
+
+### Step 8: Seed Communication Account Records
+
+Create `sprk_communicationaccount` records in Dataverse for each mailbox the BFF API should manage. At minimum, configure the primary shared mailbox:
+
+1. Navigate to **Communication Accounts** in the model-driven app
+2. Create a new record:
+   - **Name**: "Central Mailbox"
+   - **Email Address**: `mailbox-central@spaarke.com`
+   - **Display Name**: "Spaarke Legal"
+   - **Account Type**: Shared Account (100000000)
+   - **Send Enableds** (`sprk_sendenableds`): Yes
+   - **Is Default Sender** (`sprk_isdefaultsender`): Yes
+   - **Receive Enabled** (`sprk_receiveenabled`): Yes
+   - **Auto Create Records** (`sprk_autocreaterecords`): Yes
+3. Save the record
+
+For detailed instructions on creating and configuring accounts, see the [Communication Admin Guide](COMMUNICATION-ADMIN-GUIDE.md).
+
+### Step 9: Configure Webhook URL
+
+Set the webhook notification URL in App Service configuration so the `GraphSubscriptionManager` knows where to direct Graph subscriptions:
+
+```bash
+az webapp config appsettings set \
+  --resource-group spe-infrastructure-westus2 \
+  --name spe-api-dev-67e2xz \
+  --settings Communication__WebhookNotificationUrl="https://spe-api-dev-67e2xz.azurewebsites.net/api/communications/incoming-webhook"
+```
+
+### Step 10: Verify Graph Subscriptions
+
+After the BFF API starts, the `GraphSubscriptionManager` automatically creates subscriptions on its first cycle (within 30 minutes of startup).
+
+**Verify subscriptions are created**:
+1. Open the `sprk_communicationaccount` record in Dataverse
+2. Check that `sprk_subscriptionid` is populated (a GUID)
+3. Check that `sprk_subscriptionexpiry` is set to a future date (up to 3 days out)
+
+If these fields are empty after 30 minutes, check the BFF API logs for subscription creation errors.
+
+### Step 11: Run Verification on Each Account
+
+For each communication account, run the verification endpoint:
+
+```bash
+# Verify the primary shared mailbox
+curl -X POST \
+  "https://spe-api-dev-67e2xz.azurewebsites.net/api/communications/accounts/{account-id}/verify" \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json"
+```
+
+Verify that `sprk_verificationstatus` updates to **Verified** (100000000) on the account record.
+
+### Step 12: End-to-End Verification (Phases 6-9)
+
+#### Outbound Shared Mailbox (Phase 6)
+- [ ] Communication account record exists for `mailbox-central@spaarke.com`
+- [ ] `sprk_sendenableds = Yes` and `sprk_isdefaultsender = Yes`
+- [ ] Send a test email via `POST /api/communications/send` — email delivered
+- [ ] Sender resolved from `sprk_communicationaccount` (not just appsettings.json)
+
+#### Individual User Send (Phase 7)
+- [ ] Send with `sendMode: "User"` — email sent from user's own mailbox
+- [ ] `sprk_from` shows user's email address on the communication record
+- [ ] Send with `sendMode: "SharedMailbox"` still works as before
+
+#### Inbound Monitoring (Phase 8)
+- [ ] `sprk_subscriptionid` populated on receive-enabled accounts
+- [ ] Send an email TO `mailbox-central@spaarke.com` from an external address
+- [ ] `sprk_communication` record created with `sprk_direction` = Incoming (100000000)
+- [ ] Incoming record has `sprk_to`, `sprk_from`, `sprk_subject`, `sprk_body` populated
+- [ ] `sprk_graphmessageid` populated on the incoming record
+- [ ] Regarding fields are empty (association resolution is out of scope)
+
+#### Verification (Phase 9)
+- [ ] `POST /api/communications/accounts/{id}/verify` returns success
+- [ ] `sprk_verificationstatus` = Verified (100000000)
+- [ ] `sprk_lastverified` updated to current timestamp
+
+---
+
+## Phase 6-9 Background Services
+
+### GraphSubscriptionManager
+
+| Property | Value |
+|----------|-------|
+| Type | `BackgroundService` (hosted service) |
+| Cycle Interval | 30 minutes |
+| Startup Behavior | Runs immediately on startup, then every 30 minutes |
+| What It Does | Creates, renews, and recreates Graph webhook subscriptions for receive-enabled accounts |
+| Subscription Lifetime | Up to 3 days (Graph API maximum for mail) |
+| Renewal Threshold | Renews when expiry < 24 hours |
+| Dataverse Updates | Writes `sprk_subscriptionid` and `sprk_subscriptionexpiry` on account records |
+| Health Check | Included in `/healthz` response |
+
+### InboundPollingBackupService
+
+| Property | Value |
+|----------|-------|
+| Type | `BackgroundService` (hosted service) |
+| Cycle Interval | 5 minutes |
+| Startup Behavior | Starts after initial delay, then every 5 minutes |
+| What It Does | Polls Graph for messages since last poll for each receive-enabled account |
+| Deduplication | Checks `sprk_graphmessageid` on existing records to skip already-tracked messages |
+| Resilience | Catches all exceptions per-account to avoid one failure blocking others |
+| Health Check | Included in `/healthz` response |
+
+### Monitoring
+
+Both background services log to the standard BFF API logging pipeline. Monitor via:
+
+```bash
+# Tail logs for subscription and polling activity
+az webapp log tail \
+  --resource-group spe-infrastructure-westus2 \
+  --name spe-api-dev-67e2xz \
+  --filter "GraphSubscriptionManager|InboundPollingBackupService"
+```
+
+---
+
 ## Environment-Specific Configuration
 
 ### Dev Environment
@@ -705,12 +885,17 @@ When promoting to staging/production:
 
 1. Update `Communication__ApprovedSenders` with environment-specific mailboxes
 2. Update `Communication__ArchiveContainerId` with environment SPE container
-3. Update `sprk_BffApiBaseUrl` Dataverse environment variable
-4. Verify Graph API permissions on target app registration
-5. Deploy web resource to target Dataverse environment
-6. Deploy ribbon solution to target Dataverse environment
-7. Run end-to-end verification checklist
+3. Update `Communication__WebhookNotificationUrl` with environment-specific webhook URL
+4. Update `sprk_BffApiBaseUrl` Dataverse environment variable
+5. Verify Graph API permissions on target app registration (`Mail.Send` Application, `Mail.Read` Application, `Mail.Send` Delegated)
+6. Deploy web resource to target Dataverse environment
+7. Deploy ribbon solution to target Dataverse environment
+8. Seed `sprk_communicationaccount` records for environment-specific mailboxes
+9. Configure Exchange Application Access Policy for the target tenant
+10. Wait 30 minutes for Exchange policy propagation
+11. Run verification on each account (`POST /api/communications/accounts/{id}/verify`)
+12. Run end-to-end verification checklist (Phases 1-5 + Phases 6-9)
 
 ---
 
-*Deployment guide for the Email Communication Solution R1. See also: [Architecture](../architecture/communication-service-architecture.md) | [User Guide](communication-user-guide.md)*
+*Deployment guide for the Email Communication Solution R1. See also: [Architecture](../architecture/communication-service-architecture.md) | [User Guide](communication-user-guide.md) | [Admin Guide](COMMUNICATION-ADMIN-GUIDE.md)*

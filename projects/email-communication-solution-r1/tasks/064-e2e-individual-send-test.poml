@@ -2,7 +2,7 @@
   <metadata>
     <title>End-to-end individual send testing</title>
     <phase>7</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>1h</estimate>
     <tags>testing, integration-test</tags>
     <dependencies>060, 061, 062, 063</dependencies>
