@@ -1,0 +1,56 @@
+<task id="070" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create GraphSubscriptionManager BackgroundService</title>
+    <phase>8</phase>
+    <status>pending</status>
+    <estimate>5h</estimate>
+    <tags>bff-api, api</tags>
+    <dependencies>055</dependencies>
+    <blocks>071, 077</blocks>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create a GraphSubscriptionManager BackgroundService that automatically creates, renews, and recreates Graph webhook subscriptions for all receive-enabled communication accounts.</goal>
+    <context>Inbound email monitoring requires Graph change notification subscriptions on each receive-enabled mailbox. Subscriptions expire after 3 days (Graph maximum for mail resources) and must be renewed automatically. The EmailPollingBackupService already demonstrates the BackgroundService with PeriodicTimer pattern. Graph subscriptions auto-renew with NO human in loop.</context>
+    <constraints>
+      <constraint source="ADR-001">Implement as BackgroundService registered in AddCommunicationModule(). No Azure Functions.</constraint>
+      <constraint source="ADR-010">Register as concrete type. No unnecessary interfaces.</constraint>
+      <constraint source="SCHEMA">Use sprk_subscriptionid (NOT sprk_graphsubscriptionid). Subscription status derived from sprk_subscriptionid presence + sprk_subscriptionexpiry — no sprk_subscriptionstatus field exists.</constraint>
+      <constraint source="DESIGN">Graph subscriptions auto-renew, NO human in loop. Fully automated lifecycle.</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/EmailPollingBackupService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+      <file>projects/email-communication-solution-r1/design-communication-accounts.md</file>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create GraphSubscriptionManager as BackgroundService with 30-minute PeriodicTimer (follow EmailPollingBackupService pattern)</step>
+    <step>On tick: query CommunicationAccountService.QueryReceiveEnabledAccountsAsync() for all receive-enabled accounts</step>
+    <step>For each receive-enabled account: check sprk_subscriptionid and sprk_subscriptionexpiry fields</step>
+    <step>If no subscription (sprk_subscriptionid is null): POST /subscriptions to create Graph subscription for /users/{email}/mailFolders/{folder}/messages with changeType=created</step>
+    <step>If subscription exists and expiry less than 24h away: PATCH /subscriptions/{id} to renew (new expiry = now + 3 days, Graph max for mail)</step>
+    <step>If subscription renewal fails (404 or error): DELETE old subscription + POST new subscription to recreate</step>
+    <step>Update sprk_communicationaccount record: set sprk_subscriptionid and sprk_subscriptionexpiry after each create/renew/recreate operation</step>
+    <step>Add clientState HMAC secret for webhook validation (read from configuration, shared with webhook endpoint)</step>
+    <step>Register GraphSubscriptionManager BackgroundService in AddCommunicationModule()</step>
+    <step>Use GraphClientFactory.ForApp() for all subscription management operations (app-only auth required)</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>GraphSubscriptionManager runs as BackgroundService with 30-minute timer</criterion>
+    <criterion>Subscriptions auto-created for receive-enabled accounts with no existing subscription</criterion>
+    <criterion>Subscriptions auto-renewed when expiry is less than 24 hours away</criterion>
+    <criterion>Failed renewals handled by delete + recreate</criterion>
+    <criterion>sprk_subscriptionid and sprk_subscriptionexpiry updated on account record after each operation</criterion>
+    <criterion>clientState HMAC secret configured for webhook validation</criterion>
+    <criterion>Uses GraphClientFactory.ForApp() for app-only auth</criterion>
+    <criterion>No human in loop — fully automated subscription lifecycle</criterion>
+  </acceptance-criteria>
+</task>

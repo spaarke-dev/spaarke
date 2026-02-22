@@ -1,0 +1,40 @@
+<task id="053" project="email-communication-solution-r1">
+  <metadata>
+    <title>Configure appsettings.json and document Exchange setup</title>
+    <phase>6</phase>
+    <status>pending</status>
+    <estimate>2h</estimate>
+    <tags>config, documentation</tags>
+    <dependencies>050</dependencies>
+    <blocks>055</blocks>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Update appsettings.json with mailbox-central@spaarke.com configuration and document the Exchange Online application access policy setup.</goal>
+    <context>The shared mailbox mailbox-central@spaarke.com has been confirmed by the owner. We need to configure the BFF to use it and document the Exchange Online setup steps for the security team.</context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r1/design-communication-accounts.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/CommunicationOptions.cs</file>
+      <file>docs/guides/COMMUNICATION-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Update appsettings.json Communication section: set DefaultMailbox to mailbox-central@spaarke.com, update ApprovedSenders array with mailbox-central entry as default</step>
+    <step>Document Exchange Online setup steps in COMMUNICATION-DEPLOYMENT-GUIDE.md: create mail-enabled security group, add mailbox to group, create application access policy with New-ApplicationAccessPolicy, verify with Test-ApplicationAccessPolicy</step>
+    <step>Document the 30-minute propagation delay for Exchange access policies</step>
+    <step>Document how to add new mailboxes: Add-DistributionGroupMember + create sprk_communicationaccount record in Dataverse</step>
+    <step>Document Graph API permissions needed: Mail.Send (application), Mail.Read (application for Phase 8), Mail.Send (delegated for Phase 7)</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>appsettings.json configured with mailbox-central@spaarke.com</criterion>
+    <criterion>Exchange setup documented with PowerShell commands</criterion>
+    <criterion>Propagation delay warning documented</criterion>
+    <criterion>New mailbox procedure documented</criterion>
+  </acceptance-criteria>
+</task>

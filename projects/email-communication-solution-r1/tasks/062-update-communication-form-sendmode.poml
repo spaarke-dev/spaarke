@@ -1,0 +1,38 @@
+<task id="062" project="email-communication-solution-r1">
+  <metadata>
+    <title>Update Communication form with send mode UX</title>
+    <phase>7</phase>
+    <status>pending</status>
+    <estimate>2h</estimate>
+    <tags>dataverse, solution</tags>
+    <dependencies>060</dependencies>
+    <blocks>064</blocks>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Update the sprk_communication form to provide clear send mode selection in the compose view and proper display of the actual sender in read mode.</goal>
+    <context>With the addition of individual user send (SendMode.User), the communication form needs to show a "Send From" area when composing so users can choose between their own mailbox and a shared mailbox. After sending, the read-mode view should display the actual sender (sprk_from) regardless of which send mode was used.</context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+      <file>projects/email-communication-solution-r1/design-communication-accounts.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Document form update: add "Send From" area on compose view showing available send mode options (My Mailbox + shared mailboxes)</step>
+    <step>If user selects "My Mailbox", pre-fill sprk_from with user's primary email address</step>
+    <step>If user selects a shared mailbox, pre-fill sprk_from with the selected mailbox's email address</step>
+    <step>Ensure read-mode (sent record) shows the actual sender (sprk_from value) regardless of which send mode was used</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Compose view provides clear send mode selection with "Send From" area</criterion>
+    <criterion>sprk_from pre-filled based on user's send mode selection</criterion>
+    <criterion>Read mode displays actual sender from sprk_from field</criterion>
+    <criterion>Form configuration documented for manual creation in Dataverse</criterion>
+  </acceptance-criteria>
+</task>

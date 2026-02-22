@@ -1,0 +1,41 @@
+<task id="082" project="email-communication-solution-r1">
+  <metadata>
+    <title>Admin documentation and deployment guide updates</title>
+    <phase>9</phase>
+    <status>pending</status>
+    <estimate>3h</estimate>
+    <tags>documentation</tags>
+    <dependencies>080, 081</dependencies>
+    <blocks>090</blocks>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create comprehensive admin documentation for communication account management and update the deployment guide with all new endpoints and deployment sequences from Phases 6-9.</goal>
+    <context>Phases 6-9 added significant new functionality: communication account management, individual user send, inbound email monitoring, and mailbox verification. Administrators need clear documentation for managing accounts, and the deployment guide needs updating with all new endpoints (incoming-webhook, verify, account query) and the complete deployment sequence.</context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+      <file>docs/guides/COMMUNICATION-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/email-communication-solution-r1/design-communication-accounts.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create "How to Add a New Communication Account" admin guide covering: creating the account record, configuring send/receive settings, setting security group, running verification, monitoring subscription status</step>
+    <step>Update COMMUNICATION-DEPLOYMENT-GUIDE.md with new endpoints: POST /api/communications/incoming-webhook (anonymous, Graph webhooks), POST /api/communications/accounts/{id}/verify (authenticated), GET /api/communications/accounts (authenticated, account query)</step>
+    <step>Document complete deployment sequence for Phases 6-9: account service registration, subscription manager startup, webhook URL configuration in Azure, polling service startup, verification endpoint availability</step>
+    <step>Document troubleshooting scenarios: subscription not creating (check app permissions), verification failing (check mailbox permissions), backup polling not running (check service health), OBO token errors (check token cache TTL)</step>
+    <step>Update project notes/project-completion-summary.md with Phase 6-9 completion information and summary of delivered capabilities</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Admin guide created for adding new communication accounts</criterion>
+    <criterion>Deployment guide updated with all new endpoints</criterion>
+    <criterion>Complete deployment sequence documented for Phases 6-9</criterion>
+    <criterion>Troubleshooting guide covers common failure scenarios</criterion>
+    <criterion>Project completion summary updated with Phase 6-9 information</criterion>
+  </acceptance-criteria>
+</task>

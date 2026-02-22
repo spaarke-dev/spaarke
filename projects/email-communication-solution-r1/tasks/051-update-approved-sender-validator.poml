@@ -1,0 +1,48 @@
+<task id="051" project="email-communication-solution-r1">
+  <metadata>
+    <title>Update ApprovedSenderValidator to use CommunicationAccountService</title>
+    <phase>6</phase>
+    <status>pending</status>
+    <estimate>3h</estimate>
+    <tags>bff-api, refactor</tags>
+    <dependencies>050</dependencies>
+    <blocks>055</blocks>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Update ApprovedSenderValidator to use CommunicationAccountService instead of the old QueryApprovedSendersAsync method. Maintain appsettings.json as fallback.</goal>
+    <context>ApprovedSenderValidator currently has a two-tier merge: config senders (appsettings.json) as base, Dataverse senders overlay. The Dataverse query needs to be updated to use the new CommunicationAccountService which queries sprk_communicationaccount instead of sprk_approvedsender.</context>
+    <constraints>
+      <constraint source="OWNER">appsettings.json MUST remain as fallback when Dataverse query fails</constraint>
+      <constraint source="ADR-010">Inject CommunicationAccountService as concrete dependency</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ApprovedSenderValidator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/CommunicationOptions.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Inject CommunicationAccountService into ApprovedSenderValidator constructor</step>
+    <step>Update ResolveAsync() to call CommunicationAccountService.QuerySendEnabledAccountsAsync() instead of _dataverseService.QueryApprovedSendersAsync()</step>
+    <step>Map CommunicationAccount to the existing ApprovedSender model (sprk_emailaddress → Email, sprk_displayname → DisplayName, sprk_isdefaultsender → IsDefault)</step>
+    <step>Maintain the two-tier merge logic: config senders as base, Dataverse accounts overlay, Dataverse wins on email match</step>
+    <step>Add graceful fallback: if CommunicationAccountService throws, log warning and use config-only senders</step>
+    <step>Remove or deprecate QueryApprovedSendersAsync from IDataverseService if no longer needed</step>
+    <step>Update Redis cache key namespace if needed (avoid collision with old keys)</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>ApprovedSenderValidator queries sprk_communicationaccount via CommunicationAccountService</criterion>
+    <criterion>appsettings.json fallback works when Dataverse query fails</criterion>
+    <criterion>Two-tier merge logic preserved (config base + Dataverse overlay)</criterion>
+    <criterion>Old QueryApprovedSendersAsync removed or deprecated</criterion>
+    <criterion>No breaking changes to existing send flow</criterion>
+  </acceptance-criteria>
+</task>

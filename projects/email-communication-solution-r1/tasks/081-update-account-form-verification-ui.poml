@@ -1,0 +1,44 @@
+<task id="081" project="email-communication-solution-r1">
+  <metadata>
+    <title>Update sprk_communicationaccount form with verification UI</title>
+    <phase>9</phase>
+    <status>pending</status>
+    <estimate>2h</estimate>
+    <tags>dataverse, solution, frontend</tags>
+    <dependencies>080</dependencies>
+    <blocks>082</blocks>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Add a "Verify" command bar button to the sprk_communicationaccount form that calls the verification endpoint and displays results to the administrator.</goal>
+    <context>The verification endpoint (task 080) exists at POST /api/communications/accounts/{id}/verify. Administrators need a UI button on the form to trigger verification and see the results. The verification status and last verified date should be visible on the form.</context>
+    <constraints>
+      <constraint source="ADR-006">Create JS web resource for the Verify button handler. Acceptable since this is a command bar action, not a full UI component.</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+      <file>projects/email-communication-solution-r1/design-communication-accounts.md</file>
+      <file>src/solutions/CommunicationRibbons/WebResources/sprk_communication_send.js</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Add "Verify" command bar button to sprk_communicationaccount form (document ribbon/command bar configuration)</step>
+    <step>Create JS web resource for Verify button: calls POST /api/communications/accounts/{recordId}/verify with bearer token</step>
+    <step>Display verification result to admin: success message with verified capabilities, or failure message with error details</step>
+    <step>Ensure sprk_verificationstatus and sprk_lastverified fields are visible on the form and refresh after verification completes</step>
+    <step>Document ribbon/command bar configuration for the Verify button (enable rule, display rule, command definition)</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Verify command bar button visible on sprk_communicationaccount form</criterion>
+    <criterion>Button click calls verification endpoint with correct account ID</criterion>
+    <criterion>Success/failure result displayed to administrator</criterion>
+    <criterion>Verification status and last verified date visible on form and refresh after verification</criterion>
+    <criterion>Ribbon/command bar configuration documented</criterion>
+  </acceptance-criteria>
+</task>

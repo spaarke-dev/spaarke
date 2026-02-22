@@ -1,0 +1,41 @@
+<task id="064" project="email-communication-solution-r1">
+  <metadata>
+    <title>End-to-end individual send testing</title>
+    <phase>7</phase>
+    <status>pending</status>
+    <estimate>1h</estimate>
+    <tags>testing, integration-test</tags>
+    <dependencies>060, 061, 062, 063</dependencies>
+    <blocks>080</blocks>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Verify end-to-end email sending for both send modes: shared mailbox and individual user.</goal>
+    <context>This is the gate task for Phase 7. All individual user send functionality must work correctly alongside the existing shared mailbox send before proceeding to Phase 9 verification.</context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+      <file>docs/guides/COMMUNICATION-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Send email with sendMode: "sharedMailbox" — verify works as before (regression)</step>
+    <step>Send email with sendMode: "user" — verify email sent from user's own mailbox via OBO</step>
+    <step>Verify sprk_communication record: sprk_from shows user's email for user mode send</step>
+    <step>Verify sprk_communication record: sprk_from shows shared mailbox email for shared mode send</step>
+    <step>Test OBO token error handling: expired session scenario returns appropriate error</step>
+    <step>Document test results and any issues found</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Shared mailbox send works as before — no regressions</criterion>
+    <criterion>Individual user send works via OBO — email sent from user's mailbox</criterion>
+    <criterion>sprk_from correctly set for both send modes in sprk_communication records</criterion>
+    <criterion>OBO token error handled gracefully</criterion>
+    <criterion>Test results documented</criterion>
+  </acceptance-criteria>
+</task>

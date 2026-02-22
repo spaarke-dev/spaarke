@@ -1,0 +1,53 @@
+<task id="071" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create incoming webhook endpoint</title>
+    <phase>8</phase>
+    <status>pending</status>
+    <estimate>4h</estimate>
+    <tags>bff-api, api, auth</tags>
+    <dependencies>070</dependencies>
+    <blocks>072, 077</blocks>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create a POST /api/communications/incoming-webhook endpoint that receives Graph change notifications for new emails, validates them, and enqueues them for asynchronous processing.</goal>
+    <context>Graph sends change notifications to a webhook URL when new messages arrive in monitored mailboxes. The endpoint must handle two types of requests: subscription validation (returns validationToken) and actual change notifications. The EmailEndpoints.cs already demonstrates webhook signature validation. Graph requires fast webhook responses, so processing must be enqueued, not inline.</context>
+    <constraints>
+      <constraint source="ADR-008">Endpoint must allow anonymous access for Graph webhook delivery — clientState validation replaces standard auth.</constraint>
+      <constraint source="ADR-001">Register endpoint in CommunicationEndpoints group. No Azure Functions.</constraint>
+      <constraint source="ADR-019">Return ProblemDetails for validation failures.</constraint>
+      <constraint source="DESIGN">Return 202 Accepted for valid notifications. Do not process inline — Graph requires fast response.</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/EmailEndpoints.cs</file>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+      <file>projects/email-communication-solution-r1/design-communication-accounts.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create POST /api/communications/incoming-webhook endpoint in CommunicationEndpoints</step>
+    <step>Handle Graph subscription validation request: if request body contains validationToken query parameter, return 200 OK with the token as plain text (text/plain content type)</step>
+    <step>Validate incoming change notification: check clientState in notification matches expected HMAC secret from configuration</step>
+    <step>Extract change notification fields: subscriptionId, resource (contains mailbox and messageId), changeType</step>
+    <step>Enqueue IncomingCommunicationJob with mailbox identifier, messageId, and subscriptionId for asynchronous processing</step>
+    <step>Return 202 Accepted immediately (do not process inline — Graph requires fast webhook response)</step>
+    <step>Configure endpoint to allow anonymous access since Graph webhook delivery cannot authenticate — clientState validation replaces standard auth</step>
+    <step>Add rate limiting or deduplication logic to prevent processing the same message notification twice</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>POST /api/communications/incoming-webhook endpoint registered in CommunicationEndpoints</criterion>
+    <criterion>Subscription validation handled correctly (returns validationToken as plain text)</criterion>
+    <criterion>clientState validated on incoming notifications</criterion>
+    <criterion>Invalid clientState rejected with appropriate error</criterion>
+    <criterion>Valid notifications enqueued as IncomingCommunicationJob</criterion>
+    <criterion>Returns 202 Accepted for valid notifications (no inline processing)</criterion>
+    <criterion>Anonymous access allowed for Graph webhook delivery</criterion>
+    <criterion>Deduplication prevents processing same message twice</criterion>
+  </acceptance-criteria>
+</task>

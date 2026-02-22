@@ -1,0 +1,39 @@
+<task id="052" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create sprk_communicationaccount admin form and views</title>
+    <phase>6</phase>
+    <status>pending</status>
+    <estimate>3h</estimate>
+    <tags>dataverse, solution</tags>
+    <dependencies>050</dependencies>
+    <blocks>055</blocks>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create a model-driven form and views for the sprk_communicationaccount entity so admins can manage communication accounts through the Dataverse UI.</goal>
+    <context>The entity already exists in Dataverse with all fields. We need to create a form layout and useful views for administrators.</context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+      <file>projects/email-communication-solution-r1/design-communication-accounts.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Design form layout with sections: Core Identity (sprk_name, sprk_emailaddress, sprk_displayname, sprk_accounttype), Outbound Config (sprk_sendenableds, sprk_isdefaultsender), Inbound Config (sprk_receiveenabled, sprk_monitorfolder, sprk_autocreaterecords), Graph Integration (sprk_subscriptionid read-only, sprk_subscriptionexpiry read-only), Security (sprk_securitygroupid, sprk_securitygroupname), Verification (sprk_verificationstatus read-only, sprk_lastverified read-only)</step>
+    <step>Document form configuration for manual creation in Dataverse UI (make.powerapps.com)</step>
+    <step>Document views: Active Accounts (all active), Send-Enabled (sprk_sendenableds eq true), Receive-Enabled (sprk_receiveenabled eq true), Default Senders (sprk_isdefaultsender eq true)</step>
+    <step>Document each view's columns and sort order</step>
+    <step>Seed initial record: mailbox-central@spaarke.com with sprk_sendenableds=true, sprk_isdefaultsender=true, sprk_accounttype=100000000 (Shared Account), sprk_displayname="Spaarke Central"</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Form configuration documented for manual creation</criterion>
+    <criterion>At least 4 views defined (Active, Send-Enabled, Receive-Enabled, Default)</criterion>
+    <criterion>Seed data documented for mailbox-central@spaarke.com</criterion>
+    <criterion>Read-only system fields (subscription, verification) clearly marked</criterion>
+  </acceptance-criteria>
+</task>

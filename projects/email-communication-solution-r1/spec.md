@@ -22,16 +22,22 @@ Replace heavyweight Dataverse email activities with a unified **Communication Se
 - **Phase 3 — Communication Application**: Model-driven form (compose + read views), AssociationResolver PCF on form, communication views/subgrids
 - **Phase 4 — Attachments + Archival**: `sprk_communicationattachment` intersection entity, SPE document attachment to emails, .eml archival to SPE
 - **Phase 5 — Playbook Integration**: `SendCommunicationToolHandler` AI tool, playbook email scenarios
+- **Phase 6 — Communication Account Management**: Replace `appsettings.json`-only approved sender config with Dataverse-managed `sprk_communicationaccount` entity. Configure `mailbox-central@spaarke.com` as default sender. Admin form/views.
+- **Phase 7 — Individual User Outbound**: Add `SendMode` (shared mailbox vs. user) to send DTO. Branch `CommunicationService.SendAsync()` for OBO path via `GraphClientFactory.ForUserAsync()`. Update web resource and form UX.
+- **Phase 8 — Inbound Shared Mailbox Monitoring**: Graph subscription-based webhook for incoming email. `GraphSubscriptionManager` BackgroundService for auto-renewal. `IncomingCommunicationProcessor` creates `sprk_communication` records with Direction=Incoming. Backup polling for missed webhooks.
+- **Phase 9 — Verification & Admin UX**: Mailbox verification endpoint (test send/read). Admin documentation. Project wrap-up.
 
 ### Out of Scope
 
-- Multi-record association (`sprk_communicationassociation` child entity — Phase 6, future)
-- Inbound email processing (keep existing `EmailEndpoints.cs` webhook pipeline)
+- Multi-record association (`sprk_communicationassociation` child entity — future)
 - SMS / Teams message channels (schema supports it, implementation deferred)
 - Email templates engine (server-side Liquid/Handlebars)
 - Read receipts / delivery notifications via Graph webhooks
 - Bulk marketing email
 - Background retry on send failure (fail immediately in Phase 1; retry mechanism deferred)
+- **Association resolution for incoming email** — This is an AI-driven process that belongs in the AI Analysis Enhancements project, NOT this project. Incoming communications are created with empty regarding fields; association is resolved separately.
+- **Individual user inbound monitoring** — Requires per-user consent, refresh token management, and privacy controls. Fundamentally different consent model. Deferred to separate project.
+- **Automated Exchange group management** — Automatically adding/removing mailboxes from security groups when Dataverse records change. Manual process for now.
 
 ### Affected Areas
 
@@ -125,14 +131,62 @@ Replace heavyweight Dataverse email activities with a unified **Communication Se
 21. **FR-21**: Tool returns communicationId and status on success, structured error on failure.
     - Acceptance: Playbook receives actionable result for next-step decisions.
 
+#### Phase 6: Communication Account Management
+
+22. **FR-22**: `sprk_communicationaccount` Dataverse entity manages mailbox configuration with core identity (name, email, display name, account type), outbound config (send enabled, is default sender), inbound config (receive enabled, monitor folder, auto-create records), Graph integration (subscription ID, subscription expiry), and security (security group ID/name, verification status, last verified).
+    - Acceptance: Entity **already exists** in Dataverse. BFF code queries it correctly using actual field names from schema.
+
+23. **FR-23**: `CommunicationAccountService` queries `sprk_communicationaccount` with OData filter for send-enabled accounts. Results cached in Redis (5-minute TTL, matching existing pattern). `ApprovedSenderValidator` updated to use new service instead of `QueryApprovedSendersAsync`.
+    - Acceptance: BFF resolves approved senders from Dataverse entity with appsettings.json as fallback.
+
+24. **FR-24**: Model-driven form for `sprk_communicationaccount` with sections for core identity, outbound configuration, inbound configuration, Graph integration (read-only system fields), and security. Admin views: Active Accounts, Send-Enabled, Receive-Enabled.
+    - Acceptance: Admins can manage communication accounts entirely through Dataverse UI.
+
+25. **FR-25**: `mailbox-central@spaarke.com` configured as default sender in both `appsettings.json` (fallback) and seeded as `sprk_communicationaccount` record with `sprk_sendenableds=true`, `sprk_isdefaultsender=true`.
+    - Acceptance: Outbound email sends from `mailbox-central@spaarke.com` end-to-end.
+
+#### Phase 7: Individual User Outbound
+
+26. **FR-26**: `SendMode` enum (`SharedMailbox`, `User`) added to `SendCommunicationRequest`. When `SendMode.User`, BFF uses `GraphClientFactory.ForUserAsync()` (OBO) to send via `/me/sendMail` as the authenticated user. Approved sender validation is skipped for user mode.
+    - Acceptance: Users can choose "Send as me" and email is sent from their own mailbox with `sprk_from` set to their email.
+
+27. **FR-27**: Communication form and `sprk_communication_send.js` web resource updated with send mode selection UI — dropdown with "Shared Mailbox" options (from enabled accounts) and "My Mailbox" option.
+    - Acceptance: UI provides clear send mode selection. Bearer token passed for user mode.
+
+#### Phase 8: Inbound Shared Mailbox Monitoring
+
+28. **FR-28**: `GraphSubscriptionManager` BackgroundService creates/renews/recreates Graph webhook subscriptions for all receive-enabled `sprk_communicationaccount` records. Runs on startup + every 30 minutes. Renews when expiry < 24 hours. Updates `sprk_subscriptionid` and `sprk_subscriptionexpiry` on account records. **No human in the loop** — fully automated.
+    - Acceptance: Graph subscriptions auto-created for receive-enabled accounts and auto-renewed before expiry.
+
+29. **FR-29**: `POST /api/communications/incoming-webhook` endpoint receives Graph subscription notifications. Validates notification via `clientState` HMAC. Handles subscription validation requests (returns `validationToken`). Enqueues `IncomingCommunicationJob` for processing.
+    - Acceptance: Graph webhook notifications received and queued for processing.
+
+30. **FR-30**: `IncomingCommunicationProcessor` fetches full message via `GET /users/{mailbox}/messages/{id}`, creates `sprk_communication` record with `sprk_direction=Incoming` (100000000), sets email fields from Graph message, processes attachments (reuse `EmailAttachmentProcessor` pattern), archives .eml to SPE (reuse `EmlGenerationService`). **Association resolution is NOT in scope** — regarding fields left empty for AI-driven resolution in a separate project.
+    - Acceptance: Incoming emails create `sprk_communication` records with Direction=Incoming and all email fields populated.
+
+31. **FR-31**: Backup polling service runs every 15 minutes for each receive-enabled account. Queries Graph for messages since last poll. Skips already-tracked messages (checks `sprk_graphmessageid`). Enqueues missed messages.
+    - Acceptance: Messages missed by webhook are caught within 15 minutes.
+
+#### Phase 9: Verification & Admin UX
+
+32. **FR-32**: `POST /api/communications/accounts/{id}/verify` endpoint tests mailbox connectivity — sends test email (if send-enabled) and reads recent messages (if receive-enabled). Updates `sprk_verificationstatus` and `sprk_lastverified` on account record.
+    - Acceptance: Admin can verify any communication account's connectivity from the form.
+
+33. **FR-33**: `sprk_communicationaccount` form includes "Verify" command bar button and displays verification status, last verified date, and subscription status for receive-enabled accounts.
+    - Acceptance: Verification status visible and actionable on account form.
+
 ### Non-Functional Requirements
 
-- **NFR-01**: No per-user mailbox configuration — all sends use app-only Graph auth via shared mailbox.
+- **NFR-01**: Shared mailbox sends use app-only Graph auth. Individual user sends use OBO delegated auth.
 - **NFR-02**: Fine-grained security — `sprk_communication` entity with per-field security, not coarse-grained activity permissions.
 - **NFR-03**: Attachment limits — validate before send: max 150 attachments, 35MB total per Graph API limits.
 - **NFR-04**: On send failure, fail immediately and return error with ProblemDetails. No background retry in current scope.
 - **NFR-05**: All error responses use ProblemDetails (RFC 7807) with stable `errorCode` extension and correlation ID.
 - **NFR-06**: Existing inbound email-to-document pipeline (`EmailEndpoints.cs`) remains unchanged.
+- **NFR-07**: Graph subscriptions for inbound monitoring must auto-renew with no human intervention.
+- **NFR-08**: Backup polling catches any missed webhooks within 15 minutes.
+- **NFR-09**: `appsettings.json` serves as fallback when Dataverse `sprk_communicationaccount` query fails (two-tier resilience).
+- **NFR-10**: Association resolution for incoming email is explicitly OUT OF SCOPE — belongs in AI Analysis Enhancements project.
 
 ---
 
@@ -160,6 +214,11 @@ Replace heavyweight Dataverse email activities with a unified **Communication Se
 - MUST return ProblemDetails with error codes (`COMMUNICATION_SEND_FAILED`, `COMMUNICATION_NOT_FOUND`, `ATTACHMENT_TOO_LARGE`, `INVALID_RECIPIENT`)
 - MUST include correlation ID in all error responses and logs
 - MUST implement `SendCommunicationToolHandler` as `IAiToolHandler` for auto-discovery
+- MUST use `GraphClientFactory.ForUserAsync()` for individual user send (OBO flow)
+- MUST use actual Dataverse field names (e.g., `sprk_sendenableds` not `sprk_sendenabled`, `sprk_subscriptionid` not `sprk_graphsubscriptionid`)
+- MUST maintain `appsettings.json` fallback for approved sender resolution
+- MUST auto-renew Graph subscriptions before expiry (no human in loop)
+- MUST validate Graph webhook notifications via `clientState` HMAC
 
 ### MUST NOT Rules
 
@@ -169,6 +228,8 @@ Replace heavyweight Dataverse email activities with a unified **Communication Se
 - MUST NOT leak email content, recipient addresses, or API keys in error responses
 - MUST NOT create Azure Functions for email processing
 - MUST NOT modify existing `EmailEndpoints.cs` inbound pipeline
+- MUST NOT implement association resolution for incoming email in this project (AI process, separate project)
+- MUST NOT monitor individual user mailboxes (separate consent/privacy model)
 
 ### Existing Patterns to Follow
 
@@ -182,6 +243,11 @@ Replace heavyweight Dataverse email activities with a unified **Communication Se
 | AssociationResolver PCF | `src/client/pcf/AssociationResolver/` | Reuse on communication form (no new PCF) |
 | Send email via Graph | `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/SendEmailNodeExecutor.cs` | Graph sendMail pattern |
 | SpeFileStore operations | `src/server/api/Sprk.Bff.Api/Services/Spe/SpeFileStore.cs` | Download/upload file content |
+| OBO Graph sendMail | `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/SendEmailNodeExecutor.cs` | Individual user send via `/me/sendMail` |
+| BackgroundService polling | `src/server/api/Sprk.Bff.Api/Services/Jobs/EmailPollingBackupService.cs` | Periodic timer pattern for backup polling |
+| Job processing | `src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs` | Generic job enqueue/process pattern |
+| Email attachment processing | `src/server/api/Sprk.Bff.Api/Services/Email/EmailAttachmentProcessor.cs` | Incoming attachment handling |
+| Webhook endpoint | `src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs` | Webhook validation pattern |
 
 ---
 
@@ -196,6 +262,12 @@ Replace heavyweight Dataverse email activities with a unified **Communication Se
 7. [ ] **G7**: Communication form for compose and view — Verify: Create and send email from form, view sent details
 8. [ ] **G8**: AI playbooks can send emails via tool call — Verify: Playbook executes `send_communication` tool successfully
 9. [ ] **G9**: Schema supports future channels — Verify: `sprk_communicationtype` choice includes SMS, Notification values
+10. [ ] **G10**: Communication accounts managed in Dataverse — Verify: `sprk_communicationaccount` records control sender resolution, admin form works
+11. [ ] **G11**: Individual user send works — Verify: User selects "Send as me", email sent from their mailbox, `sprk_from` shows user email
+12. [ ] **G12**: Inbound shared mailbox monitoring works — Verify: Email sent to `mailbox-central@spaarke.com` auto-creates `sprk_communication` record with Direction=Incoming
+13. [ ] **G13**: Graph subscriptions auto-renew — Verify: Subscription renewed before 3-day expiry without human intervention
+14. [ ] **G14**: Backup polling catches missed webhooks — Verify: Missed webhook email appears within 15 minutes via polling
+15. [ ] **G15**: Mailbox verification works — Verify: Admin clicks "Verify" on account, status updated correctly
 
 ---
 
@@ -223,8 +295,12 @@ Replace heavyweight Dataverse email activities with a unified **Communication Se
 | Application access policy | Scope `Mail.Send` to specific mailbox | Phase 1 |
 | `sprk_communication` entity | **ALREADY EXISTS** — add `sprk_hasattachments`, `sprk_attachmentcount` fields | Phase 4 |
 | `sprk_recordtype_ref` entry | Add "Communication" record type | Phase 3 |
-| `sprk_approvedsender` config entity | Optional manual creation in Dataverse | Phase 2+ |
+| `sprk_communicationaccount` entity | **ALREADY EXISTS** in Dataverse — see schema below | Phase 6 |
 | `sprk_communicationattachment` entity | Manual creation in Dataverse | Phase 4 |
+| `Mail.Read` app permission | Add to app registration in Azure AD | Phase 8 |
+| Delegated `Mail.Send` permission | Grant on app registration for OBO flow | Phase 7 |
+| Shared mailbox `mailbox-central@spaarke.com` | **EXISTS** — confirmed by owner | Phase 6 |
+| Exchange application access policy | Security group + `New-ApplicationAccessPolicy` | Phase 6 |
 
 ---
 
@@ -264,6 +340,65 @@ Replace heavyweight Dataverse email activities with a unified **Communication Se
 | `sprk_regardingcontact` | `sprk_regardingperson` | Targets `contact` |
 | Status: Sent=100000002 | `statuscode`: Send=659490002 | Different values |
 | Direction: Outbound=100000000 | `sprk_direction`: Outgoing=100000001 | Swapped values |
+
+### sprk_communicationaccount — Actual Dataverse Schema
+
+**IMPORTANT**: The design document proposed fields that differ from the actual entity. All BFF code MUST use the actual logical names below.
+
+> **Source of truth**: `docs/data-model/sprk_communication-data-schema.md`
+> **Entity status**: ALREADY EXISTS in Dataverse. No manual creation needed.
+
+| Category | Fields (Actual Logical Names) | Notes |
+|----------|-------------------------------|-------|
+| Core Identity | `sprk_name` (Text 850, primary), `sprk_emailaddress` (Text 100), `sprk_displayname` (Text 100), `sprk_accounttype` (choice) | Account Type choices differ from design — see below |
+| Outbound | `sprk_sendenableds` (Yes/No, default No), `sprk_isdefaultsender` (Yes/No, default No) | **CRITICAL**: Field is `sprk_sendenableds` (trailing 's') — NOT `sprk_sendenabled` |
+| Inbound | `sprk_receiveenabled` (Yes/No, default No), `sprk_monitorfolder` (Text 100), `sprk_autocreaterecords` (Yes/No, default No) | |
+| Graph Integration | `sprk_subscriptionid` (Text 100), `sprk_subscriptionexpiry` (DateTime) | **DIFFERS**: `sprk_subscriptionid` NOT `sprk_graphsubscriptionid`. No subscription status choice field exists. |
+| Security | `sprk_securitygroupid` (Text 100), `sprk_securitygroupname` (Text 100) | Security group tracked per-account, NOT per business unit |
+| Verification | `sprk_verificationstatus` (choice), `sprk_lastverified` (DateTime) | |
+| Ownership | `ownerid` (Owner→systemuser/team), `owningbusinessunit` (Lookup→businessunit) | User/team owned entity |
+
+#### Account Type Choices (Actual)
+
+| Value | Label |
+|-------|-------|
+| 100000000 | Shared Account |
+| 100000001 | Service Account |
+| 100000002 | User Account |
+
+**Note**: Design proposed "Distribution List" (value 3) — this was NOT created. Only 3 types exist.
+
+#### Verification Status Choices (Actual)
+
+| Value | Label |
+|-------|-------|
+| 100000000 | Verified |
+| 100000001 | Failed |
+| 100000002 | Pending |
+
+#### Fields in Design but NOT Created
+
+These fields from `design-communication-accounts.md` do NOT exist in the actual entity:
+
+| Design Field | Why Absent | Impact |
+|---|---|---|
+| `sprk_description` | Not created | No admin notes field — use `sprk_name` for descriptive naming |
+| `sprk_dailysendlimit` | Not created | Send limit tracking deferred |
+| `sprk_sendstoday` | Not created | Daily count tracking deferred |
+| `sprk_autoextractattachments` | Not created | Attachment extraction controlled by code, not config |
+| `sprk_processingrules` | Not created | JSON processing rules deferred |
+| `sprk_subscriptionstatus` | Not created | Use subscription ID presence + expiry to determine status |
+| `sprk_authmethod` | Not created | Determine auth method from `sprk_accounttype` (Shared/Service → App-Only, User → OBO) |
+| `sprk_verificationmessage` | Not created | Verification details not persisted |
+
+#### Design-to-Actual Field Mapping (sprk_communicationaccount)
+
+| Design Name | Actual Name | Difference |
+|-------------|-------------|------------|
+| `sprk_sendenabled` | `sprk_sendenableds` | Trailing 's' in actual name |
+| `sprk_graphsubscriptionid` | `sprk_subscriptionid` | Shortened name |
+| Account Type values: 1,2,3,4 | 100000000, 100000001, 100000002 | Standard Dataverse choice values, no Distribution List |
+| Verification Status values: 1,2,3,4 | 100000000, 100000001, 100000002 | Standard Dataverse choice values, no "Not Checked" |
 
 ### sprk_communicationattachment (Phase 4)
 
@@ -311,6 +446,57 @@ Replace heavyweight Dataverse email activities with a unified **Communication Se
 }
 ```
 
+### POST /api/communications/send (Updated — Phase 7)
+
+```json
+// Request (with SendMode)
+{
+  "type": "email",
+  "to": ["email@example.com"],
+  "subject": "Subject line",
+  "body": "<p>HTML body</p>",
+  "bodyFormat": "html",
+  "sendMode": "sharedMailbox",       // NEW: "sharedMailbox" | "user"
+  "fromMailbox": null,                // Used only for sharedMailbox mode
+  "associations": [...],
+  "attachmentDocumentIds": [],
+  "archiveToSpe": true,
+  "containerId": "container-guid",
+  "correlationId": "trace-id"
+}
+```
+
+### POST /api/communications/incoming-webhook (Phase 8)
+
+```json
+// Graph sends notification:
+{
+  "value": [{
+    "subscriptionId": "...",
+    "clientState": "{HMAC secret}",
+    "changeType": "created",
+    "resource": "users/{mailbox}/messages/{messageId}",
+    "resourceData": { "@odata.id": "...", "id": "..." }
+  }]
+}
+
+// BFF responds: 202 Accepted (queues for async processing)
+```
+
+### POST /api/communications/accounts/{id}/verify (Phase 9)
+
+```json
+// Response
+{
+  "accountId": "guid",
+  "sendVerified": true,
+  "readVerified": true,
+  "verificationStatus": "Verified",
+  "lastVerified": "2026-02-22T10:00:00Z",
+  "details": "Send test succeeded. Read access confirmed (3 recent messages found)."
+}
+```
+
 ---
 
 ## Owner Clarifications
@@ -321,20 +507,31 @@ Replace heavyweight Dataverse email activities with a unified **Communication Se
 | Wizard changes | Include Create Matter wizard rewire in this project? | Yes, include in project | Tasks will reference workspace worktree files (`spaarke-wt-home-corporate-workspace-r1`) |
 | Retry strategy | On Graph sendMail failure, retry or fail? | Fail immediately, return error | No background retry mechanism needed. Simplifies Phase 1. Retry can be added later. |
 | Sender control | Restrict fromMailbox to whitelist? | BFF config + Dataverse override | Phase 1: approved senders in appsettings.json. Phase 2+: optional `sprk_approvedsender` Dataverse entity for admin-managed senders. Senders can be shared mailboxes, service accounts, role-based addresses — NOT required to be Dataverse users. `sprk_sentby` separately tracks initiating user. |
+| Security group scope | Exchange access policy at BU level or per-account? | Per-account record (`sprk_securitygroupid` on `sprk_communicationaccount`) | Security group tracked on each account record. More pragmatic than BU-level — different accounts may use different security groups. |
+| Graph subscription renewal | Auto-renew or human approval? | Fully automated, NO human in loop | `GraphSubscriptionManager` BackgroundService auto-renews before expiry |
+| Backup polling | Include backup polling for missed webhooks? | Yes | 15-minute polling interval for resilience |
+| Association resolution | Include incoming email association in this project? | **NO — this is an AI process**. Belongs in AI Analysis Enhancements project. | Incoming communications created with empty regarding fields. Association resolved by separate AI analysis pipeline. **Very important** per owner. |
+| appsettings.json fallback | Keep config fallback when Dataverse is available? | Yes | Two-tier resilience: Dataverse preferred, config as fallback |
+| Individual user send | Include in scope? | Yes — sounds reasonable, include | OBO infrastructure exists. ~8h additional scope. |
+| Shared mailbox address | What is the shared mailbox? | `mailbox-central@spaarke.com` | Confirmed by owner. Ready for configuration. |
 
 ## Assumptions
 
-- **Shared mailbox**: Will be configured in Azure AD before Phase 1 implementation begins. BFF reads mailbox address from configuration (`CommunicationOptions.DefaultMailbox`).
+- **Shared mailbox**: `mailbox-central@spaarke.com` — confirmed by owner. Ready for use.
 - **Exchange Online license**: Shared mailbox has appropriate Exchange Online license for Graph sendMail.
-- **Application access policy**: `Mail.Send` permission scoped via application access policy (security best practice, not blocking for dev).
+- **Application access policy**: `Mail.Send` + `Mail.Read` permissions scoped via application access policy to security group.
 - **Template fields**: Include `templateId` and `templateData` in request model for API stability, but template rendering is out of scope.
 - **Large attachments**: Files >3MB use standard base64 attachment (not large file upload session) until hitting 35MB limit. Large file upload session deferred.
+- **Auth method derivation**: No `sprk_authmethod` field exists. Derive from `sprk_accounttype`: Shared Account / Service Account → App-Only, User Account → OBO.
+- **Subscription status derivation**: No `sprk_subscriptionstatus` field exists. Derive from `sprk_subscriptionid` (null = not configured) and `sprk_subscriptionexpiry` (past = expired).
 
 ## Unresolved Questions
 
-- [ ] **Shared mailbox address**: What is the actual shared mailbox address (or will it be created)? — Blocks: Phase 1 configuration
-- [ ] **Mail.Send permission**: Does the app registration already have `Mail.Send` application permission? — Blocks: Phase 1 testing
+- [x] ~~**Shared mailbox address**: What is the actual shared mailbox address?~~ → **RESOLVED**: `mailbox-central@spaarke.com`
+- [ ] **Mail.Send permission**: Does the app registration already have `Mail.Send` application permission? — Blocks: Phase 6 testing
+- [ ] **Mail.Read permission**: Does the app registration already have `Mail.Read` application permission? — Blocks: Phase 8 testing
+- [ ] **Delegated Mail.Send**: Is delegated `Mail.Send` granted on the app registration? — Blocks: Phase 7 testing
 
 ---
 
-*AI-optimized specification. Original design: design.md*
+*AI-optimized specification. Original design: design.md, design-communication-accounts.md*

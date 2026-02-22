@@ -2,10 +2,11 @@
 
 ## Executive Summary
 
-- **Purpose**: Replace Dataverse email activities with unified Communication Service via Graph API through BFF
-- **Scope**: 5 phases — BFF endpoint, entity tracking, communication app, attachments/archival, playbook integration
-- **Estimated Effort**: ~120 hours across 35 tasks
-- **Critical Path**: 001 → 003 → 006 → 010 → 011 → 030 → 032 → 040 → 090
+- **Purpose**: Replace Dataverse email activities with unified Communication Service via Graph API through BFF. Extended to include Dataverse-managed communication accounts, individual user sending, and inbound shared mailbox monitoring.
+- **Scope**: 9 phases — BFF endpoint, entity tracking, communication app, attachments/archival, playbook integration, communication accounts, individual send, inbound monitoring, verification/admin
+- **Estimated Effort**: ~176 hours across 55 tasks (120h original + ~56h extension)
+- **Original Critical Path**: 001 → 003 → 006 → 010 → 011 → 030 → 032 → 040 → 043 (Phases 1-5, COMPLETE)
+- **Extension Critical Path**: 050 → 051 → 055 → 070 → 072 → 076 → 080 → 090 (Phases 6-9)
 
 ## Architecture Context
 
@@ -25,12 +26,18 @@
 | Decision | Choice | Impact |
 |----------|--------|--------|
 | Graph auth model | App-only via `GraphClientFactory.ForApp()` | No per-user mailbox config |
-| Sender management | Two-tier: BFF config + Dataverse `sprk_approvedsender` | Phase 1 works without Dataverse entity |
+| Sender management | Two-tier: BFF config + Dataverse `sprk_communicationaccount` | appsettings.json as fallback, Dataverse preferred |
 | Status field | Standard Dataverse `statuscode` (not custom choice) | Use actual values: Draft=1, Send=659490002, Failed=659490004 |
 | Regarding fields | `sprk_regardingorganization` + `sprk_regardingperson` | Differs from design (not account/contact) |
 | Type field | `sprk_communiationtype` (typo in Dataverse) | Use actual logical name |
 | Retry behavior | Fail immediately, return error | No background retry mechanism |
 | fromMailbox | Any user can specify | BFF validates against approved sender list |
+| Security group scope | Per-account (`sprk_securitygroupid` on record) | More pragmatic than BU-level |
+| Association resolution | Separate AI project (NOT this project) | Incoming emails have empty regarding fields |
+| Subscription renewal | Fully automated, no human in loop | `GraphSubscriptionManager` BackgroundService |
+| Individual user send | Included in scope (~8h) | OBO infrastructure already exists |
+| Auth method derivation | From `sprk_accounttype` (no field) | Shared/Service → App-Only, User → OBO |
+| Subscription status derivation | From `sprk_subscriptionid` + expiry | No `sprk_subscriptionstatus` field exists |
 
 ### Discovered Resources
 
@@ -75,16 +82,20 @@
 
 ### Phase Structure
 
-| Phase | Focus | Tasks | Estimated Hours | Parallel Groups |
-|-------|-------|-------|----------------|-----------------|
-| 1: BFF Email Service | Core send endpoint + wizard rewire | 001-008 | 32h | A (001,002), B (005,006), C (007,008) |
-| 2: Entity + Tracking | Dataverse record creation + associations | 010-016 | 24h | D (012,013), E (014,015) |
-| 3: Communication App | Model-driven form + views | 020-025 | 20h | F (020,021), G (023,024) |
-| 4: Attachments + Archival | SPE integration + .eml | 030-038 | 28h | H (031,032), I (034,035), J (037,038) |
-| 5: Playbook Integration | AI tool handler | 040-043 | 12h | K (041,042) |
-| Wrap-up | Project completion | 090 | 4h | — |
+| Phase | Focus | Tasks | Estimated Hours | Parallel Groups | Status |
+|-------|-------|-------|----------------|-----------------|--------|
+| 1: BFF Email Service | Core send endpoint + wizard rewire | 001-008 | 32h | A (001,002), B (005,006), C (007,008) | ✅ COMPLETE |
+| 2: Entity + Tracking | Dataverse record creation + associations | 010-016 | 24h | D (012,013), E (014,015) | ✅ COMPLETE |
+| 3: Communication App | Model-driven form + views | 020-025 | 20h | F (020,021), G (023,024) | ✅ COMPLETE |
+| 4: Attachments + Archival | SPE integration + .eml | 030-038 | 28h | H (031,032), I (034,035), J (037,038) | ✅ COMPLETE |
+| 5: Playbook Integration | AI tool handler | 040-043 | 12h | K (041,042) | ✅ COMPLETE |
+| 6: Communication Accounts | Dataverse-managed accounts + outbound config | 050-055 | 16h | L (052,053) | 🔲 PENDING |
+| 7: Individual User Outbound | OBO send path + form UX | 060-064 | 12h | M (062,063) | 🔲 PENDING |
+| 8: Inbound Monitoring | Graph subscriptions + webhook + processing | 070-077 | 24h | N (073,074), O (075,076) | 🔲 PENDING |
+| 9: Verification & Admin | Mailbox verification + admin docs | 080-082 | 8h | — | 🔲 PENDING |
+| Wrap-up | Project completion (reset) | 090 | 4h | — | 🔲 PENDING |
 
-### Critical Path
+### Critical Path (Original — Phases 1-5, COMPLETE)
 
 ```
 001 (Models) → 003 (Service) → 006 (Module Registration)
@@ -97,7 +108,25 @@
                                                                     ↓
                                                            040 (AI Tool Handler)
                                                                     ↓
-                                                           090 (Wrap-up)
+                                                           043 (E2E Testing)
+```
+
+### Critical Path (Extension — Phases 6-9)
+
+```
+050 (Account Service) → 051 (Validator Update) → 055 (E2E Test)
+                                                       ↓
+                                        ┌──────────────┼──────────────┐
+                                        ↓              ↓              ↓
+                              060 (SendMode)    070 (Subscriptions)   |
+                                        ↓              ↓              |
+                              064 (E2E Test)    072 (Processor)       |
+                                        ↓              ↓              |
+                                        └──────────────┼──────────────┘
+                                                       ↓
+                                              080 (Verification)
+                                                       ↓
+                                              090 (Wrap-up)
 ```
 
 ## Phase Breakdown (WBS)
@@ -182,12 +211,74 @@
 **Inputs**: Phase 1+ complete, AI Tool Framework
 **Outputs**: Working AI tool, playbook email scenarios
 
+### Phase 6: Communication Account Management
+
+**Objectives**: Replace `appsettings.json`-only approved sender config with Dataverse-managed `sprk_communicationaccount` entity. Configure `mailbox-central@spaarke.com`. Set up Exchange access policy.
+
+**Deliverables**:
+1. `CommunicationAccountService` with Dataverse query + Redis cache
+2. Updated `ApprovedSenderValidator` to use new service
+3. Updated `IDataverseService` interface (`QueryCommunicationAccountsAsync`)
+4. `sprk_communicationaccount` admin form and views
+5. `appsettings.json` configured with `mailbox-central@spaarke.com`
+6. Exchange access policy setup documentation
+7. End-to-end outbound send testing
+
+**Inputs**: Phases 1-5 complete, `sprk_communicationaccount` entity (already exists in Dataverse)
+**Outputs**: Dataverse-managed sender accounts, working outbound send from `mailbox-central@spaarke.com`
+
+### Phase 7: Individual User Outbound
+
+**Objectives**: Users can choose "Send as me" to send from their own mailbox via OBO flow.
+
+**Deliverables**:
+1. `SendMode` enum + updated `SendCommunicationRequest`
+2. OBO branch in `CommunicationService.SendAsync()`
+3. Updated `sprk_communication_send.js` with send mode selection
+4. Updated Communication form UX
+5. Unit and E2E tests
+
+**Inputs**: Phase 6 complete, `GraphClientFactory.ForUserAsync()` (existing), `SendEmailNodeExecutor` (OBO pattern reference)
+**Outputs**: Users can send as themselves or from shared mailbox
+
+### Phase 8: Inbound Shared Mailbox Monitoring
+
+**Objectives**: Incoming emails to monitored mailboxes automatically create `sprk_communication` records. Association resolution is NOT in scope (separate AI project).
+
+**Deliverables**:
+1. `GraphSubscriptionManager` BackgroundService (auto-create/renew subscriptions)
+2. `POST /api/communications/incoming-webhook` endpoint
+3. `IncomingCommunicationProcessor` job handler
+4. Backup polling service for missed webhooks
+5. Incoming communication views in Dataverse
+6. Unit and E2E tests
+
+**Inputs**: Phase 6 complete, `Mail.Read` app permission, existing patterns (EmailPollingBackupService, ServiceBusJobProcessor, EmailAttachmentProcessor)
+**Outputs**: Incoming emails tracked as `sprk_communication` records with Direction=Incoming
+
+**Important**: Association resolution (matching incoming email to entities) is explicitly OUT OF SCOPE — this is an AI-driven process that belongs in the AI Analysis Enhancements project. Incoming communication records are created with empty regarding fields.
+
+### Phase 9: Verification & Admin UX
+
+**Objectives**: Admin tooling for verifying mailbox connectivity and managing accounts.
+
+**Deliverables**:
+1. `POST /api/communications/accounts/{id}/verify` endpoint
+2. Verification logic (test send + test read)
+3. Updated `sprk_communicationaccount` form with verification UI
+4. Admin documentation
+
+**Inputs**: Phases 6-8 complete
+**Outputs**: Admin can verify and manage communication accounts
+
 ## Dependencies
 
 ### External
-- Microsoft Graph API (`Mail.Send` application permission)
-- Shared mailbox in Azure AD (Exchange Online license)
-- Application access policy (scope Mail.Send to specific mailbox)
+- Microsoft Graph API (`Mail.Send` + `Mail.Read` application permissions)
+- Delegated `Mail.Send` permission (for OBO individual user send)
+- Shared mailbox `mailbox-central@spaarke.com` in Azure AD (Exchange Online license)
+- Application access policy (scope permissions to security group)
+- Mail-enabled security group "SDAP Communication Accounts"
 
 ### Internal
 - `GraphClientFactory.ForApp()` — Available
@@ -210,12 +301,18 @@
 - POST /api/communications/send — End-to-end with test mailbox
 - Dataverse record creation — Verify sprk_communication fields
 - Attachment download + send — SpeFileStore → Graph payload
+- Communication account query — Verify sprk_communicationaccount OData filter
+- Individual send via OBO — Verify /me/sendMail flow
+- Incoming webhook — Verify Graph notification processing
+- Backup polling — Verify missed message detection
 
 ### UI Tests (Phase 3)
 - Communication form compose mode
 - AssociationResolver entity selection
 - Send button executes BFF call
 - Communication views filter correctly
+- Send mode selection (shared vs individual) — Phase 7
+- Communication account admin form — Phase 6
 
 ## Acceptance Criteria
 
@@ -231,47 +328,18 @@ Reference: spec.md Success Criteria (G1-G9)
 | R4 | Mail.Send permission too broad | Medium | Medium | Application access policy |
 | R5 | matterService.ts merge conflict | Medium | Low | Coordinate with PR #186 |
 
-## Implementation Summary (Completed)
+## Phases 1-5 Implementation Summary (Completed 2026-02-21)
 
-### Execution Timeline
-- **Project Started**: 2026-02-20
-- **Project Completed**: 2026-02-21
-- **Actual Duration**: 1 day (32 hours estimated vs actual completion)
-
-### Tasks Completed
-- **Total Tasks**: 35
-- **Completed**: 35 (100%)
+### Tasks Completed (Original Scope)
+- **Total Tasks**: 35/35 (100%)
 - **Phase 1 (BFF Service)**: 8/8 ✅
 - **Phase 2 (Dataverse Integration)**: 7/7 ✅
 - **Phase 3 (Communication App)**: 6/6 ✅
 - **Phase 4 (Attachments + Archival)**: 9/9 ✅
 - **Phase 5 (Playbook Integration)**: 4/4 ✅
-- **Wrap-up**: 1/1 ✅
+- **Wrap-up (Original)**: 1/1 ✅
 
-### Key Metrics
-- **Lines of Code**: ~2,500+ (services, DTOs, endpoints, tests)
-- **Unit Tests**: 30+ tests, all passing
-- **Build Status**: 0 errors, 0 warnings
-- **Code Review**: PASSED (no critical issues)
-- **ADR Compliance**: PASSED (all 6 applicable ADRs)
-- **Acceptance Criteria**: 9/9 met (100%)
-
-### Scope Adherence
-- ✅ All in-scope items delivered
-- ✅ No scope creep (out-of-scope items deferred to Phase 6)
-- ✅ All risks mitigated or monitored
-
-### Quality Gates Passed
-1. ✅ Code review: No critical or high-severity findings
-2. ✅ ADR compliance: All 6 applicable ADRs (001, 007, 008, 010, 013, 019)
-3. ✅ Build validation: 0 errors, 0 warnings
-4. ✅ Test coverage: 30+ unit/integration tests
-5. ✅ Architecture isolation: Graph SDK types properly isolated via facade
-6. ✅ Error handling: ProblemDetails with correlation IDs
-7. ✅ Authorization: Endpoint filters on all communication endpoints
-8. ✅ Documentation: Comprehensive project docs and test notes
-
-### What Was Delivered
+### What Was Delivered (Phases 1-5)
 1. **BFF Communication Service** — Single endpoint for Graph API email sending
 2. **Dataverse Integration** — sprk_communication record tracking with 8-entity association support
 3. **Communication App** — Model-driven form with compose/read modes, views, and subgrids
@@ -281,10 +349,41 @@ Reference: spec.md Success Criteria (G1-G9)
 7. **AI Playbook Integration** — SendCommunicationToolHandler for playbook email scenarios
 8. **Comprehensive Tests** — 30+ unit/integration tests validating all phases
 
-### Recommendations for Next Phase
-See `projects/email-communication-solution-r1/notes/project-completion-summary.md` for detailed lessons learned and Phase 6 recommendations.
+## Extension Scope (Phases 6-9, Added 2026-02-22)
+
+### Why Extend
+
+During operational testing of the completed Phases 1-5, the following gaps were identified:
+
+1. **No central mailbox management** — Approved senders only in appsettings.json, no admin UI
+2. **No incoming email processing** — No way to track incoming emails as Communication records
+3. **No individual user sending** — Only shared mailbox sending (app-only auth)
+4. **Shared mailbox confirmed** — `mailbox-central@spaarke.com` now ready for configuration
+
+### Extension Tasks (20 new tasks)
+- **Phase 6 (Communication Accounts)**: 6 tasks, ~16h
+- **Phase 7 (Individual User Outbound)**: 5 tasks, ~12h
+- **Phase 8 (Inbound Monitoring)**: 8 tasks, ~24h
+- **Phase 9 (Verification & Admin)**: 3 tasks, ~8h
+- **Wrap-up (Reset)**: 1 task, ~4h
+
+### Key Design Decisions (Extension)
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Security group scope | Per-account (`sprk_securitygroupid` on record) | Different accounts may use different security groups |
+| Association resolution | Separate AI project | AI-driven process, not deterministic code |
+| Subscription renewal | Fully automated, no human in loop | Reliability requirement |
+| Individual user send | Included (~8h) | OBO infrastructure already exists |
+| Inbound individual | Deferred to separate project | Fundamentally different consent model |
+
+### Source Documents
+- `projects/email-communication-solution-r1/design-communication-accounts.md` — Full design for Phases 6-9
+- `docs/data-model/sprk_communication-data-schema.md` — Actual Dataverse schema (source of truth)
+- `projects/email-communication-solution-r1/notes/project-completion-summary.md` — Phases 1-5 lessons learned
 
 ---
 
 *Generated by project-pipeline on 2026-02-20*
 *Updated with completion summary on 2026-02-21*
+*Extended with Phases 6-9 on 2026-02-22*

@@ -1,0 +1,43 @@
+<task id="055" project="email-communication-solution-r1">
+  <metadata>
+    <title>End-to-end outbound shared mailbox testing</title>
+    <phase>6</phase>
+    <status>pending</status>
+    <estimate>2h</estimate>
+    <tags>testing, integration-test</tags>
+    <dependencies>050, 051, 052, 053, 054</dependencies>
+    <blocks>060, 070, 080</blocks>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Verify end-to-end outbound email sending from mailbox-central@spaarke.com using the new CommunicationAccountService and updated ApprovedSenderValidator.</goal>
+    <context>This is the gate task for Phase 6. All outbound sending must work correctly before proceeding to individual send (Phase 7), inbound monitoring (Phase 8), or verification (Phase 9).</context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/COMMUNICATION-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Verify sprk_communicationaccount record exists for mailbox-central@spaarke.com with sprk_sendenableds=true and sprk_isdefaultsender=true</step>
+    <step>Send test email via POST /api/communications/send with no fromMailbox (should use default)</step>
+    <step>Verify email received by recipient</step>
+    <step>Verify sprk_communication record created with correct fields</step>
+    <step>Verify ApprovedSenderValidator resolves from Dataverse sprk_communicationaccount (check logs or add diagnostic)</step>
+    <step>Test fallback: temporarily break Dataverse query, verify send still works via appsettings.json fallback</step>
+    <step>Test invalid sender: specify non-approved fromMailbox, verify INVALID_SENDER error</step>
+    <step>Document test results and any issues found</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Outbound email sends successfully from mailbox-central@spaarke.com</criterion>
+    <criterion>sprk_communication record created correctly</criterion>
+    <criterion>Sender resolved from sprk_communicationaccount entity</criterion>
+    <criterion>appsettings.json fallback works when Dataverse unavailable</criterion>
+    <criterion>Invalid sender correctly rejected with INVALID_SENDER error</criterion>
+  </acceptance-criteria>
+</task>

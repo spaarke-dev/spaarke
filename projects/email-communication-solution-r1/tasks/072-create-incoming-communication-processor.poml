@@ -1,0 +1,55 @@
+<task id="072" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create IncomingCommunicationProcessor job handler</title>
+    <phase>8</phase>
+    <status>pending</status>
+    <estimate>5h</estimate>
+    <tags>bff-api, api</tags>
+    <dependencies>071</dependencies>
+    <blocks>077</blocks>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create IncomingCommunicationProcessor that fetches full email details from Graph, creates a sprk_communication record with Direction=Incoming, processes attachments, and archives the .eml file — without setting any association/regarding fields.</goal>
+    <context>When the webhook endpoint enqueues an IncomingCommunicationJob, this processor handles the actual work: fetch the message from Graph, create a Dataverse record, handle attachments, and archive. Association resolution (setting regarding fields) is explicitly OUT OF SCOPE — it will be a separate AI project. Existing patterns to reuse: ServiceBusJobProcessor for job handling, EmailAttachmentProcessor for attachments, EmlGenerationService for .eml archival.</context>
+    <constraints>
+      <constraint source="SCHEMA">sprk_direction=100000000 (Incoming). sprk_communiationtype=100000000 (Email). statuscode=659490003 (Delivered). Use actual field names throughout.</constraint>
+      <constraint source="DESIGN">Do NOT set any regarding fields (sprk_regardingmatter, sprk_regardingorganization, sprk_regardingperson). Association resolution is a separate AI project.</constraint>
+      <constraint source="ADR-007">Use GraphClientFactory.ForApp() for fetching messages. Do not leak Graph SDK types above service boundary.</constraint>
+      <constraint source="ADR-010">Register as concrete type in AddCommunicationModule().</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailAttachmentProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmlGenerationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/DataverseWebApiService.cs</file>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create IncomingCommunicationProcessor implementing job handler pattern (follow ServiceBusJobProcessor pattern)</step>
+    <step>Fetch full message from Graph: GET /users/{mailbox}/messages/{messageId} using GraphClientFactory.ForApp()</step>
+    <step>Create sprk_communication record with field mapping: sprk_direction=100000000 (Incoming), sprk_communiationtype=100000000 (Email), statuscode=659490003 (Delivered), sprk_from=message.from.emailAddress.address, sprk_to=mailbox email, sprk_cc from message.ccRecipients, sprk_subject=message.subject, sprk_body from message.uniqueBody or message.body, sprk_bodyformat based on body.contentType, sprk_graphmessageid=message.id, sprk_sentat=message.receivedDateTime</step>
+    <step>IMPORTANT: Do NOT set any regarding fields (sprk_regardingmatter, sprk_regardingorganization, sprk_regardingperson) — association resolution is a separate AI project</step>
+    <step>Process attachments if account has sprk_autocreaterecords=true: reuse EmailAttachmentProcessor pattern for filtering and SPE upload</step>
+    <step>Archive .eml to SPE: reuse EmlGenerationService if applicable for generating .eml from message data</step>
+    <step>Mark Graph message as read after processing (optional, make configurable)</step>
+    <step>Handle deduplication: check if sprk_graphmessageid already exists in sprk_communication before creating a new record</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Incoming emails create sprk_communication records with sprk_direction=100000000 (Incoming)</criterion>
+    <criterion>All email fields correctly mapped: from, to, cc, subject, body, bodyformat, graphmessageid, sentat</criterion>
+    <criterion>Regarding fields are NOT set (explicit requirement — association is separate project)</criterion>
+    <criterion>Attachments processed when sprk_autocreaterecords=true on account</criterion>
+    <criterion>.eml archived to SPE</criterion>
+    <criterion>Deduplication: duplicate messages (same sprk_graphmessageid) not processed twice</criterion>
+    <criterion>Uses GraphClientFactory.ForApp() for message retrieval</criterion>
+  </acceptance-criteria>
+</task>
