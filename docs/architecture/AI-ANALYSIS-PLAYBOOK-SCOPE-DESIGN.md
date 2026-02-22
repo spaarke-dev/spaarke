@@ -1,8 +1,10 @@
 # AI Analysis Playbook & Scope Design
 
+> **DEPRECATED**: This document has been superseded by [`docs/architecture/AI-ARCHITECTURE.md`](AI-ARCHITECTURE.md) (v3.0, February 2026). All scope definitions, Dataverse entity models, and playbook catalogs have been consolidated into the new document. This file is retained for historical reference only.
+
 > **Version**: 2.0
 > **Date**: January 16, 2026
-> **Status**: Draft
+> **Status**: Deprecated (was Draft)
 > **Purpose**: Define the scope definitions (Actions, Skills, Knowledge, Tools, Outputs) available for building Playbooks
 > **Related**:
 > - [AI-PLAYBOOK-ARCHITECTURE.md](AI-PLAYBOOK-ARCHITECTURE.md) - Node-based execution architecture (authoritative)

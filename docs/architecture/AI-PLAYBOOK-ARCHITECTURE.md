@@ -1,5 +1,7 @@
 # AI Playbook Architecture
 
+> **DEPRECATED**: This document has been superseded by [`docs/architecture/AI-ARCHITECTURE.md`](AI-ARCHITECTURE.md) (v3.0, February 2026). All content has been consolidated into the new document with updated four-tier architecture, file mappings, and Agent Framework evolution. This file is retained for historical reference only.
+
 > **Version**: 2.0
 > **Last Updated**: January 15, 2026
 > **Author**: AI Summary and Analysis Enhancements Team

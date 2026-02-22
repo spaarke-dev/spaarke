@@ -1,7 +1,9 @@
 # Spaarke & Microsoft IQ Services: Adoption Analysis
 
+> **DEPRECATED**: This document has been superseded by [`docs/guides/SPAARKE-AI-STRATEGY-AND-ROADMAP.md`](../../docs/guides/SPAARKE-AI-STRATEGY-AND-ROADMAP.md) (v1.0, February 2026). The Foundry adoption strategy and migration paths have been consolidated into the strategy guide with updated four-tier architecture positioning. This file is retained for historical reference only.
+
 > **Last Updated**: January 2026
-> **Status**: Strategic Analysis
+> **Status**: Deprecated (was Strategic Analysis)
 > **Target**: Product Launch June 2026
 
 ---

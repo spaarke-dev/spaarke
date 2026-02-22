@@ -1,8 +1,14 @@
 # Spaarke AI Strategy & Architecture
 
+> **DEPRECATED**: This document has been superseded by two new documents:
+> - **Technical architecture**: [`docs/architecture/AI-ARCHITECTURE.md`](AI-ARCHITECTURE.md) (v3.0, February 2026)
+> - **Executive strategy & roadmap**: [`docs/guides/SPAARKE-AI-STRATEGY-AND-ROADMAP.md`](../../docs/guides/SPAARKE-AI-STRATEGY-AND-ROADMAP.md) (v1.0, February 2026)
+>
+> Content has been split by audience: technical content for Claude Code/engineers, and strategic content for business stakeholders. This file is retained for historical reference only.
+
 > **Version**: 2.1
 > **Date**: January 4, 2026
-> **Status**: Active
+> **Status**: Deprecated (was Active)
 > **Authors**: Spaarke Engineering
 > **Updated**: Clarified custom "Spaarke IQ" approach vs Microsoft Foundry adoption
 
