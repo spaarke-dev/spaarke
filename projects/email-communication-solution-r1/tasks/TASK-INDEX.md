@@ -69,12 +69,12 @@
 
 | ID | Title | Status | Est. | Deps | Blocks | Rigor | Group |
 |----|-------|--------|------|------|--------|-------|-------|
-| 050 | Create CommunicationAccountService with Dataverse query | 🔲 | 4h | none | 051, 052, 055 | FULL | — |
-| 051 | Update ApprovedSenderValidator to use CommunicationAccountService | 🔲 | 3h | 050 | 055 | FULL | — |
-| 052 | Create sprk_communicationaccount admin form and views | 🔲 | 3h | 050 | 055 | STANDARD | L |
-| 053 | Configure appsettings.json and document Exchange setup | 🔲 | 2h | 050 | 055 | MINIMAL | L |
-| 054 | Unit tests for account service and validator updates | 🔲 | 2h | 050, 051 | none | STANDARD | — |
-| 055 | End-to-end outbound shared mailbox testing | 🔲 | 2h | 050-054 | 060, 070, 080 | STANDARD | — |
+| 050 | Create CommunicationAccountService with Dataverse query | ✅ | 4h | none | 051, 052, 055 | FULL | — |
+| 051 | Update ApprovedSenderValidator to use CommunicationAccountService | ✅ | 3h | 050 | 055 | FULL | — |
+| 052 | Create sprk_communicationaccount admin form and views | ✅ | 3h | 050 | 055 | STANDARD | L |
+| 053 | Configure appsettings.json and document Exchange setup | ✅ | 2h | 050 | 055 | MINIMAL | L |
+| 054 | Unit tests for account service and validator updates | ✅ | 2h | 050, 051 | none | STANDARD | — |
+| 055 | End-to-end outbound shared mailbox testing | ✅ | 2h | 050-054 | 060, 070, 080 | STANDARD | — |
 
 ### Phase 7: Individual User Outbound (5 tasks, ~12h)
 

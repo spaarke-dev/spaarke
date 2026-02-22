@@ -1781,6 +1781,47 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return results.Entities.ToArray();
     }
 
+    // ========================================
+    // Communication Account Operations (Email Communication R1 — Phase 6)
+    // ========================================
+
+    public async Task<Entity[]> QueryCommunicationAccountsAsync(string filter, string select, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying communication accounts from Dataverse with filter: {Filter}", filter);
+
+        var columns = select.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        var query = new QueryExpression("sprk_communicationaccount")
+        {
+            ColumnSet = new ColumnSet(columns)
+        };
+
+        // Parse basic OData filter: "field eq value and field eq value"
+        var parts = filter.Split(" and ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var part in parts)
+        {
+            var tokens = part.Split(' ', 3, StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length != 3 || !string.Equals(tokens[1], "eq", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var field = tokens[0];
+            var rawValue = tokens[2];
+
+            if (bool.TryParse(rawValue, out var boolVal))
+                query.Criteria.Conditions.Add(new ConditionExpression(field, ConditionOperator.Equal, boolVal));
+            else if (int.TryParse(rawValue, out var intVal))
+                query.Criteria.Conditions.Add(new ConditionExpression(field, ConditionOperator.Equal, intVal));
+            else
+                query.Criteria.Conditions.Add(new ConditionExpression(field, ConditionOperator.Equal, rawValue));
+        }
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+
+        _logger.LogDebug("Found {Count} communication accounts", results.Entities.Count);
+
+        return results.Entities.ToArray();
+    }
+
     public void Dispose()
     {
         if (!_disposed)

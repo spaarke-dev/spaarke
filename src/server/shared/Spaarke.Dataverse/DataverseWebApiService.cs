@@ -1827,4 +1827,11 @@ public class DataverseWebApiService : IDataverseService
             "QueryApprovedSendersAsync is implemented in DataverseServiceClientImpl. " +
             "Configure DI to use ServiceClient implementation for approved sender queries.");
     }
+
+    public Task<Entity[]> QueryCommunicationAccountsAsync(string filter, string select, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "QueryCommunicationAccountsAsync is implemented in DataverseServiceClientImpl. " +
+            "Configure DI to use ServiceClient implementation for communication account queries.");
+    }
 }

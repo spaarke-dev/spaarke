@@ -2,7 +2,7 @@
   <metadata>
     <title>Update ApprovedSenderValidator to use CommunicationAccountService</title>
     <phase>6</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>3h</estimate>
     <tags>bff-api, refactor</tags>
     <dependencies>050</dependencies>

@@ -44,9 +44,13 @@ public class SendCommunicationToolHandlerRegistrationTests
             DefaultMailbox = "noreply@contoso.com"
         };
 
+        var accountService = new CommunicationAccountService(
+            Mock.Of<IDataverseService>(),
+            Mock.Of<IDistributedCache>(),
+            Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
             Options.Create(options),
-            Mock.Of<IDataverseService>(),
+            accountService,
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<ApprovedSenderValidator>>());
 
@@ -145,9 +149,13 @@ public class SendCommunicationToolHandlerRegistrationTests
             }
         };
 
+        var accountService = new CommunicationAccountService(
+            Mock.Of<IDataverseService>(),
+            Mock.Of<IDistributedCache>(),
+            Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
             Options.Create(options),
-            Mock.Of<IDataverseService>(),
+            accountService,
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<ApprovedSenderValidator>>());
         var communicationService = new CommunicationService(

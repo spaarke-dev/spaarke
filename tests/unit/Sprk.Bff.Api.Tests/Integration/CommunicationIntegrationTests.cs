@@ -132,9 +132,13 @@ public class CommunicationIntegrationTests
         CommunicationOptions? options = null)
     {
         var opts = options ?? CreateDefaultOptions();
+        var accountService = new CommunicationAccountService(
+            dataverseMock.Object,
+            Mock.Of<IDistributedCache>(),
+            Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
             Options.Create(opts),
-            dataverseMock.Object,
+            accountService,
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<ApprovedSenderValidator>>());
 
@@ -447,14 +451,18 @@ public class CommunicationIntegrationTests
         };
 
         // Dataverse returns a sender record with a different DisplayName
-        var dataverseSenderEntity = new DataverseEntity("sprk_approvedsender");
-        dataverseSenderEntity["sprk_email"] = "noreply@contoso.com";
+        var dataverseSenderEntity = new DataverseEntity("sprk_communicationaccount");
+        dataverseSenderEntity.Id = Guid.NewGuid();
+        dataverseSenderEntity["sprk_emailaddress"] = "noreply@contoso.com";
         dataverseSenderEntity["sprk_name"] = "Dataverse Name";
-        dataverseSenderEntity["sprk_isdefault"] = true;
+        dataverseSenderEntity["sprk_displayname"] = "Dataverse Name";
+        dataverseSenderEntity["sprk_isdefaultsender"] = true;
+        dataverseSenderEntity["sprk_sendenableds"] = true;
+        dataverseSenderEntity["sprk_accounttype"] = new OptionSetValue(100000000);
 
         var dataverseMock = new Mock<IDataverseService>();
         dataverseMock
-            .Setup(d => d.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { dataverseSenderEntity });
 
         // Redis cache returns null (cache miss) to force Dataverse query
@@ -463,9 +471,18 @@ public class CommunicationIntegrationTests
             .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((byte[]?)null);
 
+        var accountCacheMock = new Mock<IDistributedCache>();
+        accountCacheMock
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
+
+        var accountService = new CommunicationAccountService(
+            dataverseMock.Object,
+            accountCacheMock.Object,
+            Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
             Options.Create(options),
-            dataverseMock.Object,
+            accountService,
             cacheMock.Object,
             Mock.Of<ILogger<ApprovedSenderValidator>>());
 
@@ -748,6 +765,240 @@ public class CommunicationIntegrationTests
 
         capturedEntity.GetAttributeValue<string>("sprk_regardingrecordname").Should().Be("Acme Corp");
         capturedEntity.GetAttributeValue<int>("sprk_associationcount").Should().Be(1);
+    }
+
+    #endregion
+
+    #region Phase 6: CommunicationAccountService Integration
+
+    [Fact]
+    public async Task CommunicationAccountService_QuerySendEnabledAccounts_ResolvesViaValidator()
+    {
+        // Arrange: Dataverse returns a sprk_communicationaccount for mailbox-central@spaarke.com
+        var accountEntity = new DataverseEntity("sprk_communicationaccount");
+        accountEntity.Id = Guid.NewGuid();
+        accountEntity["sprk_emailaddress"] = "mailbox-central@spaarke.com";
+        accountEntity["sprk_name"] = "Spaarke Central Mailbox";
+        accountEntity["sprk_displayname"] = "Spaarke Central";
+        accountEntity["sprk_sendenableds"] = true;
+        accountEntity["sprk_isdefaultsender"] = true;
+        accountEntity["sprk_accounttype"] = new OptionSetValue(100000000);
+
+        var dataverseMock = new Mock<IDataverseService>();
+        dataverseMock
+            .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { accountEntity });
+
+        // Redis cache returns null (cache miss) to force Dataverse query
+        var accountCacheMock = new Mock<IDistributedCache>();
+        accountCacheMock
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
+
+        var validatorCacheMock = new Mock<IDistributedCache>();
+        validatorCacheMock
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
+
+        var options = new CommunicationOptions
+        {
+            ApprovedSenders = Array.Empty<ApprovedSenderConfig>(),
+            DefaultMailbox = "mailbox-central@spaarke.com"
+        };
+
+        var accountService = new CommunicationAccountService(
+            dataverseMock.Object,
+            accountCacheMock.Object,
+            Mock.Of<ILogger<CommunicationAccountService>>());
+        var senderValidator = new ApprovedSenderValidator(
+            Options.Create(options),
+            accountService,
+            validatorCacheMock.Object,
+            Mock.Of<ILogger<ApprovedSenderValidator>>());
+
+        // Act: resolve default sender (null = use default)
+        var result = await senderValidator.ResolveAsync(null);
+
+        // Assert
+        result.IsValid.Should().BeTrue("CommunicationAccountService should provide the default sender");
+        result.Email.Should().Be("mailbox-central@spaarke.com");
+    }
+
+    [Fact]
+    public async Task CommunicationAccountService_FallbackToConfig_WhenDataverseUnavailable()
+    {
+        // Arrange: Dataverse throws on QueryCommunicationAccountsAsync
+        var dataverseMock = new Mock<IDataverseService>();
+        dataverseMock
+            .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse is unavailable"));
+
+        var accountCacheMock = new Mock<IDistributedCache>();
+        accountCacheMock
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
+
+        var validatorCacheMock = new Mock<IDistributedCache>();
+        validatorCacheMock
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
+
+        // Config has mailbox-central@spaarke.com as an approved sender
+        var options = new CommunicationOptions
+        {
+            ApprovedSenders = new[]
+            {
+                new ApprovedSenderConfig
+                {
+                    Email = "mailbox-central@spaarke.com",
+                    DisplayName = "Config Fallback",
+                    IsDefault = true
+                }
+            },
+            DefaultMailbox = "mailbox-central@spaarke.com"
+        };
+
+        var accountService = new CommunicationAccountService(
+            dataverseMock.Object,
+            accountCacheMock.Object,
+            Mock.Of<ILogger<CommunicationAccountService>>());
+        var senderValidator = new ApprovedSenderValidator(
+            Options.Create(options),
+            accountService,
+            validatorCacheMock.Object,
+            Mock.Of<ILogger<ApprovedSenderValidator>>());
+
+        // Act: resolve default sender; Dataverse query will fail, should fall back to config
+        var result = await senderValidator.ResolveAsync(null);
+
+        // Assert
+        result.IsValid.Should().BeTrue("Validator should fall back to config senders when Dataverse is unavailable");
+        result.Email.Should().Be("mailbox-central@spaarke.com");
+        result.DisplayName.Should().Be("Config Fallback");
+    }
+
+    [Fact]
+    public async Task CommunicationAccountService_InvalidSender_RejectsUnapprovedMailbox()
+    {
+        // Arrange: only mailbox-central@spaarke.com is approved (both config and Dataverse)
+        var accountEntity = new DataverseEntity("sprk_communicationaccount");
+        accountEntity.Id = Guid.NewGuid();
+        accountEntity["sprk_emailaddress"] = "mailbox-central@spaarke.com";
+        accountEntity["sprk_name"] = "Spaarke Central Mailbox";
+        accountEntity["sprk_displayname"] = "Spaarke Central";
+        accountEntity["sprk_sendenableds"] = true;
+        accountEntity["sprk_isdefaultsender"] = true;
+        accountEntity["sprk_accounttype"] = new OptionSetValue(100000000);
+
+        var dataverseMock = new Mock<IDataverseService>();
+        dataverseMock
+            .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { accountEntity });
+
+        var accountCacheMock = new Mock<IDistributedCache>();
+        accountCacheMock
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
+
+        var validatorCacheMock = new Mock<IDistributedCache>();
+        validatorCacheMock
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
+
+        var options = new CommunicationOptions
+        {
+            ApprovedSenders = new[]
+            {
+                new ApprovedSenderConfig
+                {
+                    Email = "mailbox-central@spaarke.com",
+                    DisplayName = "Spaarke Central",
+                    IsDefault = true
+                }
+            },
+            DefaultMailbox = "mailbox-central@spaarke.com"
+        };
+
+        var accountService = new CommunicationAccountService(
+            dataverseMock.Object,
+            accountCacheMock.Object,
+            Mock.Of<ILogger<CommunicationAccountService>>());
+        var senderValidator = new ApprovedSenderValidator(
+            Options.Create(options),
+            accountService,
+            validatorCacheMock.Object,
+            Mock.Of<ILogger<ApprovedSenderValidator>>());
+
+        // Act: attempt to resolve an unapproved sender
+        var result = await senderValidator.ResolveAsync("evil@hacker.com");
+
+        // Assert
+        result.IsValid.Should().BeFalse("Unapproved mailbox should be rejected");
+        result.ErrorCode.Should().Be("INVALID_SENDER");
+        result.ErrorDetail.Should().Contain("evil@hacker.com");
+    }
+
+    [Fact]
+    public async Task CommunicationAccountService_DataverseOverridesConfig_ForSameEmail()
+    {
+        // Arrange: config has mailbox-central@spaarke.com with DisplayName="Config Name"
+        //          Dataverse has the same email with DisplayName="Spaarke Central"
+        var options = new CommunicationOptions
+        {
+            ApprovedSenders = new[]
+            {
+                new ApprovedSenderConfig
+                {
+                    Email = "mailbox-central@spaarke.com",
+                    DisplayName = "Config Name",
+                    IsDefault = true
+                }
+            },
+            DefaultMailbox = "mailbox-central@spaarke.com"
+        };
+
+        var dataverseSenderEntity = new DataverseEntity("sprk_communicationaccount");
+        dataverseSenderEntity.Id = Guid.NewGuid();
+        dataverseSenderEntity["sprk_emailaddress"] = "mailbox-central@spaarke.com";
+        dataverseSenderEntity["sprk_name"] = "Spaarke Central";
+        dataverseSenderEntity["sprk_displayname"] = "Spaarke Central";
+        dataverseSenderEntity["sprk_isdefaultsender"] = true;
+        dataverseSenderEntity["sprk_sendenableds"] = true;
+        dataverseSenderEntity["sprk_accounttype"] = new OptionSetValue(100000000);
+
+        var dataverseMock = new Mock<IDataverseService>();
+        dataverseMock
+            .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { dataverseSenderEntity });
+
+        var accountCacheMock = new Mock<IDistributedCache>();
+        accountCacheMock
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
+
+        var validatorCacheMock = new Mock<IDistributedCache>();
+        validatorCacheMock
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
+
+        var accountService = new CommunicationAccountService(
+            dataverseMock.Object,
+            accountCacheMock.Object,
+            Mock.Of<ILogger<CommunicationAccountService>>());
+        var senderValidator = new ApprovedSenderValidator(
+            Options.Create(options),
+            accountService,
+            validatorCacheMock.Object,
+            Mock.Of<ILogger<ApprovedSenderValidator>>());
+
+        // Act: resolve default sender via merged resolution
+        var result = await senderValidator.ResolveAsync(null);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.Email.Should().Be("mailbox-central@spaarke.com");
+        result.DisplayName.Should().Be("Spaarke Central",
+            "When both config and Dataverse have the same email, Dataverse DisplayName should win");
     }
 
     #endregion

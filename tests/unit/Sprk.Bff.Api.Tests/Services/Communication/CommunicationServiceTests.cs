@@ -34,9 +34,13 @@ public class CommunicationServiceTests
         _loggerMock = new Mock<ILogger<CommunicationService>>();
 
         var options = CreateDefaultOptions();
+        var accountService = new CommunicationAccountService(
+            Mock.Of<IDataverseService>(),
+            Mock.Of<IDistributedCache>(),
+            Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
             Options.Create(options),
-            Mock.Of<IDataverseService>(),
+            accountService,
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<ApprovedSenderValidator>>());
 
@@ -115,9 +119,13 @@ public class CommunicationServiceTests
     /// </summary>
     private CommunicationService CreateServiceWithOptions(CommunicationOptions options)
     {
+        var accountService = new CommunicationAccountService(
+            Mock.Of<IDataverseService>(),
+            Mock.Of<IDistributedCache>(),
+            Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
             Options.Create(options),
-            Mock.Of<IDataverseService>(),
+            accountService,
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<ApprovedSenderValidator>>());
         return new CommunicationService(

@@ -2,7 +2,7 @@
   <metadata>
     <title>Create CommunicationAccountService with Dataverse query</title>
     <phase>6</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>4h</estimate>
     <tags>bff-api, dataverse, cache</tags>
     <dependencies>none (Phases 1-5 complete)</dependencies>

@@ -2,7 +2,7 @@
   <metadata>
     <title>Configure appsettings.json and document Exchange setup</title>
     <phase>6</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>2h</estimate>
     <tags>config, documentation</tags>
     <dependencies>050</dependencies>

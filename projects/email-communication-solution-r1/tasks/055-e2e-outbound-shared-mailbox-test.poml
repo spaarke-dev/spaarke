@@ -2,7 +2,7 @@
   <metadata>
     <title>End-to-end outbound shared mailbox testing</title>
     <phase>6</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>2h</estimate>
     <tags>testing, integration-test</tags>
     <dependencies>050, 051, 052, 053, 054</dependencies>

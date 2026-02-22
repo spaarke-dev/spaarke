@@ -2,7 +2,7 @@
   <metadata>
     <title>Create sprk_communicationaccount admin form and views</title>
     <phase>6</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>3h</estimate>
     <tags>dataverse, solution</tags>
     <dependencies>050</dependencies>

@@ -16,6 +16,7 @@ public static class CommunicationModule
         services.Configure<CommunicationOptions>(configuration.GetSection(CommunicationOptions.SectionName));
 
         // Core services (singleton: all dependencies are singleton or options)
+        services.AddSingleton<CommunicationAccountService>();
         services.AddSingleton<ApprovedSenderValidator>();
         services.AddSingleton<CommunicationService>();
         services.AddSingleton<EmlGenerationService>();

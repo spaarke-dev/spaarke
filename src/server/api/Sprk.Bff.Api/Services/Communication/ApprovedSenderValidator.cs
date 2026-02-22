@@ -2,8 +2,6 @@ using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Microsoft.Xrm.Sdk;
-using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Communication.Models;
 
@@ -12,7 +10,8 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// <summary>
 /// Validates that a requested sender mailbox is in the approved senders list.
 /// Phase 1: Reads from CommunicationOptions.ApprovedSenders[] configuration only (synchronous Resolve).
-/// Phase 2: Merges BFF config with Dataverse sprk_approvedsender entity records, cached in Redis (async ResolveAsync).
+/// Phase 2: Merges BFF config with Dataverse sprk_communicationaccount records via CommunicationAccountService,
+///          cached in Redis (async ResolveAsync). Falls back to config-only on service failure.
 /// </summary>
 public sealed class ApprovedSenderValidator
 {
@@ -20,18 +19,18 @@ public sealed class ApprovedSenderValidator
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
 
     private readonly CommunicationOptions _options;
-    private readonly IDataverseService _dataverseService;
+    private readonly CommunicationAccountService _accountService;
     private readonly IDistributedCache _cache;
     private readonly ILogger<ApprovedSenderValidator> _logger;
 
     public ApprovedSenderValidator(
         IOptions<CommunicationOptions> options,
-        IDataverseService dataverseService,
+        CommunicationAccountService accountService,
         IDistributedCache cache,
         ILogger<ApprovedSenderValidator> logger)
     {
         _options = options.Value;
-        _dataverseService = dataverseService;
+        _accountService = accountService;
         _cache = cache;
         _logger = logger;
     }
@@ -57,9 +56,9 @@ public sealed class ApprovedSenderValidator
 
     /// <summary>
     /// Resolves the sender for a communication request (async, merges BFF config + Dataverse).
-    /// Queries Dataverse for active sprk_approvedsender records, merges with BFF config
+    /// Queries CommunicationAccountService for send-enabled accounts, merges with BFF config
     /// (Dataverse wins on email match), and caches the merged list in Redis with a 5-minute TTL.
-    /// Falls back to config-only on Dataverse failure.
+    /// Falls back to config-only on CommunicationAccountService failure.
     /// </summary>
     /// <param name="fromMailbox">Requested sender mailbox, or null for default.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -77,7 +76,7 @@ public sealed class ApprovedSenderValidator
     }
 
     /// <summary>
-    /// Gets the merged approved senders list from cache or by querying Dataverse and merging with config.
+    /// Gets the merged approved senders list from cache or by querying CommunicationAccountService and merging with config.
     /// </summary>
     private async Task<ApprovedSenderConfig[]> GetMergedSendersAsync(CancellationToken ct)
     {
@@ -97,27 +96,27 @@ public sealed class ApprovedSenderValidator
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to read approved senders from Redis cache; proceeding with Dataverse query");
+            _logger.LogWarning(ex, "Failed to read approved senders from Redis cache; proceeding with account service query");
         }
 
-        // Query Dataverse for active sprk_approvedsender records
+        // Query CommunicationAccountService for send-enabled accounts
         var configSenders = _options.ApprovedSenders ?? Array.Empty<ApprovedSenderConfig>();
-        ApprovedSenderConfig[] dataverseSenders;
+        ApprovedSenderConfig[] accountSenders;
 
         try
         {
-            var entities = await _dataverseService.QueryApprovedSendersAsync(ct);
-            dataverseSenders = MapToApprovedSenderConfigs(entities);
-            _logger.LogDebug("Retrieved {Count} approved senders from Dataverse", dataverseSenders.Length);
+            var accounts = await _accountService.QuerySendEnabledAccountsAsync(ct);
+            accountSenders = MapToApprovedSenderConfigs(accounts);
+            _logger.LogDebug("Retrieved {Count} send-enabled accounts from CommunicationAccountService", accountSenders.Length);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to query Dataverse for approved senders; returning config-only senders");
+            _logger.LogWarning(ex, "Failed to query CommunicationAccountService for send-enabled accounts; returning config-only senders");
             return configSenders;
         }
 
-        // Merge: config senders as base, Dataverse senders overlay (Dataverse wins on email match)
-        var merged = MergeSenders(configSenders, dataverseSenders);
+        // Merge: config senders as base, account senders overlay (Dataverse wins on email match)
+        var merged = MergeSenders(configSenders, accountSenders);
 
         // Cache the merged result with 5-minute TTL
         try
@@ -139,27 +138,28 @@ public sealed class ApprovedSenderValidator
     }
 
     /// <summary>
-    /// Maps Dataverse Entity objects to ApprovedSenderConfig objects.
+    /// Maps CommunicationAccount objects to ApprovedSenderConfig objects.
+    /// Uses DisplayName with fallback to Name for the display name.
     /// </summary>
-    private static ApprovedSenderConfig[] MapToApprovedSenderConfigs(Entity[] entities)
+    private static ApprovedSenderConfig[] MapToApprovedSenderConfigs(CommunicationAccount[] accounts)
     {
-        return entities
-            .Select(e => new ApprovedSenderConfig
+        return accounts
+            .Select(a => new ApprovedSenderConfig
             {
-                Email = e.GetAttributeValue<string>("sprk_email") ?? string.Empty,
-                DisplayName = e.GetAttributeValue<string>("sprk_name") ?? string.Empty,
-                IsDefault = e.GetAttributeValue<bool>("sprk_isdefault")
+                Email = a.EmailAddress,
+                DisplayName = a.DisplayName ?? a.Name,
+                IsDefault = a.IsDefaultSender
             })
             .Where(s => !string.IsNullOrWhiteSpace(s.Email))
             .ToArray();
     }
 
     /// <summary>
-    /// Merges config senders with Dataverse senders.
-    /// Starts with config senders as base, then overlays Dataverse senders.
-    /// Dataverse wins on email match (case-insensitive).
+    /// Merges config senders with account senders from CommunicationAccountService.
+    /// Starts with config senders as base, then overlays account senders.
+    /// Account senders (Dataverse) win on email match (case-insensitive).
     /// </summary>
-    private static ApprovedSenderConfig[] MergeSenders(ApprovedSenderConfig[] configSenders, ApprovedSenderConfig[] dataverseSenders)
+    private static ApprovedSenderConfig[] MergeSenders(ApprovedSenderConfig[] configSenders, ApprovedSenderConfig[] accountSenders)
     {
         var merged = new Dictionary<string, ApprovedSenderConfig>(StringComparer.OrdinalIgnoreCase);
 
@@ -168,8 +168,8 @@ public sealed class ApprovedSenderValidator
             merged[s.Email] = s;
         }
 
-        // Overlay Dataverse senders (wins on match)
-        foreach (var s in dataverseSenders)
+        // Overlay account senders (Dataverse wins on match)
+        foreach (var s in accountSenders)
         {
             merged[s.Email] = s;
         }

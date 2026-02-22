@@ -25,13 +25,18 @@ public class ApprovedSenderMergeTests
 
     private readonly Mock<IDataverseService> _dataverseServiceMock;
     private readonly Mock<IDistributedCache> _cacheMock;
+    private readonly Mock<IDistributedCache> _accountCacheMock;
     private readonly Mock<ILogger<ApprovedSenderValidator>> _loggerMock;
 
     public ApprovedSenderMergeTests()
     {
         _dataverseServiceMock = new Mock<IDataverseService>();
         _cacheMock = new Mock<IDistributedCache>();
+        _accountCacheMock = new Mock<IDistributedCache>();
         _loggerMock = new Mock<ILogger<ApprovedSenderValidator>>();
+
+        // Always cache miss for CommunicationAccountService's cache
+        _accountCacheMock.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((byte[]?)null);
     }
 
     private ApprovedSenderValidator CreateValidator(
@@ -44,9 +49,14 @@ public class ApprovedSenderMergeTests
             DefaultMailbox = defaultMailbox
         };
 
+        var accountService = new CommunicationAccountService(
+            _dataverseServiceMock.Object,
+            _accountCacheMock.Object,
+            Mock.Of<ILogger<CommunicationAccountService>>());
+
         return new ApprovedSenderValidator(
             Options.Create(options),
-            _dataverseServiceMock.Object,
+            accountService,
             _cacheMock.Object,
             _loggerMock.Object);
     }
@@ -61,15 +71,19 @@ public class ApprovedSenderMergeTests
         IsDefault = isDefault
     };
 
-    private static DataverseEntity CreateApprovedSenderEntity(
+    private static DataverseEntity CreateCommunicationAccountEntity(
         string email,
         string name,
         bool isDefault = false)
     {
-        var entity = new DataverseEntity("sprk_approvedsender");
-        entity["sprk_email"] = email;
+        var entity = new DataverseEntity("sprk_communicationaccount");
+        entity.Id = Guid.NewGuid();
+        entity["sprk_emailaddress"] = email;
         entity["sprk_name"] = name;
-        entity["sprk_isdefault"] = isDefault;
+        entity["sprk_displayname"] = name;
+        entity["sprk_isdefaultsender"] = isDefault;
+        entity["sprk_sendenableds"] = true;
+        entity["sprk_accounttype"] = new OptionSetValue(100000000); // SharedAccount
         return entity;
     }
 
@@ -150,7 +164,7 @@ public class ApprovedSenderMergeTests
 
         // Assert
         _dataverseServiceMock.Verify(
-            ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()),
+            ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "Dataverse should not be queried when cache hit occurs");
     }
@@ -166,10 +180,10 @@ public class ApprovedSenderMergeTests
         SetupCacheMiss();
 
         _dataverseServiceMock
-            .Setup(ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()))
+            .Setup(ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[]
             {
-                CreateApprovedSenderEntity("dv-sender@contoso.com", "DV Sender", isDefault: true)
+                CreateCommunicationAccountEntity("dv-sender@contoso.com", "DV Sender", isDefault: true)
             });
 
         var validator = CreateValidator(
@@ -183,7 +197,7 @@ public class ApprovedSenderMergeTests
         result.Email.Should().Be("dv-sender@contoso.com");
 
         _dataverseServiceMock.Verify(
-            ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()),
+            ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once,
             "Dataverse should be queried on cache miss");
     }
@@ -195,10 +209,10 @@ public class ApprovedSenderMergeTests
         SetupCacheMiss();
 
         _dataverseServiceMock
-            .Setup(ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()))
+            .Setup(ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[]
             {
-                CreateApprovedSenderEntity("dv@contoso.com", "DV Sender")
+                CreateCommunicationAccountEntity("dv@contoso.com", "DV Sender")
             });
 
         var validator = CreateValidator(
@@ -229,10 +243,10 @@ public class ApprovedSenderMergeTests
         SetupCacheMiss();
 
         _dataverseServiceMock
-            .Setup(ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()))
+            .Setup(ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[]
             {
-                CreateApprovedSenderEntity("shared@contoso.com", "DV Display Name Override", isDefault: true)
+                CreateCommunicationAccountEntity("shared@contoso.com", "DV Display Name Override", isDefault: true)
             });
 
         var validator = CreateValidator(
@@ -255,10 +269,10 @@ public class ApprovedSenderMergeTests
         SetupCacheMiss();
 
         _dataverseServiceMock
-            .Setup(ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()))
+            .Setup(ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[]
             {
-                CreateApprovedSenderEntity("SHARED@CONTOSO.COM", "DV Override Upper", isDefault: true)
+                CreateCommunicationAccountEntity("SHARED@CONTOSO.COM", "DV Override Upper", isDefault: true)
             });
 
         var validator = CreateValidator(
@@ -284,10 +298,10 @@ public class ApprovedSenderMergeTests
         SetupCacheMiss();
 
         _dataverseServiceMock
-            .Setup(ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()))
+            .Setup(ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[]
             {
-                CreateApprovedSenderEntity("new-dv@contoso.com", "New DV Sender")
+                CreateCommunicationAccountEntity("new-dv@contoso.com", "New DV Sender")
             });
 
         var validator = CreateValidator(
@@ -314,7 +328,7 @@ public class ApprovedSenderMergeTests
         SetupCacheMiss();
 
         _dataverseServiceMock
-            .Setup(ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()))
+            .Setup(ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Dataverse connection failed"));
 
         var validator = CreateValidator(
@@ -340,7 +354,7 @@ public class ApprovedSenderMergeTests
         SetupCacheMiss();
 
         _dataverseServiceMock
-            .Setup(ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()))
+            .Setup(ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TimeoutException("Dataverse timeout"));
 
         var validator = CreateValidator(
@@ -367,7 +381,7 @@ public class ApprovedSenderMergeTests
         SetupCacheFailure();
 
         _dataverseServiceMock
-            .Setup(ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()))
+            .Setup(ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Dataverse down"));
 
         var validator = CreateValidator(
@@ -395,13 +409,17 @@ public class ApprovedSenderMergeTests
         // Arrange
         SetupCacheMiss();
 
-        var dvEntity = new DataverseEntity("sprk_approvedsender");
-        dvEntity["sprk_email"] = "mapped@contoso.com";
+        var dvEntity = new DataverseEntity("sprk_communicationaccount");
+        dvEntity.Id = Guid.NewGuid();
+        dvEntity["sprk_emailaddress"] = "mapped@contoso.com";
         dvEntity["sprk_name"] = "Mapped Display Name";
-        dvEntity["sprk_isdefault"] = true;
+        dvEntity["sprk_displayname"] = "Mapped Display Name";
+        dvEntity["sprk_isdefaultsender"] = true;
+        dvEntity["sprk_sendenableds"] = true;
+        dvEntity["sprk_accounttype"] = new OptionSetValue(100000000);
 
         _dataverseServiceMock
-            .Setup(ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()))
+            .Setup(ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { dvEntity });
 
         var validator = CreateValidator();
@@ -422,11 +440,11 @@ public class ApprovedSenderMergeTests
         SetupCacheMiss();
 
         _dataverseServiceMock
-            .Setup(ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()))
+            .Setup(ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[]
             {
-                CreateApprovedSenderEntity("", "Empty Email Sender"),
-                CreateApprovedSenderEntity("valid@contoso.com", "Valid Sender", isDefault: true)
+                CreateCommunicationAccountEntity("", "Empty Email Sender"),
+                CreateCommunicationAccountEntity("valid@contoso.com", "Valid Sender", isDefault: true)
             });
 
         var validator = CreateValidator();
@@ -451,11 +469,11 @@ public class ApprovedSenderMergeTests
         SetupCacheMiss();
 
         _dataverseServiceMock
-            .Setup(ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()))
+            .Setup(ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[]
             {
-                CreateApprovedSenderEntity("config@contoso.com", "DV Override", isDefault: false),
-                CreateApprovedSenderEntity("dv-only@contoso.com", "DV Only", isDefault: false)
+                CreateCommunicationAccountEntity("config@contoso.com", "DV Override", isDefault: false),
+                CreateCommunicationAccountEntity("dv-only@contoso.com", "DV Only", isDefault: false)
             });
 
         var validator = CreateValidator(
@@ -495,10 +513,10 @@ public class ApprovedSenderMergeTests
         SetupCacheMiss();
 
         _dataverseServiceMock
-            .Setup(ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()))
+            .Setup(ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[]
             {
-                CreateApprovedSenderEntity("dv-default@contoso.com", "DV Default Sender", isDefault: true)
+                CreateCommunicationAccountEntity("dv-default@contoso.com", "DV Default Sender", isDefault: true)
             });
 
         var validator = CreateValidator(
@@ -524,10 +542,10 @@ public class ApprovedSenderMergeTests
         SetupCacheMiss();
 
         _dataverseServiceMock
-            .Setup(ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()))
+            .Setup(ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[]
             {
-                CreateApprovedSenderEntity("sender@contoso.com", "Test Sender", isDefault: true)
+                CreateCommunicationAccountEntity("sender@contoso.com", "Test Sender", isDefault: true)
             });
 
         // Cache write (SetAsync) throws
@@ -561,10 +579,10 @@ public class ApprovedSenderMergeTests
         SetupCacheMiss();
 
         _dataverseServiceMock
-            .Setup(ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()))
+            .Setup(ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[]
             {
-                CreateApprovedSenderEntity("approved-dv@contoso.com", "DV Approved")
+                CreateCommunicationAccountEntity("approved-dv@contoso.com", "DV Approved")
             });
 
         var validator = CreateValidator(
@@ -585,10 +603,10 @@ public class ApprovedSenderMergeTests
         SetupCacheMiss();
 
         _dataverseServiceMock
-            .Setup(ds => ds.QueryApprovedSendersAsync(It.IsAny<CancellationToken>()))
+            .Setup(ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[]
             {
-                CreateApprovedSenderEntity("dv-approved@contoso.com", "DV Approved Sender")
+                CreateCommunicationAccountEntity("dv-approved@contoso.com", "DV Approved Sender")
             });
 
         var validator = CreateValidator(

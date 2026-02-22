@@ -2,7 +2,7 @@
   <metadata>
     <title>Unit tests for account service and validator updates</title>
     <phase>6</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>2h</estimate>
     <tags>testing, unit-test</tags>
     <dependencies>050, 051</dependencies>

@@ -34,11 +34,17 @@ public class ApprovedSenderValidatorTests
     };
 
     private static ApprovedSenderValidator CreateValidator(CommunicationOptions options)
-        => new(
-            Options.Create(options),
+    {
+        var accountService = new CommunicationAccountService(
             Mock.Of<IDataverseService>(),
             Mock.Of<IDistributedCache>(),
+            Mock.Of<ILogger<CommunicationAccountService>>());
+        return new(
+            Options.Create(options),
+            accountService,
+            Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<ApprovedSenderValidator>>());
+    }
 
     #endregion
 

@@ -66,9 +66,13 @@ public class ArchivalFlowTests
         var opts = options ?? CreateDefaultOptions();
         var dvService = dataverseService ?? _dataverseServiceMock.Object;
 
+        var accountService = new CommunicationAccountService(
+            Mock.Of<IDataverseService>(),
+            Mock.Of<IDistributedCache>(),
+            Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
             Options.Create(opts),
-            Mock.Of<IDataverseService>(),
+            accountService,
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<ApprovedSenderValidator>>());
 
