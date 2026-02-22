@@ -2,7 +2,7 @@
   <metadata>
     <title>Create GraphSubscriptionManager BackgroundService</title>
     <phase>8</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>5h</estimate>
     <tags>bff-api, api</tags>
     <dependencies>055</dependencies>

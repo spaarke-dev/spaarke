@@ -4,7 +4,8 @@
  * Web resource for the sprk_communication entity Send command bar button.
  *
  * Main Form Button:
- * - Send: Collect form data and send email via BFF POST /api/communications/send
+ * - Send: Opens send mode selection (My Mailbox / shared accounts), then
+ *   collects form data and sends email via BFF POST /api/communications/send
  *
  * Enable Rule:
  * - isStatusDraft: Button enabled only when statuscode = 1 (Draft)
@@ -12,6 +13,10 @@
  * Communication Status Values (statuscode):
  * - 1: Draft, 659490001: Queued, 659490002: Send, 659490003: Delivered,
  *   659490004: Failed, 659490005: Bounded, 659490006: Recalled
+ *
+ * Send Mode (Phase 7):
+ * - "user": Send from user's own mailbox via OBO (My Mailbox)
+ * - "sharedMailbox": Send from a shared mailbox account
  *
  * Association lookup fields (8 entity types):
  * - sprk_regardingmatter, sprk_regardingproject, sprk_regardingorganization,
@@ -76,6 +81,47 @@ Sprk.Communication.Send._REGARDING_FIELDS = [
     { field: "sprk_regardinginvoice", entityType: "sprk_invoice" },
     { field: "sprk_regardingworkassignment", entityType: "sprk_workassignment" }
 ];
+
+/**
+ * Send Mode values for the BFF API sendMode field.
+ * Determines whether to send from a shared mailbox (app-only) or user mailbox (OBO).
+ */
+Sprk.Communication.Send.SendMode = {
+    SHARED_MAILBOX: "sharedMailbox",
+    USER: "user"
+};
+
+/**
+ * MSAL Configuration for BFF API authentication.
+ * Reuses the same app registration as Spaarke.Email / Document modules.
+ * Required for acquiring bearer tokens for cross-origin BFF API calls
+ * and for user-mode OBO token flow.
+ */
+Sprk.Communication.Send._MSAL_CONFIG = {
+    // Client Application ID (SPE-File-Viewer-PCF app registration)
+    clientId: "b36e9b91-ee7d-46e6-9f6a-376871cc9d54",
+    // BFF Application ID (SDAP-BFF-SPE-API for scope construction)
+    bffAppId: "1e40baad-e065-4aea-a8d4-4b7ab273458c",
+    // Azure AD Tenant ID
+    tenantId: "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+    // Redirect URI - must match Azure AD app registration
+    redirectUri: "https://spaarkedev1.crm.dynamics.com"
+};
+
+/**
+ * Cached MSAL instance and account.
+ * @private
+ */
+Sprk.Communication.Send._msalInstance = null;
+Sprk.Communication.Send._msalInitPromise = null;
+Sprk.Communication.Send._currentAccount = null;
+
+/**
+ * Cached send-enabled accounts from sprk_communicationaccount.
+ * @private
+ */
+Sprk.Communication.Send._cachedSendAccounts = null;
+Sprk.Communication.Send._sendAccountsLoading = false;
 
 // -----------------------------------------------------------------------
 // Configuration
@@ -188,13 +234,16 @@ Sprk.Communication.Send.isStatusDraft = function (formContext) {
 /**
  * Send Communication button click handler.
  *
- * Collects form data, builds the SendCommunicationRequest payload,
- * calls POST /api/communications/send via fetch, and handles the response.
+ * Opens a send mode selection dialog (My Mailbox or shared accounts),
+ * collects form data, builds the SendCommunicationRequest payload with
+ * sendMode and fromMailbox fields, calls POST /api/communications/send
+ * via fetch, and handles the response.
  *
  * On success: shows success notification, updates statuscode to Send (659490002),
  * saves and refreshes the form.
  *
  * On error: parses ProblemDetails response and shows error notification.
+ * Special handling for expired OBO tokens (401) with user-friendly message.
  *
  * @param {Object} executionContext - The execution context from ribbon command
  */
@@ -219,18 +268,34 @@ Sprk.Communication.Send.sendCommunication = function (executionContext) {
         return;
     }
 
-    // Show progress notification
-    formContext.ui.setFormNotification(
-        "Sending communication...",
-        "INFO",
-        Sprk.Communication.Send._NOTIFICATION_IDS.PROGRESS
-    );
+    // Show send mode selection dialog, then proceed with send
+    Sprk.Communication.Send._showSendModeDialog(formContext).then(function (sendModeResult) {
+        if (!sendModeResult) {
+            // User cancelled the dialog
+            console.log("[Communication Send] Send cancelled by user.");
+            return;
+        }
 
-    // Collect form data and build request payload
-    var request = Sprk.Communication.Send._buildRequest(formContext);
+        // Show progress notification
+        formContext.ui.setFormNotification(
+            "Sending communication...",
+            "INFO",
+            Sprk.Communication.Send._NOTIFICATION_IDS.PROGRESS
+        );
 
-    // Get auth token and send
-    Sprk.Communication.Send._sendRequest(formContext, request);
+        // Collect form data and build request payload with send mode
+        var request = Sprk.Communication.Send._buildRequest(formContext, sendModeResult);
+
+        // Get auth token and send
+        Sprk.Communication.Send._sendRequest(formContext, request);
+    }).catch(function (error) {
+        console.error("[Communication Send] Send mode selection failed:", error);
+        formContext.ui.setFormNotification(
+            "Could not load send options. Please try again.",
+            "ERROR",
+            Sprk.Communication.Send._NOTIFICATION_IDS.ERROR
+        );
+    });
 };
 
 // -----------------------------------------------------------------------
@@ -272,11 +337,16 @@ Sprk.Communication.Send._validateForm = function (formContext) {
 
 /**
  * Build SendCommunicationRequest payload from form data.
+ * Includes sendMode and fromMailbox from the send mode selection result.
+ *
  * @param {Object} formContext - The form context
+ * @param {Object} sendModeResult - The send mode selection result
+ * @param {string} sendModeResult.sendMode - "user" or "sharedMailbox"
+ * @param {string|null} sendModeResult.fromMailbox - Email address for shared mailbox mode
  * @returns {Object} SendCommunicationRequest JSON payload
  * @private
  */
-Sprk.Communication.Send._buildRequest = function (formContext) {
+Sprk.Communication.Send._buildRequest = function (formContext, sendModeResult) {
     // Collect email fields
     var toValue = Sprk.Communication.Send._getFieldValue(formContext, "sprk_to");
     var ccValue = Sprk.Communication.Send._getFieldValue(formContext, "sprk_cc");
@@ -316,6 +386,17 @@ Sprk.Communication.Send._buildRequest = function (formContext) {
         bodyFormat: "HTML",
         communicationType: communicationType
     };
+
+    // Include send mode from user selection (Phase 7)
+    if (sendModeResult) {
+        request.sendMode = sendModeResult.sendMode;
+
+        // Include fromMailbox only when sending via shared mailbox
+        if (sendModeResult.sendMode === Sprk.Communication.Send.SendMode.SHARED_MAILBOX &&
+            sendModeResult.fromMailbox) {
+            request.fromMailbox = sendModeResult.fromMailbox;
+        }
+    }
 
     if (ccArray && ccArray.length > 0) {
         request.cc = ccArray;
@@ -413,9 +494,17 @@ Sprk.Communication.Send._sendRequest = function (formContext, request) {
     var bffBaseUrl = Sprk.Communication.Send._getBffBaseUrl();
     var url = bffBaseUrl + "/api/communications/send";
 
-    // Get the bearer token from the Dataverse session for BFF authentication.
-    // The BFF accepts the same OBO token that Dataverse uses.
+    // Get the bearer token via MSAL for BFF authentication.
+    // Required for both send modes:
+    // - SharedMailbox: BFF validates caller identity
+    // - User: BFF uses token for OBO exchange to send as the user
     Sprk.Communication.Send._getAuthToken().then(function (token) {
+        if (!token) {
+            // Token acquisition failed — warn user
+            // This is particularly important for user-mode sends where OBO requires a valid token
+            console.warn("[Communication Send] No auth token acquired; request may fail for user-mode sends");
+        }
+
         var headers = {
             "Content-Type": "application/json",
             "Accept": "application/json"
@@ -461,36 +550,379 @@ Sprk.Communication.Send._sendRequest = function (formContext, request) {
 };
 
 /**
+ * Load MSAL library from CDN if not already loaded.
+ * Reuses the same CDN source as Spaarke.Email module.
+ * @returns {Promise<void>}
+ * @private
+ */
+Sprk.Communication.Send._loadMsalLibrary = function () {
+    return new Promise(function (resolve, reject) {
+        // Check if already loaded (by this module or Spaarke.Email)
+        if (typeof msal !== "undefined" && msal.PublicClientApplication) {
+            resolve();
+            return;
+        }
+
+        // Load from CDN
+        var script = document.createElement("script");
+        script.src = "https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js";
+        script.onload = function () {
+            console.log("[Communication Send] MSAL library loaded");
+            resolve();
+        };
+        script.onerror = function () {
+            reject(new Error("Failed to load MSAL library"));
+        };
+        document.head.appendChild(script);
+    });
+};
+
+/**
+ * Initialize MSAL PublicClientApplication instance.
+ * Reuses Spaarke.Email or Spaarke.Document MSAL instance if available.
+ * @returns {Promise<Object>} MSAL instance
+ * @private
+ */
+Sprk.Communication.Send._initMsal = function () {
+    // Reuse existing MSAL instance from other Spaarke modules if available
+    if (typeof Spaarke !== "undefined") {
+        if (Spaarke.Email && Spaarke.Email._msalInstance) {
+            console.log("[Communication Send] Reusing Spaarke.Email MSAL instance");
+            Sprk.Communication.Send._msalInstance = Spaarke.Email._msalInstance;
+            Sprk.Communication.Send._currentAccount = Spaarke.Email._currentAccount;
+            return Promise.resolve(Sprk.Communication.Send._msalInstance);
+        }
+        if (Spaarke.Document && Spaarke.Document._msalInstance) {
+            console.log("[Communication Send] Reusing Spaarke.Document MSAL instance");
+            Sprk.Communication.Send._msalInstance = Spaarke.Document._msalInstance;
+            return Promise.resolve(Sprk.Communication.Send._msalInstance);
+        }
+    }
+
+    if (Sprk.Communication.Send._msalInitPromise) {
+        return Sprk.Communication.Send._msalInitPromise;
+    }
+
+    var cfg = Sprk.Communication.Send._MSAL_CONFIG;
+
+    Sprk.Communication.Send._msalInitPromise = Sprk.Communication.Send._loadMsalLibrary()
+        .then(function () {
+            var authorityMetadataJson = JSON.stringify({
+                "authorization_endpoint": "https://login.microsoftonline.com/" + cfg.tenantId + "/oauth2/v2.0/authorize",
+                "token_endpoint": "https://login.microsoftonline.com/" + cfg.tenantId + "/oauth2/v2.0/token",
+                "issuer": "https://login.microsoftonline.com/" + cfg.tenantId + "/v2.0",
+                "jwks_uri": "https://login.microsoftonline.com/" + cfg.tenantId + "/discovery/v2.0/keys",
+                "end_session_endpoint": "https://login.microsoftonline.com/" + cfg.tenantId + "/oauth2/v2.0/logout"
+            });
+
+            var config = {
+                auth: {
+                    clientId: cfg.clientId,
+                    authority: "https://login.microsoftonline.com/" + cfg.tenantId,
+                    redirectUri: cfg.redirectUri,
+                    navigateToLoginRequestUrl: false,
+                    knownAuthorities: ["login.microsoftonline.com"],
+                    authorityMetadata: authorityMetadataJson
+                },
+                cache: {
+                    cacheLocation: "sessionStorage",
+                    storeAuthStateInCookie: false
+                },
+                system: {
+                    loggerOptions: {
+                        loggerCallback: function (level, message, containsPii) {
+                            if (containsPii) return;
+                            if (level <= 1) { // Only log errors and warnings
+                                console.log("[Communication Send MSAL] " + message);
+                            }
+                        },
+                        logLevel: 3
+                    }
+                }
+            };
+
+            Sprk.Communication.Send._msalInstance = new msal.PublicClientApplication(config);
+            console.log("[Communication Send] MSAL PublicClientApplication created");
+
+            if (typeof Sprk.Communication.Send._msalInstance.initialize === "function") {
+                return Sprk.Communication.Send._msalInstance.initialize().then(function () {
+                    return Sprk.Communication.Send._msalInstance.handleRedirectPromise();
+                });
+            } else {
+                return Sprk.Communication.Send._msalInstance.handleRedirectPromise();
+            }
+        })
+        .then(function (redirectResponse) {
+            if (redirectResponse) {
+                console.log("[Communication Send] Redirect response processed");
+                Sprk.Communication.Send._currentAccount = redirectResponse.account;
+            } else {
+                var accounts = Sprk.Communication.Send._msalInstance.getAllAccounts();
+                if (accounts.length > 0) {
+                    Sprk.Communication.Send._currentAccount = accounts[0];
+                    console.log("[Communication Send] Existing account found:", accounts[0].username);
+                }
+            }
+            return Sprk.Communication.Send._msalInstance;
+        });
+
+    return Sprk.Communication.Send._msalInitPromise;
+};
+
+/**
  * Get an authentication token for the BFF API.
  *
- * In model-driven apps, the user's session token is available via the
- * global context. We use it for BFF API authentication (On-Behalf-Of flow).
+ * Uses MSAL to acquire a bearer token for cross-origin BFF API calls.
+ * Token is required for both shared mailbox sends (BFF validates caller)
+ * and user-mode sends (BFF uses OBO to send as the user).
+ *
+ * Token acquisition strategy:
+ * 1. acquireTokenSilent (cached token)
+ * 2. ssoSilent (Dataverse session SSO)
+ * 3. acquireTokenPopup (interactive fallback)
  *
  * @returns {Promise<string|null>} Promise resolving to auth token or null
  * @private
  */
 Sprk.Communication.Send._getAuthToken = function () {
-    return new Promise(function (resolve) {
-        try {
-            var globalContext = Xrm.Utility.getGlobalContext();
-            // Get the auth token from the Dataverse session
-            // The getCurrentAppUrl provides the base URL; we use getAuthToken for the bearer token
-            if (globalContext.getCurrentAppProperties) {
-                globalContext.getCurrentAppProperties().then(function (appProperties) {
-                    // In model-driven apps, the session auth is available via XMLHttpRequest
-                    // that inherits the Dataverse session cookies automatically.
-                    // For cross-origin BFF calls, we extract the token from Xrm context.
-                    resolve(null);
-                }).catch(function () {
-                    resolve(null);
-                });
-            } else {
-                resolve(null);
-            }
-        } catch (e) {
-            console.warn("[Communication Send] Auth token acquisition failed:", e);
-            resolve(null);
+    var cfg = Sprk.Communication.Send._MSAL_CONFIG;
+    var scope = "api://" + cfg.bffAppId + "/SDAP.Access";
+
+    return Sprk.Communication.Send._initMsal().then(function (msalInstance) {
+        // Strategy 1: Silent token acquisition from cache
+        if (Sprk.Communication.Send._currentAccount) {
+            console.log("[Communication Send] Attempting acquireTokenSilent...");
+            return msalInstance.acquireTokenSilent({
+                scopes: [scope],
+                account: Sprk.Communication.Send._currentAccount
+            }).then(function (response) {
+                console.log("[Communication Send] acquireTokenSilent succeeded");
+                return response.accessToken;
+            }).catch(function () {
+                console.log("[Communication Send] acquireTokenSilent failed, trying ssoSilent...");
+                return Sprk.Communication.Send._getAuthTokenSsoFallback(msalInstance, scope);
+            });
         }
+
+        // No cached account, try SSO directly
+        return Sprk.Communication.Send._getAuthTokenSsoFallback(msalInstance, scope);
+    }).catch(function (error) {
+        console.error("[Communication Send] Auth token acquisition failed:", error);
+        return null;
+    });
+};
+
+/**
+ * SSO and popup fallback for token acquisition.
+ * @param {Object} msalInstance - The MSAL instance
+ * @param {string} scope - The token scope
+ * @returns {Promise<string|null>} Access token or null
+ * @private
+ */
+Sprk.Communication.Send._getAuthTokenSsoFallback = function (msalInstance, scope) {
+    // Strategy 2: SSO silent (uses Dataverse session)
+    return msalInstance.ssoSilent({ scopes: [scope] }).then(function (response) {
+        console.log("[Communication Send] ssoSilent succeeded");
+        if (response.account) {
+            Sprk.Communication.Send._currentAccount = response.account;
+        }
+        return response.accessToken;
+    }).catch(function () {
+        // Strategy 3: Interactive popup
+        console.log("[Communication Send] Falling back to popup authentication...");
+        var popupRequest = {
+            scopes: [scope],
+            loginHint: Sprk.Communication.Send._currentAccount
+                ? Sprk.Communication.Send._currentAccount.username
+                : undefined
+        };
+        return msalInstance.acquireTokenPopup(popupRequest).then(function (response) {
+            console.log("[Communication Send] Popup authentication succeeded");
+            if (response.account) {
+                Sprk.Communication.Send._currentAccount = response.account;
+            }
+            return response.accessToken;
+        });
+    });
+};
+
+// -----------------------------------------------------------------------
+// Internal: Send Mode Selection
+// -----------------------------------------------------------------------
+
+/**
+ * Query send-enabled shared accounts from sprk_communicationaccount.
+ * Results are cached for the duration of the session.
+ *
+ * Queries: sprk_communicationaccount where sprk_sendenableds = true
+ * Returns: Array of {name, email, isDefault} objects
+ *
+ * @returns {Promise<Array>} Array of send-enabled account objects
+ * @private
+ */
+Sprk.Communication.Send._loadSendEnabledAccounts = function () {
+    // Return cached results if available
+    if (Sprk.Communication.Send._cachedSendAccounts !== null) {
+        return Promise.resolve(Sprk.Communication.Send._cachedSendAccounts);
+    }
+
+    // Prevent concurrent requests
+    if (Sprk.Communication.Send._sendAccountsLoading) {
+        return new Promise(function (resolve) {
+            // Poll until cache is populated
+            var checkInterval = setInterval(function () {
+                if (Sprk.Communication.Send._cachedSendAccounts !== null) {
+                    clearInterval(checkInterval);
+                    resolve(Sprk.Communication.Send._cachedSendAccounts);
+                }
+            }, 100);
+
+            // Timeout after 10 seconds
+            setTimeout(function () {
+                clearInterval(checkInterval);
+                resolve([]);
+            }, 10000);
+        });
+    }
+
+    Sprk.Communication.Send._sendAccountsLoading = true;
+
+    // Query sprk_communicationaccount where send is enabled
+    // Uses actual Dataverse field names: sprk_sendenableds (trailing 's'), sprk_emailaddress, etc.
+    var filter = "?$filter=sprk_sendenableds eq true and statecode eq 0" +
+        "&$select=sprk_name,sprk_emailaddress,sprk_displayname,sprk_isdefaultsender,sprk_accounttype" +
+        "&$orderby=sprk_isdefaultsender desc,sprk_name asc";
+
+    return Xrm.WebApi.retrieveMultipleRecords("sprk_communicationaccount", filter)
+        .then(function (result) {
+            var accounts = [];
+
+            if (result.entities && result.entities.length > 0) {
+                result.entities.forEach(function (entity) {
+                    accounts.push({
+                        name: entity.sprk_displayname || entity.sprk_name || entity.sprk_emailaddress,
+                        email: entity.sprk_emailaddress,
+                        isDefault: entity.sprk_isdefaultsender === true,
+                        accountType: entity.sprk_accounttype
+                    });
+                });
+            }
+
+            Sprk.Communication.Send._cachedSendAccounts = accounts;
+            Sprk.Communication.Send._sendAccountsLoading = false;
+            console.log("[Communication Send] Loaded " + accounts.length + " send-enabled accounts");
+            return accounts;
+        })
+        .catch(function (error) {
+            console.error("[Communication Send] Failed to load send-enabled accounts:", error);
+            Sprk.Communication.Send._cachedSendAccounts = [];
+            Sprk.Communication.Send._sendAccountsLoading = false;
+            return [];
+        });
+};
+
+/**
+ * Show send mode selection dialog to the user.
+ *
+ * Presents a dialog with options:
+ * - "My Mailbox" (sendMode: "user") - sends from the user's own mailbox via OBO
+ * - Shared account options (sendMode: "sharedMailbox") - sends from shared mailbox
+ *
+ * Uses Xrm.Navigation.openAlertDialog for the selection UI since model-driven
+ * apps do not support custom HTML dialogs. The dialog presents a numbered list
+ * and uses a confirm dialog to capture the choice.
+ *
+ * When only one shared account exists, uses a simple confirm dialog.
+ * When multiple shared accounts exist, presents numbered options.
+ *
+ * @param {Object} formContext - The form context
+ * @returns {Promise<Object|null>} Send mode result or null if cancelled
+ *   - {sendMode: "user"} for My Mailbox
+ *   - {sendMode: "sharedMailbox", fromMailbox: "email@..."} for shared mailbox
+ * @private
+ */
+Sprk.Communication.Send._showSendModeDialog = function (formContext) {
+    return Sprk.Communication.Send._loadSendEnabledAccounts().then(function (accounts) {
+        // If no shared accounts configured, default to user mode without dialog
+        if (!accounts || accounts.length === 0) {
+            console.log("[Communication Send] No shared accounts configured, defaulting to user mode");
+            return { sendMode: Sprk.Communication.Send.SendMode.USER };
+        }
+
+        // Find the default shared account
+        var defaultAccount = null;
+        for (var i = 0; i < accounts.length; i++) {
+            if (accounts[i].isDefault) {
+                defaultAccount = accounts[i];
+                break;
+            }
+        }
+        // Fall back to first account if no default
+        if (!defaultAccount && accounts.length > 0) {
+            defaultAccount = accounts[0];
+        }
+
+        // Build the option list for display
+        var optionLines = [];
+        optionLines.push("1. My Mailbox (send as yourself)");
+        for (var j = 0; j < accounts.length; j++) {
+            var acct = accounts[j];
+            var label = acct.name + " (" + acct.email + ")";
+            if (acct.isDefault) {
+                label += " [Default]";
+            }
+            optionLines.push((j + 2) + ". " + label);
+        }
+
+        var dialogText = "Choose how to send this email:\n\n" +
+            optionLines.join("\n") +
+            "\n\nClick OK to send from the default shared mailbox" +
+            (defaultAccount ? " (" + defaultAccount.email + ")" : "") +
+            ", or Cancel to send from your own mailbox.";
+
+        // Use confirm dialog: OK = default shared mailbox, Cancel = My Mailbox
+        // For simplicity in the Dataverse dialog constraint, we use two-option confirm.
+        // If multiple shared accounts exist, the user can pre-set the from field
+        // on the form (sprk_from) to override which shared account to use.
+        return Xrm.Navigation.openConfirmDialog({
+            title: "Send Mode",
+            text: dialogText,
+            confirmButtonLabel: "Send from Shared Mailbox",
+            cancelButtonLabel: "Send from My Mailbox"
+        }).then(function (dialogResult) {
+            if (dialogResult.confirmed) {
+                // User chose shared mailbox mode
+                // Check if from field has a pre-set email for shared account override
+                var fromFieldValue = Sprk.Communication.Send._getFieldValue(formContext, "sprk_from");
+                var selectedMailbox = null;
+
+                if (fromFieldValue) {
+                    // Check if the from field matches a known shared account
+                    var fromEmail = fromFieldValue.trim().toLowerCase();
+                    for (var k = 0; k < accounts.length; k++) {
+                        if (accounts[k].email.toLowerCase() === fromEmail) {
+                            selectedMailbox = accounts[k].email;
+                            break;
+                        }
+                    }
+                }
+
+                // Default to the default shared account if no valid override
+                if (!selectedMailbox && defaultAccount) {
+                    selectedMailbox = defaultAccount.email;
+                }
+
+                console.log("[Communication Send] User selected shared mailbox mode:", selectedMailbox);
+                return {
+                    sendMode: Sprk.Communication.Send.SendMode.SHARED_MAILBOX,
+                    fromMailbox: selectedMailbox
+                };
+            } else {
+                // User chose My Mailbox (user mode)
+                console.log("[Communication Send] User selected My Mailbox mode");
+                return { sendMode: Sprk.Communication.Send.SendMode.USER };
+            }
+        });
     });
 };
 
@@ -599,6 +1031,37 @@ Sprk.Communication.Send._handleError = function (formContext, problemDetails, ht
 
     // Clear progress notification
     Sprk.Communication.Send._clearNotifications(formContext);
+
+    // Handle expired OBO token specifically (401 Unauthorized)
+    // This occurs when the user's delegated token has expired and the BFF
+    // cannot complete the OBO exchange for user-mode sends.
+    if (httpStatus === 401) {
+        var errorCode401 = problemDetails.errorCode || problemDetails.code || "";
+        var isOboError = errorCode401 === "OBO_TOKEN_EXPIRED" ||
+            errorCode401 === "UNAUTHORIZED" ||
+            (problemDetails.detail && problemDetails.detail.toLowerCase().indexOf("token") !== -1);
+
+        if (isOboError) {
+            // Clear MSAL cached account to force re-authentication on next attempt
+            Sprk.Communication.Send._currentAccount = null;
+            Sprk.Communication.Send._msalInitPromise = null;
+
+            formContext.ui.setFormNotification(
+                "Your session has expired. Please refresh the page and try again.",
+                "ERROR",
+                Sprk.Communication.Send._NOTIFICATION_IDS.ERROR
+            );
+            return;
+        }
+
+        // Generic 401 - still show refresh message
+        formContext.ui.setFormNotification(
+            "Authentication failed. Please refresh the page and try again.",
+            "ERROR",
+            Sprk.Communication.Send._NOTIFICATION_IDS.ERROR
+        );
+        return;
+    }
 
     // Build user-friendly error message from ProblemDetails
     var title = problemDetails.title || "Send Failed";

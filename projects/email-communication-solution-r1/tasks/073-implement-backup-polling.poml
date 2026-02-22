@@ -2,7 +2,7 @@
   <metadata>
     <title>Implement backup polling for missed webhooks</title>
     <phase>8</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>3h</estimate>
     <tags>bff-api, api</tags>
     <dependencies>070</dependencies>

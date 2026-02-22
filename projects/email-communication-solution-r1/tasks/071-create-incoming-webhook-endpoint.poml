@@ -2,7 +2,7 @@
   <metadata>
     <title>Create incoming webhook endpoint</title>
     <phase>8</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>4h</estimate>
     <tags>bff-api, api, auth</tags>
     <dependencies>070</dependencies>

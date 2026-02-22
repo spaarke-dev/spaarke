@@ -20,9 +20,16 @@ public static class CommunicationModule
         services.AddSingleton<ApprovedSenderValidator>();
         services.AddSingleton<CommunicationService>();
         services.AddSingleton<EmlGenerationService>();
+        services.AddSingleton<MailboxVerificationService>();
 
         // AI tool handler (IAiToolHandler — not auto-discovered by ToolFramework which scans IAnalysisToolHandler only)
         services.AddSingleton<SendCommunicationToolHandler>();
+
+        // Background service: manages Graph webhook subscriptions for inbound email monitoring (ADR-001)
+        services.AddHostedService<GraphSubscriptionManager>();
+
+        // Background service: backup polling for missed webhooks (ADR-001)
+        services.AddHostedService<InboundPollingBackupService>();
 
         return services;
     }

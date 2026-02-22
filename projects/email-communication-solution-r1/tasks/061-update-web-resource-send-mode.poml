@@ -2,7 +2,7 @@
   <metadata>
     <title>Update communication web resource with send mode selection</title>
     <phase>7</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>3h</estimate>
     <tags>dataverse, frontend</tags>
     <dependencies>060</dependencies>

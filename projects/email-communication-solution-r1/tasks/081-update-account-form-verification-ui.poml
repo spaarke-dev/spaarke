@@ -2,7 +2,7 @@
   <metadata>
     <title>Update sprk_communicationaccount form with verification UI</title>
     <phase>9</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>2h</estimate>
     <tags>dataverse, solution, frontend</tags>
     <dependencies>080</dependencies>

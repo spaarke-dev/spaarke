@@ -2,7 +2,7 @@
   <metadata>
     <title>Update sprk_communicationaccount form with inbound fields</title>
     <phase>8</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>1h</estimate>
     <tags>dataverse, solution</tags>
     <dependencies>070</dependencies>

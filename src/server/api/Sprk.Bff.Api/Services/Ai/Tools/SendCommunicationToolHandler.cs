@@ -95,7 +95,7 @@ public class SendCommunicationToolHandler : IAiToolHandler
                 Associations = associations
             };
 
-            var response = await _communicationService.SendAsync(request, ct);
+            var response = await _communicationService.SendAsync(request, httpContext: null, ct);
 
             return PlaybookToolResult.CreateSuccess(new
             {

@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-02-22
 > **Total Tasks**: 55
-> **Overall Status**: IN PROGRESS — Extended (35/55 complete, Phases 1-5 done, Phases 6-9 pending)
+> **Overall Status**: IN PROGRESS — Extended (48/55 complete, Phases 1-6 done, Phases 7-9 in progress)
 
 ## Task Registry
 
@@ -80,21 +80,21 @@
 
 | ID | Title | Status | Est. | Deps | Blocks | Rigor | Group |
 |----|-------|--------|------|------|--------|-------|-------|
-| 060 | Add SendMode to DTOs and branch CommunicationService for OBO | 🔲 | 4h | 055 | 061, 064 | FULL | — |
-| 061 | Update communication web resource with send mode selection | 🔲 | 3h | 060 | 064 | FULL | M |
-| 062 | Update Communication form with send mode UX | 🔲 | 2h | 060 | 064 | STANDARD | M |
-| 063 | Unit tests for individual send path | 🔲 | 2h | 060 | none | STANDARD | — |
+| 060 | Add SendMode to DTOs and branch CommunicationService for OBO | ✅ | 4h | 055 | 061, 064 | FULL | — |
+| 061 | Update communication web resource with send mode selection | ✅ | 3h | 060 | 064 | FULL | M |
+| 062 | Update Communication form with send mode UX | ✅ | 2h | 060 | 064 | STANDARD | M |
+| 063 | Unit tests for individual send path | ✅ | 2h | 060 | none | STANDARD | — |
 | 064 | End-to-end individual send testing | 🔲 | 1h | 060-063 | 080 | STANDARD | — |
 
 ### Phase 8: Inbound Shared Mailbox Monitoring (8 tasks, ~24h)
 
 | ID | Title | Status | Est. | Deps | Blocks | Rigor | Group |
 |----|-------|--------|------|------|--------|-------|-------|
-| 070 | Create GraphSubscriptionManager BackgroundService | 🔲 | 5h | 055 | 071, 077 | FULL | — |
-| 071 | Create incoming webhook endpoint | 🔲 | 4h | 070 | 072, 077 | FULL | — |
+| 070 | Create GraphSubscriptionManager BackgroundService | ✅ | 5h | 055 | 071, 077 | FULL | — |
+| 071 | Create incoming webhook endpoint | ✅ | 4h | 070 | 072, 077 | FULL | — |
 | 072 | Create IncomingCommunicationProcessor job handler | 🔲 | 5h | 071 | 077 | FULL | — |
-| 073 | Implement backup polling for missed webhooks | 🔲 | 3h | 070 | 077 | FULL | N |
-| 074 | Update sprk_communicationaccount form with inbound fields | 🔲 | 1h | 070 | none | MINIMAL | N |
+| 073 | Implement backup polling for missed webhooks | ✅ | 3h | 070 | 077 | FULL | N |
+| 074 | Update sprk_communicationaccount form with inbound fields | ✅ | 1h | 070 | none | MINIMAL | N |
 | 075 | Create incoming communication views | 🔲 | 2h | 072 | none | MINIMAL | O |
 | 076 | Unit tests for inbound pipeline | 🔲 | 3h | 070-073 | none | STANDARD | O |
 | 077 | End-to-end inbound monitoring testing | 🔲 | 2h | 070-076 | 080 | STANDARD | — |
@@ -103,8 +103,8 @@
 
 | ID | Title | Status | Est. | Deps | Blocks | Rigor | Group |
 |----|-------|--------|------|------|--------|-------|-------|
-| 080 | Create mailbox verification endpoint and service | 🔲 | 3h | 055 | 082 | FULL | — |
-| 081 | Update sprk_communicationaccount form with verification UI | 🔲 | 2h | 080 | 082 | STANDARD | — |
+| 080 | Create mailbox verification endpoint and service | ✅ | 3h | 055 | 082 | FULL | — |
+| 081 | Update sprk_communicationaccount form with verification UI | ✅ | 2h | 080 | 082 | STANDARD | — |
 | 082 | Admin documentation and deployment guide updates | 🔲 | 3h | 080, 081 | 090 | MINIMAL | — |
 
 ### Wrap-up (1 task, ~4h) — RESET
@@ -122,12 +122,12 @@
 | 3: Communication App | 6 | 1 | 3 | 2 | 20h | ✅ |
 | 4: Attachments + Archival | 9 | 4 | 2 | 3 | 28h | ✅ |
 | 5: Playbook Integration | 4 | 1 | 2 | 0 | 12h | ✅ |
-| 6: Communication Accounts | 6 | 2 | 2 | 1 | 16h | 🔲 |
-| 7: Individual User Outbound | 5 | 2 | 2 | 0 | 12h | 🔲 |
-| 8: Inbound Monitoring | 8 | 4 | 1 | 2 | 24h | 🔲 |
-| 9: Verification & Admin | 3 | 1 | 1 | 1 | 8h | 🔲 |
+| 6: Communication Accounts | 6 | 2 | 2 | 1 | 16h | ✅ |
+| 7: Individual User Outbound | 5 | 2 | 2 | 0 | 12h | 🔨 (4/5) |
+| 8: Inbound Monitoring | 8 | 4 | 1 | 2 | 24h | 🔨 (4/8) |
+| 9: Verification & Admin | 3 | 1 | 1 | 1 | 8h | 🔨 (2/3) |
 | Wrap-up (reset) | 1 | 0 | 0 | 1 | 4h | 🔲 |
-| **Total** | **57** | **22** | **18** | **12** | **~180h** | **35/57** |
+| **Total** | **57** | **22** | **18** | **12** | **~180h** | **48/57** |
 
 ## Dependency Graph
 

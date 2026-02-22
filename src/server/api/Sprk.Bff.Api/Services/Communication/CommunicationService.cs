@@ -51,24 +51,34 @@ public sealed class CommunicationService
     /// Sends a communication via Microsoft Graph sendMail API.
     /// Validates the request, resolves the sender, constructs a Graph Message, and sends.
     /// On failure, throws SdapProblemException immediately (no retry).
+    /// When SendMode is User, uses OBO flow to send as the authenticated user.
     /// </summary>
     /// <param name="request">The send communication request.</param>
+    /// <param name="httpContext">HttpContext for OBO token resolution (required when SendMode is User).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>SendCommunicationResponse on success.</returns>
     /// <exception cref="SdapProblemException">Thrown for validation errors, invalid sender, or Graph failures.</exception>
     public async Task<SendCommunicationResponse> SendAsync(
         SendCommunicationRequest request,
+        HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
     {
         var correlationId = request.CorrelationId ?? Guid.NewGuid().ToString("N");
 
         _logger.LogInformation(
-            "Sending communication | CorrelationId: {CorrelationId}, To: {RecipientCount}, Type: {Type}",
+            "Sending communication | CorrelationId: {CorrelationId}, To: {RecipientCount}, Type: {Type}, SendMode: {SendMode}",
             correlationId,
             request.To.Length,
-            request.CommunicationType);
+            request.CommunicationType,
+            request.SendMode);
 
-        // Step 1: Validate request
+        // Branch: User mode sends via OBO as the authenticated user
+        if (request.SendMode == SendMode.User)
+        {
+            return await SendAsUserAsync(request, httpContext!, correlationId, cancellationToken);
+        }
+
+        // Step 1: Validate request (shared mailbox path)
         ValidateRequest(request, correlationId);
 
         // Step 1b: Download and validate attachments (if any)
@@ -266,6 +276,319 @@ public sealed class CommunicationService
                     ["correlationId"] = correlationId
                 });
         }
+    }
+
+    /// <summary>
+    /// Sends an email as the authenticated user via On-Behalf-Of (OBO) flow.
+    /// Skips ApprovedSenderValidator — the user sends as themselves.
+    /// Uses GraphClientFactory.ForUserAsync() and calls /me/sendMail.
+    /// </summary>
+    private async Task<SendCommunicationResponse> SendAsUserAsync(
+        SendCommunicationRequest request,
+        HttpContext httpContext,
+        string correlationId,
+        CancellationToken ct)
+    {
+        // Step 1: Validate request (same basic validation as shared path)
+        ValidateRequest(request, correlationId);
+
+        // Step 1b: Validate HttpContext is available
+        if (httpContext is null)
+        {
+            throw new SdapProblemException(
+                code: "OBO_CONTEXT_REQUIRED",
+                title: "HttpContext Required",
+                detail: "SendMode.User requires an authenticated HttpContext for OBO token resolution.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object>
+                {
+                    ["correlationId"] = correlationId
+                });
+        }
+
+        // Step 1c: Download and validate attachments (if any)
+        List<FileAttachment>? fileAttachments = null;
+        if (request.AttachmentDocumentIds is { Length: > 0 })
+        {
+            fileAttachments = await DownloadAndBuildAttachmentsAsync(
+                request.AttachmentDocumentIds, correlationId, ct);
+        }
+
+        // Step 2: Resolve user email from claims (no ApprovedSenderValidator for user mode)
+        var userEmail = httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+            ?? httpContext.User.FindFirst("preferred_username")?.Value
+            ?? httpContext.User.FindFirst("email")?.Value;
+
+        if (string.IsNullOrWhiteSpace(userEmail))
+        {
+            throw new SdapProblemException(
+                code: "USER_EMAIL_NOT_FOUND",
+                title: "User Email Not Found",
+                detail: "Could not resolve user email from authentication claims. Ensure the token includes 'email' or 'preferred_username' claim.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object>
+                {
+                    ["correlationId"] = correlationId
+                });
+        }
+
+        // Resolve user object ID for sprk_sentby (Azure AD oid claim)
+        var userObjectId = httpContext.User.FindFirst("oid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+
+        _logger.LogInformation(
+            "Sending as user (OBO) | CorrelationId: {CorrelationId}, UserEmail: {UserEmail}",
+            correlationId,
+            userEmail);
+
+        // Step 3: Build Graph message (user as sender)
+        var message = new Message
+        {
+            Subject = request.Subject,
+            Body = new ItemBody
+            {
+                ContentType = request.BodyFormat == Models.BodyFormat.PlainText ? BodyType.Text : BodyType.Html,
+                Content = request.Body
+            },
+            ToRecipients = request.To.Select(email => new Recipient
+            {
+                EmailAddress = new EmailAddress { Address = email }
+            }).ToList(),
+            CcRecipients = (request.Cc ?? Array.Empty<string>()).Select(email => new Recipient
+            {
+                EmailAddress = new EmailAddress { Address = email }
+            }).ToList(),
+            BccRecipients = (request.Bcc ?? Array.Empty<string>()).Select(email => new Recipient
+            {
+                EmailAddress = new EmailAddress { Address = email }
+            }).ToList()
+        };
+
+        // Step 3b: Attach files to message (if any)
+        if (fileAttachments is { Count: > 0 })
+        {
+            message.Attachments = new List<Attachment>(fileAttachments);
+        }
+
+        // Step 4: Send via Graph API (OBO — /me/sendMail)
+        try
+        {
+            var graphClient = await _graphClientFactory.ForUserAsync(httpContext, ct);
+
+            await graphClient.Me.SendMail.PostAsync(
+                new Microsoft.Graph.Me.SendMail.SendMailPostRequestBody
+                {
+                    Message = message,
+                    SaveToSentItems = true
+                },
+                cancellationToken: ct);
+
+            _logger.LogInformation(
+                "Communication sent as user (OBO) | CorrelationId: {CorrelationId}, From: {From}, To: {RecipientCount}",
+                correlationId,
+                userEmail,
+                request.To.Length);
+
+            // Step 5: Create Dataverse communication record (best-effort)
+            Guid? communicationId = null;
+            try
+            {
+                communicationId = await CreateDataverseRecordForUserAsync(
+                    request, userEmail, userObjectId, correlationId, ct);
+            }
+            catch (Exception dvEx)
+            {
+                _logger.LogWarning(
+                    dvEx,
+                    "Dataverse record creation failed (non-fatal) | CorrelationId: {CorrelationId}",
+                    correlationId);
+            }
+
+            // Step 6: Archive to SPE if requested (best-effort)
+            Guid? archivedDocumentId = null;
+            string? archivalWarning = null;
+            if (request.ArchiveToSpe && communicationId.HasValue)
+            {
+                var partialResponse = new SendCommunicationResponse
+                {
+                    CommunicationId = communicationId,
+                    GraphMessageId = correlationId,
+                    Status = CommunicationStatus.Send,
+                    SentAt = DateTimeOffset.UtcNow,
+                    From = userEmail,
+                    CorrelationId = correlationId
+                };
+
+                try
+                {
+                    archivedDocumentId = await ArchiveToSpeAsync(request, partialResponse, communicationId.Value, ct);
+                }
+                catch (Exception archEx)
+                {
+                    archivalWarning = $"Email sent successfully but archival failed: {archEx.Message}";
+                    _logger.LogWarning(
+                        archEx,
+                        "SPE archival failed (non-fatal) | CorrelationId: {CorrelationId}",
+                        correlationId);
+                }
+            }
+            else if (request.ArchiveToSpe && !communicationId.HasValue)
+            {
+                archivalWarning = "Email sent successfully but archival skipped: Dataverse communication record was not created.";
+                _logger.LogWarning(
+                    "SPE archival skipped because Dataverse record creation failed | CorrelationId: {CorrelationId}",
+                    correlationId);
+            }
+
+            // Step 7: Create sprk_communicationattachment records (best-effort)
+            string? attachmentRecordWarning = null;
+            if (request.AttachmentDocumentIds is { Length: > 0 } && communicationId.HasValue)
+            {
+                var attachmentNames = fileAttachments?
+                    .Select(fa => fa.Name ?? "Unknown")
+                    .ToArray() ?? Array.Empty<string>();
+
+                try
+                {
+                    await CreateAttachmentRecordsAsync(
+                        communicationId.Value,
+                        request.AttachmentDocumentIds,
+                        attachmentNames,
+                        correlationId,
+                        ct);
+                }
+                catch (Exception attEx)
+                {
+                    attachmentRecordWarning = $"Email sent successfully but attachment record creation failed: {attEx.Message}";
+                    _logger.LogWarning(
+                        attEx,
+                        "Attachment record creation failed (non-fatal) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                        communicationId.Value,
+                        correlationId);
+                }
+            }
+            else if (request.AttachmentDocumentIds is { Length: > 0 } && !communicationId.HasValue)
+            {
+                attachmentRecordWarning = "Email sent successfully but attachment records skipped: Dataverse communication record was not created.";
+                _logger.LogWarning(
+                    "Attachment record creation skipped because Dataverse record creation failed | CorrelationId: {CorrelationId}",
+                    correlationId);
+            }
+
+            return new SendCommunicationResponse
+            {
+                CommunicationId = communicationId,
+                GraphMessageId = correlationId,
+                Status = CommunicationStatus.Send,
+                SentAt = DateTimeOffset.UtcNow,
+                From = userEmail,
+                CorrelationId = correlationId,
+                ArchivedDocumentId = archivedDocumentId,
+                ArchivalWarning = archivalWarning,
+                AttachmentCount = request.AttachmentDocumentIds?.Length ?? 0,
+                AttachmentRecordWarning = attachmentRecordWarning
+            };
+        }
+        catch (ODataError ex)
+        {
+            _logger.LogError(
+                ex,
+                "Graph sendMail (OBO) failed | CorrelationId: {CorrelationId}, StatusCode: {StatusCode}, ErrorCode: {ErrorCode}",
+                correlationId,
+                ex.ResponseStatusCode,
+                ex.Error?.Code);
+
+            throw new SdapProblemException(
+                code: "GRAPH_SEND_FAILED",
+                title: "Email Send Failed",
+                detail: $"Graph API error (OBO): {ex.Error?.Message ?? ex.Message}",
+                statusCode: ex.ResponseStatusCode > 0 ? ex.ResponseStatusCode : 502,
+                extensions: new Dictionary<string, object>
+                {
+                    ["correlationId"] = correlationId,
+                    ["graphErrorCode"] = ex.Error?.Code ?? "unknown",
+                    ["sendMode"] = "User"
+                });
+        }
+        catch (Exception ex) when (ex is not SdapProblemException)
+        {
+            _logger.LogError(
+                ex,
+                "Unexpected error sending communication (OBO) | CorrelationId: {CorrelationId}",
+                correlationId);
+
+            throw new SdapProblemException(
+                code: "GRAPH_SEND_FAILED",
+                title: "Email Send Failed",
+                detail: $"Unexpected error (OBO): {ex.Message}",
+                statusCode: 500,
+                extensions: new Dictionary<string, object>
+                {
+                    ["correlationId"] = correlationId,
+                    ["sendMode"] = "User"
+                });
+        }
+    }
+
+    /// <summary>
+    /// Creates a Dataverse sprk_communication record for user-mode sends.
+    /// Sets sprk_from to user's email and sprk_sentby to user's Azure AD object ID.
+    /// </summary>
+    private async Task<Guid> CreateDataverseRecordForUserAsync(
+        SendCommunicationRequest request,
+        string userEmail,
+        string? userObjectId,
+        string correlationId,
+        CancellationToken ct)
+    {
+        var communication = new DataverseEntity("sprk_communication")
+        {
+            ["sprk_name"] = $"Email: {TruncateTo(request.Subject, 200)}",
+            ["sprk_communiationtype"] = new OptionSetValue((int)request.CommunicationType), // NOTE: typo "communiation" is intentional (actual Dataverse schema)
+            ["statuscode"] = new OptionSetValue((int)CommunicationStatus.Send),
+            ["statecode"] = new OptionSetValue(0), // Active
+            ["sprk_direction"] = new OptionSetValue((int)CommunicationDirection.Outgoing),
+            ["sprk_bodyformat"] = new OptionSetValue((int)request.BodyFormat),
+            ["sprk_to"] = string.Join("; ", request.To),
+            ["sprk_from"] = userEmail,
+            ["sprk_subject"] = request.Subject,
+            ["sprk_body"] = request.Body,
+            ["sprk_graphmessageid"] = correlationId,
+            ["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime,
+            ["sprk_correlationid"] = correlationId
+        };
+
+        // Set sprk_sentby to user's Azure AD object ID (if available)
+        if (!string.IsNullOrWhiteSpace(userObjectId))
+        {
+            communication["sprk_sentby"] = userObjectId;
+        }
+
+        // Only set CC/BCC if provided
+        if (request.Cc is { Length: > 0 })
+            communication["sprk_cc"] = string.Join("; ", request.Cc);
+        if (request.Bcc is { Length: > 0 })
+            communication["sprk_bcc"] = string.Join("; ", request.Bcc);
+
+        // Set attachment fields if attachments were included
+        if (request.AttachmentDocumentIds is { Length: > 0 })
+        {
+            communication["sprk_hasattachments"] = true;
+            communication["sprk_attachmentcount"] = request.AttachmentDocumentIds.Length;
+        }
+
+        // Map primary association (regarding lookup + denormalized fields)
+        MapAssociationFields(communication, request.Associations, _logger);
+
+        var recordId = await _dataverseService.CreateAsync(communication, ct);
+
+        _logger.LogInformation(
+            "Dataverse communication record created (user mode) | Id: {RecordId}, UserEmail: {UserEmail}, CorrelationId: {CorrelationId}",
+            recordId,
+            userEmail,
+            correlationId);
+
+        return recordId;
     }
 
     private static void ValidateRequest(SendCommunicationRequest request, string correlationId)

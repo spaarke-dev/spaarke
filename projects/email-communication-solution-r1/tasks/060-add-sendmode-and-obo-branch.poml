@@ -2,7 +2,7 @@
   <metadata>
     <title>Add SendMode to DTOs and branch CommunicationService for OBO</title>
     <phase>7</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>4h</estimate>
     <tags>bff-api, api</tags>
     <dependencies>055</dependencies>

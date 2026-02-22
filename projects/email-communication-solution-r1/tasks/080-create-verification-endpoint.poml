@@ -2,7 +2,7 @@
   <metadata>
     <title>Create mailbox verification endpoint and service</title>
     <phase>9</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>3h</estimate>
     <tags>bff-api, api</tags>
     <dependencies>055</dependencies>

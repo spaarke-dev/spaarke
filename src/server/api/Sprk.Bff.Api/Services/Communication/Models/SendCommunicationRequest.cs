@@ -64,6 +64,13 @@ public sealed record SendCommunicationRequest
     public string? CorrelationId { get; init; }
 
     /// <summary>
+    /// Determines how the email is sent.
+    /// SharedMailbox (default): sends via app-only auth through the approved shared mailbox.
+    /// User: sends as the authenticated user via OBO (On-Behalf-Of) flow.
+    /// </summary>
+    public SendMode SendMode { get; init; } = SendMode.SharedMailbox;
+
+    /// <summary>
     /// Whether to archive the sent email as .eml in SharePoint Embedded.
     /// Default false.
     /// </summary>

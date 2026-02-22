@@ -2,7 +2,7 @@
   <metadata>
     <title>Update Communication form with send mode UX</title>
     <phase>7</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>2h</estimate>
     <tags>dataverse, solution</tags>
     <dependencies>060</dependencies>

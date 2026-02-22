@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -12,6 +13,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 using System.Net;
+using System.Security.Claims;
 using System.Text;
 using Xunit;
 
@@ -337,6 +339,262 @@ public class CommunicationServiceTests
         // Assert
         response.CorrelationId.Should().NotBeNullOrWhiteSpace();
         response.CorrelationId!.Length.Should().Be(32, "auto-generated correlation IDs use Guid.ToString(\"N\") which produces 32 hex chars");
+    }
+
+    #endregion
+
+    #region Phase 7: Individual Send (User Mode)
+
+    private static HttpContext CreateMockHttpContext(string email = "user@contoso.com", string? oid = null)
+    {
+        var claims = new List<Claim>
+        {
+            new Claim("preferred_username", email)
+        };
+        if (oid != null) claims.Add(new Claim("oid", oid));
+        var identity = new ClaimsIdentity(claims, "test");
+        var principal = new ClaimsPrincipal(identity);
+        var httpContext = new DefaultHttpContext { User = principal };
+        return httpContext;
+    }
+
+    [Fact]
+    public async Task SendAsync_UserMode_SkipsApprovedSenderValidator()
+    {
+        // Arrange — Use an invalid fromMailbox that would fail ApprovedSenderValidator.
+        // If validator runs, this will throw INVALID_SENDER. In User mode, it should be skipped.
+        var request = new SendCommunicationRequest
+        {
+            To = new[] { "recipient@example.com" },
+            Subject = "Test Subject",
+            Body = "<p>Test body</p>",
+            BodyFormat = BodyFormat.HTML,
+            CommunicationType = CommunicationType.Email,
+            SendMode = SendMode.User,
+            FromMailbox = "unauthorized@evil.com" // would fail if validator runs
+        };
+
+        var httpContext = CreateMockHttpContext();
+
+        _graphClientFactoryMock
+            .Setup(f => f.ForUserAsync(It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateMockGraphClient());
+
+        // Act
+        var response = await _sut.SendAsync(request, httpContext);
+
+        // Assert — Should succeed without INVALID_SENDER error (validator was skipped)
+        response.Should().NotBeNull();
+        response.Status.Should().Be(CommunicationStatus.Send);
+        response.From.Should().Be("user@contoso.com", "User mode resolves sender from claims, not from ApprovedSenderValidator");
+    }
+
+    [Fact]
+    public async Task SendAsync_UserMode_UsesForUserAsync()
+    {
+        // Arrange
+        var request = new SendCommunicationRequest
+        {
+            To = new[] { "recipient@example.com" },
+            Subject = "Test Subject",
+            Body = "<p>Test body</p>",
+            BodyFormat = BodyFormat.HTML,
+            CommunicationType = CommunicationType.Email,
+            SendMode = SendMode.User
+        };
+
+        var httpContext = CreateMockHttpContext();
+
+        _graphClientFactoryMock
+            .Setup(f => f.ForUserAsync(It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateMockGraphClient());
+
+        // Act
+        await _sut.SendAsync(request, httpContext);
+
+        // Assert — ForUserAsync called (not ForApp)
+        _graphClientFactoryMock.Verify(
+            f => f.ForUserAsync(httpContext, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "User mode must use ForUserAsync for OBO flow");
+
+        _graphClientFactoryMock.Verify(
+            f => f.ForApp(),
+            Times.Never,
+            "User mode must NOT call ForApp");
+    }
+
+    [Fact]
+    public async Task SendAsync_SharedMailboxMode_IsUnchanged()
+    {
+        // Arrange — Explicit SharedMailbox mode (default path)
+        var request = new SendCommunicationRequest
+        {
+            To = new[] { "recipient@example.com" },
+            Subject = "Test Subject",
+            Body = "<p>Test body</p>",
+            BodyFormat = BodyFormat.HTML,
+            CommunicationType = CommunicationType.Email,
+            SendMode = SendMode.SharedMailbox
+        };
+
+        // Act
+        var response = await _sut.SendAsync(request);
+
+        // Assert — Uses ForApp (shared mailbox path), response reflects approved sender
+        _graphClientFactoryMock.Verify(
+            f => f.ForApp(),
+            Times.AtLeastOnce,
+            "SharedMailbox mode must use ForApp for app-only auth");
+
+        _graphClientFactoryMock.Verify(
+            f => f.ForUserAsync(It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "SharedMailbox mode must NOT call ForUserAsync");
+
+        response.Should().NotBeNull();
+        response.Status.Should().Be(CommunicationStatus.Send);
+        response.From.Should().Be("noreply@contoso.com", "SharedMailbox mode uses approved sender from config");
+    }
+
+    [Fact]
+    public async Task SendAsync_DefaultSendMode_IsSharedMailbox()
+    {
+        // Arrange — Request without explicit SendMode (should default to SharedMailbox)
+        var request = CreateValidRequest();
+
+        // Act
+        var response = await _sut.SendAsync(request);
+
+        // Assert — Default behavior is SharedMailbox (ForApp)
+        request.SendMode.Should().Be(SendMode.SharedMailbox, "SendMode should default to SharedMailbox");
+
+        _graphClientFactoryMock.Verify(
+            f => f.ForApp(),
+            Times.AtLeastOnce,
+            "Default send mode should use ForApp (SharedMailbox path)");
+
+        _graphClientFactoryMock.Verify(
+            f => f.ForUserAsync(It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "Default send mode should NOT call ForUserAsync");
+
+        response.Should().NotBeNull();
+        response.Status.Should().Be(CommunicationStatus.Send);
+        response.From.Should().Be("noreply@contoso.com");
+    }
+
+    [Fact]
+    public async Task SendAsync_UserMode_ResolvesUserEmailFromClaims()
+    {
+        // Arrange — HttpContext with a specific preferred_username claim
+        var expectedEmail = "jane.doe@lawfirm.com";
+        var httpContext = CreateMockHttpContext(email: expectedEmail, oid: "aad-object-id-123");
+
+        var request = new SendCommunicationRequest
+        {
+            To = new[] { "client@example.com" },
+            Subject = "Legal Update",
+            Body = "<p>Status update on your matter.</p>",
+            BodyFormat = BodyFormat.HTML,
+            CommunicationType = CommunicationType.Email,
+            SendMode = SendMode.User,
+            CorrelationId = "corr-user-email-test"
+        };
+
+        _graphClientFactoryMock
+            .Setup(f => f.ForUserAsync(It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateMockGraphClient());
+
+        // Act
+        var response = await _sut.SendAsync(request, httpContext);
+
+        // Assert — From address should be the user's email from claims
+        response.Should().NotBeNull();
+        response.From.Should().Be(expectedEmail, "User mode must resolve sender email from HttpContext claims");
+        response.CorrelationId.Should().Be("corr-user-email-test");
+        response.Status.Should().Be(CommunicationStatus.Send);
+    }
+
+    [Fact]
+    public async Task SendAsync_UserMode_WithoutHttpContext_ThrowsOboContextRequired()
+    {
+        // Arrange — User mode but no HttpContext provided
+        var request = new SendCommunicationRequest
+        {
+            To = new[] { "recipient@example.com" },
+            Subject = "Test Subject",
+            Body = "<p>Test body</p>",
+            BodyFormat = BodyFormat.HTML,
+            CommunicationType = CommunicationType.Email,
+            SendMode = SendMode.User
+        };
+
+        // Act
+        var act = () => _sut.SendAsync(request, httpContext: null);
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<SdapProblemException>();
+        ex.Which.Code.Should().Be("OBO_CONTEXT_REQUIRED");
+        ex.Which.StatusCode.Should().Be(400);
+        ex.Which.Detail.Should().Contain("HttpContext");
+    }
+
+    [Fact]
+    public async Task SendAsync_UserMode_WithNoEmailClaim_ThrowsUserEmailNotFound()
+    {
+        // Arrange — HttpContext with no email-related claims
+        var identity = new ClaimsIdentity(new[] { new Claim("name", "Some User") }, "test");
+        var principal = new ClaimsPrincipal(identity);
+        var httpContext = new DefaultHttpContext { User = principal };
+
+        var request = new SendCommunicationRequest
+        {
+            To = new[] { "recipient@example.com" },
+            Subject = "Test Subject",
+            Body = "<p>Test body</p>",
+            BodyFormat = BodyFormat.HTML,
+            CommunicationType = CommunicationType.Email,
+            SendMode = SendMode.User
+        };
+
+        // Act
+        var act = () => _sut.SendAsync(request, httpContext);
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<SdapProblemException>();
+        ex.Which.Code.Should().Be("USER_EMAIL_NOT_FOUND");
+        ex.Which.StatusCode.Should().Be(400);
+        ex.Which.Detail.Should().Contain("email");
+    }
+
+    [Fact]
+    public async Task SendAsync_UserMode_WhenGraphFails_ThrowsGraphSendFailedWithUserSendMode()
+    {
+        // Arrange — OBO Graph client returns 403 Forbidden
+        var request = new SendCommunicationRequest
+        {
+            To = new[] { "recipient@example.com" },
+            Subject = "Test Subject",
+            Body = "<p>Test body</p>",
+            BodyFormat = BodyFormat.HTML,
+            CommunicationType = CommunicationType.Email,
+            SendMode = SendMode.User
+        };
+
+        var httpContext = CreateMockHttpContext();
+
+        _graphClientFactoryMock
+            .Setup(f => f.ForUserAsync(It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateFailingGraphClient());
+
+        // Act
+        var act = () => _sut.SendAsync(request, httpContext);
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<SdapProblemException>();
+        ex.Which.Code.Should().Be("GRAPH_SEND_FAILED");
+        ex.Which.Title.Should().Be("Email Send Failed");
     }
 
     #endregion

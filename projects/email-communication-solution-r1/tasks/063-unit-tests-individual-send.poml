@@ -2,7 +2,7 @@
   <metadata>
     <title>Unit tests for individual send path</title>
     <phase>7</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>2h</estimate>
     <tags>testing, unit-test</tags>
     <dependencies>060</dependencies>
