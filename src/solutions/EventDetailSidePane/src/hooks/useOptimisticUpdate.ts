@@ -159,9 +159,9 @@ export function useOptimisticUpdate(
       // Build rollback values from original event
       const rollbackValues: Partial<IEventRecord> = {};
       if (originalEvent) {
+        const orig = originalEvent as unknown as Record<string, unknown>;
         for (const field of Object.keys(failedFields)) {
-          rollbackValues[field as keyof IEventRecord] =
-            originalEvent[field as keyof IEventRecord];
+          (rollbackValues as Record<string, unknown>)[field] = orig[field];
         }
       }
 
