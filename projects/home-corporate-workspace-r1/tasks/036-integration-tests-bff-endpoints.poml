@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Integration Tests - BFF Endpoints</title>
+    <phase>Phase 4: Integration &amp; Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>008, 009, 019, 026, 027, 028</dependencies>
+    <blocks>042</blocks>
+    <tags>testing, integration-test, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing tag — integration test creation for existing BFF endpoints with explicit constraints</rigor-reason>
+    <parallel-group>pg-testing</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create integration tests for all Workspace BFF endpoints using WebApplicationFactory. Test the portfolio
+    aggregation endpoint (GET /api/workspace/portfolio), health metrics endpoint (GET /api/workspace/health),
+    scoring endpoint (POST /api/workspace/calculate-scores), AI summary endpoint (POST /api/workspace/ai-summary),
+    briefing endpoint (GET /api/workspace/briefing), and matter pre-fill endpoint. Verify response shapes match
+    expected DTOs, error handling returns ProblemDetails, caching behavior works correctly, and authorization
+    filters enforce access control.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET 8 integration testing with WebApplicationFactory, HTTP endpoint testing, mock service configuration, and ProblemDetails validation.</role>
+
+  <goal>
+    Integration test suite covering all Workspace BFF endpoints: portfolio aggregation, health metrics, scoring,
+    AI summary, briefing, and pre-fill. Tests verify response shapes, HTTP status codes, ProblemDetails error
+    responses, Redis caching behavior, and authorization filter enforcement. All tests pass with mock data.
+  </goal>
+
+  <context>
+    <background>
+      The Legal Operations Workspace BFF API exposes multiple endpoints for server-side operations that the
+      Custom Page PCF cannot perform client-side: portfolio aggregation (multi-entity joins), health metrics
+      (complex calculations), priority/effort scoring (rule engine), AI summary (Azure OpenAI integration),
+      daily briefing (deterministic content generation), and matter pre-fill (AI-assisted form population).
+      Integration tests verify these endpoints work correctly end-to-end within the ASP.NET pipeline, including
+      routing, model binding, authorization filters, service execution, and response serialization.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Workspace/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Workspace/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/</file>
+      <file>tests/integration/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">BFF uses Minimal API pattern — test endpoints via HTTP client, not controller testing</constraint>
+    <constraint source="ADR-008">Endpoint authorization filters must be tested — verify unauthorized requests return 401/403</constraint>
+    <constraint source="testing">Use WebApplicationFactory for integration tests — in-memory test server with real HTTP pipeline</constraint>
+    <constraint source="testing">Mock external dependencies (Dataverse, Azure OpenAI, Redis) — tests must not require live services</constraint>
+    <constraint source="testing">All error responses MUST return ProblemDetails with correlation ID</constraint>
+    <constraint source="testing">Use xUnit, FluentAssertions for assertions</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint pattern for BFF</pattern>
+      <pattern name="error-handling" location=".claude/patterns/api/error-handling.md">ProblemDetails error response pattern</pattern>
+      <pattern name="existing-integration-tests" location="tests/integration/">Reference for integration test setup patterns with WebApplicationFactory</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create integration test class at tests/integration/Workspace/WorkspaceEndpoints.Tests.cs — set up WebApplicationFactory with mock service registrations for Dataverse client, Azure OpenAI, IDistributedCache (Redis), and any other external dependencies</step>
+    <step order="2">Test GET /api/workspace/portfolio — send authenticated request, verify 200 response with correct PortfolioResponse shape (matters array, total count, aggregation fields). Verify response is JSON with expected Content-Type header.</step>
+    <step order="3">Test GET /api/workspace/portfolio caching — send same request twice, verify second request returns cached result. Verify cache key includes user context. Test cache invalidation behavior.</step>
+    <step order="4">Test GET /api/workspace/health — send authenticated request, verify 200 response with correct HealthMetricsResponse shape (budget utilization, compliance grades, overdue counts, portfolio grade). Verify metric calculations match expected values from mock data.</step>
+    <step order="5">Test POST /api/workspace/calculate-scores — send request with known event inputs, verify 200 response with correct ScoringResponse shape (priorityScore, effortScore, priorityReason, effortReason). Verify scores match expected calculations from known inputs.</step>
+    <step order="6">Test POST /api/workspace/ai-summary — send request with event context, verify 200 response with AiSummaryResponse shape. Use mock AI service that returns deterministic response. Verify response includes summary text and confidence score.</step>
+    <step order="7">Test GET /api/workspace/briefing — send authenticated request, verify 200 response with BriefingResponse shape (sections array, generated timestamp). Verify deterministic content generation from mock data.</step>
+    <step order="8">Test error responses across all endpoints — send malformed requests, verify 400 Bad Request with ProblemDetails body. Send requests with missing auth, verify 401 Unauthorized. Verify ProblemDetails includes correlation ID (type, title, status, detail, instance fields).</step>
+    <step order="9">Test authorization filters — verify each endpoint requires authentication. Test with different user roles if applicable. Verify 403 Forbidden for insufficient permissions.</step>
+    <step order="10">Run all integration tests (dotnet test) and verify they pass. Verify no flaky tests by running 3 times.</step>
+    <step order="11">Update TASK-INDEX.md — mark task 036 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects, run tests</tool>
+    <tool name="terminal">Run shell commands for test execution</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/integration/Workspace/WorkspaceEndpoints.Tests.cs</output>
+    <output type="code">tests/integration/Workspace/WorkspaceTestFixture.cs (shared test setup)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/workspace/portfolio returns 200 with correct PortfolioResponse shape</criterion>
+    <criterion testable="true">GET /api/workspace/portfolio caching works — second request returns cached result</criterion>
+    <criterion testable="true">GET /api/workspace/health returns 200 with correct HealthMetricsResponse shape</criterion>
+    <criterion testable="true">POST /api/workspace/calculate-scores returns correct scores for known inputs</criterion>
+    <criterion testable="true">POST /api/workspace/ai-summary returns 200 with correct AiSummaryResponse shape</criterion>
+    <criterion testable="true">GET /api/workspace/briefing returns 200 with deterministic BriefingResponse content</criterion>
+    <criterion testable="true">All error responses return ProblemDetails with correlation ID</criterion>
+    <criterion testable="true">Authorization filters return 401 for unauthenticated requests</criterion>
+    <criterion testable="true">All integration tests pass consistently (no flaky tests)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Use WebApplicationFactory&lt;Program&gt; with ConfigureTestServices to swap in mock implementations
+    - Mock IDistributedCache with MemoryDistributedCache for testing cache behavior
+    - Mock Dataverse client to return known test data sets
+    - Mock Azure OpenAI client to return deterministic AI responses
+    - Test both happy path and error scenarios for each endpoint
+    - ProblemDetails validation: check type (URI), title, status (int), detail (string), instance (correlation ID)
+    - This task can run in parallel with task 035 (Unit Tests - Scoring Engine)
+    - If endpoints use streaming (AI summary), test the streaming response correctly
+    - Authorization test: create test tokens with different claims to verify role-based access
+    - Consider using shared test fixtures (IClassFixture) for WebApplicationFactory reuse across test methods
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 8.</protocol>
+  </execution>
+</task>

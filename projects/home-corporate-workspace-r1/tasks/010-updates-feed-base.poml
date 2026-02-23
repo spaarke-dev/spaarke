@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Block 3 - Updates Feed Base</title>
+    <phase>Phase 2: Core Feature Blocks</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>001, 002, 003</dependencies>
+    <blocks>011</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag with code implementation — core engagement feature with complex filter logic, virtualized scrolling, and Dataverse integration</rigor-reason>
+    <parallel-group>pg-phase2-feed</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the Updates Feed base component (Block 3) for the Legal Operations Workspace. This is a chronological
+    activity stream showing Events from Dataverse. Build a filter bar with 8 pill-style filter cards (All, High Priority,
+    Overdue, Alerts, Emails, Documents, Invoices, Tasks) that show dynamic counts. The feed list must use virtualized
+    scrolling for performance with up to 500 items. Sort order is Priority first (critical > high > normal), then
+    timestamp descending. Include empty state handling when no results match the active filter.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in PCF control development, Fluent UI v9, React 18, virtualized lists, and Dataverse Xrm.WebApi integration.</role>
+
+  <goal>
+    A fully functional Updates Feed component with an 8-category filter bar showing dynamic count badges,
+    virtualized feed list container, correct sort order (priority DESC then timestamp DESC), empty state
+    for no results, and live data from Xrm.WebApi querying sprk_event records. All styling uses Fluent v9
+    makeStyles with semantic tokens. Dark mode renders correctly.
+  </goal>
+
+  <context>
+    <background>
+      The Updates Feed (Block 3) is the core engagement feature of the Legal Operations Workspace. It provides
+      legal operations managers with a chronological stream of Events (emails, documents, tasks, invoices, alerts)
+      relevant to their portfolio. The feed sits in the left column of the 50/50 responsive grid layout created in
+      task 001. Users filter the feed by category using pill-style filter cards that display dynamic counts. Events
+      are sorted by priority first (critical items surface above all others), then by timestamp within each priority
+      level. The feed must handle up to 500 items efficiently via virtualized scrolling. Data is fetched client-side
+      via Xrm.WebApi (hybrid data access pattern per spec.md).
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/plan.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/updates-list-filtered-by-alert_1.jpg</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/workspace-main-page.jpg</file>
+      <file>src/client/pcf/LegalWorkspace/LegalWorkspaceApp.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/components/Shell/WorkspaceGrid.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">All UI MUST use Fluent UI v9 (@fluentui/react-components) exclusively — no v8, no third-party UI libraries</constraint>
+    <constraint source="ADR-021">MUST use makeStyles (Griffel) for all custom styling with Fluent tokens — NEVER hardcode hex/rgb/hsl color values</constraint>
+    <constraint source="ADR-021">MUST support light mode, dark mode, and high-contrast mode</constraint>
+    <constraint source="ADR-021">MUST use @fluentui/react-icons for all icons</constraint>
+    <constraint source="ADR-006">Build as PCF control — no legacy JS webresources</constraint>
+    <constraint source="ADR-012">Import shared UI components from @spaarke/ui-components where available</constraint>
+    <constraint source="spec">Hybrid data access — use Xrm.WebApi for event queries (simple entity queries are client-side)</constraint>
+    <constraint source="NFR-07">Feed/portfolio queries must return within 2 seconds for up to 500 matters per user</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-006.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="theme-management" location=".claude/patterns/pcf/theme-management.md">FluentProvider theme setup, dark mode detection, semantic token usage</pattern>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Xrm.WebApi query patterns for retrieving entity records with filters and sorting</pattern>
+      <pattern name="workspace-reference" location="src/client/pcf/AnalysisWorkspace/">Canonical multi-panel workspace PCF with list/detail patterns</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ActivityFeed component directory at src/client/pcf/LegalWorkspace/components/ActivityFeed/ with index.ts barrel export</step>
+    <step order="2">Create FilterBar component with 8 pill-style filter cards (All, High Priority, Overdue, Alerts, Emails, Documents, Invoices, Tasks) — each card shows label and dynamic count badge. Use Fluent v9 Badge and Button components. Active filter has brand color highlight. Reference screenshots/updates-list-filtered-by-alert_1.jpg for visual design.</step>
+    <step order="3">Create ActivityFeedList container component with virtualized scrolling for performance. Use a virtualized list approach (react-window or manual intersection observer) to handle up to 500 items without rendering all DOM nodes. Feed container should have a fixed height with overflow scroll.</step>
+    <step order="4">Implement filter logic in a useActivityFeedFilters hook — category-based filtering (type match for Alerts/Emails/Documents/Invoices/Tasks, priority-based for High Priority, overdue date check for Overdue, All shows everything). Counts update dynamically when data changes. Active filter stored in component state.</step>
+    <step order="5">Implement sort logic: primary sort by priority level (Critical=4, High=3, Medium=2, Low=1) descending, secondary sort by timestamp descending. Apply sort after filter. Create a useSortedFeed hook or utility function.</step>
+    <step order="6">Create EmptyState component for when no results match the active filter — show an appropriate Fluent v9 illustration/icon with "No [category] items" message and a suggestion to try a different filter.</step>
+    <step order="7">Wire to Xrm.WebApi via DataverseService for Event data — query sprk_event entity with appropriate columns (name, type, priority, timestamp, todoflag, todostatus, etc.). Create a useEvents hook that fetches and caches event data. Handle loading and error states.</step>
+    <step order="8">Style all components with makeStyles and Fluent semantic tokens. Verify dark mode renders correctly — no hardcoded colors. Test high-contrast mode. Reference screenshots for spacing and layout guidance.</step>
+    <step order="9">Update TASK-INDEX.md — mark task 010 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects, install dependencies</tool>
+    <tool name="terminal">Run shell commands for build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/components/ActivityFeed/index.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/ActivityFeed/ActivityFeed.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/ActivityFeed/FilterBar.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/ActivityFeed/ActivityFeedList.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/ActivityFeed/EmptyState.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/hooks/useActivityFeedFilters.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/hooks/useEvents.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ActivityFeed component renders within the workspace grid left column</criterion>
+    <criterion testable="true">FilterBar displays 8 pill-style filter cards (All, High Priority, Overdue, Alerts, Emails, Documents, Invoices, Tasks) with dynamic count badges</criterion>
+    <criterion testable="true">Clicking a filter card updates the active filter and shows only matching events</criterion>
+    <criterion testable="true">Count badges update dynamically to reflect the number of items matching each filter category</criterion>
+    <criterion testable="true">Feed items are sorted by priority level descending (Critical > High > Medium > Low) then by timestamp descending</criterion>
+    <criterion testable="true">Virtualized scrolling handles 500+ items without performance degradation</criterion>
+    <criterion testable="true">Empty state displays when no events match the active filter</criterion>
+    <criterion testable="true">Events are fetched from Dataverse via Xrm.WebApi (sprk_event entity)</criterion>
+    <criterion testable="true">Dark mode renders correctly with zero hardcoded color values</criterion>
+    <criterion testable="true">PCF control builds without TypeScript or webpack errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Reference screenshots/updates-list-filtered-by-alert_1.jpg for filter bar styling (pill-style cards with active highlight)
+    - Reference screenshots/workspace-main-page.jpg for feed placement in the overall layout
+    - The feed list container renders FeedItemCard components (created in task 011) — for now, render placeholder items with title and type
+    - Filter bar scrolls horizontally if it overflows on narrow screens
+    - Consider using react-window for virtualized list (check if already in dependencies) or implement with IntersectionObserver
+    - The "All" filter shows total count of all events; other filters show count of events matching that category
+    - Priority levels map to numeric values for sorting: Critical=4, High=3, Medium=2, Low=1
+    - Event type field (sprk_eventtype) maps to filter categories: Alert, Email, Document, Invoice, Task
+    - Overdue filter checks if event due date is before current date
+    - High Priority filter shows events with priority = Critical or High
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 3 and 6.</protocol>
+  </execution>
+</task>

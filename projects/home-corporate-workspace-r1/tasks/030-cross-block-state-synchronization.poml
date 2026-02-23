@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Cross-Block State Synchronization</title>
+    <phase>Phase 4: Integration &amp; Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>012, 014, 020</dependencies>
+    <blocks>031, 032, 033, 034, 037</blocks>
+    <tags>pcf, react, typescript, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code modification across multiple cross-component state boundaries — PCF tag with complex shared state debugging and fixing</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Verify and fix cross-block state synchronization across all 7 build blocks in the Legal Operations Workspace.
+    Ensure the FeedTodoSyncContext propagates correctly: flagging an event in the Updates Feed must add it to the
+    Smart To Do list, unflagging must remove it. Priority and effort score badges must reflect current BFF calculations.
+    Quick Summary metrics must stay current after data changes. Portfolio Health must refresh when matter data changes.
+    This is the integration glue task that ensures all blocks work together as a cohesive page.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in React 18 state management, cross-component synchronization, context providers, and integration testing.</role>
+
+  <goal>
+    All cross-block state synchronization works correctly: feed flag toggle round-trips to Smart To Do,
+    score badges match BFF calculations, Quick Summary metrics update after data changes, Portfolio Health
+    refreshes after to-do or matter changes. Zero stale data scenarios. Integration-level component tests
+    verify all sync paths.
+  </goal>
+
+  <context>
+    <background>
+      The Legal Operations Workspace contains 7 build blocks that share state through React contexts
+      (FeedTodoSyncContext, theme context, navigation context). After individual block implementation in
+      Phases 1-3, this task verifies that the cross-block communication contracts work correctly end-to-end.
+      Key sync paths: (1) flag toggle in Updates Feed creates/removes Smart To Do items, (2) scoring
+      engine results display in both feed item badges and to-do list badges, (3) Quick Summary aggregation
+      metrics reflect current data, (4) Portfolio Health refreshes when underlying matter data changes.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/client/pcf/LegalWorkspace/LegalWorkspaceApp.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/components/ActivityFeed/</file>
+      <file>src/client/pcf/LegalWorkspace/components/SmartToDo/</file>
+      <file>src/client/pcf/LegalWorkspace/components/PortfolioHealth/</file>
+      <file>src/client/pcf/LegalWorkspace/components/QuickSummary/</file>
+      <file>src/client/pcf/LegalWorkspace/contexts/</file>
+      <file>src/client/pcf/LegalWorkspace/hooks/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">All UI MUST use Fluent UI v9 (@fluentui/react-components) exclusively — no v8, no third-party UI libraries</constraint>
+    <constraint source="ADR-021">MUST use makeStyles (Griffel) for all custom styling with Fluent tokens — NEVER hardcode hex/rgb/hsl color values</constraint>
+    <constraint source="ADR-021">MUST support light mode, dark mode, and high-contrast mode</constraint>
+    <constraint source="spec">FeedTodoSyncContext must propagate flag toggle bidirectionally between Updates Feed and Smart To Do</constraint>
+    <constraint source="spec">Score badges must reflect current BFF calculations — no cached stale values after re-scoring</constraint>
+    <constraint source="NFR-01">Page interactions must feel responsive — state updates should propagate within 100ms</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="theme-management" location=".claude/patterns/pcf/theme-management.md">FluentProvider theme setup, context provider patterns</pattern>
+      <pattern name="workspace-reference" location="src/client/pcf/AnalysisWorkspace/">Canonical multi-panel workspace PCF with cross-component state patterns</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Audit all shared state contexts: FeedTodoSyncContext, ThemeContext, NavigationContext — verify each context provider wraps the correct component subtree and all consumers are subscribed</step>
+    <step order="2">Test flag toggle round-trip: flag an event in Updates Feed — verify it appears in Smart To Do list. Unflag in Updates Feed — verify it disappears from Smart To Do. Flag from Smart To Do side — verify feed reflects the flag state.</step>
+    <step order="3">Test score display consistency: verify priority and effort badges on feed items match BFF scoring calculations. Verify to-do items show the same scores. Ensure no stale badge values after re-scoring.</step>
+    <step order="4">Test Quick Summary metrics: verify counts (overdue, high priority, pending to-dos, upcoming deadlines) update after data changes — adding a to-do should increment pending count, completing one should decrement.</step>
+    <step order="5">Test Portfolio Health refresh: verify health metrics (budget utilization, compliance grades, overdue counts) refresh when underlying matter data changes — completing a to-do or resolving an overdue event should update health display.</step>
+    <step order="6">Fix any synchronization issues found during testing — update context providers, add missing subscriptions, fix stale closure bugs, add proper dependency arrays to useEffect/useMemo/useCallback hooks.</step>
+    <step order="7">Add integration-level component tests that verify cross-block sync paths: mount multiple blocks together, trigger state changes, assert propagation across blocks.</step>
+    <step order="8">Update TASK-INDEX.md — mark task 030 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects, run tests</tool>
+    <tool name="terminal">Run shell commands for build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/contexts/ (fixed context providers)</output>
+    <output type="code">src/client/pcf/LegalWorkspace/hooks/ (fixed hooks with correct dependencies)</output>
+    <output type="code">src/client/pcf/LegalWorkspace/__tests__/cross-block-sync.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Flagging an event in Updates Feed causes it to appear in Smart To Do list within one render cycle</criterion>
+    <criterion testable="true">Unflagging an event in Updates Feed removes it from Smart To Do list within one render cycle</criterion>
+    <criterion testable="true">Priority and effort score badges on feed items match BFF scoring calculations exactly</criterion>
+    <criterion testable="true">Quick Summary metrics update correctly after to-do creation, completion, and dismissal</criterion>
+    <criterion testable="true">Portfolio Health metrics refresh after underlying matter data changes</criterion>
+    <criterion testable="true">No stale data scenarios — all cross-block state reflects current values</criterion>
+    <criterion testable="true">Integration component tests pass for all sync paths</criterion>
+    <criterion testable="true">PCF control builds without TypeScript or webpack errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - This is a sequential task — all individual block implementations must be complete before integration testing
+    - FeedTodoSyncContext is the primary cross-block communication channel between Updates Feed and Smart To Do
+    - Watch for stale closure bugs in useEffect/useCallback — ensure dependency arrays include all referenced state
+    - React 18 batching may mask synchronization issues in dev mode — test with concurrent features enabled
+    - Consider adding a simple event bus if context propagation becomes too deeply nested
+    - Portfolio Health and Quick Summary may need to re-fetch from BFF after local state changes
+    - Score badges should display the same values regardless of which block renders them
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 3 and 6.</protocol>
+  </execution>
+</task>

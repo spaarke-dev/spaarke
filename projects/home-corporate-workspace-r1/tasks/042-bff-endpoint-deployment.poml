@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>BFF Endpoint Deployment</title>
+    <phase>Phase 5: Deployment &amp; Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>036</dependencies>
+    <blocks>043</blocks>
+    <tags>deploy, azure, bff-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Deployment to Azure App Service — affects production-like environment, requires endpoint verification and caching validation</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy the Workspace BFF endpoints to the Azure App Service (spe-api-dev-67e2xz). Build the API project
+    with all workspace endpoints, deploy to Azure, verify the health endpoint responds, test the portfolio
+    endpoint from the Custom Page context, and verify Redis caching works correctly in the deployed environment.
+    Ensure all workspace-specific endpoints are accessible and return correct responses.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure App Service deployment, .NET 8 Minimal API deployment, Azure CLI, Redis cache configuration, and endpoint health verification.</role>
+
+  <goal>
+    All Workspace BFF endpoints are deployed to Azure App Service and accessible. Health endpoint responds
+    with 200 OK. Portfolio, health, scoring, AI summary, briefing endpoints return correct responses when
+    called from the Custom Page. Redis caching works in the deployed environment.
+  </goal>
+
+  <context>
+    <background>
+      The Legal Operations Workspace BFF endpoints handle server-side operations: portfolio aggregation,
+      health metrics, scoring calculations, AI summaries, and briefing generation. These endpoints are part
+      of the existing Sprk.Bff.Api application deployed to Azure App Service. Deployment involves building
+      the full API project (which includes workspace endpoints alongside existing endpoints), deploying to
+      the dev App Service instance, and verifying the new workspace endpoints work correctly. Redis caching
+      (Azure Cache for Redis) must be verified for the aggregation endpoints that cache results.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Workspace/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">BFF uses .NET 8 Minimal API — deploy as single application, not separate Azure Functions</constraint>
+    <constraint source="ADR-009">Redis caching must work in deployed environment — verify IDistributedCache connects to Azure Cache for Redis</constraint>
+    <constraint source="ADR-008">Endpoint authorization filters must enforce authentication in deployed environment</constraint>
+    <constraint source="spec">All workspace endpoints must be accessible from the Custom Page deployed in task 041</constraint>
+    <constraint source="spec">Existing BFF endpoints must not be disrupted by the workspace endpoint additions</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-009.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="azure-deploy" location=".claude/skills/azure-deploy/SKILL.md">Azure deployment skill with App Service deployment steps, health verification, and troubleshooting</pattern>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint pattern for deployment verification</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build the API project and verify all workspace endpoints compile — dotnet build src/server/api/Sprk.Bff.Api/. Fix any build errors. Run dotnet test to ensure all tests pass before deployment.</step>
+    <step order="2">Deploy to Azure App Service — use az webapp deploy or dotnet publish + az webapp deployment. Target: spe-api-dev-67e2xz in resource group spe-infrastructure-westus2. Verify deployment completes without errors.</step>
+    <step order="3">Verify health endpoint — send GET request to https://spe-api-dev-67e2xz.azurewebsites.net/healthz. Verify 200 OK response. Check that the deployment didn't break existing health checks.</step>
+    <step order="4">Test workspace portfolio endpoint — send authenticated GET request to /api/workspace/portfolio. Verify 200 response with correct PortfolioResponse shape. Check response time is acceptable.</step>
+    <step order="5">Verify Redis caching works in deployed environment — test the portfolio endpoint twice, verify second response is faster (cached). Check Azure Cache for Redis connectivity in App Service logs. Verify cache keys are created correctly.</step>
+    <step order="6">Test remaining workspace endpoints — health metrics (/api/workspace/health), scoring (/api/workspace/calculate-scores), AI summary (/api/workspace/ai-summary), briefing (/api/workspace/briefing). Verify each returns correct responses.</step>
+    <step order="7">Verify existing BFF endpoints still work — spot-check 2-3 existing endpoints (e.g., /api/documents, /api/finance) to ensure the workspace additions didn't break anything.</step>
+    <step order="8">Update TASK-INDEX.md — mark task 042 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and publish .NET API project</tool>
+    <tool name="az">Azure CLI for App Service deployment and management</tool>
+    <tool name="terminal">Run shell commands for deployment and verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">Workspace BFF endpoints deployed to spe-api-dev-67e2xz Azure App Service</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">API project builds and all tests pass before deployment</criterion>
+    <criterion testable="true">Deployment to Azure App Service completes without errors</criterion>
+    <criterion testable="true">Health endpoint (/healthz) returns 200 OK</criterion>
+    <criterion testable="true">Portfolio endpoint (/api/workspace/portfolio) returns correct data with authentication</criterion>
+    <criterion testable="true">Redis caching works — cached responses return faster than uncached</criterion>
+    <criterion testable="true">All workspace endpoints return correct responses (health, scoring, AI summary, briefing)</criterion>
+    <criterion testable="true">Existing BFF endpoints still function correctly after deployment</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Azure App Service: spe-api-dev-67e2xz in resource group spe-infrastructure-westus2
+    - BFF API URL: https://spe-api-dev-67e2xz.azurewebsites.net
+    - Use az login first to authenticate to Azure
+    - Deployment options: az webapp deploy (zip deploy), or dotnet publish -c Release then az webapp deployment source config-zip
+    - After deployment, check App Service logs (az webapp log tail) for startup errors
+    - Redis connection string should already be configured in App Service application settings — verify if not
+    - AI endpoints may require Azure OpenAI API key in App Service settings — verify configuration
+    - Load the azure-deploy skill before starting this task for the complete deployment procedure
+    - If deployment fails, check: (1) App Service plan capacity, (2) application settings, (3) startup logs
+    - CORS configuration may need updating if Custom Page URL is new — check App Service CORS settings
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load azure-deploy skill before starting. Follow task-execute skill protocol. Checkpoint after steps 2 and 6.</protocol>
+  </execution>
+</task>

@@ -42,6 +42,11 @@ This directory contains practical guides for implementing features, configuring 
 - [RIBBON-CUSTOMIZATION-GUIDE.md](RIBBON-CUSTOMIZATION-GUIDE.md)
 - [TASK-MANAGEMENT-GUIDE.md](TASK-MANAGEMENT-GUIDE.md)
 
+### Workspace & Entity Creation
+
+- **[WORKSPACE-ENTITY-CREATION-GUIDE.md](WORKSPACE-ENTITY-CREATION-GUIDE.md)** - **NEW**: Full guide for entity creation wizards (Matter, Project, etc.) — SPE upload, Dataverse records, AI analysis, follow-on actions
+- **[WORKSPACE-AI-PREFILL-GUIDE.md](WORKSPACE-AI-PREFILL-GUIDE.md)** - **NEW**: AI pre-fill process, playbook integration, and r2 roadmap for configurable extraction scopes
+
 ### How-To Guides
 
 - [HOW-TO-ADD-DOCUMENT-SUPPORT-TO-ENTITY.md](HOW-TO-ADD-DOCUMENT-SUPPORT-TO-ENTITY.md)
@@ -59,6 +64,8 @@ This directory contains practical guides for implementing features, configuring 
 - AI integration → Load AI-TOOL-FRAMEWORK-GUIDE.md, AI-STREAMING-SSE-IMPLEMENTATION.md
 - Dataverse work → Load DATAVERSE-*.md guides
 - Email automation → Load EMAIL-TO-DOCUMENT-ARCHITECTURE.md
+- Workspace entity creation → Load WORKSPACE-ENTITY-CREATION-GUIDE.md
+- AI pre-fill → Load WORKSPACE-AI-PREFILL-GUIDE.md
 
 ## Phase 3 TODO
 

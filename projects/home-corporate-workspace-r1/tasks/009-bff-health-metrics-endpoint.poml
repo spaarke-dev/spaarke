@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>BFF — Health Metrics Endpoint</title>
+    <phase>Phase 1: Foundation &amp; Independent Blocks</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>008</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag with code implementation — extends existing endpoint group with health-specific aggregation logic</rigor-reason>
+    <parallel-group>pg-phase1-bff</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the BFF health metrics endpoint at GET /api/workspace/health. This endpoint returns health metrics
+    that support the Portfolio Health Summary (Block 2): matters at risk count, overdue events count, active
+    matters count, and budget utilization percentage. Add this endpoint to the existing WorkspaceEndpoints
+    group created in task 008. Cache results in Redis with 5-minute TTL. Return a focused HealthMetrics DTO
+    optimized for the health strip UI.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET 8 Minimal API, Redis caching, Dataverse data aggregation, and BFF endpoint extension patterns.</role>
+
+  <goal>
+    A focused health metrics endpoint that returns exactly the data needed by the Portfolio Health Summary
+    UI — matters at risk, overdue events, active matters, budget utilization — cached in Redis, extending
+    the WorkspaceEndpoints group from task 008 without creating a new endpoint class.
+  </goal>
+
+  <context>
+    <background>
+      Task 008 created the WorkspaceEndpoints group and PortfolioService. This task extends that group with
+      a dedicated health metrics endpoint that returns a focused, UI-optimized DTO for the Portfolio Health
+      Summary strip (Block 2, task 004). While the portfolio endpoint returns raw aggregation data, the health
+      metrics endpoint returns pre-computed health indicators with at-risk thresholds already applied. This
+      separation keeps the UI layer thin — the health strip can consume data directly without recomputing
+      thresholds client-side.
+
+      The health metrics are:
+      - Matters at risk: count of matters where overdueeventcount > 0 OR utilizationpercent > 85%
+      - Overdue events: total count of overdue events across all user matters
+      - Active matters: total count of active matters assigned to the user
+      - Budget utilization: average utilization percentage across all user matters
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/PortfolioService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/WorkspaceModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API pattern — add to existing MapGroup, static handler method</constraint>
+    <constraint source="ADR-001">MUST return ProblemDetails for all error responses</constraint>
+    <constraint source="ADR-008">MUST use the existing WorkspaceAuthorizationFilter on the endpoint group (already applied in task 008)</constraint>
+    <constraint source="ADR-009">MUST cache health metrics in Redis — cache key: workspace:{userId}:health, TTL: 5 minutes</constraint>
+    <constraint source="ADR-010">DI registrations: reuse PortfolioService or add HealthMetricsService if needed — stay within 15-line limit</constraint>
+    <constraint source="spec">Health thresholds: matters at risk = overdueeventcount &gt; 0 OR utilization &gt; 85%</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-009.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-extension" location="src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceEndpoints.cs">Extend this existing endpoint group — add new route handler method to MapGroup</pattern>
+      <pattern name="portfolio-service" location="src/server/api/Sprk.Bff.Api/Services/Workspace/PortfolioService.cs">Reuse or extend PortfolioService for health metrics computation</pattern>
+      <pattern name="distributed-cache" location=".claude/patterns/caching/distributed-cache.md">Redis cache key conventions and TTL patterns</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add GET /health endpoint handler to WorkspaceEndpoints.cs — add a new static method GetHealthMetrics to the existing MapGroup("/api/workspace") group. The handler receives PortfolioService (or a new HealthMetricsService) and IDistributedCache via parameter injection.</step>
+    <step order="2">Define HealthMetricsResponse record/class — focused DTO with: mattersAtRisk (int), overdueEvents (int), activeMatters (int), budgetUtilizationPercent (decimal), portfolioSpend (decimal), portfolioBudget (decimal), timestamp (DateTimeOffset). Place in a Contracts or DTOs folder under Api/Workspace/.</step>
+    <step order="3">Implement health metrics computation — either extend PortfolioService with a GetHealthMetrics method or create a dedicated computation. Query user's matters from Dataverse and compute: mattersAtRisk (count where overdueeventcount &gt; 0 OR utilizationpercent &gt; 85), overdueEvents (sum of overdueeventcount), activeMatters (total count), budgetUtilizationPercent (totalSpend / totalBudget * 100 across all matters), portfolioSpend (sum), portfolioBudget (sum).</step>
+    <step order="4">Add Redis caching for health metrics — cache key: workspace:{userId}:health, TTL: 5 minutes. Check cache first, return cached data on hit. On miss, compute, cache, and return. Reuse the same serialization pattern from task 008 (System.Text.Json).</step>
+    <step order="5">Add ProblemDetails error handling — same pattern as portfolio endpoint: 401 for unauthorized, 500 for server errors, correlation ID included.</step>
+    <step order="6">If a new service class was created (HealthMetricsService), register it in WorkspaceModule.cs — verify DI registration count stays within the 15-line limit.</step>
+    <step order="7">Verify build — run dotnet build for the API project and confirm no compilation errors. Verify both /api/workspace/portfolio and /api/workspace/health endpoints are registered.</step>
+    <step order="8">Update TASK-INDEX.md — mark task 009 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects, run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceEndpoints.cs (extended)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/Contracts/HealthMetricsResponse.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/PortfolioService.cs (extended, or new HealthMetricsService.cs)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/workspace/health returns JSON with mattersAtRisk, overdueEvents, activeMatters, budgetUtilizationPercent, portfolioSpend, portfolioBudget, and timestamp fields</criterion>
+    <criterion testable="true">mattersAtRisk count correctly identifies matters where overdueeventcount &gt; 0 OR utilizationpercent &gt; 85%</criterion>
+    <criterion testable="true">overdueEvents is the sum of overdueeventcount across all user matters</criterion>
+    <criterion testable="true">budgetUtilizationPercent is correctly computed as (totalSpend / totalBudget * 100) with division-by-zero protection</criterion>
+    <criterion testable="true">Results are cached in Redis with key workspace:{userId}:health and 5-minute TTL</criterion>
+    <criterion testable="true">Cache hit returns cached data without re-querying Dataverse</criterion>
+    <criterion testable="true">Endpoint inherits WorkspaceAuthorizationFilter from the endpoint group</criterion>
+    <criterion testable="true">Errors return ProblemDetails with correlation ID and appropriate HTTP status</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+    <criterion testable="true">DI registrations remain within the 15 non-framework line limit</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - This endpoint extends the WorkspaceEndpoints group from task 008 — add a new route, don't create a new endpoint class
+    - Consider whether PortfolioService can serve both endpoints (portfolio + health) or if a separate service is cleaner
+    - If PortfolioService already computes the needed data, the health endpoint can be a thin projection of portfolio data
+    - The health metrics DTO is optimized for the Block 2 UI — includes portfolioSpend and portfolioBudget so the UI doesn't need a second call
+    - Division by zero: if totalBudget is 0, budgetUtilizationPercent should be 0 (not NaN or infinity)
+    - Consider cache invalidation strategy: when a matter is updated, the 5-minute TTL provides eventual consistency
+    - The timestamp field in the response lets the UI show "Last updated X minutes ago" for transparency
+    - Both portfolio and health caches use the same TTL (5 min) — they could potentially share a single cache entry if the data model aligns, but separate keys keep the concern separation clean
+    - Keep the HealthMetricsResponse as a C# record for immutability: public record HealthMetricsResponse(...)
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Verify task 008 outputs exist before starting.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,83 @@
+{
+  "id": "c1d2e3f4-a5b6-4c5d-8e9f-008008008008",
+  "name": "SYS-TL-BUILDER-008-autoLayout",
+  "displayName": "Auto Layout",
+  "description": "Automatically arrange nodes on the canvas for visual clarity. Organizes nodes based on execution flow using dagre layout algorithm.",
+  "scopeType": "Tool",
+  "ownerType": 1,
+  "isImmutable": true,
+  "configuration": {
+    "handlerType": "CanvasOperationHandler",
+    "operation": "autoLayout",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "direction": {
+          "type": "string",
+          "enum": ["TB", "LR", "BT", "RL"],
+          "default": "LR",
+          "description": "Layout direction: TB=top-bottom, LR=left-right, BT=bottom-top, RL=right-left"
+        },
+        "nodeSpacing": {
+          "type": "object",
+          "properties": {
+            "horizontal": {
+              "type": "number",
+              "default": 250,
+              "description": "Horizontal spacing between nodes"
+            },
+            "vertical": {
+              "type": "number",
+              "default": 150,
+              "description": "Vertical spacing between nodes"
+            }
+          }
+        },
+        "selectedNodesOnly": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, only rearrange selected nodes"
+        },
+        "preserveGroups": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep grouped nodes together"
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "updatedNodePositions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "nodeId": { "type": "string" },
+              "position": {
+                "type": "object",
+                "properties": {
+                  "x": { "type": "number" },
+                  "y": { "type": "number" }
+                }
+              }
+            }
+          }
+        },
+        "nodesAffected": {
+          "type": "integer"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      }
+    },
+    "algorithm": "dagre",
+    "notes": "Uses dagre-d3 layout algorithm for directed graph layout"
+  },
+  "metadata": {
+    "tags": ["builder", "tool", "canvas", "layout", "visual"],
+    "version": "1.0.0",
+    "category": "builder-canvas-ops"
+  }
+}

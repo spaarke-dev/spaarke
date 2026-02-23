@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>BFF - Scoring Calculation Endpoint</title>
+    <phase>Phase 2: Core Feature Blocks</phase>
+    <status>completed</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>017, 018, 008</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag with endpoint implementation — API endpoint for scoring calculation, endpoint authorization filter, DTOs, and service wiring</rigor-reason>
+    <parallel-group>pg-scoring</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create BFF API endpoints for priority and effort score calculation. Implement POST /api/workspace/calculate-scores
+    for batch scoring of multiple events and GET /api/workspace/events/{id}/scores for individual event scoring.
+    Wire PriorityScoringService and EffortScoringService into the endpoints. Create request/response DTOs with
+    full factor breakdowns. Add endpoint authorization filter per ADR-008. Return ProblemDetails on errors.
+    Register scoring services in DI module. Verify build succeeds.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET 8 Minimal API endpoint design, request/response DTOs, endpoint authorization filters, ProblemDetails error handling, and DI service registration.</role>
+
+  <goal>
+    Two functional BFF API endpoints: POST /api/workspace/calculate-scores (batch) and
+    GET /api/workspace/events/{id}/scores (single). Both return priority and effort scores with full
+    factor breakdowns. Endpoints are secured with authorization filter. Error responses use ProblemDetails.
+    PriorityScoringService and EffortScoringService are registered in DI. Build succeeds.
+  </goal>
+
+  <context>
+    <background>
+      The scoring calculation endpoints complete the server-side scoring infrastructure for the Legal Operations
+      Workspace. The priority scoring engine (task 017) and effort scoring engine (task 018) provide the
+      calculation logic; this task exposes them as BFF API endpoints that the Custom Page UI can call. The
+      single-event endpoint (GET) is used by the AI Summary dialog (Block 4D) to show scoring details for a
+      specific to-do item. The batch endpoint (POST) is used for initial page load to calculate scores for all
+      visible to-do items at once, reducing the number of API round-trips. Both endpoints follow the Minimal API
+      pattern (ADR-001) with endpoint authorization filters (ADR-008) and ProblemDetails error responses.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Scorecard/ScorecardCalculatorEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/PriorityScoringService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/EffortScoringService.cs</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API pattern — MapGet/MapPost on route groups, no controllers</constraint>
+    <constraint source="ADR-008">MUST use endpoint authorization filter — no global middleware for resource authorization</constraint>
+    <constraint source="ADR-010">DI minimalism — register services as concrete types. Total BFF DI registrations ≤15 non-framework lines.</constraint>
+    <constraint source="spec">All BFF error responses MUST use ProblemDetails format with correlation IDs</constraint>
+    <constraint source="spec">All API endpoints require authentication (except /healthz, /ping)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-008.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint registration pattern — MapGroup, MapGet, MapPost</pattern>
+      <pattern name="error-handling" location=".claude/patterns/api/error-handling.md">ProblemDetails error response pattern with correlation IDs</pattern>
+      <pattern name="scoring-endpoint" location="src/server/api/Sprk.Bff.Api/Api/Scorecard/ScorecardCalculatorEndpoints.cs">Canonical scoring endpoint — follow this exact pattern for route groups and handler methods</pattern>
+      <pattern name="auth-filter" location="src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs">Endpoint authorization filter pattern — apply to workspace endpoints</pattern>
+      <pattern name="di-module" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs">DI module pattern — create WorkspaceModule for scoring services</pattern>
+      <pattern name="aggregation-endpoint" location="src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs">Aggregation endpoint pattern — similar structure for multi-entity data assembly</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create or extend WorkspaceEndpoints.cs at src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceEndpoints.cs — define a route group /api/workspace using MapGroup. Add RequireAuthorization to the group.</step>
+    <step order="2">Create ScoreRequest DTO — for batch endpoint: list of event IDs (Guid[]) to score. For single endpoint: event ID from route parameter. Define ScoreResponse DTO: EventId (Guid), PriorityScore (int), PriorityLevel (string), PriorityFactors (list of factor results with name, value, points, explanation), EffortScore (int), EffortLevel (string), BaseEffort (int), EffortMultipliers (list of multiplier results with name, value, isApplied), PriorityReason (string), EffortReason (string).</step>
+    <step order="3">Create BatchScoreRequest DTO (list of event IDs) and BatchScoreResponse DTO (list of ScoreResponse). Add validation: max 50 events per batch request.</step>
+    <step order="4">Implement GET /api/workspace/events/{id}/scores endpoint — handler method that: 1) Retrieves event and related matter data from context/service, 2) Calls PriorityScoringService.CalculatePriorityScore, 3) Calls EffortScoringService.CalculateEffortScore, 4) Returns ScoreResponse with full breakdowns. Return 404 ProblemDetails if event not found.</step>
+    <step order="5">Implement POST /api/workspace/calculate-scores endpoint — handler method that: 1) Validates batch size ≤ 50, 2) Retrieves all events and related data, 3) Calculates scores for each event, 4) Returns BatchScoreResponse. Return 400 ProblemDetails for validation errors.</step>
+    <step order="6">Create or reuse WorkspaceAuthorizationFilter as endpoint filter — verify the user has access to the requested event/matter data. Follow DocumentAuthorizationFilter pattern. Add to workspace endpoint group with .AddEndpointFilter&lt;WorkspaceAuthorizationFilter&gt;().</step>
+    <step order="7">Create WorkspaceModule.cs at src/server/api/Sprk.Bff.Api/Infrastructure/DI/WorkspaceModule.cs — register PriorityScoringService and EffortScoringService as concrete types (services.AddSingleton&lt;PriorityScoringService&gt;() and services.AddSingleton&lt;EffortScoringService&gt;()). Follow FinanceModule pattern. Verify total DI registrations remain ≤15.</step>
+    <step order="8">Wire WorkspaceEndpoints into the API startup — add app.MapWorkspaceEndpoints() call in Program.cs or endpoint registration. Add WorkspaceModule.Register(services) in DI setup.</step>
+    <step order="9">Verify build — run dotnet build to ensure compilation succeeds. Verify no runtime startup errors.</step>
+    <step order="10">Update TASK-INDEX.md — mark task 019 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands for build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceAuthorizationFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/Dtos/ScoreRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/Dtos/ScoreResponse.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/Dtos/BatchScoreRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/Dtos/BatchScoreResponse.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/WorkspaceModule.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/workspace/events/{id}/scores returns ScoreResponse with priority score, level, factors, effort score, level, multipliers, and reason strings</criterion>
+    <criterion testable="true">POST /api/workspace/calculate-scores accepts batch of event IDs and returns BatchScoreResponse with scores for each event</criterion>
+    <criterion testable="true">Batch endpoint validates max 50 events per request and returns 400 ProblemDetails for oversized batches</criterion>
+    <criterion testable="true">404 ProblemDetails returned when event ID not found on single scoring endpoint</criterion>
+    <criterion testable="true">Endpoint authorization filter is applied to workspace route group</criterion>
+    <criterion testable="true">PriorityScoringService and EffortScoringService are registered in WorkspaceModule</criterion>
+    <criterion testable="true">Total DI registrations remain ≤15 non-framework lines after adding workspace services</criterion>
+    <criterion testable="true">All error responses use ProblemDetails format</criterion>
+    <criterion testable="true">Endpoints require authentication</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Follow ScorecardCalculatorEndpoints.cs exactly for the endpoint registration pattern — MapGroup, static handler methods, DTOs
+    - Follow FinanceModule.cs for the DI registration pattern — static Register method, AddSingleton for stateless services
+    - The scoring services are stateless and thread-safe → register as Singleton
+    - DocumentAuthorizationFilter is the pattern for workspace authorization — adapt it to check event/matter ownership
+    - ProblemDetails should include a correlation ID (from HttpContext.TraceIdentifier) for tracing
+    - Batch endpoint is important for initial page load performance — score all visible to-do items in one call instead of N individual calls
+    - Consider adding response caching headers for individual scores (scores don't change frequently)
+    - The endpoint handler needs to assemble PriorityScoreInput and EffortScoreInput from event/matter data — this may require querying Dataverse or accepting pre-assembled input from the client
+    - For R1, consider accepting pre-assembled scoring inputs in the request body (client sends the data it already has) rather than querying Dataverse server-side (simpler, faster)
+    - Task 008 (BFF health/aggregation endpoints) may have already established some of the WorkspaceEndpoints infrastructure — extend rather than duplicate
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 7.</protocol>
+  </execution>
+</task>

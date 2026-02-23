@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Solution Packaging for Dataverse</title>
+    <phase>Phase 5: Deployment &amp; Wrap-up</phase>
+    <status>completed</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>033, 034, 037</dependencies>
+    <blocks>041</blocks>
+    <tags>deploy, dataverse, pcf, solution</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Deployment task with PCF packaging — modifies solution artifacts, affects shared Dataverse environment, requires version bumping protocol</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Package the LegalWorkspace PCF control as a Dataverse unmanaged solution. Build the PCF control with all
+    7 blocks, bump the version following the PCF-V9-PACKAGING.md protocol (4 locations), create the solution
+    package using pac CLI tools, verify solution XML integrity, create the Custom Page definition within the
+    solution, and test-import to the dev environment. This is the critical packaging step before deployment.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse solution packaging, PCF control deployment, pac CLI tools, Custom Page registration, and solution XML management.</role>
+
+  <goal>
+    A valid Dataverse unmanaged solution containing the LegalWorkspace PCF control with all 7 build blocks,
+    correctly versioned per PCF-V9-PACKAGING.md, with a Custom Page definition. Solution imports to the dev
+    environment without errors and the PCF control is available for Custom Page registration.
+  </goal>
+
+  <context>
+    <background>
+      The Legal Operations Workspace is a Power Apps Custom Page built as a PCF control. Deploying to Dataverse
+      requires packaging the PCF as part of a Dataverse solution. The packaging process involves: (1) building
+      the PCF control with production configuration, (2) bumping the version in 4 locations per the PCF-V9
+      packaging guide, (3) creating/updating the Dataverse solution using pac CLI, (4) verifying the solution
+      XML is valid, (5) creating the Custom Page definition that references the PCF control. ADR-022 mandates
+      unmanaged solutions for development deployments.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/client/pcf/LegalWorkspace/ControlManifest.Input.xml</file>
+      <file>src/client/pcf/LegalWorkspace/package.json</file>
+      <file>src/solutions/</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">MUST use unmanaged solution for development deployment — no managed solutions in dev</constraint>
+    <constraint source="ADR-022">Declare platform-library in ControlManifest for React and Fluent UI — do NOT bundle these libraries</constraint>
+    <constraint source="ADR-006">Build as PCF control — output must be valid PCF artifact</constraint>
+    <constraint source="PCF-V9-PACKAGING">Version MUST be bumped in 4 locations: ControlManifest.Input.xml (version attribute), package.json (version field), solution.xml (Version element), and any solution-specific manifest</constraint>
+    <constraint source="NFR-02">Bundle size must be under 5MB — verify before packaging</constraint>
+    <constraint source="spec">Custom Page definition must reference the LegalWorkspace PCF control with correct control name</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+      <file>.claude/adr/ADR-006.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="pcf-packaging" location="docs/guides/PCF-V9-PACKAGING.md">Complete PCF v9 packaging guide with version bumping, solution creation, and deployment steps</pattern>
+      <pattern name="dataverse-deploy" location=".claude/skills/dataverse-deploy/SKILL.md">Dataverse deployment skill with pac CLI command sequences and verification steps</pattern>
+      <pattern name="existing-solution" location="src/solutions/">Existing Dataverse solution projects for reference structure</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify the PCF control builds successfully with all 7 blocks (npm run build). Confirm bundle size is under 5MB. Fix any build errors before proceeding.</step>
+    <step order="2">Bump version per PCF-V9-PACKAGING.md protocol — update version in all 4 required locations: ControlManifest.Input.xml (version attribute on control element), package.json (version field), solution project solution.xml (Version element), and any additional manifest files. Use semantic versioning (increment patch for fix, minor for feature).</step>
+    <step order="3">Create or update the Dataverse solution project — use pac solution init if new, or update existing. Add the LegalWorkspace PCF control reference to the solution (pac pcf push or pac solution add-reference).</step>
+    <step order="4">Verify solution XML integrity — check that customizations.xml, solution.xml, and [Content_Types].xml are valid. Verify the PCF control is correctly referenced in the solution components.</step>
+    <step order="5">Create the Custom Page definition within the solution — define the canvas app / Custom Page that hosts the LegalWorkspace PCF control. Configure page properties (dimensions, title, icon).</step>
+    <step order="6">Test-import the solution to dev environment (pac solution import --path {solution-zip} --environment https://spaarkedev1.crm.dynamics.com). Verify import completes without errors or warnings.</step>
+    <step order="7">Update TASK-INDEX.md — mark task 040 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF control</tool>
+    <tool name="pac">Power Apps CLI for solution packaging and deployment</tool>
+    <tool name="dotnet">Build solution projects if needed</tool>
+    <tool name="terminal">Run shell commands for build and deployment</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/ControlManifest.Input.xml (version bumped)</output>
+    <output type="code">src/client/pcf/LegalWorkspace/package.json (version bumped)</output>
+    <output type="code">src/solutions/ (solution project with PCF and Custom Page)</output>
+    <output type="artifact">Solution .zip file for Dataverse import</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PCF control builds without errors with all 7 blocks included</criterion>
+    <criterion testable="true">Bundle size is under 5MB</criterion>
+    <criterion testable="true">Version is bumped correctly in all 4 required locations</criterion>
+    <criterion testable="true">Solution XML is valid — no schema errors in customizations.xml or solution.xml</criterion>
+    <criterion testable="true">Custom Page definition is included in the solution</criterion>
+    <criterion testable="true">Solution imports to dev environment without errors</criterion>
+    <criterion testable="true">PCF control is visible in the Dataverse environment after import</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - ALWAYS follow PCF-V9-PACKAGING.md for the exact version bumping procedure — missing a location causes deployment failures
+    - Use pac auth create to authenticate to Dataverse before pac solution commands
+    - Dev environment: https://spaarkedev1.crm.dynamics.com
+    - pac solution import may take 1-5 minutes depending on solution size
+    - If import fails, check the import log for specific error details
+    - Custom Page registration may require additional manual steps in the Power Apps maker portal
+    - The dataverse-deploy skill has the complete pac CLI command sequence — load it before starting
+    - Consider creating a deployment script for repeatable packaging
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load dataverse-deploy skill and PCF-V9-PACKAGING.md before starting. Follow task-execute skill protocol. Checkpoint after steps 2 and 5.</protocol>
+  </execution>
+</task>

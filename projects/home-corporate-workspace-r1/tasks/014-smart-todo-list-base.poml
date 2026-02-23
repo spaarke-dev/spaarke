@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Block 4 - Smart To Do List Base</title>
+    <phase>Phase 2: Core Feature Blocks</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>002, 003, 012</dependencies>
+    <blocks>015, 016</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag with code implementation — complex list component with priority/effort scoring display, cross-component state consumption from FeedTodoSyncContext, and multi-source to-do aggregation</rigor-reason>
+    <parallel-group>pg-phase2-todo</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the Smart To Do list base component (Block 4). This is a prioritized work queue displaying
+    system-generated, user-flagged, and manually created to-do items. Items are sorted by priority score
+    descending then due date ascending. Each TodoItem shows: drag handle placeholder (visual only, not functional
+    in R1), checkbox, source indicator (system bot icon, user flag icon, manual edit icon), title, context text,
+    priority badge (Critical/High/Medium/Low with colors), effort badge (High/Med/Low with colors), and due label
+    (Overdue/3d/7d/10d). The list consumes FeedTodoSyncContext from Block 3D to react to flag changes. Data comes
+    from Xrm.WebApi querying events where sprk_todoflag=true.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9, React 18, list components with complex item rendering, priority/effort scoring display, and cross-component state consumption.</role>
+
+  <goal>
+    A Smart To Do list component displaying prioritized items from Dataverse (events where sprk_todoflag=true).
+    Each item shows source indicator, title, context, priority badge, effort badge, and due label with correct
+    color coding. Items sorted by priority score DESC then due date ASC. Consumes FeedTodoSyncContext to react
+    to flag changes from the Updates Feed. Dark mode supported. All badges use Fluent v9 semantic tokens.
+  </goal>
+
+  <context>
+    <background>
+      The Smart To Do list (Block 4) is the prioritized work queue for legal operations managers. It aggregates
+      items from three sources: system-generated (auto-flagged by rules — overdue, budget warnings), user-flagged
+      (manually flagged from the Updates Feed via Block 3D), and manually created (typed directly into the add bar).
+      Each item displays its priority and effort scores as colored badges, along with a due date label that uses
+      color coding to indicate urgency. The list is sorted by priority score (highest first) then due date (earliest
+      first), ensuring the most important and urgent items are always at the top. The component consumes the
+      FeedTodoSyncContext to dynamically update when items are flagged/unflagged in the Updates Feed.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/screenshots/to-do-list_1.jpg</file>
+      <file>src/client/pcf/LegalWorkspace/components/Shell/WorkspaceGrid.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/contexts/FeedTodoSyncContext.tsx</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">All UI MUST use Fluent UI v9 (@fluentui/react-components) exclusively</constraint>
+    <constraint source="ADR-021">MUST use makeStyles (Griffel) for all custom styling with Fluent tokens — NEVER hardcode hex/rgb/hsl color values</constraint>
+    <constraint source="ADR-021">MUST support light mode, dark mode, and high-contrast mode</constraint>
+    <constraint source="ADR-021">MUST use @fluentui/react-icons for all icons (drag handle, source indicators, etc.)</constraint>
+    <constraint source="ADR-012">Import shared UI components from @spaarke/ui-components where available</constraint>
+    <constraint source="spec">Hybrid data access — use Xrm.WebApi for to-do item queries (sprk_event where sprk_todoflag=true)</constraint>
+    <constraint source="spec">Drag-and-drop reorder is visual placeholder only (out of scope for R1)</constraint>
+    <constraint source="FR-07">Items sorted by priority score DESC then due date ASC</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="theme-management" location=".claude/patterns/pcf/theme-management.md">Dark mode, semantic token usage for badges and indicators</pattern>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Xrm.WebApi query patterns for filtered entity retrieval</pattern>
+      <pattern name="todo-visual-reference" location="projects/home-corporate-workspace-r1/screenshots/to-do-list_1.jpg">Visual reference for to-do item layout, badges, source indicators, due labels</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create SmartToDo component directory at src/client/pcf/LegalWorkspace/components/SmartToDo/ with index.ts barrel export. Create SmartToDo.tsx as the container component with section header ("Smart To Do" title with item count badge).</step>
+    <step order="2">Create TodoItem component — layout with: drag handle placeholder (ReOrderDotsVerticalRegular icon, visually present but non-functional), Checkbox (Fluent v9), source indicator icon, title text, context/description text. Use flexbox layout with proper alignment.</step>
+    <step order="3">Add priority badge to TodoItem — use Fluent v9 Badge component with color mapping: Critical=colorPaletteRedBackground3, High=colorPaletteYellowBackground3, Medium=colorPaletteBlueBorderActive, Low=colorNeutralBackground3. Display priority level text (Critical/High/Medium/Low).</step>
+    <step order="4">Add effort badge to TodoItem — separate badge with effort level: High=colorPaletteRedBackground3, Med=colorPaletteYellowBackground3, Low=colorPaletteGreenBackground3. Display effort level text.</step>
+    <step order="5">Add due label to TodoItem — compute due label from due date: Overdue (past due)=red badge, 3d (due within 3 days)=orange badge, 7d (due within 7 days)=yellow badge, 10d (due within 10 days)=gray badge. No label if due date is beyond 10 days.</step>
+    <step order="6">Add source indicator icons — BotRegular for system-generated (sprk_todosource='System'), FlagRegular for user-flagged (sprk_todosource='User'), EditRegular for manually created (sprk_todosource='Manual'). Display as small icon to the left of the title.</step>
+    <step order="7">Implement sort logic — primary: priority score (sprk_priorityscore) descending, secondary: due date ascending (earliest due dates first). Create a useSortedTodos hook or utility.</step>
+    <step order="8">Wire to Xrm.WebApi — query sprk_event where sprk_todoflag=true and sprk_todostatus='Open'. Retrieve fields: name, sprk_todoflag, sprk_todostatus, sprk_todosource, sprk_priorityscore, sprk_effortscore, sprk_priority, sprk_effort, due date. Create useTodoItems hook.</step>
+    <step order="9">Consume FeedTodoSyncContext — subscribe to flag state changes from Block 3D. When a new event is flagged in the feed, it should appear in the to-do list. When unflagged, it should disappear. Re-sort after changes.</step>
+    <step order="10">Update TASK-INDEX.md — mark task 014 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+    <tool name="terminal">Run shell commands for build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/components/SmartToDo/index.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/SmartToDo/SmartToDo.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/SmartToDo/TodoItem.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/hooks/useTodoItems.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/utils/dueLabelUtils.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SmartToDo component renders in the workspace layout with section header and item count</criterion>
+    <criterion testable="true">TodoItem displays drag handle placeholder, checkbox, source indicator, title, and context text</criterion>
+    <criterion testable="true">Priority badge shows correct level and color (Critical=red, High=orange, Medium=blue, Low=gray)</criterion>
+    <criterion testable="true">Effort badge shows correct level and color (High=red, Med=yellow, Low=green)</criterion>
+    <criterion testable="true">Due label displays correct urgency indicator (Overdue=red, 3d=orange, 7d=yellow, 10d=gray)</criterion>
+    <criterion testable="true">Source indicator icon correctly maps to sprk_todosource value (System=bot, User=flag, Manual=edit)</criterion>
+    <criterion testable="true">Items are sorted by priority score DESC then due date ASC</criterion>
+    <criterion testable="true">Items are fetched from Dataverse via Xrm.WebApi (sprk_event where sprk_todoflag=true)</criterion>
+    <criterion testable="true">List updates reactively when FeedTodoSyncContext emits flag changes from Block 3D</criterion>
+    <criterion testable="true">Dark mode renders correctly with zero hardcoded color values</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Reference screenshots/to-do-list_1.jpg for item layout — drag handle, checkbox, source icon, title, context, priority/effort badges, due label
+    - The drag handle is VISUAL ONLY in R1 — it renders the ReOrderDotsVerticalRegular icon but has no drag-and-drop behavior
+    - Priority and effort badges should be compact (small size) to fit in the item row
+    - Due label calculation: compare event due date to current date. If past due → "Overdue". If within 3 days → "3d". If within 7 days → "7d". If within 10 days → "10d". Beyond 10 days → no label.
+    - Priority score comes from sprk_priorityscore (0-100 numeric), priority level from sprk_priority (Critical/High/Medium/Low)
+    - Effort score comes from sprk_effortscore (0-100 numeric), effort level from sprk_effort (High/Med/Low)
+    - Task 015 will add the manual add bar, checkbox toggle behavior, and dismiss functionality
+    - Task 016 will add the AI Summary dialog with scoring grid
+    - Consider using Fluent v9 List component or a custom list for consistent styling
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 7.</protocol>
+  </execution>
+</task>

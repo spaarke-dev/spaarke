@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Create Matter Step 1 — File Upload</title>
+    <phase>Phase 3: Action Cards &amp; Dialogs</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>001, 002</dependencies>
+    <blocks>023</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF tag with code implementation — multi-step wizard shell and file upload with validation that all subsequent wizard steps depend on</rigor-reason>
+    <parallel-group>pg-phase3-dialog</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build the Create New Matter multi-step wizard dialog shell (Block 6) and implement Step 1: File Upload.
+    The wizard uses a Fluent v9 Dialog with a sidebar step indicator (vertical stepper) on the left and a
+    content area on the right. Step 1 provides a drag-and-drop file upload zone that accepts PDF, DOCX, and
+    XLSX files with a maximum size of 10MB per file. Uploaded files appear in a list with file name, size,
+    type icon, and a remove button. The Next button is disabled until at least one file is uploaded.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in PCF control development, Fluent UI v9 Dialog and form components, React 18 file handling, drag-and-drop APIs, and accessible wizard UX patterns.</role>
+
+  <goal>
+    A multi-step wizard dialog with vertical sidebar stepper and content area. Step 1 renders a drag-and-drop
+    file upload zone that validates file type (PDF, DOCX, XLSX only) and size (max 10MB each). Uploaded files
+    display in a list with metadata and remove capability. The wizard shell manages step navigation with
+    Cancel and Next buttons. The dialog supports light, dark, and high-contrast themes.
+  </goal>
+
+  <context>
+    <background>
+      The Create New Matter wizard is the only custom dialog in the workspace — the other 6 action cards
+      launch the existing AI Playbook Analysis Builder. The wizard has 3 base steps (Add Files, Create Record,
+      Next Steps) with optional follow-on steps that appear dynamically based on Step 3 selections. File
+      upload in Step 1 serves two purposes: (1) documents are attached to the new matter via SpeFileStore,
+      and (2) uploaded files are analyzed by AI to pre-fill the Create Record form in Step 2. This task
+      creates the wizard shell and Step 1 only — Steps 2 and 3 are tasks 023 and 024.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>projects/home-corporate-workspace-r1/screenshots/create-new-matter-dialog-wizard.jpg</file>
+      <file>src/client/pcf/LegalWorkspace/LegalWorkspaceApp.tsx</file>
+      <file>src/client/pcf/LegalWorkspace/types/index.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent v9 Dialog, DialogSurface, DialogBody from @fluentui/react-components</constraint>
+    <constraint source="ADR-021">MUST use makeStyles with semantic tokens — NEVER hardcode colors</constraint>
+    <constraint source="ADR-021">MUST support light, dark, and high-contrast modes</constraint>
+    <constraint source="ADR-021">MUST use @fluentui/react-icons for file type icons and action buttons</constraint>
+    <constraint source="ADR-007">File uploads ultimately route through SpeFileStore facade via BFF — store files in component state for now</constraint>
+    <constraint source="ADR-012">Import shared UI components from @spaarke/ui-components where available</constraint>
+    <constraint source="spec">Supported file types: PDF, DOCX, XLSX only</constraint>
+    <constraint source="spec">Maximum file size: 10MB per file</constraint>
+    <constraint source="spec">Next button disabled until at least 1 file is uploaded</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-007.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="theme-management" location=".claude/patterns/pcf/theme-management.md">FluentProvider theme setup, semantic token usage</pattern>
+      <pattern name="workspace-pcf-reference" location="src/client/pcf/AnalysisWorkspace/">Canonical workspace PCF for Dialog usage patterns</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create CreateMatter component directory at src/client/pcf/LegalWorkspace/components/CreateMatter/</step>
+    <step order="2">Create WizardDialog shell component (WizardDialog.tsx) — Fluent v9 Dialog with large surface, sidebar (left ~200px) for vertical step indicator, content area (right) for step content, and footer with Cancel + Back + Next/Finish buttons</step>
+    <step order="3">Create sidebar step indicator component (WizardStepper.tsx) — vertical list of steps with step number, label, and status (pending/active/completed). Base steps: "Step 1: Add Files", "Step 2: Create Record", "Step 3: Next Steps". Support dynamic addition of follow-on steps (for task 024).</step>
+    <step order="4">Create drag-and-drop file upload zone component (FileUploadZone.tsx) — uses HTML5 drag-and-drop API with visual feedback (border highlight on dragover), click-to-browse fallback via hidden file input, accepts only .pdf, .docx, .xlsx files</step>
+    <step order="5">Implement file type validation — reject files that are not PDF (.pdf), DOCX (.docx), or XLSX (.xlsx) with inline error message. Validate by both MIME type and file extension.</step>
+    <step order="6">Implement file size validation — reject files larger than 10MB with inline error message showing actual size vs limit</step>
+    <step order="7">Create uploaded file list component (UploadedFileList.tsx) — displays each file with type-appropriate icon (DocumentPdfRegular, DocumentRegular, TableRegular from @fluentui/react-icons), file name, formatted file size (KB/MB), and a remove button (DismissRegular icon)</step>
+    <step order="8">Add help text below upload zone: "Supported: PDF, DOCX, XLSX (max 10MB each)"</step>
+    <step order="9">Implement Next button state — disabled until at least 1 valid file is in the upload list. Next advances wizard to Step 2 (implemented in task 023).</step>
+    <step order="10">Verify dark mode rendering — drag-drop zone borders, file list backgrounds, button states, and error messages all use semantic tokens. Zero hardcoded colors.</step>
+    <step order="11">Update TASK-INDEX.md — mark task 022 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects, verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/components/CreateMatter/WizardDialog.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/CreateMatter/WizardStepper.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/CreateMatter/FileUploadZone.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/CreateMatter/UploadedFileList.tsx</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/CreateMatter/wizardTypes.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/components/CreateMatter/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Wizard dialog renders with sidebar step indicator and content area layout</criterion>
+    <criterion testable="true">Sidebar shows 3 base steps with correct labels and active/pending/completed states</criterion>
+    <criterion testable="true">Drag-and-drop zone accepts files and provides visual feedback on dragover</criterion>
+    <criterion testable="true">Click-to-browse fallback works via hidden file input</criterion>
+    <criterion testable="true">Files with invalid type (.jpg, .png, .txt, etc.) are rejected with error message</criterion>
+    <criterion testable="true">Files larger than 10MB are rejected with error message showing actual size</criterion>
+    <criterion testable="true">Uploaded file list shows file name, formatted size, type icon, and remove button</criterion>
+    <criterion testable="true">Removing a file from the list removes it from state</criterion>
+    <criterion testable="true">Next button is disabled when no files are uploaded and enabled when at least 1 file exists</criterion>
+    <criterion testable="true">Cancel button closes the wizard dialog</criterion>
+    <criterion testable="true">Dialog renders correctly in light, dark, and high-contrast themes</criterion>
+    <criterion testable="true">Zero hardcoded color values — all colors use Fluent semantic tokens</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Reference screenshots/create-new-matter-dialog-wizard.jpg for the wizard layout with sidebar stepper and upload zone
+    - The wizard shell (WizardDialog) must be extensible — task 024 adds dynamic follow-on steps to the sidebar
+    - Use React state (useState) to manage the file list — files are passed to Step 2 for AI pre-fill
+    - File validation should happen both on drop and on browse selection
+    - Consider showing a subtle animation when a file is successfully added to the list
+    - The dialog should be large enough (~800px wide) to accommodate the sidebar + content comfortably
+    - Back button is hidden on Step 1 (first step) — shown on subsequent steps
+    - Wizard step state management should use useReducer for clarity with multiple step transitions
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 8.</protocol>
+  </execution>
+</task>

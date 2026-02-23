@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Shared TypeScript Interfaces and Types</title>
+    <phase>Phase 1: Foundation &amp; Independent Blocks</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>003, 004, 005, 006, 007, 008, 009</blocks>
+    <tags>typescript, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation defining interfaces for all blocks — foundational contracts that enable parallel development</rigor-reason>
+    <parallel-group>pg-foundation</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Define all shared TypeScript interfaces and types for the Legal Operations Workspace. This is the
+    interface-first approach that enables parallel implementation of all blocks. Define entity interfaces
+    matching the Dataverse schema (IMatter, IEvent, IProject, IDocument, IOrganization, IContact), scoring
+    interfaces (IPriorityScore, IEffortScore, IScoreResult), portfolio interfaces (IPortfolioHealth,
+    IQuickSummary), BFF DTO interfaces (request/response types), and component prop interfaces for each block.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in TypeScript type systems, Dataverse entity schemas, and interface-first API design.</role>
+
+  <goal>
+    A complete, well-organized types directory with all shared interfaces exported from a single index.ts barrel
+    file. Every block component, data service, and BFF integration point has typed contracts defined. These
+    interfaces are the source of truth for parallel development across UI and API tasks.
+  </goal>
+
+  <context>
+    <background>
+      The Legal Operations Workspace uses a hybrid data access pattern — Xrm.WebApi for simple entity queries
+      and BFF endpoints for complex aggregations and AI integration. Defining all interfaces upfront enables
+      parallel task execution: UI components, data services, and BFF endpoints can all be developed simultaneously
+      against these contracts. The Dataverse entities (sprk_event, sprk_matter, sprk_project, sprk_document,
+      sprk_organization, sprk_contact) are all existing — no new entities.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/client/pcf/LegalWorkspace/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">All entity interfaces must match existing Dataverse schema field names (sprk_ prefix columns)</constraint>
+    <constraint source="spec">No new Dataverse entities — only use existing sprk_event, sprk_matter, sprk_project, sprk_document, sprk_organization, sprk_contact</constraint>
+    <constraint source="ADR-021">Component prop interfaces must support theme-aware rendering (no hardcoded color types)</constraint>
+    <constraint source="spec">Scoring interfaces must support transparent reason strings for both priority and effort</constraint>
+    <constraint source="spec">BFF DTOs must use ProblemDetails-compatible error types</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Dataverse entity field naming, Xrm.WebApi type patterns</pattern>
+      <pattern name="existing-pcf-types" location="src/client/pcf/AnalysisWorkspace/">Reference for TypeScript interface patterns in PCF controls</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create types directory at src/client/pcf/LegalWorkspace/types/</step>
+    <step order="2">Define entity interfaces matching Dataverse schema — IMatter (name, type, practicearea, totalbudget, totalspend, utilizationpercent, budgetcontrols_grade, guidelinescompliance_grade, outcomessuccess_grade, overdueeventcount, organization lookup, leadattorney lookup), IEvent (subject, type, priority, priorityscore, effortscore, estimatedminutes, priorityreason, effortreason, todoflag, todostatus, todosource, regarding lookup, duedate, modifiedon, createdon), IProject (name, type, practicearea, owner, status, budgetused), IDocument (name, type, description, matter lookup, modifiedon), IOrganization (name), IContact (name, email)</step>
+    <step order="3">Define scoring interfaces — IPriorityScore (score 0-100, level: Critical/High/Medium/Low, reason string, factors array with name/value/weight), IEffortScore (score 0-100, level: High/Medium/Low, reason string, baseEffort, multipliers array with name/value), IScoreResult (priority: IPriorityScore, effort: IEffortScore)</step>
+    <step order="4">Define portfolio interfaces — IPortfolioHealth (totalSpend, totalBudget, utilizationPercent, mattersAtRisk, overdueEvents, activeMatters), IQuickSummary (activeCount, spendFormatted, budgetFormatted, atRiskCount, overdueCount, topPriorityMatter, briefingText), IHealthMetrics (mattersAtRisk, overdueEvents, activeMatters, budgetUtilizationPercent)</step>
+    <step order="5">Define BFF DTO interfaces — IPortfolioResponse (extends IPortfolioHealth with timestamp), IHealthMetricsResponse (extends IHealthMetrics with timestamp), IAiSummaryRequest (entityType, entityId, context), IAiSummaryResponse (analysis, suggestedActions, confidence), IApiError (type, title, status, detail, traceId — ProblemDetails compatible)</step>
+    <step order="6">Define component prop interfaces for each block — IPortfolioHealthStripProps, IMetricCardProps, IMyPortfolioProps, IMatterItemProps, IProjectItemProps, IDocumentItemProps, INotificationPanelProps, INotificationItemProps, IPageHeaderProps, IThemeToggleProps</step>
+    <step order="7">Define shared enums and union types — MatterStatus ('Critical' | 'Warning' | 'OnTrack'), GradeLevel ('A' | 'B' | 'C' | 'D' | 'F'), PriorityLevel ('Critical' | 'High' | 'Medium' | 'Low'), EffortLevel ('High' | 'Medium' | 'Low'), TodoStatus ('Open' | 'Completed' | 'Dismissed'), TodoSource ('System' | 'User' | 'Flagged'), EventType (string union of all event types), NotificationCategory ('Documents' | 'Invoices' | 'Status' | 'Analysis')</step>
+    <step order="8">Create barrel export file (index.ts) that re-exports all interfaces, types, and enums from a single entry point</step>
+    <step order="9">Verify TypeScript compilation — ensure all types are valid and exported correctly with no circular dependencies</step>
+    <step order="10">Update TASK-INDEX.md — mark task 002 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">TypeScript compilation check</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/LegalWorkspace/types/entities.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/types/scoring.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/types/portfolio.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/types/api.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/types/components.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/types/enums.ts</output>
+    <output type="code">src/client/pcf/LegalWorkspace/types/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All entity interfaces match Dataverse schema field names for sprk_event, sprk_matter, sprk_project, sprk_document, sprk_organization, sprk_contact</criterion>
+    <criterion testable="true">Scoring interfaces include transparent reason strings and factor/multiplier breakdowns</criterion>
+    <criterion testable="true">BFF DTO interfaces include ProblemDetails-compatible error type (IApiError)</criterion>
+    <criterion testable="true">All component prop interfaces are defined for Blocks 2, 5, and 7</criterion>
+    <criterion testable="true">All types export from a single barrel index.ts with no circular dependencies</criterion>
+    <criterion testable="true">TypeScript compiles without errors</criterion>
+    <criterion testable="true">MatterStatus derivation logic types support Critical/Warning/OnTrack based on overdueeventcount and utilizationpercent thresholds</criterion>
+    <criterion testable="true">GradeLevel type supports A through F with associated color semantic (for later use by grade pill components)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Reference spec.md "Dataverse Entities Used" section for complete field lists
+    - Grade levels: A=green, B=teal, C=yellow, D=orange, F=red (use string unions, colors applied by components)
+    - MatterStatus derivation: Critical if overdueeventcount > 0 OR utilization > 85%; Warning if utilization > 65%; else OnTrack
+    - TodoSource: 'System' (auto-generated), 'User' (manually created), 'Flagged' (flagged from feed)
+    - Priority scoring factors from spec: overdue days, budget utilization, grades, deadline proximity, matter value
+    - Effort scoring: base effort per event type + complexity multipliers (1.1x-1.3x), capped at 100
+    - BFF endpoints use GET for queries — DTO interfaces should reflect query params as optional fields
+    - Keep interfaces in separate files by domain (entities, scoring, portfolio, api, components) for clarity
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Reference spec.md Dataverse Entities section as source of truth for field names.</protocol>
+  </execution>
+</task>

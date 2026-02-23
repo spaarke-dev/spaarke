@@ -15,6 +15,7 @@ using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Events;
 using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Finance;
+using Sprk.Bff.Api.Api.Workspace;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authorization;
@@ -260,6 +261,9 @@ builder.Services.AddWorkersModule(builder.Configuration);
 
 // Office Add-in module (Office integration endpoints)
 builder.Services.AddOfficeModule();
+
+// Legal Operations Workspace module (portfolio + scoring services + todo generation)
+builder.Services.AddWorkspaceServices(builder.Configuration);
 
 // Finance Intelligence module (configuration + telemetry)
 builder.Services.AddFinanceModule(builder.Configuration);
@@ -1274,18 +1278,30 @@ app.UseExceptionHandler(exceptionHandlerApp =>
                 500,
                 "server_error",
                 "Internal Server Error",
-                "An unexpected error occurred. Please check correlation ID in logs."
+                $"An unexpected error occurred ({exception?.GetType().Name}). Please check correlation ID in logs."
             )
         };
 
-        // Log the error with correlation ID
+        // Log the error with full exception details and correlation ID
         logger.LogError(exception,
-            "Request failed with {StatusCode} {Code}: {Detail} | CorrelationId: {CorrelationId}",
-            status, code, detail, traceId);
+            "Request failed | Status: {StatusCode} | Code: {Code} | Detail: {Detail} | ExceptionType: {ExceptionType} | Path: {Path} | CorrelationId: {CorrelationId}",
+            status, code, detail, exception?.GetType().FullName, ctx.Request.Path, traceId);
 
         // Return RFC 7807 Problem Details response
         ctx.Response.StatusCode = status;
         ctx.Response.ContentType = "application/problem+json";
+
+        // Ensure CORS headers are present on error responses.
+        // UseExceptionHandler clears the response, and CORS headers set during
+        // the original request processing may be lost. Re-apply the
+        // Access-Control-Allow-Origin header so the browser can read the body.
+        var origin = ctx.Request.Headers.Origin.FirstOrDefault();
+        if (!string.IsNullOrEmpty(origin) && !ctx.Response.Headers.ContainsKey("Access-Control-Allow-Origin"))
+        {
+            ctx.Response.Headers.Append("Access-Control-Allow-Origin", origin);
+            ctx.Response.Headers.Append("Access-Control-Allow-Credentials", "false");
+            logger.LogWarning("Re-applied CORS headers in exception handler for origin: {Origin}", origin);
+        }
 
         await ctx.Response.WriteAsJsonAsync(new
         {
@@ -1293,6 +1309,7 @@ app.UseExceptionHandler(exceptionHandlerApp =>
             title,
             detail,
             status,
+            correlationId = traceId,
             extensions = new Dictionary<string, object?>
             {
                 ["code"] = code,
@@ -1749,6 +1766,11 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:RecordMatchingEnabled
 // Builder Scope Admin endpoints (ai-playbook-node-builder-r2 Phase 4)
 // Allows importing builder scope JSON files into Dataverse
 app.MapBuilderScopeAdminEndpoints();
+
+// Legal Operations Workspace endpoints (portfolio aggregation + scoring — home-corporate-workspace-r1)
+app.MapWorkspaceEndpoints();
+app.MapWorkspaceAiEndpoints();
+app.MapWorkspaceMatterEndpoints();
 
 // Finance Intelligence endpoints (Financial Intelligence Module R1)
 app.MapFinanceEndpoints();

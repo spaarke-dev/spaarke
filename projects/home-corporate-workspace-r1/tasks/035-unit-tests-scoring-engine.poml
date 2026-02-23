@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Unit Tests - Scoring Engine</title>
+    <phase>Phase 4: Integration &amp; Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>017, 018, 019</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, unit-test, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing tag — comprehensive unit test creation for existing scoring services</rigor-reason>
+    <parallel-group>pg-testing</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create comprehensive unit tests for the priority scoring engine (PriorityScoringService) and effort scoring
+    engine (EffortScoringService) in the BFF API. Cover all factor combinations, boundary conditions, cap at 100,
+    and reason string generation. Test each factor individually and in combination. Test edge cases including
+    null inputs, zero values, and negative values. Achieve 80%+ code coverage on both scoring services.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET 8 unit testing with xUnit, test design patterns, boundary value analysis, and code coverage measurement.</role>
+
+  <goal>
+    Comprehensive unit test suites for PriorityScoringService and EffortScoringService with 80%+ code coverage.
+    All factor combinations tested, boundary conditions verified (cap at 100), reason string generation confirmed,
+    and edge cases (null, zero, negative) handled gracefully.
+  </goal>
+
+  <context>
+    <background>
+      The Legal Operations Workspace uses a deterministic rule-based scoring system for prioritizing events
+      and estimating effort. Priority scoring combines multiple factors (deadline proximity, matter value,
+      escalation status, overdue count, etc.) into a 0-100 score. Effort scoring uses event type base scores
+      plus complexity multipliers (document count, party count, jurisdiction complexity) capped at 100. Both
+      services produce transparent reason strings explaining which factors contributed to the score. These
+      services are critical for the Smart To Do list ordering and badge display.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/PriorityScoringService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/EffortScoringService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Workspace/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Priority score: 0-100, deterministic, rule-based with documented factor tables</constraint>
+    <constraint source="spec">Effort score: base by event type + complexity multipliers, capped at 100</constraint>
+    <constraint source="spec">Both scores produce transparent reason strings listing all contributing factors</constraint>
+    <constraint source="testing">Use xUnit for test framework, FluentAssertions for assertions, Moq for mocking dependencies</constraint>
+    <constraint source="testing">Achieve 80%+ code coverage on scoring services</constraint>
+    <constraint source="testing">Test file naming: {ClassName}.Tests.cs in tests/unit/ directory</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="scoring-reference" location="src/server/api/Sprk.Bff.Api/Api/Scorecard/ScorecardCalculatorEndpoints.cs">Canonical scoring calculation pattern in BFF API</pattern>
+      <pattern name="test-patterns" location="tests/">Existing test patterns for xUnit test organization and assertions</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create test project structure: tests/unit/Workspace/PriorityScoringService.Tests.cs and tests/unit/Workspace/EffortScoringService.Tests.cs — add necessary project references and NuGet packages (xUnit, FluentAssertions, Moq, coverlet)</step>
+    <step order="2">Test priority scoring — each factor individually: deadline proximity (due today = +30, due this week = +20, due this month = +10), matter value (high = +25, medium = +15, low = +5), escalation status (escalated = +20), overdue event count (each overdue = +5, capped). Verify each factor contributes the expected points.</step>
+    <step order="3">Test priority scoring — all factors combined: create a scenario with all factors at maximum, verify the score caps at 100. Create a scenario with all factors at minimum, verify the score is the base minimum. Create mid-range scenarios with 2-3 factors.</step>
+    <step order="4">Test priority scoring — boundary conditions: score exactly at 100 (not 101+), score at 0 with no contributing factors, score at boundary thresholds (99 → verify doesn't overflow to 100 unless warranted).</step>
+    <step order="5">Test effort scoring — each event type base score: email review (base 15), document review (base 25), invoice review (base 20), task completion (base 30), alert response (base 10). Verify each type returns the correct base score with no multipliers.</step>
+    <step order="6">Test effort scoring — each complexity multiplier individually: document count multiplier (1-5 = 1.0x, 6-20 = 1.5x, 21+ = 2.0x), party count multiplier, jurisdiction complexity multiplier. Verify each multiplier applies correctly to base score.</step>
+    <step order="7">Test effort scoring — all multipliers combined: maximum base + all multipliers at maximum = capped at 100. Minimum base + no multipliers = base score only. Mid-range combinations.</step>
+    <step order="8">Test reason string generation for both services: verify reason strings contain all contributing factor names and values. Test with single factor, multiple factors, and all factors. Verify format is human-readable.</step>
+    <step order="9">Test edge cases for both services: null input objects, null individual properties, zero numeric values, negative numeric values, empty strings for text fields. Verify graceful handling without exceptions.</step>
+    <step order="10">Run all tests (dotnet test) and verify they pass. Run with code coverage (dotnet test --collect:"XPlat Code Coverage") and verify 80%+ coverage on both scoring services.</step>
+    <step order="11">Update TASK-INDEX.md — mark task 035 as complete (change 🔲 to ✅)</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects, run tests, collect code coverage</tool>
+    <tool name="terminal">Run shell commands for test execution and coverage reporting</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/unit/Workspace/PriorityScoringService.Tests.cs</output>
+    <output type="code">tests/unit/Workspace/EffortScoringService.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PriorityScoringService unit tests cover each factor individually with expected point contributions</criterion>
+    <criterion testable="true">PriorityScoringService unit tests verify combined factor scoring caps at 100</criterion>
+    <criterion testable="true">EffortScoringService unit tests cover each event type base score</criterion>
+    <criterion testable="true">EffortScoringService unit tests cover each complexity multiplier individually</criterion>
+    <criterion testable="true">EffortScoringService unit tests verify combined multiplier scoring caps at 100</criterion>
+    <criterion testable="true">Reason string tests verify all contributing factors are included in output</criterion>
+    <criterion testable="true">Edge case tests verify graceful handling of null, zero, and negative inputs</criterion>
+    <criterion testable="true">All tests pass (dotnet test exits with code 0)</criterion>
+    <criterion testable="true">Code coverage is 80%+ on both PriorityScoringService and EffortScoringService</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Use [Theory] with [InlineData] for parameterized tests — test multiple factor values in single test method
+    - Use [Fact] for specific scenario tests (all factors combined, edge cases)
+    - Factor tables are defined in spec.md under "Priority Scoring Engine" and "Effort Scoring Engine" sections
+    - Reason strings should be in format: "Factors: deadline proximity (+30), matter value (+25), escalation (+20) = 75"
+    - This task can run in parallel with task 036 (Integration Tests - BFF Endpoints)
+    - If scoring services use dependency injection, mock any external dependencies (IDistributedCache, etc.)
+    - Arrange-Act-Assert pattern for all tests
+    - Consider using test fixtures for common test data setup
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 4 and 8.</protocol>
+  </execution>
+</task>

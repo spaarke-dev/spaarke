@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>Project Wrap-up</title>
+    <phase>Phase 5: Deployment &amp; Wrap-up</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>043</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation, project-management</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Final quality gates (code-review + adr-check + repo-cleanup) — comprehensive project closure with mandatory validation steps</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Execute final project wrap-up for the Legal Operations Workspace (home-corporate-workspace-r1). Run all
+    quality gates: /code-review on all project code, /adr-check to validate architectural compliance, fix any
+    critical issues found. Run /repo-cleanup for repository hygiene. Update README.md to Status: Complete with
+    100% progress and completion date. Update plan.md to Status: Complete. Verify all graduation criteria are
+    met. Create a lessons learned document. Ensure all tasks in TASK-INDEX.md show ✅. Make a final commit.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in project closure, code review, architectural compliance validation, repository maintenance, and documentation.</role>
+
+  <goal>
+    All quality gates pass (code-review clean, adr-check compliant, repo-cleanup passes). README.md shows
+    Status: Complete with 100% progress and completion date. plan.md shows Status: Complete. All graduation
+    criteria met. Lessons learned documented. TASK-INDEX.md shows all tasks ✅. Final commit made.
+  </goal>
+
+  <context>
+    <background>
+      Project wrap-up is the final phase of the development lifecycle. After all features are implemented,
+      tested, and deployed (tasks 001-043), this task ensures the project meets all quality standards,
+      documentation is complete, and the repository is clean. The wrap-up includes running automated quality
+      gates (code-review for code quality, adr-check for architectural compliance), updating project status
+      artifacts, creating a lessons learned document for future projects, and making a final commit. This
+      task follows the Spaarke development lifecycle Phase 8 (Project Wrap-up).
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/README.md</file>
+      <file>projects/home-corporate-workspace-r1/plan.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>projects/home-corporate-workspace-r1/tasks/TASK-INDEX.md</file>
+      <file>src/client/pcf/LegalWorkspace/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Workspace/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/</file>
+      <file>tests/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="lifecycle">ALL quality gates MUST pass before project can be marked Complete</constraint>
+    <constraint source="lifecycle">Code-review: no critical issues, no security vulnerabilities, no ADR violations in code</constraint>
+    <constraint source="lifecycle">ADR-check: all applicable ADRs verified for compliance (ADR-001, 006, 007, 008, 009, 010, 012, 013, 021, 022)</constraint>
+    <constraint source="lifecycle">Repo-cleanup: no orphaned files, no stale branches, no forgotten TODO comments in production code</constraint>
+    <constraint source="lifecycle">README.md must show Status: Complete, Progress: 100%, Completed Date</constraint>
+    <constraint source="lifecycle">All tasks in TASK-INDEX.md must show ✅ (no 🔲 or 🔄 remaining)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="code-review" location=".claude/skills/code-review/SKILL.md">Code review skill with checklist for quality gate validation</pattern>
+      <pattern name="adr-check" location=".claude/skills/adr-check/SKILL.md">ADR compliance check skill with validation procedures</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run /code-review on all project code — review src/client/pcf/LegalWorkspace/ (PCF frontend), src/server/api/Sprk.Bff.Api/Api/Workspace/ and Services/Workspace/ (BFF backend), and tests/. Document findings: critical issues, warnings, and suggestions.</step>
+    <step order="2">Run /adr-check on all project code — validate compliance with applicable ADRs: ADR-001 (Minimal API), ADR-006 (PCF over webresources), ADR-007 (SpeFileStore facade), ADR-008 (endpoint filters), ADR-009 (Redis caching), ADR-010 (DI minimalism), ADR-012 (shared components), ADR-013 (AI architecture), ADR-021 (Fluent v9), ADR-022 (PCF platform libraries). Document compliance status for each.</step>
+    <step order="3">Fix any critical issues found by code-review or adr-check. Critical issues include: security vulnerabilities, ADR violations, missing error handling, hardcoded secrets. Warnings and suggestions can be documented as future improvements.</step>
+    <step order="4">Run /repo-cleanup on projects/home-corporate-workspace-r1 — verify no orphaned temporary files, no leftover debugging code (console.log, debugger statements), no stale TODO/FIXME/HACK comments in production code, no committed .env or secrets files.</step>
+    <step order="5">Update README.md — set Status to "Complete", Progress to "100%", add Completed Date (today's date). Update the summary section with final feature list and deployment URLs. Ensure all sections are current.</step>
+    <step order="6">Update plan.md — set Status to "Complete". Verify all phases show as completed. Add final timeline notes if any phases took longer than estimated.</step>
+    <step order="7">Check all graduation criteria — verify: (1) all 16 spec.md success criteria passed (task 043), (2) code-review clean, (3) adr-check compliant, (4) tests pass, (5) deployed to dev, (6) documentation complete. Document graduation status.</step>
+    <step order="8">Create lessons learned document at projects/home-corporate-workspace-r1/notes/lessons-learned.md — document: what went well, what could be improved, technical decisions that proved good/bad, estimation accuracy, recommended patterns for future projects.</step>
+    <step order="9">Update TASK-INDEX.md — verify all tasks show ✅. Mark task 090 as complete (change 🔲 to ✅). Verify no tasks remain as 🔲 or 🔄.</step>
+    <step order="10">Make final commit with all wrap-up changes — descriptive commit message including project completion status and summary of wrap-up actions.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run tests to verify nothing is broken</tool>
+    <tool name="npm">Build PCF to verify nothing is broken</tool>
+    <tool name="git">Final commit</tool>
+    <tool name="terminal">Run shell commands for cleanup and verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">projects/home-corporate-workspace-r1/README.md (updated: Status Complete)</output>
+    <output type="documentation">projects/home-corporate-workspace-r1/plan.md (updated: Status Complete)</output>
+    <output type="documentation">projects/home-corporate-workspace-r1/CLAUDE.md (updated: Status Complete)</output>
+    <output type="documentation">projects/home-corporate-workspace-r1/tasks/TASK-INDEX.md (all ✅)</output>
+    <output type="documentation">projects/home-corporate-workspace-r1/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Code-review passes with no critical issues</criterion>
+    <criterion testable="true">ADR-check passes for all applicable ADRs (001, 006, 007, 008, 009, 010, 012, 013, 021, 022)</criterion>
+    <criterion testable="true">Repo-cleanup passes — no orphaned files, no debugging code, no stale TODOs</criterion>
+    <criterion testable="true">README.md shows Status: Complete, Progress: 100%, Completed Date set</criterion>
+    <criterion testable="true">plan.md shows Status: Complete</criterion>
+    <criterion testable="true">All graduation criteria documented and met</criterion>
+    <criterion testable="true">Lessons learned document exists with meaningful retrospective content</criterion>
+    <criterion testable="true">TASK-INDEX.md shows all tasks as ✅ with zero 🔲 or 🔄</criterion>
+    <criterion testable="true">Final commit made with descriptive message</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - This is the mandatory wrap-up task — every project must complete this before being marked done
+    - Quality gates (code-review + adr-check) are non-negotiable — critical issues must be fixed
+    - Lessons learned should be honest and actionable — future projects will reference this
+    - Common findings in wrap-up: leftover console.log statements, TODO comments, missing error handling edge cases
+    - CLAUDE.md should also be updated: Status to Complete, Last Updated to today's date, Current Task to "Project complete"
+    - The final commit should be clean — only wrap-up changes, no mixed feature/fix code
+    - After this task, the project branch is ready for PR to master via /push-to-github
+    - Consider running dotnet test and npm run build one final time to confirm everything still works
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load code-review and adr-check skills before starting. Follow task-execute skill protocol. Checkpoint after steps 3 and 7.</protocol>
+  </execution>
+</task>

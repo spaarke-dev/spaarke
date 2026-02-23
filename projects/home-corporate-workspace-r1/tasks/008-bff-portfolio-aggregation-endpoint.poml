@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="home-corporate-workspace-r1">
+  <metadata>
+    <title>BFF — Portfolio Aggregation Endpoint</title>
+    <phase>Phase 1: Foundation &amp; Independent Blocks</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>009</blocks>
+    <tags>bff-api, api, minimal-api, endpoints, cache, redis</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag with code implementation — new BFF endpoint group, service layer, DI module, Redis caching, and authorization filter</rigor-reason>
+    <parallel-group>pg-phase1-bff</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the BFF portfolio aggregation endpoint at GET /api/workspace/portfolio. This endpoint aggregates
+    matters by the authenticated user — computing total spend, total budget, utilization percentage, matter
+    counts by status, and overdue event counts. Results are cached in Redis with a 5-minute TTL. The endpoint
+    uses an endpoint authorization filter (per ADR-008), returns ProblemDetails on error, and follows the
+    Minimal API pattern (ADR-001). Register the workspace services through a DI module (per ADR-010).
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET 8 Minimal API, Redis IDistributedCache, endpoint filters for authorization, DI module patterns, and Dataverse integration from BFF.</role>
+
+  <goal>
+    A fully functional BFF endpoint (GET /api/workspace/portfolio) that returns aggregated portfolio data for
+    the authenticated user — total spend, total budget, utilization, matter counts, overdue events. Cached in
+    Redis with 5-minute TTL. Returns ProblemDetails on error. Authorized via endpoint filter. DI registrations
+    follow the module pattern within the 15-registration limit.
+  </goal>
+
+  <context>
+    <background>
+      The Legal Operations Workspace uses a hybrid data access pattern. Simple entity queries go through
+      Xrm.WebApi on the client side, but portfolio aggregation (summing spend/budget across all user matters,
+      counting at-risk and overdue statuses) requires server-side computation via the BFF. This endpoint
+      serves the Portfolio Health Summary (Block 2, task 004) and provides the foundational data model for
+      the health metrics endpoint (task 009). The BFF connects to Dataverse via the existing integration
+      layer to query sprk_matter and sprk_event entities for the authenticated user.
+    </background>
+    <relevant-files>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+      <file>projects/home-corporate-workspace-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingCache.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API pattern — MapGroup, static endpoint handler methods, no controllers</constraint>
+    <constraint source="ADR-001">MUST return ProblemDetails for all error responses with correlation IDs</constraint>
+    <constraint source="ADR-008">MUST use endpoint authorization filter — no global auth middleware. Follow DocumentAuthorizationFilter.cs pattern.</constraint>
+    <constraint source="ADR-009">MUST cache aggregation results in Redis via IDistributedCache — cache key: workspace:{userId}:portfolio, TTL: 5 minutes</constraint>
+    <constraint source="ADR-010">DI registrations MUST stay within ≤15 non-framework lines total for the BFF. Use module extension method pattern (WorkspaceModule.cs).</constraint>
+    <constraint source="ADR-010">Use concrete types for service registration unless a seam is explicitly required</constraint>
+    <constraint source="spec">Aggregation targets: sprk_matter (spend, budget, utilization, grades) and sprk_event (overdue counts) for the authenticated user</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-008.md</file>
+      <file>.claude/adr/ADR-009.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+      <file>projects/home-corporate-workspace-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API MapGroup, endpoint handler methods, route patterns</pattern>
+      <pattern name="error-handling" location=".claude/patterns/api/error-handling.md">ProblemDetails factory, correlation IDs, HTTP status mapping</pattern>
+      <pattern name="service-registration" location=".claude/patterns/api/service-registration.md">DI module extension method pattern, concrete type registration</pattern>
+      <pattern name="distributed-cache" location=".claude/patterns/caching/distributed-cache.md">IDistributedCache Redis patterns, cache key conventions, TTL configuration</pattern>
+      <pattern name="aggregation-endpoint" location="src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs">Canonical BFF aggregation endpoint — follow this structure for MapGroup, handler methods, service injection</pattern>
+      <pattern name="di-module" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs">Canonical DI module pattern — AddFinanceServices() extension method</pattern>
+      <pattern name="auth-filter" location="src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs">Canonical endpoint authorization filter — follow for workspace authorization</pattern>
+      <pattern name="redis-cache" location="src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingCache.cs">Canonical Redis cache usage with IDistributedCache — follow for portfolio caching</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Workspace directory under Api/ — src/server/api/Sprk.Bff.Api/Api/Workspace/</step>
+    <step order="2">Create WorkspaceEndpoints.cs with MapGroup("/api/workspace") — define static endpoint handler method for GET /portfolio route. Follow FinanceEndpoints.cs structure: static class with MapWorkspaceEndpoints extension method, endpoint handler receives services via parameter injection.</step>
+    <step order="3">Create PortfolioService.cs in src/server/api/Sprk.Bff.Api/Services/Workspace/ — service class that queries Dataverse for user's matters (sprk_matter) and computes aggregated totals: sum of totalspend, sum of totalbudget, average utilizationpercent, count of matters where overdueeventcount &gt; 0 (at-risk), count of matters where status is active, total overdue event count. Accept userId as parameter.</step>
+    <step order="4">Implement portfolio aggregation query in PortfolioService — use existing Dataverse integration layer to query sprk_matter filtered by owner = userId. Compute: totalSpend (sum), totalBudget (sum), utilizationPercent (totalSpend/totalBudget * 100), mattersAtRisk (count where overdueeventcount &gt; 0 OR utilizationpercent &gt; 85), overdueEvents (sum of overdueeventcount across all matters), activeMatters (total count).</step>
+    <step order="5">Add Redis caching to PortfolioService — check IDistributedCache for key workspace:{userId}:portfolio before querying Dataverse. If cache hit, deserialize and return. If cache miss, query Dataverse, serialize result, set in cache with 5-minute AbsoluteExpiration, then return. Follow EmbeddingCache.cs pattern for serialization.</step>
+    <step order="6">Create WorkspaceAuthorizationFilter.cs in Api/Filters/ — endpoint authorization filter that validates the authenticated user has access to workspace data. Follow DocumentAuthorizationFilter.cs pattern. Extract userId from HttpContext.User claims.</step>
+    <step order="7">Add ProblemDetails error handling — wrap endpoint handler in try/catch, return TypedResults.Problem() with appropriate status codes: 401 for unauthorized, 500 for server errors, 503 for Dataverse unavailable. Include correlation ID from HttpContext.</step>
+    <step order="8">Create WorkspaceModule.cs in Infrastructure/DI/ — AddWorkspaceServices() extension method that registers PortfolioService as concrete type. Follow FinanceModule.cs pattern. Count registrations against the 15-line limit.</step>
+    <step order="9">Register workspace services in Program.cs — call builder.Services.AddWorkspaceServices() and app.MapWorkspaceEndpoints(). Add the WorkspaceAuthorizationFilter to the endpoint group.</step>
+    <step order="10">Verify build — run dotnet build for the API project and confirm no compilation errors. Verify the endpoint is registered correctly.</step>
+    <step order="11">Update TASK-INDEX.md — mark task 008 as complete</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects, run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/PortfolioService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Filters/WorkspaceAuthorizationFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/WorkspaceModule.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/workspace/portfolio returns JSON with totalSpend, totalBudget, utilizationPercent, mattersAtRisk, overdueEvents, activeMatters fields</criterion>
+    <criterion testable="true">Aggregation correctly sums spend/budget and counts at-risk matters (overdueeventcount &gt; 0 OR utilization &gt; 85%) across user's matters</criterion>
+    <criterion testable="true">Results are cached in Redis with key workspace:{userId}:portfolio and 5-minute TTL</criterion>
+    <criterion testable="true">Cache hit returns cached data without querying Dataverse</criterion>
+    <criterion testable="true">Endpoint uses WorkspaceAuthorizationFilter — unauthenticated requests return 401 ProblemDetails</criterion>
+    <criterion testable="true">Server errors return ProblemDetails with correlation ID and appropriate status code</criterion>
+    <criterion testable="true">DI registrations in WorkspaceModule.cs use concrete types and stay within the 15-line BFF limit</criterion>
+    <criterion testable="true">WorkspaceEndpoints.cs follows Minimal API MapGroup pattern matching FinanceEndpoints.cs structure</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+    <criterion testable="true">Endpoint is registered in Program.cs via MapWorkspaceEndpoints()</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Follow FinanceEndpoints.cs as the canonical aggregation endpoint pattern — same static class structure, MapGroup, handler methods
+    - Follow FinanceModule.cs for DI module pattern — AddWorkspaceServices() extension method
+    - Follow DocumentAuthorizationFilter.cs for endpoint auth filter pattern
+    - Follow EmbeddingCache.cs for Redis IDistributedCache pattern — System.Text.Json for serialization
+    - Redis cache key convention: workspace:{userId}:portfolio — userId from authenticated claims
+    - Cache TTL: 5 minutes (AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5))
+    - ProblemDetails: use TypedResults.Problem() with ProblemDetails factory — include traceId from Activity.Current
+    - The endpoint handler should extract userId from HttpContext.User (ClaimsPrincipal) via the auth filter
+    - Utilization calculation: if totalBudget is 0, set utilizationPercent to 0 (avoid division by zero)
+    - At-risk definition: matter has overdueeventcount &gt; 0 OR utilizationpercent &gt; 85 (matches UI threshold)
+    - This endpoint group will be extended in task 009 with the health metrics endpoint
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow task-execute skill protocol. Checkpoint after steps 5 and 9.</protocol>
+  </execution>
+</task>
