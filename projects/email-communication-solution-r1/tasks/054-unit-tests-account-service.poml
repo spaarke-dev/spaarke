@@ -1,0 +1,43 @@
+<task id="054" project="email-communication-solution-r1">
+  <metadata>
+    <title>Unit tests for account service and validator updates</title>
+    <phase>6</phase>
+    <status>completed</status>
+    <estimate>2h</estimate>
+    <tags>testing, unit-test</tags>
+    <dependencies>050, 051</dependencies>
+    <blocks>none</blocks>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create unit tests for CommunicationAccountService and the updated ApprovedSenderValidator.</goal>
+    <context>Tests should verify Dataverse query construction, Redis caching, two-tier merge logic, and graceful fallback behavior.</context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ApprovedSenderValidator.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Test CommunicationAccountService.QuerySendEnabledAccountsAsync() returns correct accounts from Dataverse mock</step>
+    <step>Test Redis caching: first call hits Dataverse, second call hits cache</step>
+    <step>Test cache expiry: after 5 minutes, call hits Dataverse again</step>
+    <step>Test AccountType enum values match Dataverse schema</step>
+    <step>Test DeriveAuthMethod: SharedAccount/ServiceAccount → AppOnly, UserAccount → OBO</step>
+    <step>Test updated ApprovedSenderValidator: config-only scenario (no Dataverse accounts)</step>
+    <step>Test ApprovedSenderValidator: Dataverse accounts overlay config senders</step>
+    <step>Test ApprovedSenderValidator: fallback when Dataverse throws exception</step>
+    <step>Test ApprovedSenderValidator: Dataverse wins on email match</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All unit tests pass</criterion>
+    <criterion>Coverage for cache hit/miss/expiry scenarios</criterion>
+    <criterion>Coverage for two-tier merge logic (config + Dataverse overlay)</criterion>
+    <criterion>Coverage for fallback behavior on Dataverse failure</criterion>
+  </acceptance-criteria>
+</task>

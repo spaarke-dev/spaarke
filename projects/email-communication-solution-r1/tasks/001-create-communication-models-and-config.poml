@@ -1,0 +1,87 @@
+<task id="001" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create communication models, DTOs, and configuration</title>
+    <phase>1: BFF Email Service</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>003, 004, 005</blocks>
+    <tags>bff-api, models</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New files only, no existing code modification</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Create the communication DTOs, enums, and configuration options for the BFF Communication Service. All enum values must match the actual Dataverse schema exactly, including the typo in sprk_communiationtype.</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8 Minimal API, Dataverse schema mapping, and strongly-typed configuration</role>
+
+  <goal>All communication models, DTOs, and CommunicationOptions are created in Services/Communication/Models/ and compile successfully. Enum values match the actual Dataverse schema precisely.</goal>
+
+  <context>
+    <background>The Email Communication Solution replaces Dataverse email activities with a unified Communication Service via Graph API through the BFF. This task creates the foundational types that all other Phase 1 and Phase 2 tasks depend on. The Dataverse entity sprk_communication already exists with specific field names and choice values that must be matched exactly.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/SendEmailNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Register as concrete types. No unnecessary interfaces for models.</constraint>
+    <constraint source="ADR-019">Error responses use ProblemDetails with errorCode extension.</constraint>
+    <constraint source="Dataverse Schema">Type field is sprk_communiationtype (typo is intentional). Status uses standard statuscode. Direction is sprk_direction.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="BFF endpoint MUST/MUST NOT rules"/>
+      <file path=".claude/patterns/api/service-registration.md" reason="Feature module DI pattern for CommunicationOptions"/>
+      <file path="docs/data-model/sprk_communication-data-schema.md" reason="Source of truth for all field names and choice values"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read docs/data-model/sprk_communication-data-schema.md to confirm all field names and choice values.</step>
+    <step order="2">Create CommunicationType enum: Email=100000000, TeamsMessage=100000001, SMS=100000002, Notification=100000003.</step>
+    <step order="3">Create CommunicationStatus enum matching statuscode: Draft=1, Deleted=2, Queued=659490001, Send=659490002, Delivered=659490003, Failed=659490004, Bounded=659490005, Recalled=659490006.</step>
+    <step order="4">Create CommunicationDirection enum: Incoming=100000000, Outgoing=100000001.</step>
+    <step order="5">Create BodyFormat enum: PlainText=100000000, HTML=100000001.</step>
+    <step order="6">Create CommunicationAssociation DTO with entityType (string), entityId (Guid), entityName (string, optional), entityUrl (string, optional).</step>
+    <step order="7">Create SendCommunicationRequest DTO with: to (string[]), cc (string[], optional), bcc (string[], optional), subject (string), body (string), bodyFormat (BodyFormat, default HTML), fromMailbox (string, optional), communicationType (CommunicationType, default Email), associations (CommunicationAssociation[], optional), correlationId (string, optional).</step>
+    <step order="8">Create SendCommunicationResponse DTO with: communicationId (Guid?), graphMessageId (string), status (CommunicationStatus), sentAt (DateTimeOffset), from (string), correlationId (string).</step>
+    <step order="9">Create CommunicationOptions class with: ApprovedSenders (ApprovedSenderConfig[]), DefaultMailbox (string). Create ApprovedSenderConfig with: Email (string), DisplayName (string), IsDefault (bool).</step>
+    <step order="10">Verify all files compile with dotnet build.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read data schema and existing patterns</tool>
+    <tool name="Write">Create new model files</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationStatus.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationDirection.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/BodyFormat.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationAssociation.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationResponse.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationOptions.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All enum values match actual Dataverse schema exactly (sprk_communiationtype typo preserved in comments/mapping).</criterion>
+    <criterion testable="true">CommunicationStatus enum values match statuscode: Draft=1, Deleted=2, Queued=659490001, Send=659490002, Delivered=659490003, Failed=659490004, Bounded=659490005, Recalled=659490006.</criterion>
+    <criterion testable="true">SendCommunicationRequest includes all required fields: to, subject, body, and optional: cc, bcc, fromMailbox, bodyFormat, communicationType, associations, correlationId.</criterion>
+    <criterion testable="true">CommunicationOptions supports ApprovedSenders[] with Email, DisplayName, IsDefault properties.</criterion>
+    <criterion testable="true">dotnet build completes without errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Verify field names against data schema doc.</protocol>
+  </execution>
+</task>

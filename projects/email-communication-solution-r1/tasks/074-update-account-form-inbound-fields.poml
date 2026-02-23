@@ -1,0 +1,36 @@
+<task id="074" project="email-communication-solution-r1">
+  <metadata>
+    <title>Update sprk_communicationaccount form with inbound fields</title>
+    <phase>8</phase>
+    <status>completed</status>
+    <estimate>1h</estimate>
+    <tags>dataverse, solution</tags>
+    <dependencies>070</dependencies>
+    <blocks>077</blocks>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Update the sprk_communicationaccount form documentation to ensure inbound configuration and Graph integration fields are properly displayed and managed.</goal>
+    <context>The admin form from task 052 already includes sections for Inbound Config and Graph Integration. This task ensures those sections properly support the inbound monitoring features from Phase 8, including business rules for conditional visibility.</context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r1/design-communication-accounts.md</file>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Document form update: ensure Inbound Config section shows sprk_receiveenabled, sprk_monitorfolder, sprk_autocreaterecords with appropriate labels and tooltips</step>
+    <step>Document form update: ensure Graph Integration section shows sprk_subscriptionid (read-only) and sprk_subscriptionexpiry (read-only) so admins can see subscription status</step>
+    <step>Add business rule documentation: if sprk_receiveenabled = No, hide or disable inbound-specific fields (sprk_monitorfolder, sprk_autocreaterecords) to reduce admin confusion</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Inbound Config section properly documents sprk_receiveenabled, sprk_monitorfolder, sprk_autocreaterecords fields</criterion>
+    <criterion>Graph Integration section documents sprk_subscriptionid and sprk_subscriptionexpiry as read-only</criterion>
+    <criterion>Business rule documented: inbound fields hidden/disabled when sprk_receiveenabled is No</criterion>
+  </acceptance-criteria>
+</task>

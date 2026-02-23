@@ -1,0 +1,78 @@
+<task id="002" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create approved sender validation service</title>
+    <phase>1: BFF Email Service</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>003</blocks>
+    <tags>bff-api, auth</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New files only, constrained validation pattern</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Create the ApprovedSenderValidator service that validates fromMailbox values against the configured approved senders list. Phase 1 reads from CommunicationOptions only; Phase 2 will add Dataverse merge.</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8 configuration binding, validation services, and ProblemDetails error handling</role>
+
+  <goal>ApprovedSenderValidator validates fromMailbox against CommunicationOptions.ApprovedSenders[], returns the default sender when fromMailbox is null, and returns a typed INVALID_SENDER error when validation fails.</goal>
+
+  <context>
+    <background>The Communication Service needs to ensure only approved email addresses are used as senders. In Phase 1, the approved list comes from BFF configuration (appsettings.json). In Phase 2 (task 013), this will be extended to merge with Dataverse sprk_approvedsender records. This service is injected into CommunicationService for sender resolution before every Graph sendMail call.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Errors/ProblemDetailsHelper.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/SendEmailNodeExecutor.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Register as concrete type: services.AddSingleton&lt;ApprovedSenderValidator&gt;(). No interface needed.</constraint>
+    <constraint source="ADR-019">Return ProblemDetails with errorCode INVALID_SENDER when validation fails.</constraint>
+    <constraint source="Design">Any authenticated user can specify fromMailbox. Validation is against approved list, not user identity.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="BFF service implementation rules"/>
+      <file path=".claude/constraints/auth.md" reason="Authorization seam patterns"/>
+      <file path=".claude/patterns/api/error-handling.md" reason="ProblemDetails error pattern with errorCode"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read .claude/patterns/api/error-handling.md for ProblemDetails pattern.</step>
+    <step order="2">Create ApprovedSenderValidator class that takes IOptions&lt;CommunicationOptions&gt; via constructor injection.</step>
+    <step order="3">Implement ResolveAsync(string? fromMailbox) method that: (a) if fromMailbox is null, returns the default sender from config (IsDefault=true), (b) if fromMailbox matches an approved sender (case-insensitive), returns that sender's email, (c) if fromMailbox does not match, returns a validation failure result.</step>
+    <step order="4">Create ApprovedSenderResult record with IsValid (bool), Email (string), DisplayName (string), ErrorCode (string?), ErrorDetail (string?) properties.</step>
+    <step order="5">Define error codes: INVALID_SENDER (fromMailbox not in approved list), NO_DEFAULT_SENDER (no default configured and fromMailbox is null).</step>
+    <step order="6">Add XML documentation explaining Phase 1 behavior and Phase 2 extensibility.</step>
+    <step order="7">Verify compilation with dotnet build.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read error handling patterns and existing validators</tool>
+    <tool name="Write">Create ApprovedSenderValidator and result types</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ApprovedSenderValidator.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/ApprovedSenderResult.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ResolveAsync(null) returns the default sender when one is configured with IsDefault=true.</criterion>
+    <criterion testable="true">ResolveAsync("valid@example.com") returns IsValid=true when email is in ApprovedSenders list.</criterion>
+    <criterion testable="true">ResolveAsync("unknown@example.com") returns IsValid=false with ErrorCode=INVALID_SENDER.</criterion>
+    <criterion testable="true">Email comparison is case-insensitive.</criterion>
+    <criterion testable="true">ResolveAsync(null) returns ErrorCode=NO_DEFAULT_SENDER when no default is configured.</criterion>
+    <criterion testable="true">dotnet build completes without errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Design for Phase 2 extensibility.</protocol>
+  </execution>
+</task>

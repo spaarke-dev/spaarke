@@ -1,0 +1,81 @@
+<task id="005" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create communication endpoint authorization filter</title>
+    <phase>1: BFF Email Service</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>006</blocks>
+    <tags>bff-api, auth</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New file following constrained endpoint filter pattern from ADR-008</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Create CommunicationAuthorizationFilter implementing IEndpointFilter that validates the authenticated user has permission to send communications. Follow the existing DocumentAuthorizationFilter pattern. Apply the filter to the communication endpoint group.</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8 endpoint filters, Dataverse security roles, and authorization patterns</role>
+
+  <goal>CommunicationAuthorizationFilter validates user permissions for sending communications and is applied to the communication endpoint group. Unauthorized requests receive 403 ProblemDetails.</goal>
+
+  <context>
+    <background>Following ADR-008, all resource-level authorization uses endpoint filters instead of global middleware. The communication endpoint needs to verify the authenticated user has permission to send communications. The existing DocumentAuthorizationFilter and AiAuthorizationFilter show the established pattern for these filters in the codebase.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/AiAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">Use IEndpointFilter implementation. Apply via .AddEndpointFilter&lt;T&gt;(). No global middleware.</constraint>
+    <constraint source="ADR-019">Return 403 ProblemDetails with COMMUNICATION_NOT_AUTHORIZED errorCode on failure.</constraint>
+    <constraint source="ADR-010">Register as concrete type if DI is needed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-008-endpoint-filters.md" reason="Endpoint filter pattern mandate"/>
+      <file path=".claude/patterns/api/endpoint-filters.md" reason="Canonical endpoint filter implementation"/>
+      <file path=".claude/constraints/auth.md" reason="Authorization seam patterns"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read DocumentAuthorizationFilter.cs and AiAuthorizationFilter.cs to understand the established filter pattern.</step>
+    <step order="2">Read .claude/patterns/api/endpoint-filters.md for the canonical pattern.</step>
+    <step order="3">Create CommunicationAuthorizationFilter implementing IEndpointFilter in Api/Filters/ folder.</step>
+    <step order="4">Implement InvokeAsync: extract user claims from HttpContext, validate user has communication send permission.</step>
+    <step order="5">On authorization failure, return 403 ProblemDetails with errorCode=COMMUNICATION_NOT_AUTHORIZED.</step>
+    <step order="6">On success, call next(context) to continue the pipeline.</step>
+    <step order="7">Update CommunicationEndpoints to apply the filter via .AddEndpointFilter&lt;CommunicationAuthorizationFilter&gt;() on the send endpoint or endpoint group.</step>
+    <step order="8">Verify compilation with dotnet build.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing authorization filter patterns</tool>
+    <tool name="Write">Create CommunicationAuthorizationFilter.cs</tool>
+    <tool name="Edit">Update CommunicationEndpoints.cs to apply filter</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Filters/CommunicationAuthorizationFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (modified to apply filter)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CommunicationAuthorizationFilter implements IEndpointFilter.</criterion>
+    <criterion testable="true">Filter checks user claims for communication send permission.</criterion>
+    <criterion testable="true">Unauthorized requests return 403 ProblemDetails with COMMUNICATION_NOT_AUTHORIZED errorCode.</criterion>
+    <criterion testable="true">Filter is applied to communication endpoint group or send endpoint via .AddEndpointFilter().</criterion>
+    <criterion testable="true">Filter follows same pattern as existing DocumentAuthorizationFilter.</criterion>
+    <criterion testable="true">dotnet build completes without errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow existing filter patterns exactly.</protocol>
+  </execution>
+</task>

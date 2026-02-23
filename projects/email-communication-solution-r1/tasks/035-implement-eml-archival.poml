@@ -1,0 +1,83 @@
+<task id="035" project="email-communication-solution-r1">
+  <metadata>
+    <title>Implement .eml archival to SPE</title>
+    <phase>4: Attachments + Archival</phase>
+    <status>completed</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>034</dependencies>
+    <blocks>036</blocks>
+    <tags>bff-api, spe</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation, SPE integration, modifies existing service</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Extend CommunicationService archival flow to generate .eml files via EmlGenerationService, upload them to SPE at /communications/{commId:N}/{fileName}.eml via SpeFileStore, create sprk_document records (DocumentType=Communication, SourceType=CommunicationArchive), and handle partial failure scenarios where the email was sent but archival failed.</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8 Minimal API, SpeFileStore facade, SPE document management, and email archival workflows</role>
+
+  <goal>When archiveToSpe=true in the send request, the communication is archived as a .eml file in SPE with a corresponding sprk_document record. Partial failures (email sent but archival failed) return a warning in the response rather than failing the entire operation.</goal>
+
+  <context>
+    <background>After sending an email, the communication can optionally be archived as a .eml file in SharePoint Embedded. This provides a permanent, immutable record of the sent communication including headers, body, and attachments. The archival flow generates the .eml via EmlGenerationService (task 034), uploads it to SPE via SpeFileStore, and creates a sprk_document record to track it in Dataverse. The archival path follows the pattern /communications/{communicationId:N}/{fileName}.eml. If archival fails after the email has already been sent, the response should include a warning rather than failing entirely.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Spe/SpeFileStore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/EmlGenerationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">All SPE file operations must go through SpeFileStore facade. No direct Graph SDK usage.</constraint>
+    <constraint source="ADR-010">Concrete DI registrations. EmlGenerationService injected as concrete type.</constraint>
+    <constraint source="ADR-019">Partial failure: return SendCommunicationResponse with warning, not ProblemDetails error.</constraint>
+    <constraint source="SPE">Upload path: /communications/{commId:N}/{fileName}.eml. Use GUID without hyphens (N format).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/data.md" reason="SPE, SpeFileStore, document management constraints"/>
+      <file path=".claude/adr/ADR-007-spefilestore.md" reason="SpeFileStore facade pattern and upload API"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SpeFileStore.cs to understand the upload API (UploadAsync or equivalent method signature).</step>
+    <step order="2">Add archiveToSpe (bool, optional, default false) to SendCommunicationRequest if not already present.</step>
+    <step order="3">Add archivedDocumentId (Guid?, optional) and archivalWarning (string?, optional) to SendCommunicationResponse.</step>
+    <step order="4">Extend CommunicationService.SendAsync: after successful Graph send, check if archiveToSpe is true.</step>
+    <step order="5">If archiveToSpe=true: call EmlGenerationService.GenerateEmlAsync() with request, response, and attachment data to produce .eml content.</step>
+    <step order="6">Upload .eml file to SPE via SpeFileStore at path /communications/{communicationId:N}/{fileName}.eml.</step>
+    <step order="7">Create sprk_document record in Dataverse with DocumentType=Communication, SourceType=CommunicationArchive, linking to the uploaded SPE file.</step>
+    <step order="8">Set archivedDocumentId in response to the created sprk_document ID.</step>
+    <step order="9">Wrap archival flow in try/catch: on failure, set archivalWarning in response with error details. Do NOT throw — the email was already sent successfully.</step>
+    <step order="10">Run dotnet build to verify compilation.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read SpeFileStore API and existing upload patterns</tool>
+    <tool name="Edit">Modify CommunicationService and response models</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Updated src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs with archival flow</output>
+    <output type="code">Updated src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs with archiveToSpe</output>
+    <output type="code">Updated src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationResponse.cs with archivedDocumentId and archivalWarning</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">When archiveToSpe=true, .eml file is generated via EmlGenerationService.</criterion>
+    <criterion testable="true">.eml file is uploaded to SPE at /communications/{commId:N}/{fileName}.eml via SpeFileStore.</criterion>
+    <criterion testable="true">sprk_document record created with DocumentType=Communication, SourceType=CommunicationArchive.</criterion>
+    <criterion testable="true">archivedDocumentId is returned in SendCommunicationResponse.</criterion>
+    <criterion testable="true">Archival failure returns warning in response, not error — email send is not rolled back.</criterion>
+    <criterion testable="true">dotnet build completes without errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load ADR-007 and data constraints before starting. Read SpeFileStore upload API first. Handle partial failure gracefully.</protocol>
+  </execution>
+</task>

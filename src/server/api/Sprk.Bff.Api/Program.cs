@@ -264,6 +264,9 @@ builder.Services.AddOfficeModule();
 // Finance Intelligence module (configuration + telemetry)
 builder.Services.AddFinanceModule(builder.Configuration);
 
+// Communication module (email sending via Graph API)
+builder.Services.AddCommunicationModule(builder.Configuration);
+
 // Office Service Bus client for workers
 builder.Services.AddOfficeServiceBus(builder.Configuration);
 
@@ -1752,6 +1755,9 @@ app.MapFinanceEndpoints();
 
 // Finance Rollup endpoints (subgrid parent rollup - AllowAnonymous for web resources)
 app.MapFinanceRollupEndpoints();
+
+// Communication endpoints (email sending via Graph API)
+app.MapCommunicationEndpoints();
 
 app.Run();
 

@@ -1,0 +1,54 @@
+<task id="060" project="email-communication-solution-r1">
+  <metadata>
+    <title>Add SendMode to DTOs and branch CommunicationService for OBO</title>
+    <phase>7</phase>
+    <status>completed</status>
+    <estimate>4h</estimate>
+    <tags>bff-api, api</tags>
+    <dependencies>055</dependencies>
+    <blocks>061, 064</blocks>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Add a SendMode enum (SharedMailbox, User) to the send DTOs and branch CommunicationService.SendAsync() so individual users can send from their own mailbox via OBO, while preserving existing shared mailbox behavior.</goal>
+    <context>CommunicationService.SendAsync() currently sends via the shared mailbox using GraphClientFactory.ForApp(). We need a second path where SendMode.User uses GraphClientFactory.ForUserAsync() and calls /me/sendMail. The SendEmailNodeExecutor already demonstrates the OBO sendMail pattern. ApprovedSenderValidator must be skipped for user-mode sends since the user is sending as themselves.</context>
+    <constraints>
+      <constraint source="ADR-010">Register new types via AddCommunicationModule(). No unnecessary interfaces.</constraint>
+      <constraint source="ADR-008">Pass HttpContext through endpoint for OBO token resolution.</constraint>
+      <constraint source="ADR-007">Do not leak Graph SDK types above the CommunicationService boundary.</constraint>
+      <constraint source="SCHEMA">sprk_from = user's email for User mode. sprk_sentby = user systemuser ID for User mode.</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+      <file>projects/email-communication-solution-r1/design-communication-accounts.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/SendEmailNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/CommunicationEndpoints.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create SendMode enum: SharedMailbox, User</step>
+    <step>Add SendMode property to SendCommunicationRequest DTO (default SharedMailbox for backward compatibility)</step>
+    <step>Branch CommunicationService.SendAsync(): if SendMode.User, use GraphClientFactory.ForUserAsync() to get OBO Graph client, skip ApprovedSenderValidator, and resolve user email from OBO token claims</step>
+    <step>For User mode: call /me/sendMail following the SendEmailNodeExecutor pattern</step>
+    <step>For User mode: set sprk_from to user's email from OBO token, set sprk_sentby to user systemuser ID</step>
+    <step>Ensure shared mailbox path (SendMode.SharedMailbox) is completely unchanged — no regressions</step>
+    <step>Update CommunicationEndpoints to pass HttpContext for OBO token resolution when SendMode.User</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>SendMode enum exists with SharedMailbox and User values</criterion>
+    <criterion>SendCommunicationRequest DTO includes SendMode property defaulting to SharedMailbox</criterion>
+    <criterion>User mode calls GraphClientFactory.ForUserAsync() and /me/sendMail</criterion>
+    <criterion>User mode skips ApprovedSenderValidator</criterion>
+    <criterion>User mode sets sprk_from to user's email and sprk_sentby to user systemuser ID</criterion>
+    <criterion>Shared mailbox path unchanged — no regressions</criterion>
+    <criterion>HttpContext passed through for OBO token resolution</criterion>
+  </acceptance-criteria>
+</task>

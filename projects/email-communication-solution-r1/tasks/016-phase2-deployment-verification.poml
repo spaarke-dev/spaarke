@@ -1,0 +1,78 @@
+<task id="016" project="email-communication-solution-r1">
+  <metadata>
+    <title>Phase 2 deployment and verification</title>
+    <phase>2: Entity + Tracking</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010, 011, 012, 013, 014, 015</dependencies>
+    <blocks>020</blocks>
+    <tags>deploy, verification</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Deployment checklist and verification; no code implementation</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Deploy the BFF API with Phase 2 changes to dev environment. Verify that POST /api/communications/send creates a sprk_communication record in Dataverse with correct field values. Verify association fields are set correctly. Verify GET /api/communications/{id}/status returns record data. Verify approved sender validation works end-to-end.</prompt>
+
+  <role>SPAARKE platform developer expert in Azure App Service deployment, Dataverse verification, and end-to-end API testing</role>
+
+  <goal>Phase 2 is deployed to dev and verified. All endpoints work end-to-end: send creates Dataverse records with correct field values, associations are mapped, status endpoint returns data, and sender validation enforces the approved list.</goal>
+
+  <context>
+    <background>Phase 2 adds Dataverse integration to the communication service. Before proceeding to Phase 3 (Communication App), all Phase 2 functionality must be deployed and verified in the dev environment. This includes the Dataverse record creation with correct schema values, association field mapping, the status endpoint, and the approved sender merge logic. The dev BFF API runs at https://spe-api-dev-67e2xz.azurewebsites.net.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>scripts/Test-SdapBffApi.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Deploy">Deploy to dev environment only. Use azure-deploy skill for BFF deployment.</constraint>
+    <constraint source="Verify">All verification against dev Dataverse: https://spaarkedev1.crm.dynamics.com.</constraint>
+    <constraint source="Verify">Verify actual field values in Dataverse match schema (sprk_communiationtype, statuscode, etc.).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="API deployment and verification rules"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run dotnet build and dotnet test to ensure all code compiles and tests pass before deployment.</step>
+    <step order="2">Deploy BFF API to dev using azure-deploy skill or az webapp deploy command.</step>
+    <step order="3">Verify health check: GET https://spe-api-dev-67e2xz.azurewebsites.net/healthz returns 200.</step>
+    <step order="4">Test POST /api/communications/send with a valid request including associations. Verify 200 response with communicationId.</step>
+    <step order="5">Query Dataverse to verify the created sprk_communication record has correct field values: sprk_communiationtype=100000000, statuscode=659490002, sprk_direction=100000001, all text and metadata fields populated.</step>
+    <step order="6">Verify association fields: sprk_regardingmatter (or appropriate regarding field) is set via @odata.bind, denormalized fields populated.</step>
+    <step order="7">Test GET /api/communications/{id}/status with the communicationId from step 4. Verify response includes status, graphMessageId, sentAt, from.</step>
+    <step order="8">Test GET /api/communications/{nonexistent-id}/status returns 404 ProblemDetails.</step>
+    <step order="9">Test sender validation: POST with invalid fromMailbox returns INVALID_SENDER error.</step>
+    <step order="10">Document verification results in notes/phase2-verification-results.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Run build, test, and deployment commands</tool>
+    <tool name="Write">Document verification results</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r1/notes/phase2-verification-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF API deployed to dev and health check passes.</criterion>
+    <criterion testable="true">POST /api/communications/send creates sprk_communication record with correct choice values.</criterion>
+    <criterion testable="true">Association fields (regarding lookups and denormalized fields) are correctly populated in Dataverse.</criterion>
+    <criterion testable="true">GET /api/communications/{id}/status returns correct data for existing records.</criterion>
+    <criterion testable="true">GET /api/communications/{id}/status returns 404 ProblemDetails for non-existent records.</criterion>
+    <criterion testable="true">Invalid sender requests return INVALID_SENDER error.</criterion>
+    <criterion testable="true">Verification results documented in notes/.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Use azure-deploy skill for deployment. Document all verification results.</protocol>
+  </execution>
+</task>

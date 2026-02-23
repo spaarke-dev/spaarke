@@ -1,0 +1,75 @@
+<task id="033" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create sprk_communicationattachment records after send</title>
+    <phase>4: Attachments + Archival</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>031, 032</dependencies>
+    <blocks>036</blocks>
+    <tags>bff-api, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New code but constrained pattern, follows established Dataverse CRUD patterns</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>After a successful send with attachments, create sprk_communicationattachment records in Dataverse to link the sprk_communication to each sprk_document. Set attachment type to File by default and auto-populate the name from the document name.</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8 Minimal API, Dataverse Web API integration, and intersection entity record creation</role>
+
+  <goal>After successful email send with attachments, sprk_communicationattachment records are created for each attached document, linking the communication to the document with correct attachment type and name.</goal>
+
+  <context>
+    <background>When a communication is sent with attachments (task 032 handles the email sending), the system must create intersection records in Dataverse to track which documents were attached. The sprk_communicationattachment entity (documented in task 031) links sprk_communication to sprk_document. Each record stores the attachment type (File or InlineImage) and the document name for display in subgrids and views.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Concrete DI registrations. Reuse existing DataverseWebApiService for record creation.</constraint>
+    <constraint source="ADR-019">Return ProblemDetails if attachment record creation fails (non-blocking — email already sent).</constraint>
+    <constraint source="Dataverse Schema">sprk_attachmenttype: File=100000000, InlineImage=100000001. Default to File.</constraint>
+    <constraint source="ADR-002">No plugin on sprk_communicationattachment — the BFF creates these records directly.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Dataverse CRUD patterns for record creation"/>
+      <file path="docs/data-model/sprk_communication-data-schema.md" reason="Field names for attachment entity"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read entity-operations.md to confirm the Dataverse record creation pattern (DataverseWebApiService).</step>
+    <step order="2">Extend CommunicationService post-send flow: after successful Graph send and Dataverse communication record creation, create attachment records.</step>
+    <step order="3">For each documentId in attachmentDocumentIds: query sprk_document to get document name, then create sprk_communicationattachment record with sprk_communication lookup, sprk_document lookup, sprk_attachmenttype = File (100000000), sprk_name = document name.</step>
+    <step order="4">Handle batch creation: create all attachment records sequentially (Dataverse does not support true batch creates via Web API in our pattern).</step>
+    <step order="5">Handle failure gracefully: if attachment record creation fails, log warning but do not fail the overall send (email was already sent). Include warning in SendCommunicationResponse.</step>
+    <step order="6">Run dotnet build to verify compilation.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing Dataverse integration patterns</tool>
+    <tool name="Edit">Modify CommunicationService for attachment record creation</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Updated src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs with attachment record creation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_communicationattachment records are created for each attached document after successful send.</criterion>
+    <criterion testable="true">Each record has correct sprk_communication lookup, sprk_document lookup, and sprk_name values.</criterion>
+    <criterion testable="true">sprk_attachmenttype defaults to File (100000000).</criterion>
+    <criterion testable="true">Attachment record creation failure does not fail the overall send operation.</criterion>
+    <criterion testable="true">dotnet build completes without errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load entity-operations pattern first. Follow existing Dataverse CRUD patterns. Ensure non-blocking failure handling.</protocol>
+  </execution>
+</task>

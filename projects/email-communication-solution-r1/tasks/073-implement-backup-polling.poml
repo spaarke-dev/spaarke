@@ -1,0 +1,50 @@
+<task id="073" project="email-communication-solution-r1">
+  <metadata>
+    <title>Implement backup polling for missed webhooks</title>
+    <phase>8</phase>
+    <status>completed</status>
+    <estimate>3h</estimate>
+    <tags>bff-api, api</tags>
+    <dependencies>070</dependencies>
+    <blocks>077</blocks>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create a CommunicationPollingService BackgroundService that periodically polls receive-enabled mailboxes for new messages, catching any emails missed by the webhook subscription.</goal>
+    <context>Graph webhook subscriptions can occasionally miss notifications due to transient failures. A backup polling service ensures no emails are lost. The EmailPollingBackupService already implements the exact BackgroundService + PeriodicTimer pattern to follow. Messages found by polling go through the same IncomingCommunicationJob pipeline as webhook-delivered messages, with deduplication preventing duplicate records.</context>
+    <constraints>
+      <constraint source="ADR-001">Implement as BackgroundService. No Azure Functions.</constraint>
+      <constraint source="ADR-010">Register as concrete type in AddCommunicationModule().</constraint>
+      <constraint source="DESIGN">Default polling interval: 15 minutes. Use same IncomingCommunicationJob as webhook path.</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/EmailPollingBackupService.cs</file>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create CommunicationPollingService as BackgroundService with configurable PeriodicTimer interval (default 15 minutes, follow EmailPollingBackupService pattern)</step>
+    <step>On tick: query CommunicationAccountService.QueryReceiveEnabledAccountsAsync() for all receive-enabled accounts</step>
+    <step>For each account: GET /users/{email}/mailFolders/{folder}/messages?$filter=receivedDateTime ge {lastPollTime}&amp;$top=50 using GraphClientFactory.ForApp()</step>
+    <step>For each message returned: check if sprk_graphmessageid already exists in sprk_communication (deduplication)</step>
+    <step>If message not already tracked: enqueue IncomingCommunicationJob (same pipeline as webhook path)</step>
+    <step>Track lastPollTime per account (store in Redis or on the sprk_communicationaccount record)</step>
+    <step>Use GraphClientFactory.ForApp() for all polling operations</step>
+    <step>Register CommunicationPollingService in AddCommunicationModule()</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>CommunicationPollingService runs as BackgroundService with 15-minute default interval</criterion>
+    <criterion>Polls all receive-enabled accounts for new messages since last poll time</criterion>
+    <criterion>Deduplication: skips messages already tracked in sprk_communication</criterion>
+    <criterion>New messages enqueued as IncomingCommunicationJob (same as webhook path)</criterion>
+    <criterion>lastPollTime tracked per account to avoid re-processing old messages</criterion>
+    <criterion>Uses GraphClientFactory.ForApp() for polling</criterion>
+    <criterion>Registered in AddCommunicationModule()</criterion>
+  </acceptance-criteria>
+</task>

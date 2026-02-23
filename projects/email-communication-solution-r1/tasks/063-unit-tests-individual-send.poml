@@ -1,0 +1,41 @@
+<task id="063" project="email-communication-solution-r1">
+  <metadata>
+    <title>Unit tests for individual send path</title>
+    <phase>7</phase>
+    <status>completed</status>
+    <estimate>2h</estimate>
+    <tags>testing, unit-test</tags>
+    <dependencies>060</dependencies>
+    <blocks>064</blocks>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create comprehensive unit tests for the individual user send path (SendMode.User) and verify the shared mailbox path (SendMode.SharedMailbox) is unchanged.</goal>
+    <context>Task 060 added a SendMode branch to CommunicationService.SendAsync(). We need tests covering both branches: User mode uses ForUserAsync() and /me/sendMail, SharedMailbox mode uses ForApp() and /users/{mailbox}/sendMail. ApprovedSenderValidator must be skipped for User mode.</context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Test SendMode.User branch: verify GraphClientFactory.ForUserAsync() called instead of ForApp()</step>
+    <step>Test SendMode.User: verify /me/sendMail endpoint used (not /users/{mailbox}/sendMail)</step>
+    <step>Test SendMode.User: verify ApprovedSenderValidator is NOT called</step>
+    <step>Test SendMode.User: verify sprk_from set to user's email from OBO token claims</step>
+    <step>Test SendMode.SharedMailbox: verify existing flow unchanged — ForApp() called, ApprovedSenderValidator called (regression test)</step>
+    <step>Test error handling: OBO token failure returns clear error message with appropriate ProblemDetails</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All unit tests pass</criterion>
+    <criterion>User mode tests verify ForUserAsync(), /me/sendMail, and no ApprovedSenderValidator</criterion>
+    <criterion>SharedMailbox mode regression tests verify existing flow unchanged</criterion>
+    <criterion>OBO token error handling tested with clear error response</criterion>
+  </acceptance-criteria>
+</task>

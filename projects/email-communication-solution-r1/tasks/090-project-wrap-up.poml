@@ -1,0 +1,50 @@
+<task id="090" project="email-communication-solution-r1">
+  <metadata>
+    <title>Project wrap-up (extended scope)</title>
+    <phase>Wrap-up</phase>
+    <status>completed</status>
+    <estimate>4h</estimate>
+    <tags>documentation, wrap-up</tags>
+    <dependencies>082</dependencies>
+    <blocks>none</blocks>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Complete final project wrap-up for the Email Communication Solution R1, covering the full extended scope (Phases 1-9). Update all project artifacts, verify acceptance criteria, and prepare for merge to master.</goal>
+    <context>The Email Communication Solution R1 project is complete with all phases implemented: Phase 1 (BFF Email Service), Phase 2 (Dataverse Integration), Phase 3 (Communication Application), Phase 4 (Attachments + Archival), Phase 5 (Playbook Integration), Phase 6 (Communication Account Management), Phase 7 (Individual User Outbound), Phase 8 (Inbound Shared Mailbox Monitoring), and Phase 9 (Verification + Admin UX). This wrap-up task ensures all documentation is finalized, quality gates pass, and the branch is ready to merge into master.</context>
+    <constraints>
+      <constraint source="Project">All previous tasks (001-082) must be completed before running wrap-up.</constraint>
+      <constraint source="Quality">Code review and ADR check must pass before marking project complete.</constraint>
+      <constraint source="Repository">Repository must pass /repo-cleanup structure validation.</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r1/README.md</file>
+      <file>projects/email-communication-solution-r1/plan.md</file>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+      <file>projects/email-communication-solution-r1/tasks/TASK-INDEX.md</file>
+      <file>projects/email-communication-solution-r1/current-task.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Update projects/email-communication-solution-r1/README.md: set project status to COMPLETE with completion date, summarize all delivered features per phase (Phases 1-9)</step>
+    <step>Update projects/email-communication-solution-r1/tasks/TASK-INDEX.md: verify all tasks (001-082, 090) marked with complete status</step>
+    <step>Create projects/email-communication-solution-r1/notes/lessons-learned.md for Phases 6-9: document what went well, what could be improved, patterns discovered, and recommendations</step>
+    <step>Verify all acceptance criteria met from spec.md (G1-G15 goals)</step>
+    <step>Run /repo-cleanup to validate repository structure and fix any issues</step>
+    <step>Prompt user to run /merge-to-master to merge the work/email-communication-solution-r1 branch into master</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>README.md status set to COMPLETE with completion date</criterion>
+    <criterion>TASK-INDEX.md shows all tasks with complete status</criterion>
+    <criterion>lessons-learned.md created for Phases 6-9</criterion>
+    <criterion>All spec.md acceptance criteria (G1-G15) verified</criterion>
+    <criterion>Repository passes /repo-cleanup structure validation</criterion>
+    <criterion>Branch ready for merge to master</criterion>
+  </acceptance-criteria>
+</task>

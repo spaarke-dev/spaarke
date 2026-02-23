@@ -1,0 +1,83 @@
+<task id="012" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create GET /api/communications/{id}/status endpoint</title>
+    <phase>2: Entity + Tracking</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New endpoint following constrained pattern; no complex logic</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Add GET /{id}/status to CommunicationEndpoints. Query the sprk_communication entity by ID from Dataverse. Return status, graphMessageId, sentAt, and from fields. Return 404 with ProblemDetails if the record is not found.</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8 Minimal API endpoints, Dataverse queries, and ProblemDetails error responses</role>
+
+  <goal>GET /api/communications/{id}/status endpoint returns the communication status from Dataverse, including status, graphMessageId, sentAt, and from. Returns 404 ProblemDetails when the record does not exist.</goal>
+
+  <context>
+    <background>After Phase 2 persists communication records in Dataverse, clients need a way to check the status of a sent communication. This endpoint queries the sprk_communication entity by its primary key (sprk_communicationid) and returns a status summary. This is a read-only endpoint that follows the same Minimal API pattern as other endpoints in the codebase.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Follow Minimal API endpoint pattern. Static handler method.</constraint>
+    <constraint source="ADR-008">Endpoint filter applies to the group (already set up in task 005).</constraint>
+    <constraint source="ADR-019">Return 404 ProblemDetails with COMMUNICATION_NOT_FOUND errorCode when record does not exist.</constraint>
+    <constraint source="Dataverse Schema">Query sprk_communications entity set. Select statuscode, sprk_graphmessageid, sprk_sentat, sprk_from.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="BFF endpoint MUST/MUST NOT rules"/>
+      <file path=".claude/adr/ADR-019-problemdetails.md" reason="ProblemDetails error pattern"/>
+      <file path=".claude/patterns/api/endpoint-definition.md" reason="Canonical endpoint structure"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing CommunicationEndpoints.cs to understand the endpoint group structure.</step>
+    <step order="2">Create CommunicationStatusResponse DTO with: communicationId (Guid), status (CommunicationStatus), graphMessageId (string), sentAt (DateTimeOffset?), from (string).</step>
+    <step order="3">Add GET /{id:guid}/status endpoint to the communication group in CommunicationEndpoints.cs.</step>
+    <step order="4">Implement GetCommunicationStatusAsync handler: accept id from route, CommunicationService or IDataverseService from DI.</step>
+    <step order="5">Query Dataverse: GET sprk_communications(id)?$select=statuscode,sprk_graphmessageid,sprk_sentat,sprk_from.</step>
+    <step order="6">If record found, map to CommunicationStatusResponse and return 200.</step>
+    <step order="7">If record not found (404 from Dataverse), return ProblemDetails with errorCode=COMMUNICATION_NOT_FOUND.</step>
+    <step order="8">Add .WithName("GetCommunicationStatus"), .Produces&lt;CommunicationStatusResponse&gt;(200), .Produces&lt;ProblemDetails&gt;(404).</step>
+    <step order="9">Verify compilation with dotnet build.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing endpoints and Dataverse service</tool>
+    <tool name="Edit">Add GET endpoint to CommunicationEndpoints.cs</tool>
+    <tool name="Write">Create CommunicationStatusResponse DTO</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (extended with GET /{id}/status)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationStatusResponse.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/communications/{id}/status endpoint exists and returns CommunicationStatusResponse.</criterion>
+    <criterion testable="true">Response includes communicationId, status, graphMessageId, sentAt, from.</criterion>
+    <criterion testable="true">Returns 404 ProblemDetails with COMMUNICATION_NOT_FOUND when record does not exist.</criterion>
+    <criterion testable="true">Queries Dataverse sprk_communications entity by primary key.</criterion>
+    <criterion testable="true">Endpoint requires authorization (inherited from group).</criterion>
+    <criterion testable="true">dotnet build completes without errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow existing endpoint patterns.</protocol>
+  </execution>
+</task>

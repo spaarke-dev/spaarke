@@ -1,0 +1,85 @@
+<task id="032" project="email-communication-solution-r1">
+  <metadata>
+    <title>Implement attachment download and Graph sendMail payload</title>
+    <phase>4: Attachments + Archival</phase>
+    <status>completed</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>033, 038</blocks>
+    <tags>bff-api, api, spe</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation with SpeFileStore integration, modifies existing service</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Extend CommunicationService to handle file attachments in the send flow. Download file content from SPE via SpeFileStore.DownloadAsync(), build FileAttachment arrays for Graph sendMail, validate attachment limits (max 150 attachments, 35MB total), and update sprk_hasattachments and sprk_attachmentcount fields after send.</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8 Minimal API, SpeFileStore facade, Microsoft Graph sendMail API, and file attachment handling</role>
+
+  <goal>CommunicationService handles attachmentDocumentIds[] in SendCommunicationRequest, downloads files from SPE, builds Graph sendMail FileAttachment payloads, validates size/count limits, and updates Dataverse attachment fields after successful send.</goal>
+
+  <context>
+    <background>When users send a communication with attachments, the BFF must download each referenced document from SharePoint Embedded (via SpeFileStore), convert them to base64-encoded FileAttachment objects for the Graph sendMail API, and include them in the email payload. Validation must enforce Graph API limits: max 150 attachments and 35MB total size. After successful send, the sprk_hasattachments and sprk_attachmentcount fields on the communication record must be updated.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Spe/SpeFileStore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/SendEmailNodeExecutor.cs</file>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">All SPE/Graph file operations must go through SpeFileStore facade. No Graph SDK types leak above facade.</constraint>
+    <constraint source="ADR-010">Concrete DI registrations. No unnecessary interfaces for attachment handling.</constraint>
+    <constraint source="ADR-019">Return ProblemDetails for validation failures (attachment too large, too many attachments).</constraint>
+    <constraint source="Graph API">Max 150 attachments per message. Max 35MB total attachment size. Files under 3MB use standard base64 encoding.</constraint>
+    <constraint source="Dataverse Schema">Update sprk_hasattachments (Boolean) and sprk_attachmentcount (Whole Number) after send.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/data.md" reason="SPE, SpeFileStore, Redis constraints"/>
+      <file path=".claude/adr/ADR-007-spefilestore.md" reason="SpeFileStore facade requirements"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SpeFileStore.cs to understand the DownloadAsync method signature and return types.</step>
+    <step order="2">Read existing SendEmailNodeExecutor.cs for the Graph sendMail attachment pattern.</step>
+    <step order="3">Add attachmentDocumentIds (Guid[]?, optional) to SendCommunicationRequest if not already present.</step>
+    <step order="4">Implement attachment download: for each documentId in attachmentDocumentIds, call SpeFileStore.DownloadAsync() to get file content and metadata (name, content type, size).</step>
+    <step order="5">Implement validation: reject if count > 150, reject if total size > 35MB (36,700,160 bytes). Return ProblemDetails with errorCode "ATTACHMENT_LIMIT_EXCEEDED".</step>
+    <step order="6">Build FileAttachment array for Graph sendMail: convert each downloaded file to base64, set name and contentType from metadata.</step>
+    <step order="7">Include FileAttachment array in the Graph sendMail request alongside the existing message payload.</step>
+    <step order="8">After successful send: update sprk_communication record with sprk_hasattachments = true and sprk_attachmentcount = attachmentDocumentIds.Length.</step>
+    <step order="9">Handle partial failure: if attachment download fails for one file, fail the entire send with ProblemDetails indicating which document failed.</step>
+    <step order="10">Run dotnet build to verify compilation.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read SpeFileStore, CommunicationService, and existing email patterns</tool>
+    <tool name="Edit">Modify CommunicationService to add attachment handling</tool>
+    <tool name="Write">Create new files if needed</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Updated src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs with attachment handling</output>
+    <output type="code">Updated src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs with attachmentDocumentIds</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CommunicationService processes attachmentDocumentIds[] from SendCommunicationRequest.</criterion>
+    <criterion testable="true">Files are downloaded via SpeFileStore.DownloadAsync() — no direct Graph SDK usage.</criterion>
+    <criterion testable="true">Validation rejects requests with > 150 attachments or > 35MB total size with ProblemDetails.</criterion>
+    <criterion testable="true">FileAttachment array is included in Graph sendMail request.</criterion>
+    <criterion testable="true">sprk_hasattachments and sprk_attachmentcount updated after successful send.</criterion>
+    <criterion testable="true">dotnet build completes without errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load ADR-007 and data constraints before starting. Read SpeFileStore API first. Follow existing sendMail patterns from SendEmailNodeExecutor.</protocol>
+  </execution>
+</task>

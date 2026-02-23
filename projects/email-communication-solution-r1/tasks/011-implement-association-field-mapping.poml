@@ -1,0 +1,87 @@
+<task id="011" project="email-communication-solution-r1">
+  <metadata>
+    <title>Implement primary association field mapping</title>
+    <phase>2: Entity + Tracking</phase>
+    <status>completed</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>014, 020</blocks>
+    <tags>bff-api, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation with polymorphic association pattern; handles 8 entity types; critical path to Phase 3</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Map associations[0] from SendCommunicationRequest to Dataverse sprk_communication fields. Use the RegardingRecordType pattern to set entity-specific lookup via @odata.bind (e.g., sprk_regardingmatter@odata.bind). Set denormalized fields: sprk_regardingrecordname, sprk_regardingrecordid, sprk_regardingrecordtype, sprk_regardingrecordurl. Handle actual field names: sprk_regardingorganization (not account), sprk_regardingperson (not contact). Set sprk_associationcount.</prompt>
+
+  <role>SPAARKE platform developer expert in Dataverse polymorphic lookups, @odata.bind patterns, denormalized field mapping, and association resolution</role>
+
+  <goal>The first association in the request is mapped to the correct Dataverse entity-specific lookup field via @odata.bind, and all denormalized regarding fields are populated. The regarding field mapping handles all supported entity types including the non-obvious sprk_regardingorganization and sprk_regardingperson field names.</goal>
+
+  <context>
+    <background>The sprk_communication entity has polymorphic regarding fields — one specific lookup for each supported entity type (matter, organization, person, etc.) plus denormalized fields for display. The primary association from the request maps to these fields. The tricky part is that the Dataverse field names don't always match the entity names: sprk_regardingorganization targets sprk_organization (not account), and sprk_regardingperson targets contact (not sprk_regardingcontact). The existing RegardingRecordType pattern in the codebase provides the resolver logic.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs</file>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Dataverse Schema">sprk_regardingorganization targets sprk_organization entity (NOT account).</constraint>
+    <constraint source="Dataverse Schema">sprk_regardingperson targets contact entity (NOT sprk_regardingcontact).</constraint>
+    <constraint source="Dataverse Schema">Lookup binding format: "sprk_regardingmatter@odata.bind": "/sprk_matters(guid)".</constraint>
+    <constraint source="Dataverse Schema">Denormalized fields: sprk_regardingrecordname, sprk_regardingrecordid, sprk_regardingrecordtype, sprk_regardingrecordurl.</constraint>
+    <constraint source="Design">associations[0] is the primary association. Set sprk_associationcount = associations.Length (or 1 for single).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/polymorphic-resolver.md" reason="AssociationResolver pattern for polymorphic lookups"/>
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Dataverse CRUD with lookup bindings"/>
+      <file path="docs/data-model/sprk_communication-data-schema.md" reason="Source of truth for regarding field names and targets"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read docs/data-model/sprk_communication-data-schema.md to confirm all regarding field names and their target entities.</step>
+    <step order="2">Read .claude/patterns/dataverse/polymorphic-resolver.md for the AssociationResolver pattern.</step>
+    <step order="3">Create a mapping dictionary from entityType string to Dataverse lookup field name and entity set name: matter -> sprk_regardingmatter / sprk_matters, organization -> sprk_regardingorganization / sprk_organizations, person -> sprk_regardingperson / contacts, project -> sprk_regardingproject / sprk_projects, etc. (all 8 supported types).</step>
+    <step order="4">Implement association mapping method in CommunicationService (or extract to a CommunicationAssociationResolver helper).</step>
+    <step order="5">For associations[0], add the @odata.bind property to the Dataverse payload: "{lookupField}@odata.bind": "/{entitySetName}({entityId})".</step>
+    <step order="6">Set denormalized fields: sprk_regardingrecordname = association.EntityName, sprk_regardingrecordid = association.EntityId.ToString(), sprk_regardingrecordtype = entityType, sprk_regardingrecordurl = association.EntityUrl.</step>
+    <step order="7">Set sprk_associationcount = request.Associations.Length (or 1 if only primary).</step>
+    <step order="8">Handle case where associations is null or empty (no regarding fields set).</step>
+    <step order="9">Handle unknown entityType gracefully (log warning, skip binding, still set denormalized fields).</step>
+    <step order="10">Verify compilation with dotnet build.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read data schema and polymorphic resolver pattern</tool>
+    <tool name="Edit">Extend CommunicationService with association mapping</tool>
+    <tool name="Write">Create CommunicationAssociationResolver if extracted as separate class</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (extended with association mapping)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationAssociationResolver.cs (optional, if extracted)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">associations[0] with entityType="matter" sets "sprk_regardingmatter@odata.bind": "/sprk_matters(guid)".</criterion>
+    <criterion testable="true">associations[0] with entityType="organization" sets "sprk_regardingorganization@odata.bind": "/sprk_organizations(guid)" (NOT sprk_regardingaccount).</criterion>
+    <criterion testable="true">associations[0] with entityType="person" sets "sprk_regardingperson@odata.bind": "/contacts(guid)" (NOT sprk_regardingcontact).</criterion>
+    <criterion testable="true">Denormalized fields (sprk_regardingrecordname, sprk_regardingrecordid, sprk_regardingrecordtype, sprk_regardingrecordurl) are populated.</criterion>
+    <criterion testable="true">sprk_associationcount is set to the number of associations.</criterion>
+    <criterion testable="true">Null or empty associations array is handled gracefully (no regarding fields set).</criterion>
+    <criterion testable="true">Unknown entityType is logged as warning and handled without exception.</criterion>
+    <criterion testable="true">dotnet build completes without errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Double-check every field name against data schema doc. Pay special attention to organization/person field name mappings.</protocol>
+  </execution>
+</task>

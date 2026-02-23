@@ -1,0 +1,66 @@
+<task id="030" project="email-communication-solution-r1">
+  <metadata>
+    <title>Add attachment fields to sprk_communication entity</title>
+    <phase>4: Attachments + Archival</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>016</dependencies>
+    <blocks>031, 033, 036</blocks>
+    <tags>dataverse, fields</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation for manual field creation, no code</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Document the field specifications for sprk_hasattachments (Boolean) and sprk_attachmentcount (Whole Number) on the sprk_communication entity. These fields do not exist yet and must be created manually in Dataverse. Provide complete field specifications for manual creation.</prompt>
+
+  <role>SPAARKE platform developer expert in Dataverse entity customization and field schema documentation</role>
+
+  <goal>Complete field specification documentation for sprk_hasattachments and sprk_attachmentcount on sprk_communication, ready for manual creation in Dataverse.</goal>
+
+  <context>
+    <background>Phase 4 adds attachment support to communications. Before the BFF can track attachments, two new fields are needed on the sprk_communication entity: a boolean flag indicating whether attachments exist and a count of how many. These fields will be updated by the BFF CommunicationService after successfully sending an email with attachments.</background>
+    <relevant-files>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Dataverse Schema">Fields must follow existing naming convention: sprk_ prefix, lowercase.</constraint>
+    <constraint source="Dataverse Schema">Boolean fields use Two Options type. Whole Number fields use integer type.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path="docs/data-model/sprk_communication-data-schema.md" reason="Existing field schema for consistency"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read docs/data-model/sprk_communication-data-schema.md to confirm existing field patterns and naming conventions.</step>
+    <step order="2">Document sprk_hasattachments field specification: Display Name = "Has Attachments", Type = Two Options (Boolean), Default Value = No (false), Description = "Indicates whether the communication has file attachments".</step>
+    <step order="3">Document sprk_attachmentcount field specification: Display Name = "Attachment Count", Type = Whole Number (Integer), Default Value = 0, Min = 0, Max = 150, Description = "Number of file attachments on the communication".</step>
+    <step order="4">Update docs/data-model/sprk_communication-data-schema.md to include the new fields in the entity schema documentation.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing data schema</tool>
+    <tool name="Write">Update data schema documentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">Field specification documentation for sprk_hasattachments and sprk_attachmentcount</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_hasattachments field documented as Boolean with default false.</criterion>
+    <criterion testable="true">sprk_attachmentcount field documented as Whole Number with default 0, max 150.</criterion>
+    <criterion testable="true">Data schema documentation updated to include new fields.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load data schema first. Follow existing field naming conventions exactly.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,83 @@
+<task id="006" project="email-communication-solution-r1">
+  <metadata>
+    <title>Register AddCommunicationModule in Program.cs</title>
+    <phase>1: BFF Email Service</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>003, 004, 005</dependencies>
+    <blocks>007, 010</blocks>
+    <tags>bff-api, di</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies existing Program.cs; must verify DI registration count against ADR-010 limit</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Create an AddCommunicationModule() extension method that registers CommunicationService and ApprovedSenderValidator as concretes, configures CommunicationOptions from config, and maps the communication endpoints. Wire it into Program.cs. Verify total non-framework DI registrations remain at 15 or fewer.</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8 DI registration, IServiceCollection extensions, and feature module patterns</role>
+
+  <goal>AddCommunicationModule() extension method registers all communication services and configuration. Program.cs calls this method. Total non-framework DI registrations remain at or below 15 per ADR-010.</goal>
+
+  <context>
+    <background>ADR-010 mandates DI minimalism with concrete registrations grouped into feature modules. The communication module follows the same pattern used by other feature modules in the BFF. CommunicationOptions is bound from the "Communication" config section. The endpoint mapping is added alongside other endpoint mappings in Program.cs.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Concrete DI registrations via feature module. Total non-framework registrations must be 15 or fewer.</constraint>
+    <constraint source="ADR-010">Use AddSingleton&lt;ConcretType&gt;() pattern. No interfaces unless a seam is required.</constraint>
+    <constraint source="Design">CommunicationOptions binds from Configuration["Communication"] section.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-010-di-minimalism.md" reason="DI registration limit and feature module pattern"/>
+      <file path=".claude/patterns/api/service-registration.md" reason="Canonical feature module registration pattern"/>
+      <file path=".claude/constraints/api.md" reason="BFF service implementation rules"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read Program.cs to understand existing DI registration pattern and current registration count.</step>
+    <step order="2">Read .claude/patterns/api/service-registration.md for the feature module pattern.</step>
+    <step order="3">Create CommunicationModuleExtensions static class in Extensions/ (or appropriate location matching existing patterns).</step>
+    <step order="4">Implement AddCommunicationModule(this IServiceCollection services, IConfiguration configuration) extension method.</step>
+    <step order="5">Register CommunicationService as singleton: services.AddSingleton&lt;CommunicationService&gt;().</step>
+    <step order="6">Register ApprovedSenderValidator as singleton: services.AddSingleton&lt;ApprovedSenderValidator&gt;().</step>
+    <step order="7">Configure CommunicationOptions: services.Configure&lt;CommunicationOptions&gt;(configuration.GetSection("Communication")).</step>
+    <step order="8">Create MapCommunicationEndpoints extension method (or include in same class) for endpoint mapping.</step>
+    <step order="9">Edit Program.cs to add builder.Services.AddCommunicationModule(builder.Configuration) in the services section.</step>
+    <step order="10">Edit Program.cs to add app.MapCommunicationEndpoints() in the endpoint mapping section.</step>
+    <step order="11">Count total non-framework DI registrations in Program.cs and verify 15 or fewer.</step>
+    <step order="12">Verify compilation with dotnet build.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read Program.cs and service registration patterns</tool>
+    <tool name="Write">Create CommunicationModuleExtensions.cs</tool>
+    <tool name="Edit">Modify Program.cs to wire in communication module</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Extensions/CommunicationModuleExtensions.cs (or location matching existing pattern)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AddCommunicationModule() registers CommunicationService and ApprovedSenderValidator as singletons.</criterion>
+    <criterion testable="true">CommunicationOptions is configured from the "Communication" configuration section.</criterion>
+    <criterion testable="true">Program.cs calls AddCommunicationModule() and MapCommunicationEndpoints().</criterion>
+    <criterion testable="true">Total non-framework DI registrations in Program.cs remain at 15 or fewer (ADR-010).</criterion>
+    <criterion testable="true">dotnet build completes without errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Count DI registrations before and after to verify ADR-010 compliance.</protocol>
+  </execution>
+</task>

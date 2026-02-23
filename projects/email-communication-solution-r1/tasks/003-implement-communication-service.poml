@@ -1,0 +1,87 @@
+<task id="003" project="email-communication-solution-r1">
+  <metadata>
+    <title>Implement CommunicationService with Graph sendMail</title>
+    <phase>1: BFF Email Service</phase>
+    <status>completed</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>001, 002</dependencies>
+    <blocks>004, 006, 007, 010</blocks>
+    <tags>bff-api, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core service implementation with Graph integration; critical path task blocking Phase 1 and Phase 2</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Implement the CommunicationService that validates requests, resolves approved senders, builds Graph Message payloads, and sends email via GraphClientFactory.ForApp(). On failure, return ProblemDetails immediately with no retry.</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8 services, Microsoft Graph sendMail API, app-only authentication, and ProblemDetails error handling</role>
+
+  <goal>CommunicationService.SendAsync() validates the request, resolves the sender via ApprovedSenderValidator, constructs a Graph Message, calls sendMail via GraphClientFactory.ForApp(), and returns SendCommunicationResponse with graphMessageId and status. Failures return ProblemDetails immediately.</goal>
+
+  <context>
+    <background>This is the core service for the Email Communication Solution. It orchestrates the entire send flow: validation, sender resolution, Graph message construction, and sendMail execution. The existing SendEmailNodeExecutor shows the Graph sendMail pattern but uses OBO flow; this service uses app-only via ForApp(). Phase 2 (task 010) will extend this service to also create a Dataverse sprk_communication record after successful send.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/SendEmailNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Errors/ProblemDetailsHelper.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API pattern. Service is a concrete class, not an Azure Function.</constraint>
+    <constraint source="ADR-010">Register as concrete: services.AddSingleton&lt;CommunicationService&gt;(). No interface unless seam is required.</constraint>
+    <constraint source="ADR-019">All errors return ProblemDetails with errorCode and correlationId extensions.</constraint>
+    <constraint source="Design">Use GraphClientFactory.ForApp() for app-only sendMail. Fail immediately on error, no retry.</constraint>
+    <constraint source="Design">fromMailbox validated against ApprovedSenderValidator. Default sender used when fromMailbox is null.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="BFF service implementation rules"/>
+      <file path=".claude/adr/ADR-001-minimal-api.md" reason="Minimal API architecture"/>
+      <file path=".claude/adr/ADR-019-problemdetails.md" reason="ProblemDetails error pattern"/>
+      <file path=".claude/patterns/api/error-handling.md" reason="Error handling with errorCode extensions"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SendEmailNodeExecutor.cs to understand the Graph sendMail pattern (Message construction, Recipient, ItemBody).</step>
+    <step order="2">Read GraphClientFactory.cs to understand ForApp() method signature and usage.</step>
+    <step order="3">Read ProblemDetailsHelper.cs for existing error construction patterns.</step>
+    <step order="4">Create CommunicationService class with constructor injecting: IGraphClientFactory, ApprovedSenderValidator, ILogger&lt;CommunicationService&gt;.</step>
+    <step order="5">Implement SendAsync(SendCommunicationRequest request, CancellationToken ct) method with validation: require at least one recipient in To, require non-empty subject and body.</step>
+    <step order="6">Call ApprovedSenderValidator.ResolveAsync(request.FromMailbox) and return ProblemDetails if invalid.</step>
+    <step order="7">Build Microsoft.Graph.Models.Message with: Subject, Body (ContentType based on bodyFormat), ToRecipients, CcRecipients, BccRecipients, From (resolved sender).</step>
+    <step order="8">Call graphClient.Users[senderEmail].SendMail.PostAsync() with the constructed message.</step>
+    <step order="9">On success, return SendCommunicationResponse with status=Send, sentAt=DateTimeOffset.UtcNow, from=resolvedSender, correlationId.</step>
+    <step order="10">On Graph ServiceException, catch and return ProblemDetails with GRAPH_SEND_FAILED errorCode, include Graph error details in problem detail string.</step>
+    <step order="11">Add structured logging for send attempts, successes, and failures with correlationId.</step>
+    <step order="12">Verify compilation with dotnet build.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing Graph patterns and error handling</tool>
+    <tool name="Write">Create CommunicationService.cs</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SendAsync validates that To has at least one recipient; returns VALIDATION_ERROR if empty.</criterion>
+    <criterion testable="true">SendAsync calls ApprovedSenderValidator.ResolveAsync and returns INVALID_SENDER ProblemDetails on failure.</criterion>
+    <criterion testable="true">SendAsync constructs Graph Message with correct ContentType (Text for PlainText, Html for HTML).</criterion>
+    <criterion testable="true">SendAsync uses GraphClientFactory.ForApp() for app-only authentication.</criterion>
+    <criterion testable="true">On Graph failure, returns ProblemDetails with GRAPH_SEND_FAILED errorCode immediately (no retry).</criterion>
+    <criterion testable="true">Response includes graphMessageId, status=Send, sentAt, from, and correlationId.</criterion>
+    <criterion testable="true">dotnet build completes without errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Study SendEmailNodeExecutor for Graph sendMail pattern. Design for Phase 2 extensibility (Dataverse record creation).</protocol>
+  </execution>
+</task>

@@ -1,0 +1,83 @@
+<task id="043" project="email-communication-solution-r1">
+  <metadata>
+    <title>End-to-end integration testing</title>
+    <phase>5: Playbook Integration</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>041, 042</dependencies>
+    <blocks>090</blocks>
+    <tags>testing, integration-test, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>End-to-end integration testing with multiple system components</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Perform full end-to-end integration testing across all project phases. Test the complete flow: create matter, send communication via BFF, verify sprk_communication record, verify Graph message sent, verify .eml archived. Test all callers: workspace UI (authenticatedFetch) and AI playbook (tool handler). Test approved sender validation and status endpoint end-to-end. Document all test results.</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8 integration testing, end-to-end verification, multi-component testing, and test result documentation</role>
+
+  <goal>Complete end-to-end integration tests verify the full communication flow from all entry points (workspace UI, AI playbook), confirm sprk_communication records are created correctly, Graph messages are sent, .eml files are archived, approved sender validation works, and status queries return accurate data. All results documented.</goal>
+
+  <context>
+    <background>This is the final integration testing task before project wrap-up. It validates that all phases work together: the BFF send endpoint (Phase 1), Dataverse record creation (Phase 2), communication form interactions (Phase 3), attachment and archival flows (Phase 4), and AI tool handler (Phase 5). Both entry points must be tested: the workspace UI using authenticatedFetch and the AI playbook using SendCommunicationToolHandler. The tests should exercise the critical path end-to-end.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SendCommunicationToolHandler.cs</file>
+      <file>scripts/Test-SdapBffApi.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Testing">Integration tests should use test fixtures and mock external services (Graph, SPE) where full live testing is not possible.</constraint>
+    <constraint source="Dataverse Schema">Verify actual field values: statuscode, sprk_communiationtype (with typo), sprk_direction, sprk_regardingorganization, sprk_regardingperson.</constraint>
+    <constraint source="ADR-019">Verify ProblemDetails error responses are returned correctly for all failure scenarios.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/testing.md" reason="Testing MUST/MUST NOT rules and integration test patterns"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Design end-to-end test plan covering: BFF send flow, Dataverse record creation, attachment handling, .eml archival, AI tool handler, approved sender validation, status query.</step>
+    <step order="2">Test BFF send flow (workspace UI caller): POST /api/communications/send with valid SendCommunicationRequest. Verify 200 OK response with communicationId, graphMessageId, status, sentAt.</step>
+    <step order="3">Test Dataverse record creation: after successful send, verify sprk_communication record exists with correct field values — statuscode=Send (659490002), sprk_communiationtype, sprk_to, sprk_subject, sprk_body, sprk_sentby, sprk_sentat.</step>
+    <step order="4">Test Graph message sent: verify Graph sendMail was called with correct from, to, cc, subject, body. Verify graphMessageId returned in response matches.</step>
+    <step order="5">Test .eml archival: send with archiveToSpe=true, verify .eml uploaded to SPE at /communications/{id:N}/, verify sprk_document record created with DocumentType=Communication.</step>
+    <step order="6">Test AI playbook caller: invoke SendCommunicationToolHandler.ExecuteAsync() with tool parameters, verify email sent and PlaybookToolResult returned with communicationId.</step>
+    <step order="7">Test approved sender validation: attempt send with unapproved fromMailbox, verify ProblemDetails error returned with appropriate errorCode.</step>
+    <step order="8">Test status endpoint: GET /api/communications/{id}/status, verify returns correct status information for existing communication.</step>
+    <step order="9">Test with attachments: send communication with attachmentDocumentIds, verify attachments included in Graph sendMail, sprk_communicationattachment records created, sprk_hasattachments=true, sprk_attachmentcount correct.</step>
+    <step order="10">Document all test results with pass/fail status, expected vs actual values, and any issues discovered.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read endpoint code and test patterns</tool>
+    <tool name="Write">Create integration test files and results documentation</tool>
+    <tool name="Bash">Run dotnet test and API test scripts</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Integration test files covering all end-to-end scenarios</output>
+    <output type="documentation">E2E test results documentation with pass/fail for each scenario</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF send endpoint returns correct response with communicationId, graphMessageId, status.</criterion>
+    <criterion testable="true">sprk_communication Dataverse record created with correct field values matching actual schema.</criterion>
+    <criterion testable="true">Graph sendMail called with correct message payload.</criterion>
+    <criterion testable="true">.eml archival creates file in SPE and sprk_document record when archiveToSpe=true.</criterion>
+    <criterion testable="true">AI tool handler sends email and returns valid PlaybookToolResult.</criterion>
+    <criterion testable="true">Approved sender validation rejects unapproved senders with ProblemDetails.</criterion>
+    <criterion testable="true">Status endpoint returns accurate communication status.</criterion>
+    <criterion testable="true">All test results documented with pass/fail status.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load testing constraints first. Design comprehensive test plan before executing. Mock external services where live testing is impractical. Document all results systematically.</protocol>
+  </execution>
+</task>

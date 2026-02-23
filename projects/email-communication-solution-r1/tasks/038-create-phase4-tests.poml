@@ -1,0 +1,80 @@
+<task id="038" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create unit/integration tests for Phase 4</title>
+    <phase>4: Attachments + Archival</phase>
+    <status>completed</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>032</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, unit-test, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with explicit constraints</rigor-reason>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Create unit and integration tests for Phase 4 features: attachment download and validation (size/count limits), .eml generation (RFC 2822 format verification), archival flow (mock SpeFileStore), send with attachments end-to-end, and partial failure scenarios. Follow existing test patterns in the codebase.</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8 testing, xUnit, Moq/NSubstitute, integration testing, and email format validation</role>
+
+  <goal>Comprehensive test coverage for all Phase 4 features: attachment handling validates limits correctly, .eml generation produces valid RFC 2822 output, archival flow uploads to SPE and creates records, and partial failure scenarios are handled gracefully. All tests pass with dotnet test.</goal>
+
+  <context>
+    <background>Phase 4 adds significant new functionality: attachment downloads from SPE, Graph sendMail with attachments, .eml file generation, .eml archival to SPE, attachment record creation, and bulk send. Each feature needs unit tests with mocked dependencies and integration tests verifying the flows work together. Attachment validation (150 max, 35MB total) must be tested at boundary values. The .eml output must be validated against RFC 2822 structure.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/EmlGenerationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Spe/SpeFileStore.cs</file>
+      <file>tests/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Testing">Use xUnit for test framework. Use established mocking library (Moq or NSubstitute based on existing tests).</constraint>
+    <constraint source="Testing">Test file naming: {ClassName}.Tests.cs in matching test project folder structure.</constraint>
+    <constraint source="ADR-007">Mock SpeFileStore for unit tests — do not call real SPE in tests.</constraint>
+    <constraint source="Testing">Integration tests may use test fixtures but must not depend on external services.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/testing.md" reason="Testing MUST/MUST NOT rules and patterns"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing test files in tests/ to understand test structure, framework, and mocking library used.</step>
+    <step order="2">Create attachment validation tests: test max 150 attachment count limit (pass at 150, fail at 151), test 35MB total size limit (pass at 35MB, fail at 35MB+1), test empty attachment list, test single attachment.</step>
+    <step order="3">Create attachment download tests: mock SpeFileStore.DownloadAsync(), verify correct documentIds passed, test download failure for one attachment fails the entire send.</step>
+    <step order="4">Create .eml generation tests: verify output contains required RFC 2822 headers (From, To, Subject, Date, Message-ID), verify HTML body is present as MIME text/html part, verify attachments are base64-encoded MIME parts, test message without attachments produces single-part output.</step>
+    <step order="5">Create archival flow tests: mock SpeFileStore upload, mock Dataverse record creation, verify .eml uploaded to correct path /communications/{id:N}/{name}.eml, verify sprk_document record created with correct DocumentType and SourceType.</step>
+    <step order="6">Create partial failure tests: test archival failure after successful send returns warning (not error), test attachment record creation failure is non-blocking.</step>
+    <step order="7">Create integration tests for send with attachments: mock Graph client and SpeFileStore, verify complete flow from request to response with attachments.</step>
+    <step order="8">Run dotnet test to verify all tests pass.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing test patterns and source code</tool>
+    <tool name="Write">Create test files</tool>
+    <tool name="Bash">Run dotnet test to verify tests pass</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/CommunicationService.Attachments.Tests.cs (or matching project structure)</output>
+    <output type="code">tests/EmlGenerationService.Tests.cs</output>
+    <output type="code">tests/CommunicationService.Archival.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Attachment validation tests cover boundary values (150 count, 35MB size).</criterion>
+    <criterion testable="true">.eml generation tests verify RFC 2822 headers and MIME structure.</criterion>
+    <criterion testable="true">Archival flow tests verify SPE upload and Dataverse record creation.</criterion>
+    <criterion testable="true">Partial failure tests verify non-blocking behavior for archival and attachment records.</criterion>
+    <criterion testable="true">All tests pass with dotnet test.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load testing constraints first. Follow existing test patterns. Use established mocking library. Run tests after writing each test file.</protocol>
+  </execution>
+</task>

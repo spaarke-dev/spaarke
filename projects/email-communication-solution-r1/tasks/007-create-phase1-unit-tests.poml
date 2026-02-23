@@ -1,0 +1,76 @@
+<task id="007" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create unit tests for Phase 1 services</title>
+    <phase>1: BFF Email Service</phase>
+    <status>completed</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>003, 006</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, unit-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with constrained test patterns</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Create unit tests for CommunicationService (mock GraphServiceClient, verify sendMail call, test failure handling), ApprovedSenderValidator (config-only, invalid sender, default sender), and request validation logic.</prompt>
+
+  <role>SPAARKE platform developer expert in xUnit testing, Moq mocking, and .NET 8 service unit testing</role>
+
+  <goal>Comprehensive unit test coverage for CommunicationService and ApprovedSenderValidator. All tests pass with dotnet test. Tests verify happy path, validation errors, sender resolution, Graph failures, and edge cases.</goal>
+
+  <context>
+    <background>Phase 1 introduces CommunicationService and ApprovedSenderValidator. These need thorough unit tests before Phase 2 extends them. The test project already exists at tests/unit/Sprk.Bff.Api.Tests/ with established patterns for mocking Graph clients and services. FakeGraphClientFactory exists for Graph mocking.</background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Mocks/FakeGraphClientFactory.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/SendEmailNodeExecutorTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Filters/DocumentAuthorizationFilterTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Testing">Use xUnit with FluentAssertions. Follow existing test file naming: {ClassName}Tests.cs.</constraint>
+    <constraint source="Testing">Mock external dependencies (Graph, configuration). Test service logic in isolation.</constraint>
+    <constraint source="ADR-019">Verify ProblemDetails are returned with correct errorCode values.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/testing.md" reason="Unit test MUST/MUST NOT rules"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing test patterns in Sprk.Bff.Api.Tests for mocking conventions and assertion styles.</step>
+    <step order="2">Read FakeGraphClientFactory.cs for Graph client mocking pattern.</step>
+    <step order="3">Create CommunicationServiceTests.cs with tests: SendAsync_WithValidRequest_SendsViaGraph, SendAsync_WithNoRecipients_ReturnsValidationError, SendAsync_WithInvalidSender_ReturnsInvalidSenderError, SendAsync_WhenGraphFails_ReturnsGraphSendFailedError, SendAsync_WithNullFromMailbox_UsesDefaultSender, SendAsync_SetsCorrectContentType_ForHtmlBody, SendAsync_SetsCorrectContentType_ForPlainTextBody.</step>
+    <step order="4">Create ApprovedSenderValidatorTests.cs with tests: ResolveAsync_WithNullFromMailbox_ReturnsDefaultSender, ResolveAsync_WithValidSender_ReturnsSuccess, ResolveAsync_WithInvalidSender_ReturnsInvalidSenderError, ResolveAsync_CaseInsensitive_MatchesSender, ResolveAsync_WithNoDefaultConfigured_ReturnsNoDefaultSenderError, ResolveAsync_WithEmptyApprovedList_ReturnsInvalidSender.</step>
+    <step order="5">Create SendCommunicationRequestValidationTests.cs (if validation is separate) or include validation tests in CommunicationServiceTests.</step>
+    <step order="6">Run dotnet test to verify all tests pass.</step>
+    <step order="7">Verify test count and all expected scenarios are covered.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing test patterns and mock utilities</tool>
+    <tool name="Write">Create test files</tool>
+    <tool name="Bash">Run dotnet test to verify all tests pass</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/ApprovedSenderValidatorTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CommunicationServiceTests covers: valid send, no recipients, invalid sender, Graph failure, null fromMailbox, HTML body, PlainText body.</criterion>
+    <criterion testable="true">ApprovedSenderValidatorTests covers: null fromMailbox default, valid sender, invalid sender, case-insensitive, no default configured, empty list.</criterion>
+    <criterion testable="true">All tests mock Graph client and configuration; no real external calls.</criterion>
+    <criterion testable="true">Tests verify ProblemDetails errorCode values match specification (INVALID_SENDER, GRAPH_SEND_FAILED, VALIDATION_ERROR).</criterion>
+    <criterion testable="true">dotnet test completes with all tests passing (zero failures).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow existing test patterns in the test project.</protocol>
+  </execution>
+</task>

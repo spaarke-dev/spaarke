@@ -1,0 +1,53 @@
+<task id="050" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create CommunicationAccountService with Dataverse query</title>
+    <phase>6</phase>
+    <status>completed</status>
+    <estimate>4h</estimate>
+    <tags>bff-api, dataverse, cache</tags>
+    <dependencies>none (Phases 1-5 complete)</dependencies>
+    <blocks>051, 052, 055</blocks>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create a CommunicationAccountService that queries sprk_communicationaccount from Dataverse with Redis caching, replacing the concept of querying sprk_approvedsender.</goal>
+    <context>The sprk_communicationaccount entity already exists in Dataverse. The ApprovedSenderValidator currently calls IDataverseService.QueryApprovedSendersAsync() which queries an entity that may not exist or uses the old name. We need a proper service that queries the actual entity with correct field names and caches results.</context>
+    <constraints>
+      <constraint source="ADR-010">Register as concrete type via AddCommunicationModule(). No unnecessary interfaces.</constraint>
+      <constraint source="ADR-007">Do not leak Graph SDK types above service boundary.</constraint>
+      <constraint source="SCHEMA">Use ACTUAL field names: sprk_sendenableds (NOT sprk_sendenabled), sprk_subscriptionid (NOT sprk_graphsubscriptionid). Account type values: 100000000=Shared, 100000001=Service, 100000002=User.</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+      <file>projects/email-communication-solution-r1/design-communication-accounts.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ApprovedSenderValidator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/DataverseWebApiService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/CommunicationOptions.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create CommunicationAccount model class matching actual Dataverse schema fields (sprk_name, sprk_emailaddress, sprk_displayname, sprk_accounttype, sprk_sendenableds, sprk_isdefaultsender, sprk_receiveenabled, sprk_monitorfolder, sprk_autocreaterecords, sprk_subscriptionid, sprk_subscriptionexpiry, sprk_securitygroupid, sprk_securitygroupname, sprk_verificationstatus, sprk_lastverified)</step>
+    <step>Create CommunicationAccountService with QuerySendEnabledAccountsAsync() and QueryReceiveEnabledAccountsAsync() methods</step>
+    <step>Implement Dataverse OData query: $filter=sprk_sendenableds eq true and statecode eq 0&amp;$select=sprk_emailaddress,sprk_displayname,sprk_isdefaultsender,sprk_accounttype,sprk_securitygroupid,sprk_name</step>
+    <step>Add Redis caching with 5-minute TTL (matching existing ApprovedSenderValidator pattern). Cache key: "comm:accounts:send-enabled" and "comm:accounts:receive-enabled"</step>
+    <step>Add QueryCommunicationAccountsAsync method to IDataverseService interface (or add directly to CommunicationAccountService if it calls Dataverse directly)</step>
+    <step>Register CommunicationAccountService in AddCommunicationModule()</step>
+    <step>Add AccountType enum matching actual values: SharedAccount=100000000, ServiceAccount=100000001, UserAccount=100000002</step>
+    <step>Add helper method DeriveAuthMethod(AccountType) → returns AppOnly or OBO based on account type</step>
+    <step>Add helper method DeriveSubscriptionStatus(subscriptionId, subscriptionExpiry) → returns Active/Expired/NotConfigured</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>CommunicationAccountService queries sprk_communicationaccount with correct field names</criterion>
+    <criterion>Redis cache with 5-minute TTL for query results</criterion>
+    <criterion>AccountType enum matches actual Dataverse values (100000000, 100000001, 100000002)</criterion>
+    <criterion>Service registered in AddCommunicationModule()</criterion>
+    <criterion>Auth method and subscription status derived correctly from available fields</criterion>
+  </acceptance-criteria>
+</task>

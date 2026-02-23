@@ -1,0 +1,46 @@
+<task id="077" project="email-communication-solution-r1">
+  <metadata>
+    <title>End-to-end inbound monitoring testing</title>
+    <phase>8</phase>
+    <status>completed</status>
+    <estimate>2h</estimate>
+    <tags>testing, integration-test</tags>
+    <dependencies>070, 071, 072, 073, 074, 075, 076</dependencies>
+    <blocks>080</blocks>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Verify end-to-end inbound email monitoring: subscriptions auto-created, incoming emails create Communication records with Direction=Incoming, backup polling catches missed messages, and subscriptions auto-renew.</goal>
+    <context>This is the gate task for Phase 8. The entire inbound pipeline must work correctly before proceeding to Phase 9 verification and admin UX.</context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+      <file>docs/guides/COMMUNICATION-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Verify sprk_communicationaccount has sprk_receiveenabled=true for mailbox-central@spaarke.com</step>
+    <step>Verify GraphSubscriptionManager creates subscription — check sprk_subscriptionid populated on account record</step>
+    <step>Send email to mailbox-central@spaarke.com from an external sender</step>
+    <step>Verify sprk_communication record auto-created with sprk_direction=100000000 (Incoming)</step>
+    <step>Verify email fields populated correctly: sprk_from, sprk_to, sprk_subject, sprk_body, sprk_sentat</step>
+    <step>Verify regarding fields are EMPTY (association resolution is a separate AI project)</step>
+    <step>Test backup polling: simulate missed webhook and verify CommunicationPollingService catches the message within 15 minutes</step>
+    <step>Test subscription renewal: verify subscription does not expire and sprk_subscriptionexpiry is updated</step>
+    <step>Document test results and any issues found</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Graph subscription auto-created for mailbox-central@spaarke.com</criterion>
+    <criterion>Incoming email creates sprk_communication record with Direction=Incoming</criterion>
+    <criterion>Email fields correctly populated (from, to, subject, body, sentat)</criterion>
+    <criterion>Regarding fields are EMPTY on incoming records</criterion>
+    <criterion>Backup polling catches missed webhook messages within 15 minutes</criterion>
+    <criterion>Subscription auto-renews without manual intervention</criterion>
+    <criterion>Test results documented</criterion>
+  </acceptance-criteria>
+</task>

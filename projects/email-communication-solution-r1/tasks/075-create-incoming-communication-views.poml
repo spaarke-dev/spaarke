@@ -1,0 +1,37 @@
+<task id="075" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create incoming communication views</title>
+    <phase>8</phase>
+    <status>completed</status>
+    <estimate>2h</estimate>
+    <tags>dataverse, solution</tags>
+    <dependencies>072</dependencies>
+    <blocks>077</blocks>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Document new Dataverse views on the sprk_communication entity for managing incoming communications, including an "Unassociated Incoming" view for manual review.</goal>
+    <context>With inbound email monitoring creating sprk_communication records with Direction=Incoming and no regarding fields set (association is a separate AI project), administrators need views to see incoming communications and identify those that need manual association.</context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Document new views on sprk_communication entity: "Incoming Communications" view filtered by sprk_direction eq 100000000 (Incoming), "Recent Incoming" view filtered by sprk_direction eq 100000000 AND last 24 hours, "Unassociated Incoming" view filtered by sprk_direction eq 100000000 AND no regarding fields set (for manual review)</step>
+    <step>Document view columns for each view: sprk_from, sprk_subject, sprk_sentat, statuscode, sprk_direction, sprk_regardingmatter (to show when unset for manual association)</step>
+    <step>Document sort order: sprk_sentat descending (newest first) for all incoming views</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Three incoming views documented: Incoming Communications, Recent Incoming, Unassociated Incoming</criterion>
+    <criterion>View columns include sprk_from, sprk_subject, sprk_sentat, statuscode, sprk_direction, sprk_regardingmatter</criterion>
+    <criterion>Sort order is sprk_sentat descending (newest first)</criterion>
+    <criterion>Views ready for manual creation in Dataverse</criterion>
+  </acceptance-criteria>
+</task>

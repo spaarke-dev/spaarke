@@ -1,0 +1,74 @@
+<task id="023" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create communication views</title>
+    <phase>3: Communication Application</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>016</dependencies>
+    <blocks>none</blocks>
+    <tags>dataverse, form-config</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Dataverse view configuration, documentation only</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Document the Dataverse view configurations for the sprk_communication entity. Create specifications for My Sent Communications, Communications By Matter, Communications By Project, Failed Communications, and All Communications views with appropriate filters, columns, and sort orders.</prompt>
+
+  <role>SPAARKE platform developer expert in Dataverse view configuration, FetchXML queries, and model-driven app UX patterns</role>
+
+  <goal>Complete view configuration documentation for all 5 sprk_communication views, with correct filters, columns, sort orders, and FetchXML specifications ready for implementation in Dataverse.</goal>
+
+  <context>
+    <background>The communication entity needs multiple views to support different user workflows. Users need to see their own sent communications, filter by associated matter or project, monitor failed sends, and browse all communications. Each view needs appropriate columns and sort orders for its use case.</background>
+    <relevant-files>
+      <file>docs/data-model/sprk_communication-data-schema.md</file>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Dataverse Schema">Status uses statuscode: Draft=1, Queued=659490001, Send=659490002, Delivered=659490003, Failed=659490004.</constraint>
+    <constraint source="Dataverse Schema">Regarding fields: sprk_regardingmatter, sprk_regardingproject (lookups for filtering).</constraint>
+    <constraint source="Dataverse Schema">Sent by field: sprk_sentby (lookup to systemuser). Use _sprk_sentby_value for FetchXML filter.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Dataverse view and query patterns"/>
+      <file path="docs/data-model/sprk_communication-data-schema.md" reason="Source of truth for all field names"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read data schema to confirm all field logical names for view columns and filters.</step>
+    <step order="2">Document "My Sent Communications" view: filter statuscode=Send (659490002) AND _sprk_sentby_value equals current user. Columns: sprk_subject, sprk_to, statuscode, sprk_sentat, sprk_communiationtype. Sort: sprk_sentat descending.</step>
+    <step order="3">Document "Communications By Matter" view: filter _sprk_regardingmatter_value is not null. Columns: sprk_subject, sprk_to, statuscode, sprk_sentat, sprk_regardingmatter. Sort: sprk_sentat descending. Group by sprk_regardingmatter.</step>
+    <step order="4">Document "Communications By Project" view: filter _sprk_regardingproject_value is not null. Columns: sprk_subject, sprk_to, statuscode, sprk_sentat, sprk_regardingproject. Sort: sprk_sentat descending. Group by sprk_regardingproject.</step>
+    <step order="5">Document "Failed Communications" view: filter statuscode=Failed (659490004). Columns: sprk_subject, sprk_to, statuscode, sprk_sentat, sprk_sentby, sprk_communiationtype. Sort: createdon descending.</step>
+    <step order="6">Document "All Communications" view: no status filter. Columns: sprk_subject, sprk_to, statuscode, sprk_sentat, sprk_sentby, sprk_communiationtype, sprk_direction. Sort: createdon descending.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read data schema and existing view patterns</tool>
+    <tool name="Write">Create view configuration documentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">View configuration documentation for all 5 communication views</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">My Sent Communications view filters by statuscode=Send AND current user as sender.</criterion>
+    <criterion testable="true">Communications By Matter view filters by _sprk_regardingmatter_value is not null.</criterion>
+    <criterion testable="true">Communications By Project view filters by _sprk_regardingproject_value is not null.</criterion>
+    <criterion testable="true">Failed Communications view filters by statuscode=Failed (659490004).</criterion>
+    <criterion testable="true">All Communications view shows all records with no status filter.</criterion>
+    <criterion testable="true">All views include appropriate columns and sort orders.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load data schema first. Verify all field logical names match actual Dataverse schema.</protocol>
+  </execution>
+</task>

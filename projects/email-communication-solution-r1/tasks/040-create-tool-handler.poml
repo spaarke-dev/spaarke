@@ -1,0 +1,84 @@
+<task id="040" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create SendCommunicationToolHandler</title>
+    <phase>5: Playbook Integration</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>006</dependencies>
+    <blocks>041, 042</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation, AI tool framework integration</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Create SendCommunicationToolHandler implementing IAiToolHandler for the AI playbook tool framework. The tool name is "send_communication" and it enables AI playbooks to send emails by building a SendCommunicationRequest from tool parameters and calling CommunicationService.SendAsync(). Register via auto-discovery (AddToolFramework scans the assembly).</prompt>
+
+  <role>SPAARKE platform developer expert in .NET 8, AI tool framework (IAiToolHandler), playbook integration, and CommunicationService orchestration</role>
+
+  <goal>A working SendCommunicationToolHandler that implements IAiToolHandler, is auto-discovered by the tool framework, accepts tool parameters (to, subject, body, regardingEntity, regardingId, attachmentDocumentIds), calls CommunicationService.SendAsync(), and returns a PlaybookToolResult with communicationId and status.</goal>
+
+  <context>
+    <background>The AI Tool Framework allows playbooks to invoke tools during automated workflows. The SendCommunicationToolHandler enables playbooks to send emails — for example, sending an introductory email after matter creation or sending engagement letters. The handler translates AI tool parameters into a SendCommunicationRequest, delegates to CommunicationService for the actual send, and returns a structured result. The tool framework auto-discovers handlers that implement IAiToolHandler via assembly scanning in AddToolFramework.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/DataverseUpdateToolHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAiToolHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IToolHandlerRegistry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Extensions/ToolFrameworkExtensions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Extend BFF for AI tools. IAiToolHandler auto-discovery. No separate service.</constraint>
+    <constraint source="ADR-010">Concrete DI registration. Tool handler discovered by assembly scanning — no manual registration needed.</constraint>
+    <constraint source="ADR-019">Return structured errors via PlaybookToolResult on failure, not raw exceptions.</constraint>
+    <constraint source="AI Tool Framework">ToolName must be unique. Use "send_communication". Follow DataverseUpdateToolHandler as canonical example.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-013-ai-architecture.md" reason="AI architecture decisions and IAiToolHandler pattern"/>
+      <file path=".claude/constraints/ai.md" reason="AI tool framework MUST/MUST NOT rules"/>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read DataverseUpdateToolHandler.cs as the canonical example of an IAiToolHandler implementation.</step>
+    <step order="2">Read IAiToolHandler.cs and IToolHandlerRegistry.cs to understand the interface contract and registration mechanism.</step>
+    <step order="3">Read ToolFrameworkExtensions.cs to confirm auto-discovery via assembly scanning.</step>
+    <step order="4">Create SendCommunicationToolHandler class implementing IAiToolHandler in Services/Ai/Tools/ folder.</step>
+    <step order="5">Set ToolName = "send_communication". Define tool parameters: to (string[], required), subject (string, required), body (string, required), cc (string[]?, optional), regardingEntity (string?, optional — entity logical name), regardingId (Guid?, optional — entity record ID), attachmentDocumentIds (Guid[]?, optional).</step>
+    <step order="6">Implement GetToolDefinition() returning the tool schema with parameter names, types, descriptions, and required flags.</step>
+    <step order="7">Implement ExecuteAsync(): extract parameters from tool invocation context, build SendCommunicationRequest (mapping regardingEntity/regardingId to CommunicationAssociation), call CommunicationService.SendAsync(), return PlaybookToolResult with communicationId, status, and sentAt.</step>
+    <step order="8">Handle errors: catch CommunicationService exceptions, return PlaybookToolResult with error details (not raw exception).</step>
+    <step order="9">Inject CommunicationService via constructor (concrete type per ADR-010).</step>
+    <step order="10">Run dotnet build to verify compilation and auto-discovery.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read IAiToolHandler interface and existing tool handler implementations</tool>
+    <tool name="Write">Create SendCommunicationToolHandler</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SendCommunicationToolHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SendCommunicationToolHandler implements IAiToolHandler with ToolName = "send_communication".</criterion>
+    <criterion testable="true">Tool definition includes parameters: to, subject, body, cc, regardingEntity, regardingId, attachmentDocumentIds.</criterion>
+    <criterion testable="true">ExecuteAsync builds SendCommunicationRequest and calls CommunicationService.SendAsync().</criterion>
+    <criterion testable="true">Returns PlaybookToolResult with communicationId, status, and sentAt on success.</criterion>
+    <criterion testable="true">Returns PlaybookToolResult with error details on failure (no raw exceptions).</criterion>
+    <criterion testable="true">Handler is auto-discovered by AddToolFramework assembly scanning.</criterion>
+    <criterion testable="true">dotnet build completes without errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load ADR-013 and AI constraints before starting. Follow DataverseUpdateToolHandler pattern exactly. Verify auto-discovery by checking ToolFrameworkExtensions scanning logic.</protocol>
+  </execution>
+</task>

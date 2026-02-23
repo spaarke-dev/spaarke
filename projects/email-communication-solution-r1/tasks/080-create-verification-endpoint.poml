@@ -1,0 +1,52 @@
+<task id="080" project="email-communication-solution-r1">
+  <metadata>
+    <title>Create mailbox verification endpoint and service</title>
+    <phase>9</phase>
+    <status>completed</status>
+    <estimate>3h</estimate>
+    <tags>bff-api, api</tags>
+    <dependencies>055</dependencies>
+    <blocks>082</blocks>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create a POST /api/communications/accounts/{id}/verify endpoint and MailboxVerificationService that tests send and/or read capabilities for a communication account and updates its verification status.</goal>
+    <context>Administrators need a way to verify that a communication account's mailbox is properly configured and accessible. The verification tests send capability (if sprk_sendenableds=true) by sending a test email, and read capability (if sprk_receiveenabled=true) by querying recent messages. Results are persisted to sprk_verificationstatus and sprk_lastverified on the account record. This can run in parallel with Phase 7 and 8 tasks since it only depends on Phase 6 completion.</context>
+    <constraints>
+      <constraint source="ADR-008">Protect endpoint with authorization filter.</constraint>
+      <constraint source="ADR-010">Register MailboxVerificationService as concrete type in AddCommunicationModule().</constraint>
+      <constraint source="ADR-019">Return ProblemDetails for failures.</constraint>
+      <constraint source="SCHEMA">sprk_verificationstatus: Verified=100000000, Failed=100000001, Pending=100000002. Use sprk_sendenableds (trailing 's'). sprk_lastverified stores verification timestamp.</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/CommunicationEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create POST /api/communications/accounts/{id}/verify endpoint in CommunicationEndpoints</step>
+    <step>Create MailboxVerificationService with VerifyAsync(Guid accountId) method</step>
+    <step>Query sprk_communicationaccount record by ID to get account configuration</step>
+    <step>If sprk_sendenableds=true: test send capability by sending a test email to the account's own address using GraphClientFactory.ForApp()</step>
+    <step>If sprk_receiveenabled=true: test read capability by querying recent messages (GET /users/{email}/messages?$top=1) using GraphClientFactory.ForApp()</step>
+    <step>Update sprk_communicationaccount record: set sprk_verificationstatus to Verified (100000000) on success or Failed (100000001) on failure, and set sprk_lastverified to current timestamp</step>
+    <step>Return verification result with details (which capabilities tested, success/failure reason)</step>
+    <step>Register endpoint with appropriate authorization filter</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>POST /api/communications/accounts/{id}/verify endpoint registered in CommunicationEndpoints</criterion>
+    <criterion>Send capability tested when sprk_sendenableds=true</criterion>
+    <criterion>Read capability tested when sprk_receiveenabled=true</criterion>
+    <criterion>sprk_verificationstatus updated: Verified (100000000) on success, Failed (100000001) on failure</criterion>
+    <criterion>sprk_lastverified updated with current timestamp</criterion>
+    <criterion>Verification result returned with details</criterion>
+    <criterion>Endpoint protected with authorization filter</criterion>
+  </acceptance-criteria>
+</task>

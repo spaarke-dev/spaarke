@@ -1,0 +1,46 @@
+<task id="076" project="email-communication-solution-r1">
+  <metadata>
+    <title>Unit tests for inbound pipeline</title>
+    <phase>8</phase>
+    <status>completed</status>
+    <estimate>3h</estimate>
+    <tags>testing, unit-test</tags>
+    <dependencies>070, 071, 072, 073</dependencies>
+    <blocks>077</blocks>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create comprehensive unit tests covering the entire inbound email pipeline: subscription management, webhook validation, incoming message processing, and backup polling.</goal>
+    <context>The inbound pipeline has four major components: GraphSubscriptionManager (creates/renews subscriptions), the webhook endpoint (validates and enqueues notifications), IncomingCommunicationProcessor (fetches messages and creates records), and CommunicationPollingService (backup polling). Each needs thorough test coverage, with an explicit test that regarding fields are NOT set.</context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Test GraphSubscriptionManager: creates subscription for receive-enabled account with null sprk_subscriptionid</step>
+    <step>Test GraphSubscriptionManager: renews subscription when sprk_subscriptionexpiry is less than 24 hours away</step>
+    <step>Test GraphSubscriptionManager: recreates subscription (delete + create) when renewal fails</step>
+    <step>Test webhook endpoint: validates clientState correctly and accepts valid notifications</step>
+    <step>Test webhook endpoint: handles validation request by returning validationToken as plain text</step>
+    <step>Test webhook endpoint: rejects notifications with invalid clientState</step>
+    <step>Test IncomingCommunicationProcessor: creates sprk_communication record with correct field mapping (direction, type, status, from, to, cc, subject, body, graphmessageid, sentat)</step>
+    <step>Test IncomingCommunicationProcessor: does NOT set regarding fields — explicit test that sprk_regardingmatter, sprk_regardingorganization, sprk_regardingperson are all null/absent</step>
+    <step>Test IncomingCommunicationProcessor: deduplication — skips messages with existing sprk_graphmessageid</step>
+    <step>Test CommunicationPollingService: skips messages already tracked in Dataverse (deduplication)</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All unit tests pass</criterion>
+    <criterion>GraphSubscriptionManager: create, renew, and recreate paths tested</criterion>
+    <criterion>Webhook endpoint: validation, valid notification, and invalid clientState tested</criterion>
+    <criterion>IncomingCommunicationProcessor: full field mapping tested</criterion>
+    <criterion>Explicit test confirms regarding fields are NOT set on incoming records</criterion>
+    <criterion>Deduplication tested for both webhook and polling paths</criterion>
+  </acceptance-criteria>
+</task>

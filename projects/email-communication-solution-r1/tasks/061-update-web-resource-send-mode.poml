@@ -1,0 +1,44 @@
+<task id="061" project="email-communication-solution-r1">
+  <metadata>
+    <title>Update communication web resource with send mode selection</title>
+    <phase>7</phase>
+    <status>completed</status>
+    <estimate>3h</estimate>
+    <tags>dataverse, frontend</tags>
+    <dependencies>060</dependencies>
+    <blocks>064</blocks>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Update sprk_communication_send.js to include send mode selection UI so users can choose between sending from a shared mailbox or their own mailbox.</goal>
+    <context>The existing sprk_communication_send.js web resource handles the Send button click and posts to the BFF API. It needs a dropdown allowing users to select "My Mailbox" or one of the enabled shared accounts. The BFF now supports a sendMode field in the POST payload (from task 060).</context>
+    <constraints>
+      <constraint source="ADR-006">Update existing web resource — no new legacy JS webresources.</constraint>
+      <constraint source="SCHEMA">sendMode values in payload: "sharedMailbox" or "user". fromMailbox set to selected shared email when shared mode selected.</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r1/spec.md</file>
+      <file>src/solutions/CommunicationRibbons/WebResources/sprk_communication_send.js</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Update sprk_communication_send.js to include send mode selection UI: dropdown with "My Mailbox" option plus dynamically queried enabled shared accounts from sprk_communicationaccount</step>
+    <step>When user selects "My Mailbox", set sendMode: "user" in the POST payload to the BFF API</step>
+    <step>When user selects a shared mailbox, set sendMode: "sharedMailbox" and fromMailbox to the selected shared account's email address in the POST payload</step>
+    <step>Ensure user's bearer token is passed in Authorization header (already happening — verify OBO flow works)</step>
+    <step>Handle error response for expired OBO token: show user-friendly message "Please refresh the page and try again"</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Send mode dropdown appears with "My Mailbox" and shared account options</criterion>
+    <criterion>Selecting "My Mailbox" sends sendMode: "user" in POST payload</criterion>
+    <criterion>Selecting shared mailbox sends sendMode: "sharedMailbox" and fromMailbox in POST payload</criterion>
+    <criterion>Bearer token passed in Authorization header for OBO</criterion>
+    <criterion>Expired OBO token error handled with user-friendly message</criterion>
+  </acceptance-criteria>
+</task>
