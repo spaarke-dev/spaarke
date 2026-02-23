@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Communication Ribbons - Send Button
+  Version: 1.0.0
+
+  Adds "Send" button to the sprk_communication entity form command bar.
+  Button is enabled only when the record status is Draft (statecode = 0).
+
+  Calls: Sprk.Communication.Send.sendCommunication(primaryControl)
+  Web Resource: sprk_communication_send
+
+  Project: Email Communication Solution R1
+  Task: 022
+-->
+<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <!-- Add "Send" button to Communication form command bar (Actions group) -->
+    <CustomAction Id="sprk.communication.send.CustomAction"
+                  Location="Mscrm.Form.sprk_communication.MainTab.Actions.Controls._children"
+                  Sequence="10">
+      <CommandUIDefinition>
+        <Button Id="sprk.communication.send.Button"
+                Command="sprk.communication.send.Command"
+                LabelText="$LocLabels:sprk.communication.send.LabelText"
+                Alt="$LocLabels:sprk.communication.send.Alt"
+                ToolTipTitle="$LocLabels:sprk.communication.send.ToolTipTitle"
+                ToolTipDescription="$LocLabels:sprk.communication.send.ToolTipDescription"
+                TemplateAlias="o1"
+                ModernImage="Send" />
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+
+  <CommandDefinitions>
+    <!-- Command for Send button — calls sendCommunication on the web resource -->
+    <CommandDefinition Id="sprk.communication.send.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.communication.isStatusDraft.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_communication_send"
+                            FunctionName="Sprk.Communication.Send.sendCommunication">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules />
+    <EnableRules>
+      <!-- Enable only when communication status is Draft (statecode = 0) -->
+      <EnableRule Id="sprk.communication.isStatusDraft.EnableRule">
+        <CustomRule Library="$webresource:sprk_communication_send"
+                    FunctionName="Sprk.Communication.Send.isStatusDraft"
+                    Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+
+  <LocLabels>
+    <LocLabel Id="sprk.communication.send.LabelText">
+      <Titles>
+        <Title description="Send" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.communication.send.Alt">
+      <Titles>
+        <Title description="Send Communication" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.communication.send.ToolTipTitle">
+      <Titles>
+        <Title description="Send Communication" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.communication.send.ToolTipDescription">
+      <Titles>
+        <Title description="Send this communication via email" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>
