@@ -30,6 +30,9 @@ import {
     FolderOpenRegular,
     OpenRegular,
     MoreHorizontalRegular,
+    BranchRegular,
+    GlobeRegular,
+    ArrowDownloadRegular,
 } from "@fluentui/react-icons";
 import { IResultCardProps, SearchResult } from "../types";
 import { SimilarityBadge } from "./SimilarityBadge";
@@ -145,6 +148,7 @@ export const ResultCard: React.FC<IResultCardProps> = ({
     onClick,
     onOpenFile,
     onOpenRecord,
+    onFindSimilar,
     compactMode,
 }) => {
     const styles = useStyles();
@@ -161,11 +165,20 @@ export const ResultCard: React.FC<IResultCardProps> = ({
         [onClick]
     );
 
-    // Handle Open File
-    const handleOpenFile = useCallback(
+    // Handle Open File in Web
+    const handleOpenFileWeb = useCallback(
         (ev: React.MouseEvent) => {
             ev.stopPropagation();
-            onOpenFile();
+            onOpenFile("web");
+        },
+        [onOpenFile]
+    );
+
+    // Handle Open File in Desktop Application
+    const handleOpenFileDesktop = useCallback(
+        (ev: React.MouseEvent) => {
+            ev.stopPropagation();
+            onOpenFile("desktop");
         },
         [onOpenFile]
     );
@@ -179,6 +192,15 @@ export const ResultCard: React.FC<IResultCardProps> = ({
     const handleOpenRecordNewTab = useCallback(() => {
         onOpenRecord(false);
     }, [onOpenRecord]);
+
+    // Handle Find Similar
+    const handleFindSimilar = useCallback(
+        (ev: React.MouseEvent) => {
+            ev.stopPropagation();
+            onFindSimilar();
+        },
+        [onFindSimilar]
+    );
 
     const cardClassName = compactMode
         ? `${styles.card} ${styles.cardCompact}`
@@ -226,7 +248,7 @@ export const ResultCard: React.FC<IResultCardProps> = ({
             />
 
             {/* Highlighted snippet */}
-            {!compactMode && result.highlights.length > 0 && (
+            {!compactMode && (result.highlights?.length ?? 0) > 0 && (
                 <div className={styles.snippet}>
                     <HighlightedSnippet
                         text={result.highlights[0]}
@@ -237,14 +259,27 @@ export const ResultCard: React.FC<IResultCardProps> = ({
 
             {/* Action buttons */}
             <div className={styles.actions}>
-                <Button
-                    appearance="subtle"
-                    size="small"
-                    icon={<FolderOpenRegular />}
-                    onClick={handleOpenFile}
-                >
-                    Open File
-                </Button>
+                <Menu>
+                    <MenuTrigger disableButtonEnhancement>
+                        <Button
+                            appearance="subtle"
+                            size="small"
+                            icon={<FolderOpenRegular />}
+                        >
+                            Open File
+                        </Button>
+                    </MenuTrigger>
+                    <MenuPopover>
+                        <MenuList>
+                            <MenuItem icon={<GlobeRegular />} onClick={handleOpenFileWeb}>
+                                Open in Web
+                            </MenuItem>
+                            <MenuItem icon={<ArrowDownloadRegular />} onClick={handleOpenFileDesktop}>
+                                Open in Desktop
+                            </MenuItem>
+                        </MenuList>
+                    </MenuPopover>
+                </Menu>
 
                 <Menu>
                     <MenuTrigger disableButtonEnhancement>
@@ -267,6 +302,15 @@ export const ResultCard: React.FC<IResultCardProps> = ({
                         </MenuList>
                     </MenuPopover>
                 </Menu>
+
+                <Button
+                    appearance="subtle"
+                    size="small"
+                    icon={<BranchRegular />}
+                    onClick={handleFindSimilar}
+                >
+                    Find Similar
+                </Button>
             </div>
         </Card>
     );

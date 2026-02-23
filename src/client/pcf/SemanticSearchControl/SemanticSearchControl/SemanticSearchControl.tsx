@@ -52,6 +52,8 @@ const useStyles = makeStyles({
         display: "flex",
         flexDirection: "column",
         height: "100%",
+        width: "100%",
+        boxSizing: "border-box",
         backgroundColor: tokens.colorNeutralBackground1,
         color: tokens.colorNeutralForeground1,
         fontFamily: tokens.fontFamilyBase,
@@ -230,6 +232,28 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     const [isAuthInitialized, setIsAuthInitialized] = useState(false);
     const [authError, setAuthError] = useState<string | null>(null);
 
+    // Filter state management — declared BEFORE auth effects so useEffect can reference filters
+    const {
+        filters,
+        setFilters,
+        clearFilters,
+        hasActiveFilters,
+    } = useFilters();
+
+    // Search state management — declared BEFORE auth effects so useEffect can reference search
+    const {
+        results,
+        totalCount,
+        isLoading,
+        isLoadingMore,
+        error,
+        hasMore,
+        query,
+        search,
+        loadMore,
+        reset,
+    } = useSemanticSearch(apiService, searchScope, scopeId);
+
     // Initialize MSAL on mount
     useEffect(() => {
         const initAuth = async () => {
@@ -244,46 +268,31 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         void initAuth();
     }, [authProvider]);
 
-    // Filter state management
-    const {
-        filters,
-        setFilters,
-        clearFilters,
-        hasActiveFilters,
-    } = useFilters();
+    // Auto-load all documents once auth is ready (shows documents without requiring a search query).
+    // search and filters intentionally omitted from deps — we only want to fire once on auth ready.
+    useEffect(() => {
+        if (isAuthInitialized) {
+            setHasSearched(true);
+            void search("", filters);
+        }
+    }, [isAuthInitialized]);
 
-    // Search state management
-    const {
-        results,
-        totalCount,
-        isLoading,
-        isLoadingMore,
-        error,
-        hasMore,
-        query,
-        search,
-        loadMore,
-        reset,
-    } = useSemanticSearch(apiService, searchScope, scopeId);
-
-    // Execute search
+    // Execute search — empty query is allowed (returns all documents in scope)
     const handleSearch = useCallback(() => {
         if (!isAuthInitialized) {
             console.warn("[SemanticSearchControl] Cannot search - auth not initialized");
             return;
         }
-        if (queryInput.trim()) {
-            setHasSearched(true);
-            void search(queryInput, filters);
-        }
+        setHasSearched(true);
+        void search(queryInput, filters);
     }, [queryInput, filters, search, isAuthInitialized]);
 
-    // Handle filter changes - trigger new search
+    // Handle filter changes - trigger new search even with no query
     const handleFiltersChange = useCallback(
         (newFilters: SearchFilters) => {
             setFilters(newFilters);
-            // Re-search if we have an active query
-            if (query.trim() && hasSearched) {
+            // Re-search whenever initial load has happened (supports filter-only queries)
+            if (hasSearched) {
                 void search(query, newFilters);
             }
         },
@@ -306,12 +315,26 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         [onDocumentSelect, notifyOutputChanged]
     );
 
-    // Handle open file
+    // Handle open file — mode is "web" (browser) or "desktop" (Office app).
+    // Calls the BFF /api/documents/{id}/open-links endpoint on demand to get the
+    // SharePoint webUrl and desktop protocol URL (ms-word://, ms-excel://, etc.)
+    // since search results do not pre-populate fileUrl.
     const handleOpenFile = useCallback(
-        (result: SearchResult) => {
-            navigationService.openFile(result.fileUrl);
+        (result: SearchResult, mode: "web" | "desktop") => {
+            apiService.getOpenLinks(result.documentId).then((openLinks) => {
+                if (mode === "web") {
+                    return window.open(openLinks.webUrl, "_blank", "noopener,noreferrer");
+                }
+                // Desktop: use protocol URL if available, otherwise fall back to web
+                if (openLinks.desktopUrl) {
+                    return window.open(openLinks.desktopUrl, "_self");
+                }
+                return window.open(openLinks.webUrl, "_blank", "noopener,noreferrer");
+            }).catch((err) => {
+                console.error("[SemanticSearchControl] Failed to open file:", err);
+            });
         },
-        [navigationService]
+        [apiService]
     );
 
     // Handle open record
@@ -330,6 +353,24 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     const handleViewAll = useCallback(() => {
         void navigationService.viewAllResults(query, searchScope, scopeId, filters);
     }, [navigationService, query, searchScope, scopeId, filters]);
+
+    // Handle Find Similar — opens DocumentRelationshipViewer custom page
+    const handleFindSimilar = useCallback(
+        (result: SearchResult) => {
+            navigationService.openFindSimilar(result).catch((err) => {
+                console.error("[SemanticSearchControl] Find Similar failed:", err);
+            });
+        },
+        [navigationService]
+    );
+
+    // Handle Add Document — opens document upload dialog custom page
+    const handleAddDocument = useCallback(() => {
+        void navigationService.openAddDocument(
+            scopeId,
+            searchScope !== "all" ? searchScope : null
+        );
+    }, [navigationService, scopeId, searchScope]);
 
     // Determine what content to show in main area
     const renderMainContent = () => {
@@ -399,6 +440,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
                     onResultClick={handleResultClick}
                     onOpenFile={handleOpenFile}
                     onOpenRecord={handleOpenRecord}
+                    onFindSimilar={handleFindSimilar}
                     onViewAll={handleViewAll}
                     compactMode={compactMode}
                 />
@@ -428,6 +470,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
                     disabled={isLoading}
                     onValueChange={setQueryInput}
                     onSearch={handleSearch}
+                    onAddDocument={handleAddDocument}
                 />
             </div>
 
@@ -463,7 +506,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
             {/* Version Footer (always visible) */}
             <div className={styles.versionFooter}>
-                <Text size={100}>v1.0.22 • Built 2026-01-26</Text>
+                <Text size={100}>v1.0.27 • Built 2026-02-22</Text>
             </div>
         </div>
     );

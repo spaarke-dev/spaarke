@@ -184,11 +184,16 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
     const darkMode = isDarkMode(context);
 
     // Get input parameters
-    // Primary approach: Get document ID from form context (current record's ID)
-    // Fallback: Use bound property if explicitly provided
+    // Priority: 1) Bound property (explicitly set, e.g. via Param() in a custom page)
+    //           2) Form context entity ID (when embedded on a record form)
+    // This order ensures the custom page dialog (opened from SemanticSearchControl's
+    // Find Similar) uses the correct document GUID passed via navigateTo recordId,
+    // rather than the parent form's entity ID (e.g. matter GUID).
     const contextEntityId = (context.mode as ComponentFramework.Mode & { contextInfo?: { entityId?: string } })?.contextInfo?.entityId;
-    const boundDocumentId = context.parameters.documentId?.raw;
-    const documentId = contextEntityId ?? boundDocumentId ?? "";
+    // Strip surrounding braces — Xrm.Navigation passes recordId as "{guid}" but the API expects bare GUIDs
+    const rawBoundId = context.parameters.documentId?.raw;
+    const boundDocumentId = rawBoundId ? rawBoundId.replace(/^\{|\}$/g, "") : null;
+    const documentId = boundDocumentId ?? contextEntityId ?? "";
     const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? "https://spe-api-dev-67e2xz.azurewebsites.net";
     const tenantId = context.parameters.tenantId?.raw ?? "";
 

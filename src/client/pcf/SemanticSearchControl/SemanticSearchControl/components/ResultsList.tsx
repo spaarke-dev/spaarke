@@ -96,6 +96,7 @@ export const ResultsList: React.FC<IResultsListProps> = ({
     onResultClick,
     onOpenFile,
     onOpenRecord,
+    onFindSimilar,
     onViewAll,
     compactMode,
 }) => {
@@ -134,13 +135,18 @@ export const ResultsList: React.FC<IResultsListProps> = ({
     );
 
     const handleOpenFile = useCallback(
-        (result: SearchResult) => () => onOpenFile(result),
+        (result: SearchResult) => (mode: "web" | "desktop") => onOpenFile(result, mode),
         [onOpenFile]
     );
 
     const handleOpenRecord = useCallback(
         (result: SearchResult) => (inModal: boolean) => onOpenRecord(result, inModal),
         [onOpenRecord]
+    );
+
+    const handleFindSimilar = useCallback(
+        (result: SearchResult) => () => onFindSimilar(result),
+        [onFindSimilar]
     );
 
     return (
@@ -163,6 +169,7 @@ export const ResultsList: React.FC<IResultsListProps> = ({
                             onClick={handleResultClick(result)}
                             onOpenFile={handleOpenFile(result)}
                             onOpenRecord={handleOpenRecord(result)}
+                            onFindSimilar={handleFindSimilar(result)}
                             compactMode={compactMode}
                         />
                     ))}

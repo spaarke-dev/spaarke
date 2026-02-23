@@ -25,6 +25,7 @@ export interface ISearchInputProps {
     disabled: boolean;
     onValueChange: (value: string) => void;
     onSearch: () => void;
+    onAddDocument: () => void;
 }
 
 /**
@@ -79,8 +80,9 @@ export interface IResultsListProps {
     totalCount: number;
     onLoadMore: () => void;
     onResultClick: (result: SearchResult) => void;
-    onOpenFile: (result: SearchResult) => void;
+    onOpenFile: (result: SearchResult, mode: "web" | "desktop") => void;
     onOpenRecord: (result: SearchResult, inModal: boolean) => void;
+    onFindSimilar: (result: SearchResult) => void;
     onViewAll: () => void;
     compactMode: boolean;
 }
@@ -91,8 +93,9 @@ export interface IResultsListProps {
 export interface IResultCardProps {
     result: SearchResult;
     onClick: () => void;
-    onOpenFile: () => void;
+    onOpenFile: (mode: "web" | "desktop") => void;
     onOpenRecord: (inModal: boolean) => void;
+    onFindSimilar: () => void;
     compactMode: boolean;
 }
 

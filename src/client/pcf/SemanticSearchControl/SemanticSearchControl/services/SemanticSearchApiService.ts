@@ -24,6 +24,16 @@ interface ApiErrorResponse {
 }
 
 /**
+ * Response from GET /api/documents/{id}/open-links
+ */
+export interface OpenLinksResponse {
+    desktopUrl: string | null;
+    webUrl: string;
+    mimeType: string;
+    fileName: string;
+}
+
+/**
  * Service for semantic search API calls
  */
 export class SemanticSearchApiService {
@@ -121,6 +131,68 @@ export class SemanticSearchApiService {
     }
 
     /**
+     * Get open links (web URL and desktop protocol URL) for a document.
+     * Calls GET /api/documents/{documentId}/open-links which fetches SPE file URLs
+     * via Graph API and constructs the appropriate desktop protocol URL.
+     * @param documentId - Dataverse sprk_document record GUID
+     * @returns OpenLinksResponse with webUrl and optional desktopUrl
+     */
+    async getOpenLinks(documentId: string): Promise<OpenLinksResponse> {
+        const endpoint = `${this.apiBaseUrl}/api/documents/${encodeURIComponent(documentId)}/open-links`;
+
+        try {
+            const token = await this.authProvider.getAccessToken();
+            if (!token) {
+                throw this.createError(
+                    "Authentication required. Please sign in.",
+                    "AUTH_REQUIRED",
+                    true
+                );
+            }
+
+            console.log("[SemanticSearchApiService] getOpenLinks:", { documentId, endpoint });
+
+            const response = await fetch(endpoint, {
+                method: "GET",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+
+            if (!response.ok) {
+                const errorMessage = `Failed to get open links (HTTP ${response.status})`;
+                throw this.createError(errorMessage, `HTTP_${response.status}`, false);
+            }
+
+            const data = await response.json() as OpenLinksResponse;
+
+            console.log("[SemanticSearchApiService] getOpenLinks response:", {
+                hasDesktopUrl: !!data.desktopUrl,
+                hasWebUrl: !!data.webUrl,
+                mimeType: data.mimeType,
+            });
+
+            return data;
+        } catch (error) {
+            if (this.isSearchError(error)) {
+                throw error;
+            }
+            if (error instanceof TypeError && error.message.includes("fetch")) {
+                throw this.createError(
+                    "Unable to connect to the search service.",
+                    "NETWORK_ERROR",
+                    true
+                );
+            }
+            throw this.createError(
+                "Failed to get file open links.",
+                "OPEN_LINKS_ERROR",
+                false
+            );
+        }
+    }
+
+    /**
      * Handle HTTP error responses
      */
     private async handleHttpError(response: Response): Promise<never> {
@@ -209,9 +281,15 @@ export class SemanticSearchApiService {
             );
         }
 
-        // Normalize response
+        // Normalize response — ensure array fields are never null (API may return null instead of [])
         return {
-            results: response.results,
+            results: response.results.map((r) => ({
+                ...r,
+                highlights: Array.isArray(r.highlights) ? r.highlights : [],
+                documentType: r.documentType ?? "",
+                fileUrl: r.fileUrl ?? "",
+                recordUrl: r.recordUrl ?? "",
+            })),
             totalCount: response.totalCount ?? response.results.length,
             metadata: response.metadata ?? {
                 searchTimeMs: 0,

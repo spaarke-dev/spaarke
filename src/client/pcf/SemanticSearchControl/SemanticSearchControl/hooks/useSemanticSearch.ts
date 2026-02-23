@@ -119,20 +119,11 @@ export function useSemanticSearch(
     const isLoadingMore = state === "loadingMore";
 
     /**
-     * Execute a new search (clears previous results)
+     * Execute a new search (clears previous results).
+     * Empty query is supported — returns all documents in scope ordered by date.
      */
     const search = useCallback(
         async (searchQuery: string, filters: SearchFilters): Promise<void> => {
-            // Don't search empty queries
-            if (!searchQuery.trim()) {
-                setResults([]);
-                setTotalCount(0);
-                setState("idle");
-                setError(null);
-                setQuery("");
-                return;
-            }
-
             // Update state
             setQuery(searchQuery);
             filtersRef.current = filters;
@@ -173,11 +164,6 @@ export function useSemanticSearch(
     const loadMore = useCallback(async (): Promise<void> => {
         // Don't load more if already loading or no more results
         if (state === "loading" || state === "loadingMore" || !hasMore) {
-            return;
-        }
-
-        // Don't load more if no query
-        if (!query.trim()) {
             return;
         }
 

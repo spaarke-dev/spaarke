@@ -24,6 +24,7 @@ describe("SearchInput", () => {
         disabled: false,
         onValueChange: jest.fn(),
         onSearch: jest.fn(),
+        onAddDocument: jest.fn(),
     };
 
     beforeEach(() => {
