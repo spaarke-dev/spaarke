@@ -266,7 +266,7 @@ import { DocumentRecordService } from "./services/DocumentRecordService";
 import { FileUploadService } from "./services/FileUploadService";
 import { SdapApiClientFactory } from "./services/SdapApiClientFactory";
 import { NavMapClient } from "./services/NavMapClient"; // Phase 7
-import { getEntityDocumentConfig, isEntitySupported } from "./config/EntityDocumentConfig";
+import { getEntityDocumentConfig, isEntitySupported, getSupportedEntities } from "./config/EntityDocumentConfig";
 import { ParentContext } from "./types";
 import { DocumentUploadForm } from "./components/DocumentUploadForm";
 
@@ -480,10 +480,9 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
         const entityName = this.parentContext.parentEntityName;
 
         if (!isEntitySupported(entityName)) {
-            const supportedEntities = ['sprk_matter', 'sprk_project', 'sprk_invoice', 'account', 'contact'];
             throw new Error(
                 `Unsupported parent entity: "${entityName}". ` +
-                `Supported entities: ${supportedEntities.join(', ')}`
+                `Supported entities: ${getSupportedEntities().join(', ')}`
             );
         }
 

@@ -5,38 +5,31 @@
 | Field | Value |
 |-------|-------|
 | **Active Task** | none |
-| **Project Status** | COMPLETE (35/35 tasks) |
-| **Last Update** | 2026-02-21 |
+| **Last Completed** | 072 - Create IncomingCommunicationProcessor job handler |
+| **Last Update** | 2026-02-22 |
 
-## Project Completion
+## Last Task Summary (072)
 
-The Email Communication Solution R1 project has been successfully completed. All 35 tasks are finished:
+Task 072 implemented the IncomingCommunicationProcessor that processes incoming email notifications from Graph webhooks. Created:
 
-- Phase 1: BFF Email Service (8/8) ✅
-- Phase 2: Dataverse Integration (7/7) ✅
-- Phase 3: Communication Application (6/6) ✅
-- Phase 4: Attachments + Archival (9/9) ✅
-- Phase 5: Playbook Integration (4/4) ✅
-- Wrap-up (1/1) ✅
+1. **IncomingCommunicationJob.cs** - Record model for job data
+2. **IncomingCommunicationProcessor.cs** - Core processor that:
+   - Fetches full email details from Graph via GraphClientFactory.ForApp()
+   - Creates sprk_communication with Direction=Incoming, statuscode=Delivered
+   - Does NOT set any regarding/association fields (separate AI project)
+   - Processes attachments when account has sprk_autocreaterecords=true
+   - Archives .eml to SPE via EmlGenerationService
+   - Marks message as read in Graph
+   - Multi-layer deduplication (webhook cache, ServiceBus idempotency, Dataverse rules)
+3. **IncomingCommunicationJobHandler.cs** - IJobHandler that routes "IncomingCommunication" jobs to the processor
+4. **CommunicationModule.cs** - Updated DI registration (concrete type per ADR-010)
 
-## Next Steps
+Build: PASSED (0 warnings, 0 errors)
 
-1. Run `/merge-to-master` to merge work/email-communication-solution-r1 into master
-2. See `projects/email-communication-solution-r1/notes/project-completion-summary.md` for:
-   - Final build and test status (PASSED)
-   - Code review findings (no critical issues)
-   - ADR compliance validation (all 6 ADRs PASSED)
-   - Deployment checklist
-   - Lessons learned
-   - Phase 6 recommendations
+## Files Modified
 
-## Key Files
-
-- Project Summary: `projects/email-communication-solution-r1/notes/project-completion-summary.md`
-- Implementation Plan: `projects/email-communication-solution-r1/plan.md`
-- Task Index: `projects/email-communication-solution-r1/tasks/TASK-INDEX.md`
-- Specification: `projects/email-communication-solution-r1/spec.md`
-
----
-
-*Project completed on 2026-02-21*
+- `src/server/api/Sprk.Bff.Api/Services/Communication/Models/IncomingCommunicationJob.cs` (new)
+- `src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs` (new)
+- `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/IncomingCommunicationJobHandler.cs` (new)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs` (modified)
+- `projects/email-communication-solution-r1/tasks/072-create-incoming-communication-processor.poml` (status updated)

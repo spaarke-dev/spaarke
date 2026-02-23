@@ -1,8 +1,8 @@
 # PCF Deployment Guide
 
-> **Last Updated**: January 2026
+> **Last Updated**: February 2026
 >
-> **Related Skill**: `.claude/skills/dataverse-deploy/SKILL.md`
+> **Related Skill**: `.claude/skills/pcf-deploy/SKILL.md`
 
 ---
 
@@ -25,6 +25,48 @@
 - ❌ **NEVER** use `pac pcf push` - creates temp solutions, rebuilds in dev mode
 - ❌ **NEVER** use `Compress-Archive` - creates backslashes, breaks import
 - ❌ **NEVER** skip copying files - stale bundles cause silent failures
+- ❌ **NEVER** include web resources (JS/HTML) in a PCF-only solution — deploy web resources separately via Dataverse UI or their own solution
+- ❌ **NEVER** use placeholder GUIDs (e.g., `{00000000-...}`) for web resource IDs — Dataverse rejects GUIDs that don't match existing records
+
+---
+
+## 🚨 PCF Solution = PCF Control ONLY
+
+**A PCF deployment solution MUST contain only the PCF control.** Do NOT add:
+- ❌ Web resources (`sprk_*.js`, `sprk_*.html`)
+- ❌ Entity definitions
+- ❌ Ribbon customizations
+- ❌ Any other component types
+
+**Why**: Web resources require real Dataverse GUIDs in `<WebResourceId>`. Using placeholder GUIDs causes import failures: `"component sprk_xyz.js of type 61 is not declared in the solution file as a root component"`. Web resources should be managed separately via the Dataverse UI or a dedicated web resource solution.
+
+**The solution.xml `<RootComponents>` section MUST only contain:**
+```xml
+<RootComponents>
+  <RootComponent type="66" schemaName="sprk_Spaarke.Controls.{ControlName}" behavior="0" />
+</RootComponents>
+```
+- Type `66` = Custom Control (PCF). This is the ONLY type that belongs in a PCF solution.
+- Do NOT add type `61` (WebResource) entries.
+
+**The customizations.xml MUST only contain `<CustomControls>` — no `<WebResources>` section.**
+
+---
+
+## 🚨 File Name Casing in ZIP
+
+**Dataverse requires specific lowercase file names inside the solution ZIP.** The XML files on disk can use any casing (e.g., `Solution.xml`, `Customizations.xml`), but the **ZIP entry names MUST be lowercase**:
+
+| ZIP Entry Name (MUST be exact) | Disk File Name (any casing) |
+|--------------------------------|---------------------------|
+| `solution.xml` | `Solution.xml`, `solution.xml` |
+| `customizations.xml` | `Customizations.xml`, `customizations.xml` |
+| `[Content_Types].xml` | `[Content_Types].xml` |
+
+**The `pack.ps1` script handles this mapping.** When creating ZIP entries, the entry name (second parameter) controls what appears in the ZIP — the disk file name is irrelevant.
+
+**If you get:** `"The solution file is invalid. The compressed file must contain solution.xml, customizations.xml, and [Content_Types].xml"`
+→ Check that the ZIP entry names are lowercase (not the disk file names).
 
 ---
 
@@ -45,10 +87,10 @@ ls -la out/controls/control/bundle.js
 
 | # | File | Update |
 |---|------|--------|
-| 1 | `control/ControlManifest.Input.xml` | `version="X.Y.Z"` |
+| 1 | `control/ControlManifest.Input.xml` | `version="X.Y.Z"` + description |
 | 2 | `control/{Component}.tsx` | UI version footer |
 | 3 | `Solution/solution.xml` | `<Version>X.Y.Z</Version>` |
-| 4 | `Solution/Controls/.../ControlManifest.xml` | `version="X.Y.Z"` |
+| 4 | `Solution/Controls/.../ControlManifest.xml` | `version="X.Y.Z"` + description |
 | 5 | `Solution/pack.ps1` | `$version = "X.Y.Z"` |
 
 ### Step 3: Copy Fresh Build to Solution
@@ -66,7 +108,7 @@ cp out/controls/control/bundle.js \
 # Disable CPM
 mv /c/code_files/spaarke-wt-ai-node-playbook-builder/Directory.Packages.props{,.disabled}
 
-# Pack (creates fresh ZIP with forward slashes)
+# Pack (creates fresh ZIP with forward slashes and lowercase entry names)
 cd Solution && powershell -ExecutionPolicy Bypass -File pack.ps1
 
 # Import
@@ -103,6 +145,8 @@ Hard refresh browser (`Ctrl+Shift+R`) and verify version footer.
 
 ### solution.xml
 
+**CRITICAL: `<RootComponents>` MUST list the PCF control (type 66) ONLY. Do NOT add web resources (type 61).**
+
 ```xml
 <ImportExportXml version="9.2.25124.178" SolutionPackageVersion="9.2" languagecode="1033"
     generatedBy="CrmLive" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -132,6 +176,7 @@ Hard refresh browser (`Ctrl+Shift+R`) and verify version footer.
 - ❌ **WRONG:** `<CustomControl Name="...">` (attribute format)
 - ✅ **CORRECT:** `<CustomControl><Name>...</Name>` (child element format)
 - ✅ **MUST include:** `<EntityDataProviders />` element
+- ❌ **MUST NOT include:** `<WebResources>` section (PCF solutions are PCF-only)
 
 **Wrong format causes "unexpected error" with no useful message.**
 
@@ -165,6 +210,8 @@ Hard refresh browser (`Ctrl+Shift+R`) and verify version footer.
 
 **MUST use `System.IO.Compression` for forward slashes.** `Compress-Archive` breaks import.
 
+**CRITICAL: ZIP entry names MUST be lowercase** for `solution.xml` and `customizations.xml` — even if the disk files use different casing. The entry name (string parameter in `CreateEntryFromFile`) controls what appears in the ZIP.
+
 ```powershell
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -178,17 +225,51 @@ if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 
 $zip = [System.IO.Compression.ZipFile]::Open($zipPath, 'Create')
 try {
-    @('solution.xml', 'customizations.xml', '[Content_Types].xml') | ForEach-Object {
+    # Root XML files - ZIP entry names MUST be lowercase
+    # Disk files may use any casing (e.g., Solution.xml, Customizations.xml)
+    # but the ZIP entry name parameter controls what Dataverse sees
+    @(
+        @{ Disk = 'Solution.xml';       Entry = 'solution.xml' },
+        @{ Disk = 'Customizations.xml'; Entry = 'customizations.xml' }
+    ) | ForEach-Object {
         [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
-            $zip, (Join-Path $PSScriptRoot $_), $_, [System.IO.Compression.CompressionLevel]::Optimal
+            $zip, (Join-Path $PSScriptRoot $_.Disk), $_.Entry,
+            [System.IO.Compression.CompressionLevel]::Optimal
         ) | Out-Null
     }
+
+    # [Content_Types].xml - create in-memory (exact casing required)
+    $contentTypes = @'
+<?xml version="1.0" encoding="utf-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/octet-stream" />
+  <Default Extension="js" ContentType="application/octet-stream" />
+  <Default Extension="css" ContentType="application/octet-stream" />
+</Types>
+'@
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($contentTypes)
+    $entry = $zip.CreateEntry("[Content_Types].xml", [System.IO.Compression.CompressionLevel]::Optimal)
+    $stream = $entry.Open()
+    $stream.Write($bytes, 0, $bytes.Length)
+    $stream.Close()
+
+    # PCF Control files ONLY (no web resources)
     $controlsDir = Join-Path $PSScriptRoot 'Controls\sprk_Spaarke.Controls.{ControlName}'
-    Get-ChildItem -Path $controlsDir | ForEach-Object {
+    Get-ChildItem -Path $controlsDir -File | ForEach-Object {
         $entryName = 'Controls/sprk_Spaarke.Controls.{ControlName}/' + $_.Name
         [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
             $zip, $_.FullName, $entryName, [System.IO.Compression.CompressionLevel]::Optimal
         ) | Out-Null
+    }
+    # Include CSS subfolder if it exists
+    $cssDir = Join-Path $controlsDir 'css'
+    if (Test-Path $cssDir) {
+        Get-ChildItem -Path $cssDir -File | ForEach-Object {
+            $entryName = 'Controls/sprk_Spaarke.Controls.{ControlName}/css/' + $_.Name
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zip, $_.FullName, $entryName, [System.IO.Compression.CompressionLevel]::Optimal
+            ) | Out-Null
+        }
     }
 } finally { $zip.Dispose() }
 Write-Host "Created: $zipPath"
@@ -251,7 +332,10 @@ If PCF is in a Custom Page, after solution import:
 
 | Error | Cause | Fix |
 |-------|-------|-----|
+| `The solution file is invalid. The compressed file must contain solution.xml, customizations.xml, and [Content_Types].xml` | ZIP entry names are wrong casing (e.g., `Solution.xml` instead of `solution.xml`) | Ensure pack.ps1 uses **lowercase ZIP entry names**: `solution.xml`, `customizations.xml`. The disk file casing does not matter — only the ZIP entry name string matters. |
 | `unexpected error` | 1) Missing `.js`/`.css` in `[Content_Types].xml`, 2) Wrong `customizations.xml` format, 3) Backslashes in ZIP | Check `[Content_Types].xml` has `.js`/`.css`, verify `customizations.xml` uses `<Name>` child element (not attribute), use `pack.ps1` |
+| `Root component missing for custom control` | `solution.xml` has empty `<RootComponents />` | Add `<RootComponent type="66" schemaName="sprk_Spaarke.Controls.{ControlName}" behavior="0" />` |
+| `component sprk_xyz.js of type 61 is not declared as root component` | Web resource added to `customizations.xml` but not in `<RootComponents>`, or GUID doesn't match Dataverse | **Remove web resources from PCF solution entirely.** PCF solutions should contain ONLY the PCF control (type 66). Deploy web resources separately via Dataverse UI. |
 | `NU1008` CPM error | CPM not disabled | Disable `Directory.Packages.props` before PAC commands |
 | Bundle is 8MB | Dev build or missing platform libraries | Use `npm run build:prod`, add platform libraries |
 | `Source File does not exist` | Missing file in Controls folder | Copy ALL 3 files from `out/` |
@@ -294,8 +378,8 @@ src/client/pcf/{ControlName}/
 │   │   ├── bundle.js                 # ← Copy from out/
 │   │   ├── ControlManifest.xml       # ← Copy from out/
 │   │   └── styles.css                # ← Copy from out/
-│   ├── solution.xml
-│   ├── customizations.xml
+│   ├── solution.xml                  # Or Solution.xml (casing on disk doesn't matter)
+│   ├── customizations.xml            # Or Customizations.xml (pack.ps1 handles casing)
 │   ├── [Content_Types].xml
 │   ├── pack.ps1
 │   └── bin/                          # Output ZIPs

@@ -122,6 +122,19 @@ export const ENTITY_DOCUMENT_CONFIGS: Record<string, EntityDocumentConfig> = {
         containerIdField: 'sprk_containerid',
         displayNameField: 'fullname',
         entitySetName: 'contacts'
+    },
+
+    /**
+     * Communication Entity (sprk_communication)
+     * Email communications with document attachments
+     */
+    'sprk_communication': {
+        entityName: 'sprk_communication',
+        lookupFieldName: 'sprk_communication',
+        relationshipSchemaName: 'sprk_Communication_Document_1n',
+        containerIdField: 'sprk_containerid',
+        displayNameField: 'sprk_name',
+        entitySetName: 'sprk_communications'
     }
 };
 

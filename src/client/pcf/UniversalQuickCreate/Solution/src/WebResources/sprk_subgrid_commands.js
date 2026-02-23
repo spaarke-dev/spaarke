@@ -48,6 +48,12 @@ const ENTITY_CONFIGURATIONS = {
         containerIdField: "sprk_containerid",
         displayNameFields: ["fullname", "lastname", "firstname"],
         entityDisplayName: "Contact"
+    },
+    "sprk_communication": {
+        entityLogicalName: "sprk_communication",
+        containerIdField: "sprk_containerid",
+        displayNameFields: ["sprk_name"],
+        entityDisplayName: "Communication"
     }
 };
 
@@ -70,7 +76,7 @@ function getEntityConfiguration(entityName) {
  *
  * @param {object} selectedControl - The subgrid control (passed by ribbon)
  */
-function Spaarke_AddMultipleDocuments(selectedControl) {
+async function Spaarke_AddMultipleDocuments(selectedControl) {
     try {
         console.log("[Spaarke] ========================================");
     console.log("[Spaarke] AddMultipleDocuments: Starting v3.0.4-DIAGNOSTIC - CUSTOM PAGE DIALOG");
@@ -127,8 +133,8 @@ function Spaarke_AddMultipleDocuments(selectedControl) {
         const parentDisplayName = getParentDisplayName(formContext, entityConfig);
         console.log("[Spaarke] Parent Display Name:", parentDisplayName);
 
-        // STEP 5: Get SharePoint container ID
-        const containerId = getContainerId(formContext, entityConfig);
+        // STEP 5: Get SharePoint container ID (async - may query business unit)
+        const containerId = await getContainerId(formContext, entityConfig);
         console.log("[Spaarke] Container ID:", containerId);
 
         if (!containerId) {
@@ -247,14 +253,14 @@ function getParentDisplayName(formContext, entityConfig) {
 }
 
 /**
- * Get SharePoint container ID from parent record
+ * Get SharePoint container ID from parent record or current user's business unit
  *
  * @param {object} formContext - Form context
  * @param {object} entityConfig - Entity configuration
- * @returns {string|null} Container ID or null
+ * @returns {Promise<string|null>} Container ID or null
  */
-function getContainerId(formContext, entityConfig) {
-    // Try configured container ID field
+async function getContainerId(formContext, entityConfig) {
+    // Try configured container ID field on the form
     const containerIdField = entityConfig.containerIdField;
     if (containerIdField) {
         const attribute = formContext.getAttribute(containerIdField);
@@ -263,10 +269,54 @@ function getContainerId(formContext, entityConfig) {
         }
     }
 
-    // Fallback: Try common field name
+    // Fallback: Try common field name on the form
     const fallbackAttribute = formContext.getAttribute("sprk_containerid");
     if (fallbackAttribute && fallbackAttribute.getValue()) {
         return fallbackAttribute.getValue();
+    }
+
+    // Fallback: Get container ID from current user's business unit
+    console.log("[Spaarke] Container ID not on form, querying from business unit...");
+    try {
+        const userSettings = Xrm.Utility.getGlobalContext().userSettings;
+        const userId = userSettings.userId.replace(/[{}]/g, '');
+        const userResult = await Xrm.WebApi.retrieveRecord(
+            "systemuser", userId, "?$select=_businessunitid_value"
+        );
+        const buId = userResult["_businessunitid_value"];
+        if (buId) {
+            const buResult = await Xrm.WebApi.retrieveRecord(
+                "businessunit", buId, "?$select=sprk_containerid"
+            );
+            const buContainerId = buResult["sprk_containerid"];
+            if (buContainerId) {
+                console.log("[Spaarke] Got container ID from business unit:", buContainerId);
+
+                // Write back to parent record so future lookups are synchronous
+                var parentEntityName = formContext.data.entity.getEntityName();
+                var parentRecordId = formContext.data.entity.getId().replace(/[{}]/g, '');
+                var targetField = entityConfig.containerIdField || "sprk_containerid";
+                try {
+                    var updateData = {};
+                    updateData[targetField] = buContainerId;
+                    await Xrm.WebApi.updateRecord(parentEntityName, parentRecordId, updateData);
+                    console.log("[Spaarke] Wrote container ID back to " + parentEntityName + "." + targetField);
+                    // Also update the form attribute so it's visible without refresh
+                    var formAttr = formContext.getAttribute(targetField);
+                    if (formAttr) {
+                        formAttr.setValue(buContainerId);
+                        formAttr.setSubmitMode("never"); // Already saved via WebApi
+                    }
+                } catch (writeError) {
+                    // Non-fatal: container ID was retrieved, just couldn't write back
+                    console.warn("[Spaarke] Could not write container ID back to parent record:", writeError);
+                }
+
+                return buContainerId;
+            }
+        }
+    } catch (buError) {
+        console.error("[Spaarke] Failed to get container ID from business unit:", buError);
     }
 
     return null;

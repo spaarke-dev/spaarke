@@ -322,7 +322,11 @@ Step 10: Special Task Types
     🔧 CALLS: azure-deploy
       → Follow Azure deployment procedure
 
-  IF task has tag="deploy" or "dataverse":
+  IF task has tag="deploy" + "pcf":
+    🔧 CALLS: pcf-deploy
+      → Follow PCF build/pack/import procedure
+
+  IF task has tag="deploy" or "dataverse" (non-PCF):
     🔧 CALLS: dataverse-deploy
       → Follow Dataverse deployment procedure
 
@@ -782,7 +786,9 @@ START: I need to work on something
   │       │
   │       ├─ Deploy to Azure → azure-deploy
   │       │
-  │       ├─ Deploy to Dataverse → dataverse-deploy
+  │       ├─ Deploy PCF control → pcf-deploy
+  │       │
+  │       ├─ Deploy to Dataverse (non-PCF) → dataverse-deploy
   │       │
   │       ├─ Edit ribbon → ribbon-edit
   │       │
@@ -1033,7 +1039,8 @@ project-pipeline (Developer-Facing)
         └─→ adr-check (Step 9.5 - after code)
         └─→ ui-test (Step 9.7 - if pcf/frontend, requires --chrome)
         └─→ azure-deploy (if azure/infrastructure tagged)
-        └─→ dataverse-deploy (if deploy/dataverse tagged)
+        └─→ pcf-deploy (if pcf + deploy tagged)
+        └─→ dataverse-deploy (if deploy/dataverse tagged, non-PCF)
         └─→ ribbon-edit (if ribbon task)
         └─→ conflict-check (Step 10.6 - sync check, parallel sessions)
 

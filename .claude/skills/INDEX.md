@@ -2,7 +2,7 @@
 
 > **Purpose**: Central registry of all Claude Code skills — the **single source of truth** for what skills exist, their triggers, and how to create new ones.
 >
-> **Last Updated**: January 9, 2026 (added dataverse-create-schema skill for Dataverse Web API schema creation)
+> **Last Updated**: February 22, 2026 (added pcf-deploy skill for PCF-specific deployment)
 
 ---
 
@@ -42,7 +42,8 @@
 | [code-review](code-review/SKILL.md) | Comprehensive code review (security, performance, style) | No | `/code-review`, "review code" |
 | [conflict-check](conflict-check/SKILL.md) | Detect file conflicts between active PRs and current work | No | `/conflict-check`, "check conflicts", "file overlap" |
 | [dataverse-create-schema](dataverse-create-schema/SKILL.md) | Create/update Dataverse entities, attributes, relationships via Web API | No | "create entity", "add column", "dataverse schema" |
-| [dataverse-deploy](dataverse-deploy/SKILL.md) | Deploy solutions, PCF controls, web resources to Dataverse | No | "deploy to dataverse", "pac pcf push" |
+| [dataverse-deploy](dataverse-deploy/SKILL.md) | Deploy solutions, plugins, web resources to Dataverse | No | "deploy to dataverse", "deploy solution" |
+| [pcf-deploy](pcf-deploy/SKILL.md) | Build, pack, and deploy PCF controls via solution ZIP import | No | "deploy pcf", "build and deploy pcf", "pcf solution import" |
 | [design-to-spec](design-to-spec/SKILL.md) | Transform human design documents into AI-optimized spec.md | No | `/design-to-spec`, "design to spec" |
 | [pull-from-github](pull-from-github/SKILL.md) | Pull latest changes from GitHub | No | `/pull-from-github`, "pull from github" |
 | [push-to-github](push-to-github/SKILL.md) | Commit changes and push to GitHub | No | `/push-to-github`, "push to github" |
@@ -90,7 +91,8 @@
 
 ### ⚙️ Dataverse/Platform
 - **dataverse-create-schema** - Create/update Dataverse entities, attributes, relationships via Web API
-- **dataverse-deploy** - Deploy solutions, PCF controls, web resources via PAC CLI
+- **dataverse-deploy** - Deploy solutions, plugins, web resources via PAC CLI
+- **pcf-deploy** - Build, pack, and deploy PCF controls via solution ZIP import (PCF-specific)
 - **ribbon-edit** - Automate ribbon customization via solution export/import
 
 ### 🔄 Operations
@@ -326,7 +328,9 @@ alwaysApply: false  # Only true for universal skills like conventions
 │       └── review-checklist.md
 ├── conflict-check/              ← Detect file overlap between active PRs
 │   └── SKILL.md
-├── dataverse-deploy/             ← Dataverse deployment operations
+├── dataverse-deploy/             ← Dataverse deployment operations (plugins, web resources, solutions)
+│   └── SKILL.md
+├── pcf-deploy/                   ← PCF control build, pack, and deploy (PCF-specific)
 │   └── SKILL.md
 ├── design-to-spec/               ← Transform design docs to AI-ready spec.md
 │   └── SKILL.md
@@ -360,4 +364,4 @@ alwaysApply: false  # Only true for universal skills like conventions
 
 ---
 
-*Last updated: February 17, 2026*
+*Last updated: February 22, 2026*
