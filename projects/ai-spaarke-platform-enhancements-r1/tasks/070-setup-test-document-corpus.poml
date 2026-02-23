@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-070" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>D1: Setup Test Document Corpus in SPE Test Container</title>
+    <phase>5 — Workstream D: End-to-End Validation</phase>
+    <tags>testing, validation, foundation</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPL-018, AIPL-037, AIPL-059</dependencies>
+    <blocks>AIPL-071 (evaluation harness), AIPL-072 (E2E tests)</blocks>
+  </metadata>
+
+  <prompt>
+    Create a test document corpus of 10+ documents covering all 10 playbook types.
+    Documents must be real-world-representative legal documents that provide meaningful
+    evaluation data. Store documents in the SPE test container and trigger analysis
+    for all documents to populate the knowledge index.
+
+    The corpus is the foundation for all Workstream D evaluation tasks.
+    Documents must NOT be from production — use synthetic/anonymized documents.
+  </prompt>
+
+  <role>
+    Legal content specialist + DevOps engineer. Familiar with SPE storage,
+    the Setup-TestDocumentStorage.ps1 script, and document analysis triggers.
+  </role>
+
+  <goal>
+    10+ test documents exist in SPE test container. All documents analyzed and indexed
+    in knowledge index. Verified via /api/ai/knowledge/indexes/health showing document count.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Use Setup-TestDocumentStorage.ps1 script for test container setup</constraint>
+    <constraint source="project">Documents must be synthetic/anonymized — NOT from production data</constraint>
+    <constraint source="ADR-007">Document upload via SpeFileStore — no direct Graph SDK calls</constraint>
+    <constraint source="spec">Corpus must cover all 10 playbook types (NDA, Contract, Lease, Invoice, SLA, Employment, SoW, IP, Termination, General)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>scripts/Setup-TestDocumentStorage.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create 10 synthetic test documents">
+      Author 10 synthetic legal documents (as PDFs or Word documents):
+      - TEST-NDA-001.pdf — 3-page NDA (Acme Corp / Beta Inc)
+      - TEST-CONTRACT-001.pdf — 5-page service contract
+      - TEST-LEASE-001.pdf — 4-page commercial lease
+      - TEST-INVOICE-001.pdf — 2-page invoice with line items
+      - TEST-SLA-001.pdf — 3-page SLA with uptime commitments
+      - TEST-EMPLOYMENT-001.pdf — 4-page employment agreement
+      - TEST-SOW-001.pdf — 3-page statement of work
+      - TEST-IP-001.pdf — 2-page IP assignment agreement
+      - TEST-TERMINATION-001.pdf — 2-page termination letter
+      - TEST-GENERAL-001.pdf — 5-page general contract
+
+      Documents must be realistic (real clause language, reasonable terms).
+      Save in: projects/ai-spaarke-platform-enhancements-r1/notes/test-corpus/
+    </step>
+    <step order="2" name="Setup test container">
+      Run: scripts/Setup-TestDocumentStorage.ps1 -Environment dev
+      Verify test SPE container is created and accessible.
+    </step>
+    <step order="3" name="Upload documents and trigger analysis">
+      Upload all 10 documents to the test SPE container.
+      Trigger document analysis for each document.
+      Verify analysis jobs complete (check job queue or analysis results).
+    </step>
+    <step order="4" name="Verify indexing">
+      Call GET /api/ai/knowledge/indexes/health.
+      Verify KnowledgeDocCount &gt; 0 (indexed chunks from test documents).
+    </step>
+    <step order="5" name="Document the corpus catalog">
+      Create projects/ai-spaarke-platform-enhancements-r1/notes/design/test-corpus-catalog.md:
+      - Document ID for each test document
+      - Playbook type it covers
+      - Key content for writing gold queries (expected retrieval answers)
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="scripts">Setup-TestDocumentStorage.ps1</tool>
+    <tool name="git">Stage test documents and catalog</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/test-corpus/ (10 test documents)</output>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/design/test-corpus-catalog.md</output>
+    <output type="infrastructure">Test documents uploaded and indexed in dev SPE + AI Search</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">10 test documents exist in notes/test-corpus/</criterion>
+    <criterion testable="true">All 10 documents analyzed (analysis results exist in Dataverse)</criterion>
+    <criterion testable="true">GET /api/ai/knowledge/indexes/health shows KnowledgeDocCount &gt; 50 (chunks from 10 docs)</criterion>
+    <criterion testable="true">test-corpus-catalog.md documents all 10 documents with playbook type and document IDs</criterion>
+  </acceptance-criteria>
+</task>

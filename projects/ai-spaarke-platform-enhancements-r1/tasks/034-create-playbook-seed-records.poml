@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-034" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Create 10 System Playbook Records (sprk_aiplaybook PB-001–010)</title>
+    <phase>3 — Workstream B: Scope Library &amp; Seed Data</phase>
+    <tags>dataverse, seed-data, scope-library</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPL-030, AIPL-031, AIPL-032, AIPL-033</dependencies>
+    <blocks>AIPL-037 (Phase 3 deploy), AIPL-072 (E2E tests)</blocks>
+  </metadata>
+
+  <prompt>
+    Create 10 system Playbook records in sprk_aiplaybook. Playbooks are the top-level
+    orchestration definitions that compose Actions, Skills, Knowledge Sources, and Tools
+    into a complete analysis workflow.
+
+    Playbooks to create (PB-001 through PB-010):
+    1. Standard Contract Review — uses ACT-001 + SKL-001,002,003 + KNW-001 + TL-001,002
+    2. NDA Deep Review — uses ACT-002 + SKL-001,004,005 + KNW-002 + TL-001,002,007
+    3. Commercial Lease Analysis — uses ACT-003 + SKL-003,006 + KNW-003 + TL-001,002
+    4. Invoice Validation — uses ACT-004 + SKL-004,008 + KNW-004 + TL-001,003
+    5. SLA Compliance Review — uses ACT-005 + SKL-002,006 + KNW-005 + TL-001,002,007
+    6. Employment Agreement Review — uses ACT-006 + SKL-005,007,009 + KNW-006,007 + TL-001,002
+    7. Statement of Work Analysis — uses ACT-007 + SKL-003,006 + KNW-005 + TL-001,002
+    8. IP Assignment Review — uses ACT-001 + SKL-007,009 + KNW-007 + TL-001,002,008
+    9. Termination Risk Assessment — uses ACT-001 + SKL-002,009 + KNW-008 + TL-001,007
+    10. Quick Legal Scan — uses ACT-008 + SKL-002,010 + KNW-010 + TL-001,007
+  </prompt>
+
+  <role>
+    Dataverse developer + legal knowledge engineer familiar with sprk_aiplaybook entity
+    schema and the relationship model connecting playbooks to scope entities.
+  </role>
+
+  <goal>
+    10 sprk_aiplaybook records exist with correct scope references (Action, Skills, Knowledge
+    Sources, Tools). All 10 playbooks are selectable in AnalysisWorkspace.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-002">Records are data only</constraint>
+    <constraint source="project">ExternalId: "PB-001" through "PB-010"</constraint>
+    <constraint source="project">Canvas JSON must be valid JSON matching the playbook canvas schema</constraint>
+    <constraint source="spec">Each playbook must reference at least 1 Action, 2 Skills, 1 Knowledge Source, 1 Tool</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>docs/guides/HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/notes/design/scope-library-catalog.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Understand playbook canvas JSON schema">
+      Read HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md to understand the canvas JSON format.
+      Look at any existing playbook records for examples.
+    </step>
+    <step order="2" name="Author canvas JSON for each playbook">
+      Create canvas JSON for each of the 10 playbooks specifying:
+      - actionId (reference to ACT-*)
+      - skillIds (list of SKL-* references)
+      - knowledgeSourceIds (list of KNW-* references)
+      - toolIds (list of TL-* references)
+      - configuration (temperature, max tokens, etc.)
+    </step>
+    <step order="3" name="Create sprk_aiplaybook records in Dataverse">
+      Required fields: sprk_name, sprk_externalid, sprk_canvasjson, sprk_isactive=true,
+      sprk_issystem=true, sprk_description, sprk_targetdocumenttype
+    </step>
+    <step order="4" name="Verify playbooks appear in AnalysisWorkspace">
+      If AnalysisWorkspace is deployed, verify playbooks appear in the selection dropdown.
+      Otherwise document that verification will happen in task 056.
+    </step>
+    <step order="5" name="Update scope-library-catalog.md">
+      Add Playbooks section with all 10 entries and their scope compositions.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for Dataverse</tool>
+    <tool name="git">Stage documentation changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">10 sprk_aiplaybook records in spaarkedev1 (PB-001–010)</output>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/design/scope-library-catalog.md (completed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">10 sprk_aiplaybook records with ExternalIds PB-001 through PB-010</criterion>
+    <criterion testable="true">Each playbook references at least 1 Action, 2 Skills, 1 Knowledge Source, 1 Tool</criterion>
+    <criterion testable="true">Canvas JSON is valid JSON for all 10 playbooks</criterion>
+    <criterion testable="true">scope-library-catalog.md is complete with all 5 entity types</criterion>
+  </acceptance-criteria>
+</task>

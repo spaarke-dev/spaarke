@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-053" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>C4: Implement Chat Tool Classes — DocumentSearch, AnalysisQuery, KnowledgeRetrieval, TextRefinement</title>
+    <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
+    <tags>bff-api, api, agent-framework, retrieval</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPL-051, AIPL-010, AIPL-015</dependencies>
+    <blocks>AIPL-054 (ChatEndpoints)</blocks>
+  </metadata>
+
+  <prompt>
+    Implement 4 chat tool classes that the SprkChatAgent can invoke via AIFunctionFactory.
+    Each class provides static methods decorated with [Description] attributes so the agent
+    understands when and how to call them.
+
+    Tool classes:
+    1. DocumentSearchTools — vector search against knowledge and discovery indexes
+    2. AnalysisQueryTools — retrieve previous analysis results for a document
+    3. KnowledgeRetrievalTools — retrieve specific knowledge source content by ID
+    4. TextRefinementTools — reformat, summarize, or extract from text sections
+
+    These must match the handler class names defined in the sprk_analysistool records (task 033).
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with AIFunctionFactory, tool method description patterns
+    for AI agents, and the existing Spaarke RAG and analysis services.
+  </role>
+
+  <goal>
+    4 tool classes implemented with correctly-described methods. SprkChatAgent can register
+    them via AIFunctionFactory.Create(). Tools call the correct underlying services.
+    Unit tests pass for each tool class.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-013">Tool classes inject services via constructor; methods are static helpers with service injection via closure</constraint>
+    <constraint source="spec">DocumentSearchTools must search both knowledge and discovery indexes</constraint>
+    <constraint source="spec">All tool methods must include [Description] attributes for the agent to understand tool purpose</constraint>
+    <constraint source="ADR-014">All search calls must include tenantId filter for tenant isolation</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagQueryBuilder.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create DocumentSearchTools.cs">
+      Create src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DocumentSearchTools.cs:
+      - SearchDocuments([Description("Search query for document knowledge")] string query, string tenantId, int topK = 5)
+      - SearchDiscovery([Description("Broad discovery search across all documents")] string query, string tenantId, int topK = 10)
+      Both call RagService with RagQueryBuilder-built queries.
+    </step>
+    <step order="2" name="Create AnalysisQueryTools.cs">
+      Create Tools/AnalysisQueryTools.cs:
+      - GetAnalysisResult([Description("Get analysis results for a specific document")] string documentId, string tenantId)
+      - GetAnalysisSummary([Description("Get executive summary of document analysis")] string documentId, string tenantId)
+      Call AnalysisOrchestrationService or DataverseService.
+    </step>
+    <step order="3" name="Create KnowledgeRetrievalTools.cs">
+      Create Tools/KnowledgeRetrievalTools.cs:
+      - GetKnowledgeSource([Description("Retrieve a specific knowledge source by ID")] string knowledgeSourceId)
+      - SearchKnowledgeBase([Description("Search knowledge base for reference information")] string query, string tenantId, int topK = 5)
+      Queries sprk_content records and knowledge index.
+    </step>
+    <step order="4" name="Create TextRefinementTools.cs">
+      Create Tools/TextRefinementTools.cs:
+      - RefineText([Description("Reformat or improve text clarity")] string text, string instruction)
+      - ExtractKeyPoints([Description("Extract key points from text")] string text, int maxPoints = 5)
+      - GenerateSummary([Description("Generate a concise summary")] string text, string format = "bullet")
+      These call IChatClient with focused prompts (not full agent context).
+    </step>
+    <step order="5" name="Register tools in SprkChatAgentFactory">
+      Update SprkChatAgentFactory to create AIFunction list from tool classes:
+        var tools = new[] {
+          AIFunctionFactory.Create(DocumentSearchTools.SearchDocuments),
+          AIFunctionFactory.Create(AnalysisQueryTools.GetAnalysisResult),
+          // ...
+        };
+    </step>
+    <step order="6" name="Write unit tests">
+      Test each tool class: correct service called, tenantId passed, Description attributes present.
+    </step>
+    <step order="7" name="Verify build and tests">
+      Run: dotnet build + dotnet test
+      Both must pass.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DocumentSearchTools.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisQueryTools.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/KnowledgeRetrievalTools.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/TextRefinementTools.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (tools registered)</output>
+    <output type="test">tests/unit/Services/Ai/Chat/Tools/DocumentSearchToolsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All tool methods have [Description] attributes</criterion>
+    <criterion testable="true">DocumentSearchTools calls RagService with tenantId filter</criterion>
+    <criterion testable="true">SprkChatAgentFactory registers all 4 tool classes</criterion>
+    <criterion testable="true">Unit tests pass</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

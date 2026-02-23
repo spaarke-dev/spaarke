@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-035" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Build ScopeConfigEditorPCF — Adaptive Scope Configuration Editor</title>
+    <phase>3 — Workstream B: Scope Library &amp; Seed Data</phase>
+    <tags>pcf, frontend, fluent-ui, scope-library</tags>
+    <status>not-started</status>
+    <estimated-effort>10 hours</estimated-effort>
+    <dependencies>AIPL-030, AIPL-033</dependencies>
+    <blocks>AIPL-037 (Phase 3 PCF deploy)</blocks>
+  </metadata>
+
+  <prompt>
+    Build ScopeConfigEditorPCF — a new PCF control that provides an adaptive editing experience
+    for all 4 scope entity forms (Action, Skill, Knowledge Source, Tool).
+
+    The control auto-detects which entity form it's on and adapts its layout:
+    - Action form: rich textarea for system prompt with character/token count
+    - Skill form: compact textarea for prompt fragment with injection preview
+    - Knowledge Source form: markdown editor for content + file upload trigger
+    - Tool form: JSON Schema editor (CodeMirror) with handler dropdown + validation
+
+    Bundle MUST be under 1MB — use CodeMirror (not Monaco) for JSON editing.
+  </prompt>
+
+  <role>
+    Senior PCF developer familiar with TypeScript/React, Fluent UI v9, CodeMirror integration,
+    and the ADR-022 PCF platform-library manifest requirement.
+  </role>
+
+  <goal>
+    ScopeConfigEditorPCF control builds successfully (bundle &lt; 1MB), deploys to all 4 scope
+    entity forms, and renders correctly in both light and dark mode. JSON validation works
+    for Tool schema editing.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-006">PCF control only — no legacy webresources</constraint>
+    <constraint source="ADR-021">Fluent UI v9 exclusively; design tokens; dark mode required; WCAG 2.1 AA</constraint>
+    <constraint source="ADR-022">React 16 APIs (ReactDOM.render not createRoot); platform-library manifest; unmanaged solution</constraint>
+    <constraint source="spec">Bundle MUST be &lt; 1MB. Use CodeMirror (~300KB), not Monaco (~4MB)</constraint>
+    <constraint source="spec">Handler dropdown must call /api/ai/tools/handlers to populate options</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>src/client/pcf/AnalysisWorkspace/index.ts</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+    <patterns>
+      <pattern name="PCF control structure" location="src/client/pcf/AnalysisWorkspace/">
+        Follow the existing AnalysisWorkspace PCF as the canonical structure reference.
+        Copy the tsconfig.json, package.json patterns, and manifest structure.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read AnalysisWorkspace PCF structure">
+      Read src/client/pcf/AnalysisWorkspace/ to understand the PCF control structure,
+      manifest, tsconfig, platform-library manifest, and build output.
+    </step>
+    <step order="2" name="Scaffold ScopeConfigEditor PCF project">
+      Create src/client/pcf/ScopeConfigEditor/ following AnalysisWorkspace structure:
+      - ControlManifest.Input.xml
+      - index.ts
+      - package.json (with @fluentui/react-components v9, @codemirror/* packages)
+      - tsconfig.json
+      - platform-library-manifest.json (ADR-022)
+    </step>
+    <step order="3" name="Create React component tree">
+      Create src/client/pcf/ScopeConfigEditor/components/:
+      - ScopeConfigEditorApp.tsx — root component, reads entity type from context
+      - ActionEditor.tsx — rich textarea with token counter
+      - SkillEditor.tsx — compact textarea with injection preview
+      - KnowledgeSourceEditor.tsx — markdown textarea + file upload button
+      - ToolEditor.tsx — CodeMirror JSON editor + handler class dropdown
+      - ScopeEditorShell.tsx — Fluent v9 shell with dark mode support
+
+      All components use makeStyles() for styling (no inline styles, no hardcoded colors).
+    </step>
+    <step order="4" name="Implement CodeMirror JSON editor in ToolEditor">
+      Install @codemirror/state, @codemirror/view, @codemirror/lang-json
+      Implement JSON validation with error highlighting.
+      Schema must pass JSON Schema draft-07 validation before save.
+    </step>
+    <step order="5" name="Implement handler class dropdown">
+      In ToolEditor, fetch handler class names from /api/ai/tools/handlers (task 036 endpoint).
+      Populate Fluent v9 Dropdown component.
+      If API fails, show text input fallback.
+    </step>
+    <step order="6" name="Build and verify bundle size">
+      Run: npm run build --prefix src/client/pcf/ScopeConfigEditor
+      Verify bundle is &lt; 1MB (check dist/ output).
+      If over 1MB: audit imports, lazy-load non-critical components.
+    </step>
+    <step order="7" name="Write component tests">
+      Create tests for ActionEditor (character count), ToolEditor (JSON validation),
+      dark mode token usage (no hardcoded colors).
+      Aim for 90%+ coverage per ADR-012.
+    </step>
+  </steps>
+
+  <ui-tests>
+    <test name="Control Renders on Action Form">
+      <url>https://spaarkedev1.crm.dynamics.com/main.aspx?etn=sprk_systemprompt&amp;pagetype=entityrecord</url>
+      <steps>
+        <step>Navigate to an existing sprk_systemprompt record</step>
+        <step>Verify ScopeConfigEditor control renders in the form</step>
+        <step>Verify ActionEditor textarea is visible with character/token count</step>
+        <step>Check browser console for errors</step>
+      </steps>
+      <expected>Control renders with ActionEditor, no console errors, character counter visible</expected>
+    </test>
+    <test name="Tool Form JSON Validation">
+      <url>https://spaarkedev1.crm.dynamics.com/main.aspx?etn=sprk_analysistool&amp;pagetype=entityrecord</url>
+      <steps>
+        <step>Navigate to an existing sprk_analysistool record</step>
+        <step>Verify ToolEditor with CodeMirror JSON editor renders</step>
+        <step>Enter invalid JSON in editor</step>
+        <step>Verify error highlighting appears</step>
+        <step>Verify handler dropdown is populated</step>
+      </steps>
+      <expected>CodeMirror highlights invalid JSON; handler dropdown shows available handlers</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps>
+        <step>Open any scope entity form in Dataverse</step>
+        <step>Toggle dark mode in Dataverse settings</step>
+        <step>Verify all ScopeConfigEditor colors adapt correctly</step>
+        <step>Verify no hardcoded hex colors remain (use browser inspector)</step>
+      </steps>
+      <expected>All UI elements use design tokens, no hardcoded colors per ADR-021</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test PCF control</tool>
+    <tool name="pac">PCF packaging verification</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/ScopeConfigEditor/ (full PCF project)</output>
+    <output type="test">src/client/pcf/ScopeConfigEditor/__tests__/ (component tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build completes with 0 errors</criterion>
+    <criterion testable="true">Bundle size &lt; 1MB (verify in dist/)</criterion>
+    <criterion testable="true">ToolEditor JSON validation works (invalid JSON shows error)</criterion>
+    <criterion testable="true">All styling uses makeStyles() / Fluent v9 tokens (no hardcoded colors)</criterion>
+    <criterion testable="true">Component tests pass with 90%+ coverage</criterion>
+  </acceptance-criteria>
+</task>

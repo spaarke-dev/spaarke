@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-073" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>D4: Record Quality Baseline — All 10 Playbooks Against Test Corpus</title>
+    <phase>5 — Workstream D: End-to-End Validation</phase>
+    <tags>testing, validation, evaluation</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPL-071, AIPL-072</dependencies>
+    <blocks>AIPL-075 (SprkChat evaluation)</blocks>
+  </metadata>
+
+  <prompt>
+    Run the EvalRunner CLI against the full gold dataset to record the quality baseline
+    for all 10 playbooks. The baseline establishes the starting quality metrics that
+    future improvements will be measured against.
+
+    Document the baseline scores in a reproducible report. The report must include
+    enough detail to reproduce the scores in a future run.
+  </prompt>
+
+  <role>
+    QA engineer familiar with RAG evaluation metrics and the EvalRunner tool.
+  </role>
+
+  <goal>
+    Quality baseline report exists documenting Recall@10 and nDCG@10 for all 10 playbooks.
+    Scores are stored in Dataverse via EvaluationEndpoints. Report is reproducible.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">Target: Recall@10 &gt;= 0.7 for knowledge index (success criterion)</constraint>
+    <constraint source="project">Baseline must be recorded before any further tuning — this is the "before" snapshot</constraint>
+    <constraint source="project">Report must note: date, model version, index state, corpus version</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/notes/design/test-corpus-catalog.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Run EvalRunner against gold dataset">
+      Run: evalrunner run --dataset notes/test-corpus/gold-dataset-v1.json --env dev
+      Capture full output.
+    </step>
+    <step order="2" name="Review scores by playbook">
+      Analyze per-playbook Recall@10 and nDCG@10.
+      Identify any playbooks below 0.7 Recall@10 threshold.
+    </step>
+    <step order="3" name="Create quality baseline report">
+      Create projects/ai-spaarke-platform-enhancements-r1/notes/design/quality-baseline-v1.md:
+      - Run date, environment, model versions, corpus version
+      - Table: Playbook | Recall@10 | nDCG@10 | Pass/Fail (threshold: 0.7)
+      - Notes on underperforming playbooks
+      - Evaluation run ID from Dataverse
+    </step>
+    <step order="4" name="Document low-quality areas">
+      For any playbook below threshold: document likely cause and proposed improvement.
+      These become backlog items for Phase 6 or post-launch work.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run EvalRunner CLI</tool>
+    <tool name="git">Stage report</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/design/quality-baseline-v1.md</output>
+    <output type="dataverse">sprk_aievaluationrun record for baseline run</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">quality-baseline-v1.md contains Recall@10 and nDCG@10 for all 10 playbooks</criterion>
+    <criterion testable="true">Report is reproducible (includes all parameters needed to rerun)</criterion>
+    <criterion testable="true">Evaluation run record exists in Dataverse sprk_aievaluationrun</criterion>
+    <criterion testable="true">Overall Recall@10 &gt;= 0.7 (or improvement path documented if below)</criterion>
+  </acceptance-criteria>
+</task>

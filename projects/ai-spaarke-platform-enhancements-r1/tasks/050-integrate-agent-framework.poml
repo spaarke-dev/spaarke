@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-050" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>C1: Integrate Agent Framework — Register IChatClient via Azure OpenAI Provider</title>
+    <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
+    <tags>bff-api, api, agent-framework, foundation</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPL-002, AIPL-004</dependencies>
+    <blocks>AIPL-051 (SprkChatAgent), AIPL-053 (chat tools)</blocks>
+  </metadata>
+
+  <prompt>
+    Wire the Microsoft Agent Framework into the BFF dependency injection. Register IChatClient
+    using the Azure OpenAI provider with the existing Azure OpenAI configuration.
+
+    This is the foundational DI registration that all Workstream C tasks depend on.
+    The IChatClient must resolve from DI container and be injectable into SprkChatAgent.
+
+    Also register the chat model configuration (model name, endpoint) so SprkChatAgent
+    can be configured without hardcoding.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with Microsoft.Extensions.AI, Microsoft.Agents.AI,
+    Azure OpenAI integration, and the Spaarke BFF DI configuration.
+  </role>
+
+  <goal>
+    IChatClient resolves from DI. AzureOpenAI chat model is configured via IOptions.
+    DI count is within ADR-010 budget. Build passes with 0 errors.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-002">Pin exact Agent Framework RC version from task 002</constraint>
+    <constraint source="ADR-010">IChatClient registration counts as 1 non-framework registration. Verify total stays &lt;= 15.</constraint>
+    <constraint source="ADR-013">IChatClient registered in BFF — no separate AI service</constraint>
+    <constraint source="project">Use AsAIAgent() extension per CLAUDE.md "Agent Framework Pattern"</constraint>
+    <constraint source="project">Azure OpenAI endpoint and model name come from configuration (not hardcoded)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read current Program.cs DI registrations">
+      Read Program.cs to understand current AI service registrations.
+      Note current non-framework registration count vs ADR-010 budget.
+    </step>
+    <step order="2" name="Add AzureOpenAI chat client registration">
+      Add to Program.cs:
+        builder.Services.AddAzureOpenAIChatClient(
+            builder.Configuration["AzureOpenAI:Endpoint"],
+            builder.Configuration["AzureOpenAI:ChatModelName"])
+            .AsAIAgent();
+      Use the Agent Framework RC pattern from CLAUDE.md.
+    </step>
+    <step order="3" name="Verify IChatClient resolution">
+      Add a temporary diagnostic: in a test or startup probe, resolve IChatClient from DI.
+      Confirm it resolves without exception.
+      Remove the diagnostic after confirming.
+    </step>
+    <step order="4" name="Update DI count in CLAUDE.md">
+      Add IChatClient to DI count. Verify total stays &lt;= 15.
+      Update CLAUDE.md "DI Baseline" with new count and remaining budget.
+    </step>
+    <step order="5" name="Verify build">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build verification</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (IChatClient registration added)</output>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/CLAUDE.md (DI count updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">IChatClient is registered in DI and resolvable</criterion>
+    <criterion testable="true">Registration uses AzureOpenAI provider with configuration-driven endpoint</criterion>
+    <criterion testable="true">CLAUDE.md DI count updated and within budget</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

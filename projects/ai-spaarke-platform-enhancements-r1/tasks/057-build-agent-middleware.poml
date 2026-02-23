@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-057" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>C8: Build Agent Middleware — Telemetry, Cost Control, Content Safety, Audit</title>
+    <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
+    <tags>bff-api, api, agent-framework</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPL-054</dependencies>
+    <blocks>AIPL-058 (Phase 4 API deploy)</blocks>
+  </metadata>
+
+  <prompt>
+    Implement a lightweight agent middleware pipeline for SprkChatAgent that provides:
+    1. Telemetry — log token usage, tool call counts, and response times per session
+    2. Cost control — enforce max token budget per request (configurable per playbook)
+    3. Content safety — flag and block responses containing sensitive content patterns
+    4. Audit — persist all agent interactions to sprk_aichatmessage with metadata
+
+    Middleware wraps the SprkChatAgent's SendMessageAsync method without changing its interface.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with decorator patterns, middleware pipeline patterns,
+    and the Agent Framework IChatClient wrapping capabilities.
+  </role>
+
+  <goal>
+    Agent middleware pipeline is implemented as a decorator around SprkChatAgent.
+    Telemetry events are logged. Token budgets are enforced. Audit records created.
+    Build passes with 0 errors.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-010">Middleware registered as thin wrappers — do not add more than 2 DI registrations</constraint>
+    <constraint source="ADR-013">Rate limiting at endpoint level (ADR-013); content safety at middleware level</constraint>
+    <constraint source="spec">Max tokens per request configurable in playbook scope configuration</constraint>
+    <constraint source="project">Never log message content in telemetry — only metadata (token counts, tool names, latency)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryManager.cs</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create AgentTelemetryMiddleware">
+      Create src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentTelemetryMiddleware.cs:
+      - Wraps SprkChatAgent
+      - Records: session_id, playbook_id, token_count, tool_calls[], response_time_ms
+      - Uses ILogger structured events (no message content)
+    </step>
+    <step order="2" name="Create AgentCostControlMiddleware">
+      Create AgentCostControlMiddleware.cs:
+      - Checks total token budget for the session
+      - If session tokens &gt; maxTokenBudget (from playbook config): returns a polite limit message
+      - Default budget: 10,000 tokens per session
+    </step>
+    <step order="3" name="Create AgentContentSafetyMiddleware">
+      Create AgentContentSafetyMiddleware.cs:
+      - Scans response tokens for sensitive patterns (PII, explicit content triggers)
+      - If pattern detected: substitutes with a safety message
+      - Logs a structured warning (no content logged — only pattern type)
+    </step>
+    <step order="4" name="Wire middleware in SprkChatAgentFactory">
+      Update SprkChatAgentFactory.CreateAgentAsync() to wrap agent with middleware:
+        agent = new AgentTelemetryMiddleware(agent, logger);
+        agent = new AgentCostControlMiddleware(agent, options);
+        // ContentSafety: apply based on configuration
+    </step>
+    <step order="5" name="Write unit tests">
+      Tests:
+      - TelemetryMiddleware logs structured event after message
+      - CostControlMiddleware blocks at token budget
+      - ContentSafetyMiddleware substitutes flagged content
+    </step>
+    <step order="6" name="Verify build and tests">
+      Run: dotnet build + dotnet test
+      Both must pass.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentTelemetryMiddleware.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentCostControlMiddleware.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentContentSafetyMiddleware.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (middleware wired)</output>
+    <output type="test">tests/unit/Services/Ai/Chat/Middleware/AgentMiddlewareTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">TelemetryMiddleware logs token count and response time (not message content)</criterion>
+    <criterion testable="true">CostControlMiddleware returns limit message when budget exceeded</criterion>
+    <criterion testable="true">Unit tests pass (3 test cases minimum)</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-055" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>C6: Build SprkChat React Shared Component in @spaarke/ui-components</title>
+    <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
+    <tags>pcf, frontend, fluent-ui, agent-framework</tags>
+    <status>not-started</status>
+    <estimated-effort>8 hours</estimated-effort>
+    <dependencies>AIPL-054</dependencies>
+    <blocks>AIPL-056 (AnalysisWorkspace integration)</blocks>
+  </metadata>
+
+  <prompt>
+    Build the SprkChat React component in the shared @spaarke/ui-components library.
+    This is a reusable chat component that integrates with the ChatEndpoints SSE API.
+
+    Features required:
+    - Message input with send button and keyboard shortcut (Ctrl+Enter)
+    - Streaming response display with token-by-token animation
+    - Chat history display with user/assistant message styling
+    - Context selector (document + playbook selector)
+    - Predefined prompt buttons (contextual, from playbook scope)
+    - Highlight-and-refine: user selects text, triggers refinement flow
+    - Session management: create, resume, delete
+
+    Bundle contribution MUST be &lt; 500KB.
+  </prompt>
+
+  <role>
+    Senior React/TypeScript developer familiar with Fluent UI v9, SSE streaming in browsers,
+    React 16 patterns, and the @spaarke/ui-components library structure.
+  </role>
+
+  <goal>
+    SprkChat component exports from @spaarke/ui-components. Renders correctly in Storybook
+    and in AnalysisWorkspace. SSE streaming shows token animation. All specified features work.
+    90%+ test coverage per ADR-012.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">SprkChat in @spaarke/ui-components; export all types; 90%+ test coverage</constraint>
+    <constraint source="ADR-021">Fluent UI v9 exclusively; design tokens; dark mode required; WCAG 2.1 AA</constraint>
+    <constraint source="ADR-022">React 16 APIs only (no createRoot, no React 17+ features)</constraint>
+    <constraint source="spec">Bundle contribution &lt; 500KB (tree-shaking enabled)</constraint>
+    <constraint source="spec">SSE: connect to POST /api/ai/chat/sessions/{id}/messages, parse token events</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/</file>
+      <file>src/client/pcf/AnalysisWorkspace/</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing @spaarke/ui-components structure">
+      Read src/client/shared/Spaarke.UI.Components/src/ to understand the export pattern,
+      component structure, and test setup. Note how existing components like DatasetGrid
+      are structured and exported.
+    </step>
+    <step order="2" name="Create SprkChat component directory">
+      Create src/client/shared/Spaarke.UI.Components/src/components/SprkChat/:
+      - SprkChat.tsx — main component
+      - SprkChatMessage.tsx — individual message bubble
+      - SprkChatInput.tsx — input area with send button
+      - SprkChatContextSelector.tsx — document + playbook selector
+      - SprkChatPredefinedPrompts.tsx — predefined prompt buttons
+      - SprkChatHighlightRefine.tsx — text selection + refinement UI
+      - hooks/useChatSession.ts — session lifecycle hook
+      - hooks/useSseStream.ts — SSE connection hook
+      - types.ts — ISprkChatProps, IChatMessage, IChatSession interfaces
+    </step>
+    <step order="3" name="Implement useSseStream hook">
+      Create useSseStream.ts:
+      - Connects to SSE endpoint via fetch with ReadableStream
+      - Parses "data: {...}" events
+      - Returns: { tokens: string[], isDone: boolean, error: Error | null }
+      - Handles reconnection and cancellation
+      - React 16 compatible (useState, useEffect, useRef only)
+    </step>
+    <step order="4" name="Implement SprkChat main component">
+      Implement SprkChat.tsx:
+      - Props: ISprkChatProps { sessionId?, documentId, playbookId, apiBaseUrl, onSessionCreated }
+      - Renders: MessageList + Input + ContextSelector + PredefinedPrompts
+      - All styling via makeStyles() Fluent v9 tokens
+      - Dark mode: use useFluentTheme() for adaptive colors
+    </step>
+    <step order="5" name="Add highlight-and-refine feature">
+      Implement SprkChatHighlightRefine.tsx:
+      - Detects text selection in document view
+      - Shows floating "Refine" button near selection
+      - On click: opens inline refinement prompt
+      - Streams refinement via POST /sessions/{id}/refine SSE endpoint
+    </step>
+    <step order="6" name="Export from component library">
+      Update src/client/shared/Spaarke.UI.Components/src/index.ts:
+      Export SprkChat, ISprkChatProps, IChatMessage, IChatSession
+    </step>
+    <step order="7" name="Write tests (90%+ coverage)">
+      Create __tests__/SprkChat.test.tsx and related test files.
+      Tests: renders, sends message, SSE tokens display, context switch, dark mode token usage.
+    </step>
+    <step order="8" name="Verify bundle size and build">
+      Run npm build for @spaarke/ui-components.
+      Verify SprkChat contribution &lt; 500KB.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test component library</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/ (full component)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts (exports added)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SprkChat component exports from @spaarke/ui-components</criterion>
+    <criterion testable="true">useSseStream hook correctly parses token events</criterion>
+    <criterion testable="true">Bundle contribution &lt; 500KB</criterion>
+    <criterion testable="true">All styling uses Fluent v9 tokens (no hardcoded colors)</criterion>
+    <criterion testable="true">Test coverage &gt;= 90%</criterion>
+    <criterion testable="true">npm build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

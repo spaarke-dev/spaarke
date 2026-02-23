@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-090" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Project Wrap-Up — Final Validation, Documentation, and Archive</title>
+    <phase>6 — Project Wrap-up</phase>
+    <tags>wrap-up, documentation, cleanup</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPL-073, AIPL-074, AIPL-075</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Complete the AI Platform Foundation Phase 1 project:
+    1. Update README.md status to "Complete" and populate graduation criteria pass/fail
+    2. Write lessons-learned.md
+    3. Update TASK-INDEX.md — all tasks marked complete
+    4. Update spec.md — mark all unresolved questions as resolved
+    5. Run /repo-cleanup to validate structure
+    6. Push final commit to branch
+    7. Create wrap-up PR or notify for merge to master
+  </prompt>
+
+  <role>
+    Project coordinator. Final review, documentation, and handoff.
+  </role>
+
+  <goal>
+    All 10 graduation criteria from README.md are marked pass/fail.
+    Lessons learned documented. Project artifacts archived and clean.
+    Branch ready for merge to master.
+  </goal>
+
+  <constraints>
+    <constraint source="project">All tasks in TASK-INDEX.md must be ✅ complete before marking project done</constraint>
+    <constraint source="project">Lessons-learned.md must be factual and specific — not generic</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/README.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/tasks/TASK-INDEX.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/notes/design/quality-baseline-v1.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Verify all tasks complete">
+      Open TASK-INDEX.md. Confirm every task shows ✅ status.
+      If any tasks are 🔲 or 🚧, do not proceed — complete them first.
+    </step>
+    <step order="2" name="Update README.md graduation criteria">
+      Update README.md graduation criteria table with actual results:
+      - Each criterion: ✅ Pass / ❌ Fail / ⚠️ Partial
+      - Add metrics: Recall@10 from baseline, latency p95, bundle sizes
+      - Update Status from "In Progress" to "Complete" (or "Partial Complete" if criteria missed)
+    </step>
+    <step order="3" name="Write lessons-learned.md">
+      Create projects/ai-spaarke-platform-enhancements-r1/notes/lessons-learned.md:
+      - What went well: specific examples
+      - What was harder than expected: specific blockers and resolution
+      - Architectural decisions that held up: confirm ADRs were correct
+      - Technical debt created: list any shortcuts taken and why
+      - Recommendations for Phase 2 (post-launch improvements)
+    </step>
+    <step order="4" name="Update spec.md unresolved questions">
+      In spec.md, find any remaining "Unresolved Questions" sections.
+      Mark each as "Resolved: [date] — [resolution summary]"
+    </step>
+    <step order="5" name="Run /repo-cleanup">
+      Run /repo-cleanup to validate project structure and remove ephemeral files.
+    </step>
+    <step order="6" name="Final commit and push">
+      Stage all remaining changes.
+      Commit: "feat(ai-platform): complete AI Platform Foundation Phase 1 project wrap-up"
+      Push to branch.
+    </step>
+    <step order="7" name="Merge branch to master">
+      Run merge-to-master skill (or notify user to merge PR).
+      Verify master build passes after merge.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="git">Final commit and push</tool>
+    <tool name="merge-to-master">Skill: Merge branch to master</tool>
+    <tool name="repo-cleanup">Skill: Repository cleanup and validation</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/README.md (updated — completion status)</output>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/lessons-learned.md</output>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/spec.md (unresolved questions marked resolved)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">README.md graduation criteria table populated with pass/fail for all 10 criteria</criterion>
+    <criterion testable="true">lessons-learned.md exists with specific, actionable content</criterion>
+    <criterion testable="true">All tasks in TASK-INDEX.md show ✅ status</criterion>
+    <criterion testable="true">All unresolved questions in spec.md marked as resolved</criterion>
+    <criterion testable="true">Branch merged to master (or PR created)</criterion>
+  </acceptance-criteria>
+</task>

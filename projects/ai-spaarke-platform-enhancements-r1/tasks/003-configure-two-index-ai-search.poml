@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-003" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Configure Two-Index Azure AI Search Architecture in appsettings</title>
+    <phase>1 — Foundation &amp; Environment</phase>
+    <tags>bff-api, configuration, foundation, ai-search</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>AIPL-002</dependencies>
+    <blocks>AIPL-010 (RagQueryBuilder), AIPL-016 (two-index provisioning)</blocks>
+  </metadata>
+
+  <prompt>
+    Extend appsettings.json to define the two-index Azure AI Search architecture required by
+    the spec. The knowledge index holds 512-token curated chunks; the discovery index holds
+    1024-token auto-populated chunks. Both indexes must be named in configuration so the
+    RagQueryBuilder and RagIndexingPipeline can target the correct index at runtime.
+
+    Also extend the AzureOpenAI configuration section to include embedding model name and
+    the LlamaParse section (added in task 002) to include ParseTimeout and MaxPages settings.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with Azure AI Search configuration, appsettings.json
+    structured configuration sections, and the existing Spaarke BFF configuration patterns.
+  </role>
+
+  <goal>
+    appsettings.json contains fully-defined AiSearch, LlamaParse, and AzureOpenAI sections
+    with all fields required by Workstream A and C tasks. No code changes — config only.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-013">AI configuration must live in BFF appsettings, not separate service</constraint>
+    <constraint source="ADR-014">Index names must support tenant-scoping at runtime (names are base names)</constraint>
+    <constraint source="project">LlamaParse API key must reference Key Vault secret name, not value</constraint>
+    <constraint source="spec">Knowledge index: 512-token chunks. Discovery index: 1024-token chunks</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read current appsettings.json">
+      Read the current appsettings.json to understand existing AiSearch and AzureOpenAI sections.
+    </step>
+    <step order="2" name="Extend AiSearch section">
+      Update the AiSearch section to add:
+      - KnowledgeIndexName: "knowledge-index" (512-token curated chunks)
+      - DiscoveryIndexName: "discovery-index" (1024-token auto-populated)
+      - SemanticConfigName: "semantic-config"
+      - Keep any existing fields (Endpoint, ApiKeySecretName, IndexName if present)
+    </step>
+    <step order="3" name="Extend LlamaParse section">
+      Ensure LlamaParse section has:
+      - ApiKeySecretName: "LlamaParseApiKey"
+      - BaseUrl: "https://api.cloud.llamaindex.ai"
+      - ParseTimeoutSeconds: 120
+      - MaxPages: 500
+      - Enabled: false (feature flag — off until key provisioned)
+    </step>
+    <step order="4" name="Extend AzureOpenAI section">
+      Ensure AzureOpenAI section has EmbeddingModelName field (value: "text-embedding-3-small")
+      alongside existing ChatModelName and Endpoint fields.
+    </step>
+    <step order="5" name="Verify build">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Ensure build passes with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build verification</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/appsettings.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">appsettings.json contains AiSearch.KnowledgeIndexName and AiSearch.DiscoveryIndexName</criterion>
+    <criterion testable="true">appsettings.json contains LlamaParse section with Enabled: false</criterion>
+    <criterion testable="true">appsettings.json contains AzureOpenAI.EmbeddingModelName</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

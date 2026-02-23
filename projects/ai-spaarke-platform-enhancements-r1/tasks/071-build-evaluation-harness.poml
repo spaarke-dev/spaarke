@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-071" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>D2: Build Evaluation Harness — EvalRunner CLI + EvaluationEndpoints</title>
+    <phase>5 — Workstream D: End-to-End Validation</phase>
+    <tags>bff-api, api, testing, evaluation</tags>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <dependencies>AIPL-070, AIPL-001</dependencies>
+    <blocks>AIPL-073 (quality baseline), AIPL-075 (SprkChat evaluation)</blocks>
+  </metadata>
+
+  <prompt>
+    Build the evaluation harness consisting of:
+    1. EvaluationEndpoints.cs — API endpoints for triggering evaluation runs and retrieving results
+    2. EvalRunner CLI tool (tools/EvalRunner/) — command-line tool for running evaluation suites
+    3. Gold dataset format — JSON schema for manually-curated query/answer pairs
+    4. Recall@K and nDCG@K computation — using the retrieval instrumentation from task 017
+
+    The evaluation harness uses the sprk_aievaluationrun and sprk_aievaluationresult Dataverse
+    entities created in task 001.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with information retrieval metrics (Recall@K, nDCG@K),
+    .NET CLI tool development, and the Spaarke evaluation entity schema.
+  </role>
+
+  <goal>
+    EvalRunner CLI can execute an evaluation run from a gold dataset file. Results are stored
+    in Dataverse. EvaluationEndpoints expose results via API. Recall@10 &gt;= 0.7 is measurable.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">EvaluationEndpoints uses Minimal API patterns</constraint>
+    <constraint source="ADR-008">EvaluationEndpoints requires authorization filter (admin only)</constraint>
+    <constraint source="AIPL-001">Evaluation results stored in sprk_aievaluationrun + sprk_aievaluationresult</constraint>
+    <constraint source="project">Gold dataset must be manually curated — not generated from production data</constraint>
+    <constraint source="spec">Metrics: Recall@10 (primary), nDCG@10 (secondary), per-playbook breakdown</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/notes/design/dataverse-chat-schema.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Define gold dataset JSON schema">
+      Create a gold dataset schema at notes/design/eval-gold-dataset-schema.json:
+      { queries: [{ id, query, expectedDocumentIds: string[], minRelevanceScore: float, playbookId }] }
+      Create a sample gold dataset: notes/test-corpus/gold-dataset-v1.json (5+ entries minimum)
+    </step>
+    <step order="2" name="Create EvalRunner CLI tool">
+      Create tools/EvalRunner/ as a .NET console application:
+      - Command: evalrunner run --dataset gold-dataset-v1.json --env dev --playbook PB-001
+      - Loads gold dataset
+      - For each query: calls /api/ai/knowledge/test-search, computes Recall@K and nDCG@K
+      - Stores results in Dataverse via EvaluationEndpoints
+      - Outputs summary table: PlaybookId | Recall@10 | nDCG@10 | Pass/Fail
+    </step>
+    <step order="3" name="Implement Recall@K and nDCG@K computation">
+      In EvalRunner, implement:
+      - RecallAtK(retrieved: string[], expected: string[], k: int) → float
+      - NdcgAtK(retrieved: (id, score)[], expected: string[], k: int) → float
+      Write unit tests for both metric computations.
+    </step>
+    <step order="4" name="Create EvaluationEndpoints.cs">
+      Create src/server/api/Sprk.Bff.Api/Api/Ai/EvaluationEndpoints.cs:
+      - POST /api/ai/eval/runs → start evaluation run (returns runId)
+      - GET /api/ai/eval/runs/{runId} → run status + metrics
+      - GET /api/ai/eval/runs → list recent runs
+      All with authorization filter (admin role check).
+    </step>
+    <step order="5" name="Register EvaluationEndpoints in Program.cs">
+      app.MapGroup("/api/ai/eval").MapEvaluationEndpoints();
+    </step>
+    <step order="6" name="Verify build and tests">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/ + dotnet build tools/EvalRunner/
+      Run: dotnet test for RecallAtK and NdcgAtK tests
+      All must pass.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tools/EvalRunner/ (.NET CLI tool)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/EvaluationEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (eval endpoints registered)</output>
+    <output type="docs">notes/design/eval-gold-dataset-schema.json</output>
+    <output type="docs">notes/test-corpus/gold-dataset-v1.json</output>
+    <output type="test">tools/EvalRunner/tests/MetricsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">EvalRunner CLI runs without error against dev environment</criterion>
+    <criterion testable="true">RecallAtK and NdcgAtK unit tests pass</criterion>
+    <criterion testable="true">EvaluationEndpoints return 200 for GET /eval/runs</criterion>
+    <criterion testable="true">Gold dataset schema documented and sample dataset exists</criterion>
+    <criterion testable="true">dotnet build succeeds for both API and EvalRunner</criterion>
+  </acceptance-criteria>
+</task>

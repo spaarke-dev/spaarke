@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-072" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>D3: Build Automated E2E Tests for All 10 Playbooks</title>
+    <phase>5 — Workstream D: End-to-End Validation</phase>
+    <tags>testing, validation, e2e-test</tags>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <dependencies>AIPL-070, AIPL-071</dependencies>
+    <blocks>AIPL-073 (quality baseline)</blocks>
+  </metadata>
+
+  <prompt>
+    Build automated E2E integration tests that exercise each of the 10 playbooks end-to-end:
+    upload document → trigger analysis → verify output + citations for each playbook type.
+
+    Each test uses a document from the test corpus (task 070) and verifies that:
+    1. Analysis completes successfully
+    2. Output contains required fields (extracted entities, obligations, dates per playbook type)
+    3. Citations reference actual document sections
+    4. RAG retrieval returns relevant knowledge base chunks
+
+    Tests run against the dev environment (not a mock) and require deployed services.
+  </prompt>
+
+  <role>
+    QA engineer + senior .NET developer familiar with integration test patterns in .NET 8,
+    the Spaarke API, and the test document corpus.
+  </role>
+
+  <goal>
+    10 E2E playbook tests pass in dev environment. Each test verifies analysis output quality
+    and citation accuracy. Tests are repeatable and documented.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Tests run against dev environment — not mocks</constraint>
+    <constraint source="project">Tests must be idempotent (re-runnable without cleanup)</constraint>
+    <constraint source="project">Each test must verify citations (not just that analysis completed)</constraint>
+    <constraint source="spec">Use test documents from task 070 corpus — not production documents</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/notes/design/test-corpus-catalog.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/notes/design/scope-library-catalog.md</file>
+      <file>scripts/Test-SdapBffApi.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create E2E test project structure">
+      Create tests/e2e/PlaybookE2ETests/ as an integration test project.
+      Configure to run against dev environment (env variables for API URL, auth).
+    </step>
+    <step order="2" name="Write base E2E test helper">
+      Create E2ETestBase.cs:
+      - API client setup with authentication
+      - Helper: UploadAndAnalyze(documentPath, playbookId) → AnalysisResult
+      - Helper: VerifyCitation(result, expectedSection) → bool
+      - Helper: VerifyExtraction(result, fieldName) → string
+    </step>
+    <step order="3" name="Write test for each playbook (10 tests)">
+      One test class per playbook type:
+      - ContractReviewE2ETest: TEST-CONTRACT-001, playbook PB-001
+        Verify: parties extracted, obligations listed, payment terms present, citations reference pages
+      - NdaReviewE2ETest: TEST-NDA-001, playbook PB-002
+        Verify: restrictions listed, effective date extracted, exclusions identified
+      - [Repeat for all 10 playbooks using corpus documents]
+    </step>
+    <step order="4" name="Run tests and document results">
+      Execute all 10 E2E tests against dev environment.
+      Document pass/fail in notes/design/e2e-test-results.md.
+      Fix any failures before proceeding to task 073.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run tests</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/e2e/PlaybookE2ETests/ (10 test classes)</output>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/design/e2e-test-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 10 E2E playbook tests pass in dev environment</criterion>
+    <criterion testable="true">Each test verifies at least 3 output fields specific to the playbook type</criterion>
+    <criterion testable="true">Each test verifies at least 1 citation references an actual document section</criterion>
+    <criterion testable="true">Tests are idempotent (can be re-run without cleanup)</criterion>
+  </acceptance-criteria>
+</task>

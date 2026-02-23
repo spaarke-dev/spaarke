@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-017" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Add Retrieval Instrumentation — Recall@K and nDCG@K Logging</title>
+    <phase>2 — Workstream A: Retrieval Foundation</phase>
+    <tags>bff-api, api, retrieval, evaluation, logging</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPL-010, AIPL-013</dependencies>
+    <blocks>AIPL-071 (evaluation harness)</blocks>
+  </metadata>
+
+  <prompt>
+    Add structured logging to RagService and RagIndexingPipeline to capture the data needed
+    by the evaluation harness (task 071) to compute Recall@K and nDCG@K metrics.
+
+    For each retrieval operation, log: query text, retrieved document IDs with scores,
+    top-K parameter, elapsed time, and index name. For each indexing operation, log:
+    document ID, chunk count, and indexing time. Use structured logging (not string interpolation).
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with structured logging via ILogger, Application Insights
+    structured events, and evaluation metrics for RAG systems.
+  </role>
+
+  <goal>
+    RagService logs retrieval queries and results as structured events. RagIndexingPipeline
+    logs indexing operations. Logs include all fields needed by evaluation harness.
+    No performance impact (async logging, no blocking).
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-013">Log retrieval data via structured ILogger events — not custom storage</constraint>
+    <constraint source="project">Log events must include: TenantId, DocumentId, QueryText, RetrievedIds, Scores, ElapsedMs</constraint>
+    <constraint source="project">Do NOT log document content in retrieval logs — PII/compliance concern</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs</file>
+      <file>docs/guides/RAG-TROUBLESHOOTING.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Define retrieval log event structure">
+      Define the structured log event fields (using LoggerMessage.Define for performance):
+      - RetrievalQuery: { TenantId, IndexName, QueryText (truncated 200 chars), TopK, ElapsedMs }
+      - RetrievalResults: { TenantId, DocumentIds[], Scores[], ResultCount }
+      - IndexingCompleted: { TenantId, DocumentId, KnowledgeChunks, DiscoveryChunks, ElapsedMs }
+    </step>
+    <step order="2" name="Add instrumentation to RagService">
+      In RagService.cs:
+      - Before search: log RetrievalQuery event (query text truncated to 200 chars, no content)
+      - After search: log RetrievalResults event with document IDs and scores
+      - Use LoggerMessage source generators for high-performance logging
+    </step>
+    <step order="3" name="Add instrumentation to RagIndexingPipeline">
+      In RagIndexingPipeline.cs:
+      - On completion: log IndexingCompleted event with chunk counts and timing
+      - On error: log IndexingFailed event with error type (no stack trace in structured log)
+    </step>
+    <step order="4" name="Verify no content logged">
+      Audit all new log statements: confirm document content, embeddings, and user queries
+      longer than 200 characters are not logged (truncated or omitted).
+    </step>
+    <step order="5" name="Verify build">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build verification</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs (instrumentation added)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs (instrumentation added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RagService logs structured RetrievalQuery and RetrievalResults events</criterion>
+    <criterion testable="true">RagIndexingPipeline logs IndexingCompleted with chunk counts</criterion>
+    <criterion testable="true">No document content or embeddings appear in log events</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

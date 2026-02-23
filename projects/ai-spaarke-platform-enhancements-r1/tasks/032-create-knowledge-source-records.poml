@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-032" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Create 10 Knowledge Source Records with Content and Index to AI Search</title>
+    <phase>3 — Workstream B: Scope Library &amp; Seed Data</phase>
+    <tags>dataverse, seed-data, scope-library, ai-search, retrieval</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPL-016, AIPL-013</dependencies>
+    <blocks>AIPL-034 (Playbooks), AIPL-070 (test corpus)</blocks>
+  </metadata>
+
+  <prompt>
+    Create 10 system Knowledge Source records in sprk_content and index their content into
+    the knowledge index in Azure AI Search. These are the authoritative reference documents
+    that the RAG system uses when answering questions.
+
+    Knowledge Sources (KNW-001 through KNW-010):
+    1. Common Contract Terms Glossary — definitions for 50+ standard contract terms
+    2. NDA Checklist — checklist of 20 key items to verify in NDA review
+    3. Lease Agreement Standards — commercial lease standard clauses and variations
+    4. Invoice Processing Guide — AP invoice validation rules and exception handling
+    5. SLA Metrics Reference — standard SLA metrics, measurement methods, typical values
+    6. Employment Law Quick Reference — key employment law concepts (US/state agnostic)
+    7. IP Assignment Clause Library — standard IP assignment clause variations
+    8. Termination and Remedy Provisions — standard termination triggers and remedy clauses
+    9. Governing Law and Jurisdiction Guide — common choice-of-law provisions
+    10. Legal Document Red Flags Catalog — 30+ red flags that require escalation
+  </prompt>
+
+  <role>
+    Legal knowledge engineer + Dataverse developer. Content must be professionally written
+    and factually accurate legal reference material.
+  </role>
+
+  <goal>
+    10 sprk_content records exist in Dataverse. Content is indexed into knowledge-index in
+    Azure AI Search. RAG retrieval returns relevant chunks from these sources when queried.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-002">Records created via data import — no plugin processing</constraint>
+    <constraint source="spec">Content must be indexed into knowledge-index (512-token chunks)</constraint>
+    <constraint source="project">ExternalId: "KNW-001" through "KNW-010"</constraint>
+    <constraint source="project">Content must be original, factual, and not copied from copyrighted sources</constraint>
+    <constraint source="ADR-014">Index with tenantId="system" for shared knowledge sources</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>docs/guides/HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/notes/design/ai-search-schema.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Author knowledge source content">
+      Write content for all 10 knowledge sources.
+      Each source: minimum 500 words, structured with headings, factually accurate.
+      Save as markdown files in notes/design/knowledge-sources/ for review.
+    </step>
+    <step order="2" name="Create sprk_content records in Dataverse">
+      Required fields: sprk_name, sprk_externalid, sprk_contenttext, sprk_contenttype,
+      sprk_isactive=true, sprk_issystem=true
+    </step>
+    <step order="3" name="Index content into knowledge-index">
+      For each knowledge source:
+      - Call RagIndexingPipeline.IndexDocumentAsync() with content and tenantId="system"
+      - OR use the /api/ai/knowledge/test-search endpoint to verify indexing
+      - Verify chunks appear in knowledge-index
+    </step>
+    <step order="4" name="Verify RAG retrieval">
+      Run test queries against each knowledge source to verify RAG retrieval works:
+      - Query: "What is a force majeure clause?" → should return Contract Terms content
+      - Query: "What is a standard SLA availability metric?" → should return SLA Reference
+    </step>
+    <step order="5" name="Update scope-library-catalog.md">
+      Add Knowledge Sources section to catalog with all 10 entries.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for Dataverse</tool>
+    <tool name="az">Azure CLI for AI Search verification</tool>
+    <tool name="git">Stage content files</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">10 sprk_content records in spaarkedev1 (KNW-001–010)</output>
+    <output type="infrastructure">Knowledge source chunks indexed in knowledge-index</output>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/design/knowledge-sources/ (content files)</output>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/design/scope-library-catalog.md (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">10 sprk_content records with ExternalIds KNW-001 through KNW-010</criterion>
+    <criterion testable="true">Knowledge source content is indexed in knowledge-index (verified via test-search)</criterion>
+    <criterion testable="true">Test query returns relevant content from at least 3 knowledge sources</criterion>
+    <criterion testable="true">scope-library-catalog.md documents all 10 Knowledge Sources</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-036" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Verify and Extend Handler Discovery API for ScopeConfigEditor</title>
+    <phase>3 — Workstream B: Scope Library &amp; Seed Data</phase>
+    <tags>bff-api, api, scope-library</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPL-033</dependencies>
+    <blocks>AIPL-035 (ScopeConfigEditorPCF handler dropdown), AIPL-037 (Phase 3 deploy)</blocks>
+  </metadata>
+
+  <prompt>
+    Verify that the handler discovery API endpoint (/api/ai/tools/handlers) exists and returns
+    all registered IAiToolHandler implementations. If the endpoint doesn't exist, create it.
+
+    ScopeConfigEditorPCF (task 035) needs this endpoint to populate the handler class dropdown
+    for Tool records. The response must include the class name and a description for each
+    registered handler.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the existing Spaarke IAiToolHandler framework,
+    Minimal API patterns, and handler discovery via reflection or DI.
+  </role>
+
+  <goal>
+    GET /api/ai/tools/handlers returns a list of all registered handler class names and
+    descriptions. ScopeConfigEditorPCF can use this to populate the dropdown.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API pattern</constraint>
+    <constraint source="ADR-008">Endpoint requires authorization filter</constraint>
+    <constraint source="ADR-013">Extend existing AiToolEndpoints — do not create new endpoint file</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/AiToolEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AiToolService.cs</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Check existing handler discovery">
+      Read AiToolEndpoints.cs and AiToolService.cs to see if handler discovery exists.
+      If GET /api/ai/tools/handlers already exists, verify it returns correct data and skip to step 4.
+    </step>
+    <step order="2" name="Add handler discovery endpoint (if missing)">
+      In AiToolEndpoints.cs, add:
+      GET /handlers → returns List&lt;HandlerInfo&gt; where HandlerInfo = { ClassName, Description, ParameterSchemaUrl }
+      Use DI to get all registered IAiToolHandler implementations via IEnumerable&lt;IAiToolHandler&gt;.
+    </step>
+    <step order="3" name="Test endpoint">
+      Deploy locally and call GET /api/ai/tools/handlers.
+      Verify response includes class names matching TL-001–008 handler class names.
+    </step>
+    <step order="4" name="Verify build">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/AiToolEndpoints.cs (modified or verified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/ai/tools/handlers returns 200 with list of handler class names</criterion>
+    <criterion testable="true">Response includes at least DocumentSearchTools and AnalysisQueryTools</criterion>
+    <criterion testable="true">Endpoint has authorization filter</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

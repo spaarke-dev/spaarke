@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-037" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Deploy Workstream B — Dataverse Records + ScopeConfigEditorPCF</title>
+    <phase>3 — Workstream B: Scope Library &amp; Seed Data</phase>
+    <tags>deploy, dataverse, pcf</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPL-034, AIPL-035, AIPL-036</dependencies>
+    <blocks>AIPL-072 (E2E tests for playbooks)</blocks>
+  </metadata>
+
+  <prompt>
+    Deploy all Workstream B deliverables to the dev environment:
+    1. Verify all Dataverse seed records are in spaarkedev1 (Actions, Skills, Knowledge Sources, Tools, Playbooks)
+    2. Deploy ScopeConfigEditorPCF to all 4 scope entity forms
+    3. Deploy updated BFF API (handler discovery endpoint from task 036)
+    4. Verify all 10 playbooks are selectable in AnalysisWorkspace
+  </prompt>
+
+  <role>
+    DevOps engineer familiar with Dataverse PCF deployment, the pcf-deploy skill,
+    and Power Platform solution management.
+  </role>
+
+  <goal>
+    ScopeConfigEditorPCF is live on all 4 scope entity forms in spaarkedev1.
+    All 46 seed records exist. All 10 playbooks selectable in AnalysisWorkspace.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Use pcf-deploy skill for PCF deployment — follow skill procedures</constraint>
+    <constraint source="ADR-022">Deploy as unmanaged solution only</constraint>
+    <constraint source="project">DO NOT disable Directory.Packages.props before pac pcf push — use workaround documented in pcf-deploy skill</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Verify Dataverse seed records">
+      Run queries to confirm count of each entity type:
+      - sprk_systemprompt: 8 records (ACT-001–008)
+      - sprk_promptfragment: 10 records (SKL-001–010)
+      - sprk_content: 10 records (KNW-001–010)
+      - sprk_analysistool: 8 records (TL-001–008)
+      - sprk_aiplaybook: 10 records (PB-001–010)
+    </step>
+    <step order="2" name="Deploy BFF API update">
+      Deploy updated BFF (handler discovery endpoint) via azure-deploy skill.
+      Verify GET /api/ai/tools/handlers returns 200.
+    </step>
+    <step order="3" name="Deploy ScopeConfigEditorPCF">
+      Invoke pcf-deploy skill to build, pack, and deploy ScopeConfigEditorPCF.
+      Add control to all 4 scope entity forms:
+      - sprk_systemprompt form
+      - sprk_promptfragment form
+      - sprk_content form
+      - sprk_analysistool form
+    </step>
+    <step order="4" name="Verify playbooks in AnalysisWorkspace">
+      Open AnalysisWorkspace in spaarkedev1.
+      Verify all 10 PB-* playbooks appear in playbook selection dropdown.
+    </step>
+    <step order="5" name="Update TASK-INDEX.md">
+      Mark all Phase 3 tasks (030-037) as completed in TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI</tool>
+    <tool name="pcf-deploy">Skill: Deploy PCF controls</tool>
+    <tool name="azure-deploy">Skill: Deploy BFF API</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">ScopeConfigEditorPCF deployed to 4 entity forms in spaarkedev1</output>
+    <output type="deployment">BFF API updated with handler discovery endpoint</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 46 seed records exist in correct Dataverse entities</criterion>
+    <criterion testable="true">ScopeConfigEditorPCF renders on sprk_systemprompt form</criterion>
+    <criterion testable="true">All 10 playbooks visible in AnalysisWorkspace dropdown</criterion>
+    <criterion testable="true">GET /api/ai/tools/handlers returns 200</criterion>
+  </acceptance-criteria>
+</task>

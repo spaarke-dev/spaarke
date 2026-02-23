@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-075" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>D6: Run SprkChat Evaluation — Answer Accuracy, Citation Rate, Latency</title>
+    <phase>5 — Workstream D: End-to-End Validation</phase>
+    <tags>testing, validation, evaluation, agent-framework</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPL-073, AIPL-059</dependencies>
+    <blocks>AIPL-090 (wrap-up)</blocks>
+  </metadata>
+
+  <prompt>
+    Evaluate SprkChat end-to-end: send pre-defined questions against the test corpus documents,
+    measure answer accuracy, citation rate, and first-token latency.
+
+    Create a SprkChat evaluation script that:
+    1. Creates a chat session for each test document
+    2. Sends a set of predefined questions per playbook type
+    3. Evaluates responses: does the answer contain expected information?
+    4. Counts citations in each response
+    5. Measures first-token latency for each message
+    6. Documents pass/fail for each question
+
+    Record results in Dataverse via EvaluationEndpoints.
+  </prompt>
+
+  <role>
+    QA engineer familiar with LLM evaluation approaches, SSE streaming measurement,
+    and the SprkChat API.
+  </role>
+
+  <goal>
+    SprkChat evaluation report exists with answer accuracy, citation rate, and p95 latency.
+    First-token latency &lt; 2 seconds p95 (NFR-06). Citation rate &gt;= 60% of responses.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">First-token latency target: &lt; 2 seconds p95 (NFR-06)</constraint>
+    <constraint source="project">Evaluation questions must be pre-defined (not generated) — curated for expected answers</constraint>
+    <constraint source="project">Citation rate: percentage of responses that include at least one [Section/Page] citation</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/notes/design/quality-baseline-v1.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/notes/design/test-corpus-catalog.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create SprkChat evaluation questions">
+      Create notes/test-corpus/chat-eval-questions.json:
+      50+ questions across all 10 playbook types, each with:
+      - question: string
+      - documentId: test corpus document
+      - playbookId: applicable playbook
+      - expectedKeywords: string[] (keywords that should appear in answer)
+      - requiresCitation: bool
+    </step>
+    <step order="2" name="Write evaluation script">
+      Extend EvalRunner CLI with SprkChat evaluation mode:
+        evalrunner eval-chat --questions chat-eval-questions.json --env dev
+      - Create session, send message, capture response
+      - Measure time to first token (SSE stream timing)
+      - Check expectedKeywords in response
+      - Check citation pattern in response
+    </step>
+    <step order="3" name="Run evaluation">
+      Execute evaluation against dev environment.
+      Record results in Dataverse sprk_aievaluationrun with type="chat_eval".
+    </step>
+    <step order="4" name="Create SprkChat evaluation report">
+      Create notes/design/sprk-chat-eval-v1.md:
+      - Answer accuracy: % questions where all expectedKeywords found
+      - Citation rate: % responses with at least one citation
+      - First-token p50 / p95 latency
+      - Problem areas and recommendations
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">EvalRunner CLI</tool>
+    <tool name="git">Stage results and report</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/test-corpus/chat-eval-questions.json</output>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/design/sprk-chat-eval-v1.md</output>
+    <output type="dataverse">sprk_aievaluationrun record for SprkChat evaluation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Evaluation covers all 10 playbook types with 5+ questions each</criterion>
+    <criterion testable="true">First-token p95 latency &lt; 2 seconds (NFR-06)</criterion>
+    <criterion testable="true">sprk-chat-eval-v1.md documents answer accuracy, citation rate, and latency</criterion>
+    <criterion testable="true">Evaluation run record exists in Dataverse</criterion>
+  </acceptance-criteria>
+</task>

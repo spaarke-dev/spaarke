@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-058" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Deploy Workstream C — BFF API to Azure App Service</title>
+    <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
+    <tags>bff-api, deploy, azure</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>AIPL-054, AIPL-057</dependencies>
+    <blocks>AIPL-059 (PCF deploy), AIPL-070 (validation)</blocks>
+  </metadata>
+
+  <prompt>
+    Deploy the Workstream C BFF API changes (ChatEndpoints, SprkChatAgent, ChatSessionManager,
+    ChatHistoryManager, chat tools, agent middleware) to the dev Azure App Service.
+
+    Verify POST /api/ai/chat/sessions creates a session and GET /api/ai/chat/sessions/{id}/history
+    returns after deployment.
+  </prompt>
+
+  <role>
+    DevOps engineer familiar with the Spaarke azure-deploy skill and deployment verification.
+  </role>
+
+  <goal>
+    Workstream C API changes are live. Chat session creation works in dev environment.
+    No regression on existing endpoints.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Use azure-deploy skill — do not manually construct az commands</constraint>
+    <constraint source="project">Verify DI count hasn't exceeded 15 before deploying (check CLAUDE.md)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/AI-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Final DI count check">
+      Read CLAUDE.md DI count. Verify total non-framework registrations &lt;= 15.
+      If over budget, refactor before deploying.
+    </step>
+    <step order="2" name="Pre-deployment build">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/ — must pass with 0 errors.
+    </step>
+    <step order="3" name="Deploy via azure-deploy skill">
+      Invoke azure-deploy skill to deploy to spe-api-dev-67e2xz.
+    </step>
+    <step order="4" name="Verify chat session creation">
+      POST https://spe-api-dev-67e2xz.azurewebsites.net/api/ai/chat/sessions
+        { "documentId": "test", "playbookId": "PB-001" }
+      Expect 201 with sessionId.
+    </step>
+    <step order="5" name="Verify no regression">
+      GET /healthz → 200
+      GET /api/ai/knowledge/indexes/health → 200
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI verification</tool>
+    <tool name="azure-deploy">Skill: Deploy BFF API</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">BFF API (Workstream C changes) deployed to spe-api-dev-67e2xz</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/ai/chat/sessions returns 201 with sessionId</criterion>
+    <criterion testable="true">GET /healthz returns 200 (no regression)</criterion>
+    <criterion testable="true">DI count &lt;= 15 confirmed in CLAUDE.md</criterion>
+  </acceptance-criteria>
+</task>

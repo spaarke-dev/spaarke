@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-033" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Create 8 System Tool Records (sprk_analysistool TL-001–008)</title>
+    <phase>3 — Workstream B: Scope Library &amp; Seed Data</phase>
+    <tags>dataverse, seed-data, scope-library</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPL-004</dependencies>
+    <blocks>AIPL-034 (Playbooks), AIPL-036 (handler discovery)</blocks>
+  </metadata>
+
+  <prompt>
+    Create 8 system Tool records in the sprk_analysistool Dataverse entity. Tools define
+    callable functions that the AI agent can invoke during analysis. Each Tool record
+    specifies the handler class name and JSON Schema for the tool's parameters.
+
+    Tools to create (TL-001 through TL-008):
+    1. DocumentSearch — search the knowledge base for relevant content
+    2. AnalysisRetrieval — retrieve previous analysis results for a document
+    3. KnowledgeRetrieval — retrieve specific knowledge source content
+    4. TextRefinement — refine or reformat a text section
+    5. CitationExtractor — extract citations from analysis results
+    6. SummaryGenerator — generate structured summaries
+    7. RedFlagDetector — detect risk indicators in document sections
+    8. PartyExtractor — extract and normalize party information
+  </prompt>
+
+  <role>
+    Dataverse developer familiar with sprk_analysistool entity schema and JSON Schema specification.
+  </role>
+
+  <goal>
+    8 sprk_analysistool records exist in spaarkedev1 with IDs TL-001 through TL-008.
+    Each has a valid JSON Schema for parameters and a handler class name that resolves
+    to a registered handler in the BFF.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-002">Records are data only — no AI processing in plugin context</constraint>
+    <constraint source="project">HandlerClassName must match actual C# class name that will be registered in Workstream C</constraint>
+    <constraint source="project">JSON Schema must be valid; use draft-07 schema format</constraint>
+    <constraint source="project">ExternalId: "TL-001" through "TL-008"</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>docs/guides/HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Define handler class names and schemas">
+      For each tool, define:
+      - Handler class name (C# class that will be created in task 053):
+        * DocumentSearch → DocumentSearchTools
+        * AnalysisRetrieval → AnalysisQueryTools
+        * KnowledgeRetrieval → KnowledgeRetrievalTools
+        * TextRefinement → TextRefinementTools
+        * CitationExtractor, SummaryGenerator, RedFlagDetector, PartyExtractor → also in above tool classes
+      - JSON Schema for parameters (query string, top-k, filters, etc.)
+    </step>
+    <step order="2" name="Create records in Dataverse">
+      Required fields: sprk_name, sprk_externalid, sprk_handlerclassname, sprk_parameterschema (JSON),
+      sprk_isactive=true, sprk_issystem=true, sprk_description
+    </step>
+    <step order="3" name="Verify handler class names">
+      Cross-reference with CLAUDE.md "Workstream C new files" list to ensure handler class names
+      match what will be implemented in task 053.
+    </step>
+    <step order="4" name="Update scope-library-catalog.md">
+      Add Tools section to catalog.
+    </step>
+    <step order="5" name="Verify records exist">
+      Confirm 8 records with correct ExternalIds.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for Dataverse</tool>
+    <tool name="git">Stage documentation changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">8 sprk_analysistool records in spaarkedev1 (TL-001–008)</output>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/design/scope-library-catalog.md (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">8 sprk_analysistool records with ExternalIds TL-001 through TL-008</criterion>
+    <criterion testable="true">Each record has a valid JSON Schema in sprk_parameterschema</criterion>
+    <criterion testable="true">Handler class names match Workstream C implementation plan</criterion>
+    <criterion testable="true">scope-library-catalog.md documents all 8 Tools</criterion>
+  </acceptance-criteria>
+</task>

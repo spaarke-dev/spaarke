@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-013" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Implement RagIndexingPipeline — Auto-Index After Document Analysis</title>
+    <phase>2 — Workstream A: Retrieval Foundation</phase>
+    <tags>bff-api, api, retrieval, indexing, jobs</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPL-011, AIPL-012</dependencies>
+    <blocks>AIPL-014 (RagIndexingJobHandler), AIPL-015 (KnowledgeBaseEndpoints)</blocks>
+  </metadata>
+
+  <prompt>
+    Implement RagIndexingPipeline — the orchestrator that takes a parsed document, chunks it
+    with SemanticDocumentChunker, generates embeddings for each chunk, and indexes them into
+    both the knowledge index and discovery index in Azure AI Search.
+
+    The pipeline is triggered after document analysis completes. It must complete within
+    60 seconds (NFR spec requirement). It indexes to both indexes in parallel to meet latency.
+
+    Also update DocumentIntelligenceService to call DocumentParserRouter instead of calling
+    Azure Document Intelligence directly.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with Azure AI Search indexing SDK, embedding generation,
+    parallel async operations, and the existing Spaarke document analysis pipeline.
+  </role>
+
+  <goal>
+    RagIndexingPipeline.cs orchestrates parse → chunk → embed → index. It writes to both
+    AI Search indexes. Completes within 60 seconds. Unit tests cover the pipeline steps.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">Indexing triggered via Service Bus job — pipeline is called by RagIndexingJobHandler (task 014)</constraint>
+    <constraint source="ADR-004">Pipeline must be idempotent — re-indexing same document replaces old chunks</constraint>
+    <constraint source="ADR-009">No chunk embeddings cached in Redis — too large; index directly to AI Search</constraint>
+    <constraint source="spec">Pipeline must complete within 60 seconds of analysis completion (NFR-11)</constraint>
+    <constraint source="ADR-014">Index documents with tenantId field for tenant isolation at query time</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticDocumentChunker.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/DocumentParserRouter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>docs/guides/RAG-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read RagService and understand AI Search indexing patterns">
+      Read RagService.cs to understand how it calls Azure AI Search for search.
+      Identify how embeddings are generated (EmbeddingClient or similar).
+      Note the SearchClient setup for potential reuse in indexing.
+    </step>
+    <step order="2" name="Create RagIndexingPipeline.cs">
+      Create src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs:
+      - Inject SemanticDocumentChunker, RagService (or direct SearchClient), ILogger
+      - IndexDocumentAsync(ParsedDocument document, string documentId, string tenantId, CancellationToken) → IndexingResult
+      - Steps:
+        1. Chunk with ChunkOptions.ForKnowledgeIndex() → knowledge chunks
+        2. Chunk with ChunkOptions.ForDiscoveryIndex() → discovery chunks
+        3. Generate embeddings for all chunks in parallel batches (max 16 concurrent)
+        4. Upload knowledge chunks to knowledge index (delete old by documentId first)
+        5. Upload discovery chunks to discovery index (delete old by documentId first)
+      - IndexingResult: { DocumentId, KnowledgeChunksIndexed, DiscoveryChunksIndexed, DurationMs }
+    </step>
+    <step order="3" name="Update DocumentIntelligenceService to use DocumentParserRouter">
+      In DocumentIntelligenceService.cs, inject DocumentParserRouter.
+      Replace direct Azure Doc Intel call with DocumentParserRouter.ParseDocumentAsync().
+      Ensure existing analysis flow still works.
+    </step>
+    <step order="4" name="Register in Program.cs">
+      Add: builder.Services.AddSingleton&lt;RagIndexingPipeline&gt;();
+      Update DI count in CLAUDE.md.
+    </step>
+    <step order="5" name="Write unit tests">
+      Create tests/unit/Services/Ai/RagIndexingPipelineTests.cs:
+      - Test: IndexDocumentAsync calls chunker for both knowledge and discovery indexes
+      - Test: Existing chunks deleted before re-indexing (idempotency)
+      - Test: IndexingResult contains correct chunk counts
+      - Test: Cancellation token is propagated to all async operations
+    </step>
+    <step order="6" name="Verify build and tests">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Run: dotnet test tests/unit/ --filter "RagIndexingPipeline"
+      Both must pass.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/IndexingResult.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (registration added)</output>
+    <output type="test">tests/unit/Services/Ai/RagIndexingPipelineTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RagIndexingPipeline indexes to both knowledge and discovery indexes</criterion>
+    <criterion testable="true">Re-indexing same documentId deletes old chunks first (idempotent)</criterion>
+    <criterion testable="true">Unit tests pass (4 test cases minimum)</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-051" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>C2: Implement SprkChatAgent + Factory + IChatContextProvider</title>
+    <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
+    <tags>bff-api, api, agent-framework</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPL-050, AIPL-001</dependencies>
+    <blocks>AIPL-052 (ChatSessionManager), AIPL-053 (chat tools), AIPL-054 (ChatEndpoints)</blocks>
+  </metadata>
+
+  <prompt>
+    Implement SprkChatAgent — the core Agent Framework agent that handles user chat messages,
+    invokes tools, and returns streaming responses. Also implement SprkChatAgentFactory to
+    create configured agents per session, and IChatContextProvider to supply the agent with
+    document context (analysis results, playbook scope).
+
+    SprkChatAgent wraps IChatClient with tool registration, system prompt injection from
+    playbook scope, and context from the current analysis document.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with Microsoft.Agents.AI agent patterns, IChatClient,
+    AIFunctionFactory, and the Spaarke playbook/scope architecture.
+  </role>
+
+  <goal>
+    SprkChatAgent, SprkChatAgentFactory, and IChatContextProvider are implemented. Agent
+    can be created for a session with a specific playbook scope. Unit tests pass.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-013">Agent created via factory — not directly constructed in endpoints</constraint>
+    <constraint source="ADR-010">Register SprkChatAgentFactory as singleton; IChatContextProvider as scoped</constraint>
+    <constraint source="spec">Agent must inject system prompt from playbook's Action (ACT-*) record</constraint>
+    <constraint source="spec">Agent must support context switching between documents without creating new session</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read ScopeResolverService and AnalysisOrchestrationService">
+      Read ScopeResolverService.cs to understand how playbook scopes are resolved.
+      Read AnalysisOrchestrationService.cs to understand current AI orchestration pattern.
+    </step>
+    <step order="2" name="Create IChatContextProvider interface">
+      Create src/server/api/Sprk.Bff.Api/Services/Ai/Chat/IChatContextProvider.cs:
+      - GetContextAsync(string documentId, string tenantId, CancellationToken) → ChatContext
+      - ChatContext: { SystemPrompt, DocumentSummary, AnalysisMetadata, PlaybookId }
+    </step>
+    <step order="3" name="Create PlaybookChatContextProvider">
+      Implement IChatContextProvider using ScopeResolverService to:
+      - Load playbook scope (Action → system prompt, Knowledge Sources, Tools)
+      - Get document analysis summary for context injection
+      - Return ChatContext with composed system prompt
+    </step>
+    <step order="4" name="Create SprkChatAgent.cs">
+      Create src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs:
+      - Wraps IChatClient
+      - Constructor: IChatClient chatClient, ChatContext context, IReadOnlyList&lt;AIFunction&gt; tools
+      - Method: SendMessageAsync(string message, IReadOnlyList&lt;ChatMessage&gt; history, CancellationToken) → IAsyncEnumerable&lt;StreamingChatMessageContent&gt;
+      - Injects system prompt from ChatContext
+      - Registers tools from AIFunctionFactory
+    </step>
+    <step order="5" name="Create SprkChatAgentFactory.cs">
+      Create src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs:
+      - Inject IChatClient, IChatContextProvider, IServiceProvider (for tool resolution)
+      - CreateAgentAsync(string sessionId, string documentId, string playbookId, string tenantId) → SprkChatAgent
+    </step>
+    <step order="6" name="Register in Program.cs">
+      Add registrations for SprkChatAgentFactory, PlaybookChatContextProvider.
+      Update DI count in CLAUDE.md.
+    </step>
+    <step order="7" name="Write unit tests">
+      Create tests for SprkChatAgentFactory (creates agent with correct context) and
+      PlaybookChatContextProvider (loads correct system prompt from playbook scope).
+    </step>
+    <step order="8" name="Verify build and tests">
+      Run: dotnet build + dotnet test
+      Both must pass.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/IChatContextProvider.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatContext.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (registrations added)</output>
+    <output type="test">tests/unit/Services/Ai/Chat/SprkChatAgentTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SprkChatAgentFactory creates agent with system prompt from playbook Action</criterion>
+    <criterion testable="true">SendMessageAsync returns IAsyncEnumerable (streaming)</criterion>
+    <criterion testable="true">Unit tests pass</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

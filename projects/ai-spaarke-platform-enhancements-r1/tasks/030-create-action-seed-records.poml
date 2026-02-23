@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-030" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Create 8 System Action Records (sprk_systemprompt ACT-001–008)</title>
+    <phase>3 — Workstream B: Scope Library &amp; Seed Data</phase>
+    <tags>dataverse, seed-data, scope-library, foundation</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPL-004</dependencies>
+    <blocks>AIPL-034 (Playbooks), AIPL-036 (handler discovery)</blocks>
+  </metadata>
+
+  <prompt>
+    Create 8 system Action records in the sprk_systemprompt Dataverse entity. Actions are
+    the primary system prompt definitions that define how the AI behaves for each document
+    analysis scenario. Each Action gets a production-quality system prompt.
+
+    Actions to create (ACT-001 through ACT-008):
+    1. Contract Review — extract obligations, parties, dates, payment terms
+    2. NDA Analysis — identify key restrictions, exclusions, effective dates
+    3. Lease Agreement Review — extract rent, term, renewal options, restrictions
+    4. Invoice Processing — extract vendor, amounts, line items, payment terms
+    5. SLA Analysis — identify SLOs, penalties, escalation paths
+    6. Employment Agreement Review — extract compensation, benefits, IP assignment, restrictions
+    7. Statement of Work Analysis — extract deliverables, milestones, acceptance criteria
+    8. General Legal Document Review — catch-all for unclassified legal documents
+  </prompt>
+
+  <role>
+    Dataverse developer familiar with sprk_systemprompt entity schema, Power Platform CLI,
+    and prompt engineering for legal document analysis.
+  </role>
+
+  <goal>
+    8 sprk_systemprompt records exist in spaarkedev1.crm.dynamics.com with IDs ACT-001 through
+    ACT-008. Each has a production-quality system prompt. ScopeResolverService can resolve them.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-002">No AI processing in plugins — records are data only, created via PAC CLI or data import</constraint>
+    <constraint source="project">Use sprk_ field prefix. ExternalId field: "ACT-001" through "ACT-008"</constraint>
+    <constraint source="project">System prompts must be in English, professional legal analysis tone</constraint>
+    <constraint source="project">Document schema in notes/design/dataverse-chat-schema.md first if not done in task 001</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>docs/guides/HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md</file>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Check existing sprk_systemprompt records">
+      Use pac or query Dataverse to check if any ACT-001–008 records already exist.
+      List current records to avoid duplicates.
+    </step>
+    <step order="2" name="Author 8 system prompts">
+      Write production-quality system prompts for each of the 8 Actions.
+      Each prompt should:
+      - Define the AI's role and expertise
+      - Specify what to extract (entities, dates, obligations, etc.)
+      - Define output format (structured sections)
+      - Include instructions to cite document sections
+      Minimum 200 words per prompt.
+    </step>
+    <step order="3" name="Create records via data import or PAC CLI">
+      Use pac data export/import or direct Dataverse API to create the 8 records.
+      Required fields: sprk_name, sprk_externalid, sprk_prompttext, sprk_isactive=true,
+      sprk_issystem=true, sprk_version="1.0"
+    </step>
+    <step order="4" name="Verify records exist">
+      Query sprk_systemprompt to confirm 8 records exist with correct ExternalIds.
+      Verify ScopeResolverService can resolve ACT-001 by ExternalId.
+    </step>
+    <step order="5" name="Document in notes">
+      Create/update projects/ai-spaarke-platform-enhancements-r1/notes/design/scope-library-catalog.md
+      with the Action catalog (ID, name, purpose).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for Dataverse data management</tool>
+    <tool name="git">Stage documentation changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">8 sprk_systemprompt records in spaarkedev1 (ACT-001–008)</output>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/design/scope-library-catalog.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">8 sprk_systemprompt records exist with ExternalIds ACT-001 through ACT-008</criterion>
+    <criterion testable="true">Each record has sprk_prompttext with at least 200 words</criterion>
+    <criterion testable="true">All records have sprk_isactive=true and sprk_issystem=true</criterion>
+    <criterion testable="true">scope-library-catalog.md documents all 8 Actions</criterion>
+  </acceptance-criteria>
+</task>

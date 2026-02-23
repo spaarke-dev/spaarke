@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-054" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>C5: Build ChatEndpoints — SSE Streaming Chat API</title>
+    <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
+    <tags>bff-api, api, agent-framework, sse</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPL-052, AIPL-053</dependencies>
+    <blocks>AIPL-057 (agent middleware), AIPL-058 (API deploy)</blocks>
+  </metadata>
+
+  <prompt>
+    Build ChatEndpoints.cs — the Minimal API endpoint group for the SprkChat API at
+    /api/ai/chat/sessions/. This includes session management endpoints and SSE streaming
+    endpoints for real-time chat.
+
+    Follow the AnalysisEndpoints.cs SSE streaming pattern for the message and refinement
+    endpoints. All endpoints require authorization via endpoint filter.
+
+    The /send-message endpoint streams the AI response as SSE events. The /refine endpoint
+    streams text refinement results.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with .NET 8 Minimal API SSE patterns, IAsyncEnumerable,
+    and the existing AnalysisEndpoints.cs streaming pattern.
+  </role>
+
+  <goal>
+    ChatEndpoints.cs provides all endpoints per spec. SSE streaming works for send-message
+    and refine. Session CRUD works. Integration tests pass. First-token latency &lt; 2 seconds p95.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API patterns only; SSE via IAsyncEnumerable and Results.Stream()</constraint>
+    <constraint source="ADR-008">All endpoints use AddEndpointFilter&lt;AiAuthorizationFilter&gt;()</constraint>
+    <constraint source="ADR-013">Rate limit AI endpoints — check existing rate limiting pattern in BFF</constraint>
+    <constraint source="spec">Chat first-token latency &lt; 2 seconds p95 (NFR-06)</constraint>
+    <constraint source="spec">SSE format: data: {type: "token", content: "..."} then data: {type: "done"}</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read AnalysisEndpoints.cs SSE pattern">
+      Thoroughly read AnalysisEndpoints.cs to understand the SSE implementation.
+      Note: IAsyncEnumerable return type, Content-Type header, event format, cancellation.
+    </step>
+    <step order="2" name="Create ChatEndpoints.cs">
+      Create src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs with:
+
+      POST /api/ai/chat/sessions → CreateSessionAsync
+        Request: { DocumentId, PlaybookId }
+        Response: { SessionId, CreatedAt }
+
+      POST /api/ai/chat/sessions/{sessionId}/messages → SendMessageAsync (SSE)
+        Request: { Message, DocumentId }
+        Response: SSE stream of { type, content } events
+
+      POST /api/ai/chat/sessions/{sessionId}/refine → RefineTextAsync (SSE)
+        Request: { SelectedText, Instruction }
+        Response: SSE stream
+
+      GET /api/ai/chat/sessions/{sessionId}/history → GetHistoryAsync
+        Response: { Messages: [] }
+
+      PATCH /api/ai/chat/sessions/{sessionId}/context → SwitchContextAsync
+        Request: { DocumentId, PlaybookId }
+
+      DELETE /api/ai/chat/sessions/{sessionId} → DeleteSessionAsync
+
+      All endpoints: .AddEndpointFilter&lt;AiAuthorizationFilter&gt;()
+    </step>
+    <step order="3" name="Implement SSE streaming for SendMessage">
+      In SendMessageAsync:
+      1. Get/create session via ChatSessionManager
+      2. Create agent via SprkChatAgentFactory
+      3. Stream response via SprkChatAgent.SendMessageAsync()
+      4. Write SSE events: data: {type:"token", content:chunk}\n\n
+      5. Write done event: data: {type:"done"}\n\n
+      6. Persist user message and assistant response to ChatHistoryManager
+    </step>
+    <step order="4" name="Register endpoint group in Program.cs">
+      app.MapGroup("/api/ai/chat").MapChatEndpoints();
+    </step>
+    <step order="5" name="Write integration tests">
+      Tests:
+      - POST /sessions creates session, returns sessionId
+      - POST /sessions/{id}/messages returns SSE stream with token events
+      - GET /sessions/{id}/history returns messages
+      - Unauthenticated → 401
+    </step>
+    <step order="6" name="Verify build and tests">
+      Run: dotnet build + dotnet test
+      Both must pass.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (endpoint group registered)</output>
+    <output type="test">tests/integration/Api/Ai/ChatEndpointsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /sessions creates a session and returns sessionId</criterion>
+    <criterion testable="true">POST /sessions/{id}/messages returns SSE stream with "token" and "done" events</criterion>
+    <criterion testable="true">All 6 endpoints have authorization filter</criterion>
+    <criterion testable="true">GET /history returns message list</criterion>
+    <criterion testable="true">Integration tests pass</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

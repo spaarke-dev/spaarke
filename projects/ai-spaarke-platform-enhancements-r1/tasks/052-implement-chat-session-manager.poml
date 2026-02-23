@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-052" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>C3: Implement ChatSessionManager + ChatHistoryManager</title>
+    <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
+    <tags>bff-api, api, agent-framework, dataverse, redis</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPL-051, AIPL-001</dependencies>
+    <blocks>AIPL-054 (ChatEndpoints)</blocks>
+  </metadata>
+
+  <prompt>
+    Implement ChatSessionManager and ChatHistoryManager to provide persistent, resumable
+    chat sessions with a Redis hot cache and Dataverse cold storage.
+
+    Architecture:
+    - Redis: hot cache of active sessions (24h TTL per NFR-07)
+    - Dataverse sprk_aichatmessage: permanent message history for audit
+    - Summarization trigger: after 15 messages, summarize to sprk_aichatsummary
+    - Max 50 messages before archive (NFR-12)
+
+    Sessions persist across server restarts. Users can resume a session from any server instance.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with Redis IDistributedCache, Dataverse integration patterns,
+    and the chat session schema defined in task 001.
+  </role>
+
+  <goal>
+    Chat sessions persist in Dataverse and cache in Redis. Sessions resume after server restart.
+    Summarization triggers after 15 messages. ChatHistoryManager reads/writes message history.
+    Unit tests pass.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-009">Redis IDistributedCache; tenant-scoped keys: "chat:session:{tenantId}:{sessionId}"</constraint>
+    <constraint source="ADR-014">Cache keys versioned by model + content version</constraint>
+    <constraint source="spec">24-hour idle TTL (NFR-07); max 50 messages per session before archive (NFR-12)</constraint>
+    <constraint source="spec">Summarize after 15 messages; summary stored in sprk_aichatsummary</constraint>
+    <constraint source="AIPL-001">Schema: sprk_aichatmessage, sprk_aichatsummary as defined in task 001</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/notes/design/dataverse-chat-schema.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read chat entity schema from task 001">
+      Read notes/design/dataverse-chat-schema.md (created in task 001) for the exact field
+      names and types for sprk_aichatmessage and sprk_aichatsummary.
+    </step>
+    <step order="2" name="Create ChatSession and ChatMessage models">
+      Create src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs:
+      - SessionId, TenantId, DocumentId, PlaybookId, CreatedAt, LastActivity
+      - Messages: IReadOnlyList&lt;ChatMessage&gt;
+
+      Create ChatMessage.cs:
+      - MessageId, SessionId, Role (User/Assistant/System), Content, TokenCount, CreatedAt
+    </step>
+    <step order="3" name="Create ChatSessionManager.cs">
+      Create src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs:
+      - CreateSessionAsync(tenantId, documentId, playbookId) → ChatSession
+      - GetSessionAsync(tenantId, sessionId) → ChatSession? (Redis first, Dataverse fallback)
+      - DeleteSessionAsync(tenantId, sessionId)
+      - Cache key: $"chat:session:{tenantId}:{sessionId}" with 24h sliding TTL
+    </step>
+    <step order="4" name="Create ChatHistoryManager.cs">
+      Create src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryManager.cs:
+      - AddMessageAsync(sessionId, message) → persists to Dataverse + updates Redis
+      - GetHistoryAsync(sessionId, maxMessages=50) → recent messages
+      - TriggerSummarizationAsync(sessionId) → if message count &gt;= 15, create summary
+      - ArchiveHistoryAsync(sessionId) → when approaching 50 messages
+    </step>
+    <step order="5" name="Register in Program.cs">
+      Add: builder.Services.AddScoped&lt;ChatSessionManager&gt;();
+      Add: builder.Services.AddScoped&lt;ChatHistoryManager&gt;();
+      Update DI count in CLAUDE.md.
+    </step>
+    <step order="6" name="Write unit tests">
+      Tests for:
+      - CreateSession persists to Dataverse + caches in Redis
+      - GetSession returns from Redis on hit, Dataverse on miss
+      - AddMessage triggers summarization when count &gt;= 15
+      - TTL is 24 hours
+    </step>
+    <step order="7" name="Verify build and tests">
+      Run: dotnet build + dotnet test
+      Both must pass.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryManager.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatMessage.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (registrations added)</output>
+    <output type="test">tests/unit/Services/Ai/Chat/ChatSessionManagerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GetSession: Redis hit returns session without Dataverse call</criterion>
+    <criterion testable="true">GetSession: Redis miss falls back to Dataverse</criterion>
+    <criterion testable="true">Summarization triggers at 15 messages</criterion>
+    <criterion testable="true">Cache TTL is 24 hours (sliding)</criterion>
+    <criterion testable="true">Unit tests pass</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

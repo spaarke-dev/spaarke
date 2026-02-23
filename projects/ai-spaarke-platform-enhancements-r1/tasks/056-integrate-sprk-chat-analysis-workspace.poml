@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-056" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>C7: Integrate SprkChat into AnalysisWorkspace PCF</title>
+    <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
+    <tags>pcf, frontend, fluent-ui, agent-framework</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPL-055</dependencies>
+    <blocks>AIPL-059 (Phase 4 PCF deploy)</blocks>
+  </metadata>
+
+  <prompt>
+    Replace the current chat panel in AnalysisWorkspace PCF with the new SprkChat component.
+    The existing chat calls /api/ai/analysis/{id}/continue — this must be replaced with the
+    new SprkChat component calling the /api/ai/chat/ endpoints.
+
+    Keep the old endpoint in parallel during this transition (deprecated but functional).
+    Add a feature flag to switch between old and new chat so rollback is possible.
+
+    Also add the predefined prompts feature: AnalysisWorkspace reads available playbook scope
+    and populates SprkChat's predefined prompt buttons.
+  </prompt>
+
+  <role>
+    Senior PCF developer familiar with the AnalysisWorkspace PCF codebase, React 16,
+    and @spaarke/ui-components integration.
+  </role>
+
+  <goal>
+    AnalysisWorkspace uses SprkChat for all chat interactions. Context (documentId, playbookId)
+    is passed correctly. Old chat endpoint kept in parallel. Feature flag enables rollback.
+    Dark mode works. Build succeeds.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-022">React 16 APIs only; no createRoot</constraint>
+    <constraint source="ADR-021">Dark mode via design tokens — no hardcoded colors</constraint>
+    <constraint source="spec">Old /api/ai/analysis/{id}/continue endpoint deprecated (not removed) during transition</constraint>
+    <constraint source="project">Feature flag: useLegacyChat = false by default; can revert via PCF property</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>src/client/pcf/AnalysisWorkspace/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read AnalysisWorkspace PCF codebase">
+      Read the full AnalysisWorkspace/ PCF source to understand:
+      - Current chat panel implementation
+      - How document ID and playbook are passed
+      - Component tree and state management
+      - Build configuration
+    </step>
+    <step order="2" name="Add SprkChat import">
+      Install @spaarke/ui-components from the local package path.
+      Import SprkChat and types into AnalysisWorkspace.
+    </step>
+    <step order="3" name="Replace chat panel">
+      Replace the current chat panel JSX with:
+        &lt;SprkChat
+          documentId={currentDocumentId}
+          playbookId={selectedPlaybookId}
+          apiBaseUrl={apiBaseUrl}
+          onSessionCreated={handleSessionCreated}
+        /&gt;
+      Wrap in feature flag check:
+        {useLegacyChat ? &lt;LegacyChatPanel /&gt; : &lt;SprkChat ... /&gt;}
+    </step>
+    <step order="4" name="Add predefined prompts from playbook scope">
+      Pass predefined prompts to SprkChat from the resolved playbook scope.
+      Prompts are read from the active playbook's Skills configuration.
+    </step>
+    <step order="5" name="Verify build and bundle size">
+      Run: npm run build --prefix src/client/pcf/AnalysisWorkspace
+      Check total bundle size stays under PCF limits (check PCF-DEPLOYMENT-GUIDE.md).
+    </step>
+    <step order="6" name="Mark old endpoint as deprecated">
+      Add [Obsolete] comment or deprecation note in AnalysisEndpoints.cs for the
+      /continue endpoint. Do NOT remove it — keep it functional for rollback.
+    </step>
+  </steps>
+
+  <ui-tests>
+    <test name="SprkChat Renders in AnalysisWorkspace">
+      <url>https://spaarkedev1.crm.dynamics.com/main.aspx?etn=sprk_analysisresult&amp;pagetype=entityrecord</url>
+      <steps>
+        <step>Open an existing analysis result record in Dataverse</step>
+        <step>Verify SprkChat panel is visible in the PCF control area</step>
+        <step>Type a message and press Enter</step>
+        <step>Verify streaming response appears token by token</step>
+        <step>Check browser console for errors</step>
+      </steps>
+      <expected>SprkChat renders, sends message, streams response without console errors</expected>
+    </test>
+    <test name="Context Switch Between Documents">
+      <steps>
+        <step>Open AnalysisWorkspace with document A selected</step>
+        <step>Send a chat message about document A</step>
+        <step>Switch to document B using the context selector</step>
+        <step>Verify chat context updates to document B</step>
+        <step>Verify session continues (not a new session)</step>
+      </steps>
+      <expected>Context switches without creating new session; subsequent messages reference document B</expected>
+    </test>
+    <test name="Dark Mode in AnalysisWorkspace">
+      <steps>
+        <step>Enable dark mode in Dataverse settings</step>
+        <step>Open AnalysisWorkspace with SprkChat</step>
+        <step>Verify SprkChat adapts to dark theme</step>
+      </steps>
+      <expected>All SprkChat UI uses design tokens, no hardcoded colors per ADR-021</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build PCF control</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/AnalysisWorkspace/ (modified — SprkChat integrated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs (old endpoint deprecated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AnalysisWorkspace renders SprkChat component (not old chat panel)</criterion>
+    <criterion testable="true">documentId and playbookId passed correctly to SprkChat</criterion>
+    <criterion testable="true">Old /continue endpoint still returns 200 (not removed)</criterion>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

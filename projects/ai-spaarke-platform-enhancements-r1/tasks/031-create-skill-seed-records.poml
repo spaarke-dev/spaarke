@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-031" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Create 10 System Skill Records (sprk_promptfragment SKL-001–010)</title>
+    <phase>3 — Workstream B: Scope Library &amp; Seed Data</phase>
+    <tags>dataverse, seed-data, scope-library</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPL-004</dependencies>
+    <blocks>AIPL-034 (Playbooks)</blocks>
+  </metadata>
+
+  <prompt>
+    Create 10 system Skill records in the sprk_promptfragment Dataverse entity. Skills are
+    prompt fragments that inject additional capability context into an analysis. They are
+    composable additions to an Action's system prompt.
+
+    Skills to create (SKL-001 through SKL-010):
+    1. Citation Extraction — cite every claim with [Section X, Page Y] format
+    2. Risk Flagging — highlight clauses requiring legal review
+    3. Summary Generation — generate executive summary in 3-5 bullet points
+    4. Date Extraction — extract and normalize all dates to ISO 8601
+    5. Party Identification — identify all parties with roles and contact info
+    6. Obligation Mapping — list mutual obligations as a structured table
+    7. Defined Terms — extract all defined terms and their definitions
+    8. Financial Terms — extract all monetary amounts, rates, and payment schedules
+    9. Termination Analysis — identify termination triggers, notice periods, consequences
+    10. Jurisdiction and Governing Law — identify applicable law and dispute resolution
+  </prompt>
+
+  <role>
+    Dataverse developer familiar with sprk_promptfragment entity schema and prompt engineering.
+  </role>
+
+  <goal>
+    10 sprk_promptfragment records exist in spaarkedev1 with IDs SKL-001 through SKL-010.
+    Each has a production-quality prompt fragment injectable into analysis prompts.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-002">Records are data only — no AI processing in plugin context</constraint>
+    <constraint source="project">Use sprk_ prefix. ExternalId: "SKL-001" through "SKL-010"</constraint>
+    <constraint source="spec">Skills must be additive fragments — no contradiction with Action prompts</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>docs/guides/HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/notes/design/scope-library-catalog.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Check existing sprk_promptfragment records">
+      Query Dataverse for existing SKL-* records to avoid duplicates.
+    </step>
+    <step order="2" name="Author 10 prompt fragments">
+      Write production-quality prompt fragments for each of the 10 Skills.
+      Each fragment (50-150 words) must be:
+      - Injectable into any Action prompt without conflict
+      - Self-contained and specific in its instruction
+      - Clear about output format it expects
+    </step>
+    <step order="3" name="Create records in Dataverse">
+      Required fields: sprk_name, sprk_externalid, sprk_fragmenttext, sprk_isactive=true,
+      sprk_issystem=true, sprk_category (matching skill category)
+    </step>
+    <step order="4" name="Update scope-library-catalog.md">
+      Add Skills section to notes/design/scope-library-catalog.md with catalog of all 10 Skills.
+    </step>
+    <step order="5" name="Verify records">
+      Confirm 10 records exist with correct ExternalIds and active status.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI</tool>
+    <tool name="git">Stage documentation changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">10 sprk_promptfragment records in spaarkedev1 (SKL-001–010)</output>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/design/scope-library-catalog.md (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">10 sprk_promptfragment records with ExternalIds SKL-001 through SKL-010</criterion>
+    <criterion testable="true">All records have sprk_isactive=true</criterion>
+    <criterion testable="true">scope-library-catalog.md documents all 10 Skills</criterion>
+  </acceptance-criteria>
+</task>

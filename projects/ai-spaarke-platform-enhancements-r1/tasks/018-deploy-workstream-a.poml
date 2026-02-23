@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-018" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Deploy Workstream A — BFF API to Azure App Service</title>
+    <phase>2 — Workstream A: Retrieval Foundation</phase>
+    <tags>bff-api, deploy, azure</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>AIPL-015, AIPL-016, AIPL-017</dependencies>
+    <blocks>AIPL-070 (test corpus setup)</blocks>
+  </metadata>
+
+  <prompt>
+    Deploy the completed Workstream A changes (RagQueryBuilder, SemanticDocumentChunker,
+    DocumentParserRouter, RagIndexingPipeline, RagIndexingJobHandler, KnowledgeBaseEndpoints)
+    to the dev Azure App Service.
+
+    Run the azure-deploy skill to deploy. Verify the /api/ai/knowledge/indexes/health endpoint
+    returns successfully after deployment.
+  </prompt>
+
+  <role>
+    DevOps engineer familiar with Azure App Service deployment, the Spaarke azure-deploy skill,
+    and post-deployment verification.
+  </role>
+
+  <goal>
+    Workstream A changes are live in dev environment. /api/ai/knowledge/indexes/health returns 200.
+    Existing endpoints still work (no regression). Build log shows 0 errors.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Use azure-deploy skill for deployment — do not manually construct az commands</constraint>
+    <constraint source="project">Verify existing /api/ai/analysis endpoints still return 200 after deployment</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>docs/guides/AI-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Run pre-deployment build verification">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Must pass with 0 errors before deploying.
+    </step>
+    <step order="2" name="Deploy via azure-deploy skill">
+      Invoke azure-deploy skill to deploy Sprk.Bff.Api to spe-api-dev-67e2xz.
+    </step>
+    <step order="3" name="Verify knowledge base health endpoint">
+      After deployment, call:
+      GET https://spe-api-dev-67e2xz.azurewebsites.net/api/ai/knowledge/indexes/health
+      Should return 200 with document counts (may be 0 initially).
+    </step>
+    <step order="4" name="Verify no regression on existing endpoints">
+      Test: GET /healthz → 200
+      Test: Existing analysis endpoint → 200 (or expected auth error)
+    </step>
+    <step order="5" name="Update TASK-INDEX.md">
+      Mark all Phase 2 tasks (010-018) as completed in TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for deployment verification</tool>
+    <tool name="azure-deploy">Skill: Deploy BFF API to Azure</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">BFF API deployed to spe-api-dev-67e2xz</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/ai/knowledge/indexes/health returns 200</criterion>
+    <criterion testable="true">GET /healthz returns 200 (no regression)</criterion>
+    <criterion testable="true">Deployment completes without errors</criterion>
+  </acceptance-criteria>
+</task>

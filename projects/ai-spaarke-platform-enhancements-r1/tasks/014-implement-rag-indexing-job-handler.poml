@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-014" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Implement RagIndexingJobHandler — Service Bus Background Indexing</title>
+    <phase>2 — Workstream A: Retrieval Foundation</phase>
+    <tags>bff-api, api, jobs, retrieval, indexing</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPL-013</dependencies>
+    <blocks>AIPL-015 (KnowledgeBaseEndpoints)</blocks>
+  </metadata>
+
+  <prompt>
+    Implement RagIndexingJobHandler — a Service Bus-triggered background job handler that
+    calls RagIndexingPipeline after a document analysis job completes. The handler follows
+    the existing BackgroundJobHandlerBase pattern used by other job handlers in the codebase.
+
+    Also update AnalysisOrchestrationService to emit a RagIndexingJob to the Service Bus queue
+    after analysis completes, so indexing happens automatically without blocking the analysis response.
+
+    The job must be idempotent — re-queuing for the same document should produce the same result.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with Azure Service Bus, BackgroundService patterns in .NET 8,
+    and the existing Spaarke job handler framework.
+  </role>
+
+  <goal>
+    RagIndexingJobHandler processes Service Bus messages and calls RagIndexingPipeline.
+    AnalysisOrchestrationService emits the job after analysis. Idempotency key prevents
+    duplicate indexing. Unit tests pass.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">Use BackgroundService + Service Bus — no Azure Functions</constraint>
+    <constraint source="ADR-004">Idempotent handler: IdempotencyKey = "{tenantId}:{documentId}". Emit JobOutcome on completion.</constraint>
+    <constraint source="ADR-004">Handler must be deterministic — same input always produces same output</constraint>
+    <constraint source="spec">Indexing must complete within 60 seconds of analysis (NFR-11)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+    </files>
+    <patterns>
+      <pattern name="Job handler pattern" location="src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/">
+        Look for existing BackgroundJobHandlerBase implementations to understand the pattern.
+        RagIndexingJobHandler must follow the same structure.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing job handler implementations">
+      Read at least one existing BackgroundJobHandlerBase implementation from Services/Jobs/Handlers/
+      to understand the pattern: job message shape, idempotency key, JobOutcome emission.
+    </step>
+    <step order="2" name="Create RagIndexingJob message class">
+      Create src/server/api/Sprk.Bff.Api/Models/Jobs/RagIndexingJob.cs:
+      - DocumentId: string
+      - TenantId: string
+      - AnalysisId: string
+      - DocumentUrl: string (or SpeFileReference)
+      - TriggeredAt: DateTimeOffset
+    </step>
+    <step order="3" name="Create RagIndexingJobHandler.cs">
+      Create src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs:
+      - Extends BackgroundJobHandlerBase&lt;RagIndexingJob&gt;
+      - IdempotencyKey: $"{job.TenantId}:{job.DocumentId}"
+      - HandleAsync: fetch document bytes → call RagIndexingPipeline.IndexDocumentAsync()
+      - Emit JobOutcome.Succeeded/Failed with timing info
+    </step>
+    <step order="4" name="Update AnalysisOrchestrationService to emit job">
+      After analysis completes in AnalysisOrchestrationService, enqueue RagIndexingJob to
+      Service Bus. Use existing Service Bus client pattern from the codebase.
+    </step>
+    <step order="5" name="Register handler in Program.cs">
+      Register RagIndexingJobHandler following existing handler registration pattern.
+      Update DI count in CLAUDE.md.
+    </step>
+    <step order="6" name="Write unit tests">
+      Create tests/unit/Services/Jobs/Handlers/RagIndexingJobHandlerTests.cs:
+      - Test: successful job calls RagIndexingPipeline with correct parameters
+      - Test: idempotency key is "{tenantId}:{documentId}"
+      - Test: JobOutcome.Succeeded emitted on successful indexing
+      - Test: JobOutcome.Failed emitted when pipeline throws, with error info
+    </step>
+    <step order="7" name="Verify build and tests">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Run: dotnet test tests/unit/ --filter "RagIndexingJobHandler"
+      Both must pass.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Jobs/RagIndexingJob.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs (job emit added)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (handler registration added)</output>
+    <output type="test">tests/unit/Services/Jobs/Handlers/RagIndexingJobHandlerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RagIndexingJobHandler follows BackgroundJobHandlerBase pattern</criterion>
+    <criterion testable="true">IdempotencyKey = "{tenantId}:{documentId}"</criterion>
+    <criterion testable="true">AnalysisOrchestrationService emits RagIndexingJob after analysis</criterion>
+    <criterion testable="true">Unit tests pass (4 test cases minimum)</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

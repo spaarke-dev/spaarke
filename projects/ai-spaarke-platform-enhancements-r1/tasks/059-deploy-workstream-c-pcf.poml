@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-059" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Deploy Workstream C — Updated AnalysisWorkspace PCF to Dataverse</title>
+    <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
+    <tags>pcf, deploy, dataverse</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>AIPL-056, AIPL-058</dependencies>
+    <blocks>AIPL-070 (validation), AIPL-075 (SprkChat evaluation)</blocks>
+  </metadata>
+
+  <prompt>
+    Deploy the updated AnalysisWorkspace PCF (with SprkChat integrated) to Dataverse dev
+    environment. Use the pcf-deploy skill to build, pack, and import the updated solution.
+
+    After deployment, verify SprkChat renders in the AnalysisWorkspace form and a chat
+    session can be created successfully.
+  </prompt>
+
+  <role>
+    DevOps engineer familiar with the Spaarke pcf-deploy skill and PCF deployment verification.
+  </role>
+
+  <goal>
+    Updated AnalysisWorkspace with SprkChat is live in spaarkedev1. Chat session creation
+    works end-to-end from the PCF UI. No regression in analysis functionality.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-022">Deploy as unmanaged solution only</constraint>
+    <constraint source="project">Use pcf-deploy skill — follow documented procedures</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Build AnalysisWorkspace PCF">
+      Run: npm run build --prefix src/client/pcf/AnalysisWorkspace
+      Must succeed with 0 errors.
+    </step>
+    <step order="2" name="Deploy via pcf-deploy skill">
+      Invoke pcf-deploy skill to pack and deploy AnalysisWorkspace to spaarkedev1.
+    </step>
+    <step order="3" name="Verify SprkChat renders">
+      Open AnalysisWorkspace in spaarkedev1.
+      Verify SprkChat panel is visible.
+      Try sending a message — verify session is created and response streams.
+    </step>
+    <step order="4" name="Update TASK-INDEX.md">
+      Mark all Phase 4 tasks (050-059) as completed in TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF</tool>
+    <tool name="pcf-deploy">Skill: Deploy PCF to Dataverse</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">AnalysisWorkspace PCF (SprkChat integrated) deployed to spaarkedev1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SprkChat panel visible in AnalysisWorkspace form</criterion>
+    <criterion testable="true">Chat session creation works end-to-end from PCF</criterion>
+    <criterion testable="true">Streaming response visible in SprkChat UI</criterion>
+    <criterion testable="true">Old analysis functionality still works (no regression)</criterion>
+  </acceptance-criteria>
+</task>

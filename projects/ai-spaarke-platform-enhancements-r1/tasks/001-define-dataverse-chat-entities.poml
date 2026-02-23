@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-001" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Define and Create Dataverse Chat + Evaluation Entities</title>
+    <phase>1 — Foundation &amp; Environment</phase>
+    <tags>dataverse, schema, foundation, blocking</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <blocks>AIPL-051 (ChatSessionManager), AIPL-071 (evaluation harness)</blocks>
+  </metadata>
+
+  <prompt>
+    Define and create four new Dataverse entities required by Workstream C (SprkChat) and
+    Workstream D (Evaluation). The spec lists these as unresolved questions that must be answered
+    before ChatSessionManager can be implemented. This task resolves all schema ambiguities and
+    creates the entities in the dev environment.
+
+    Entities to create:
+    - sprk_aichatmessage — chat message persistence (role, content, tokens, timestamp, session ref)
+    - sprk_aichatsummary — conversation summaries (session ref, summary text, message count, created)
+    - sprk_aievaluationrun — evaluation run records (playbook ref, run date, recall@k, ndcg@k, status)
+    - sprk_aievaluationresult — per-query evaluation results (run ref, query, expected, actual, score)
+  </prompt>
+
+  <role>
+    Dataverse schema architect familiar with Spaarke entity conventions (sprk_ prefix),
+    field naming patterns, and relationship design for model-driven apps.
+  </role>
+
+  <goal>
+    Four new Dataverse entities exist in spaarkedev1.crm.dynamics.com with all required fields,
+    relationships, and security roles. Schema is documented so ChatSessionManager and evaluation
+    harness can be implemented against it without ambiguity.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-002">No AI processing in plugins — entities are data structures only</constraint>
+    <constraint source="project">Use sprk_ publisher prefix for all custom entities and fields</constraint>
+    <constraint source="project">Entity schema must be documented in notes/design/dataverse-chat-schema.md before creation</constraint>
+    <constraint source="spec">sprk_aichatmessage must support: role (user/assistant/system), content, token count, session reference, timestamp</constraint>
+    <constraint source="spec">Chat history supports 50 messages per session before archiving (NFR-12)</constraint>
+    <constraint source="spec">Sessions persist in Dataverse for audit; Redis hot cache for 24h (NFR-07)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/plan.md</file>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse entity naming" location="docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md">
+        All custom entities use sprk_ prefix. Fields use sprk_ prefix. Relationships named with entity abbreviations.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The spec lists sprk_aichatmessage and sprk_aichatsummary entity schemas as "unresolved questions"
+      that block C2 (ChatSessionManager). Without defined schemas, Workstream C cannot proceed beyond C1.
+      This task resolves the ambiguity and creates the foundation for SprkChat persistence.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Design schema">
+      Document complete field definitions for all 4 entities in notes/design/dataverse-chat-schema.md.
+      Include: field names, types, max lengths, required/optional, relationships, indexes.
+      Resolve the unresolved question about message role field options.
+    </step>
+    <step order="2" name="Create entities in Dataverse">
+      Use pac CLI or Dataverse UI to create all 4 entities with defined fields.
+      Target: spaarkedev1.crm.dynamics.com (dev environment).
+    </step>
+    <step order="3" name="Verify entity creation">
+      Run pac entity list to confirm entities exist.
+      Confirm all required fields are present with correct types.
+    </step>
+    <step order="4" name="Update TASK-INDEX and current-task">
+      Mark task complete in TASK-INDEX.md. Update current-task.md to next task.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for Dataverse entity management</tool>
+    <tool name="git">Version control for schema documentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/design/dataverse-chat-schema.md</output>
+    <output type="dataverse">sprk_aichatmessage entity (spaarkedev1)</output>
+    <output type="dataverse">sprk_aichatsummary entity (spaarkedev1)</output>
+    <output type="dataverse">sprk_aievaluationrun entity (spaarkedev1)</output>
+    <output type="dataverse">sprk_aievaluationresult entity (spaarkedev1)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 entities exist in spaarkedev1.crm.dynamics.com (verified via pac entity list)</criterion>
+    <criterion testable="true">sprk_aichatmessage has: role (choice: user/assistant/system), content (multiline text), token_count (integer), session_id (text), created_on (datetime)</criterion>
+    <criterion testable="true">sprk_aichatsummary has: session_id (text), summary (multiline text), message_count (integer), created_on (datetime)</criterion>
+    <criterion testable="true">Schema documented in notes/design/dataverse-chat-schema.md with all field definitions</criterion>
+    <criterion testable="true">Unresolved question about chat entity schema is marked as resolved in spec.md</criterion>
+  </acceptance-criteria>
+</task>

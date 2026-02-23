@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-011" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Implement SemanticDocumentChunker — Clause-Aware Document Chunking</title>
+    <phase>2 — Workstream A: Retrieval Foundation</phase>
+    <tags>bff-api, api, retrieval, chunking</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPL-004</dependencies>
+    <blocks>AIPL-013 (RagIndexingPipeline)</blocks>
+  </metadata>
+
+  <prompt>
+    Replace the existing TextChunkingService with a new SemanticDocumentChunker that respects
+    section and clause boundaries from Azure Document Intelligence Layout analysis output.
+
+    The existing TextChunkingService uses naive character-count chunking which splits mid-sentence
+    and mid-clause. SemanticDocumentChunker uses the Layout model's paragraph and section structure
+    to create semantically coherent chunks (target: 1500 tokens, 200-token overlap, boundary-aware).
+
+    The chunker must support both the knowledge index (512-token target) and discovery index
+    (1024-token target) via configurable chunk size parameters.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with Azure Document Intelligence Layout model output,
+    token counting, and semantic chunking strategies for RAG systems.
+  </role>
+
+  <goal>
+    SemanticDocumentChunker.cs replaces TextChunkingService for RAG indexing. It respects
+    document section boundaries, produces configurable chunk sizes with overlap, and
+    includes section context in each chunk. Unit tests pass with 80%+ coverage.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-010">Implement IDocumentChunker interface only if a genuine seam exists (2+ implementations needed)</constraint>
+    <constraint source="spec">Knowledge index target: 512 tokens, 50-token overlap. Discovery index: 1024 tokens, 100-token overlap</constraint>
+    <constraint source="spec">Chunks must include section title context as prefix for retrieval quality</constraint>
+    <constraint source="ADR-007">Document content arrives via SpeFileStore/DocumentIntelligenceService — do not call Graph/storage directly</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TextChunkingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs</file>
+      <file>docs/guides/RAG-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-007-spe-file-store.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing chunker and Document Intelligence output">
+      Read TextChunkingService.cs to understand current approach.
+      Read DocumentIntelligenceService.cs to understand what layout data is available
+      (paragraphs, sections, tables, page numbers).
+    </step>
+    <step order="2" name="Create IDocumentChunker interface (if justified)">
+      If DocumentIntelligenceService already uses TextChunkingService and a seam is genuinely
+      needed, create IDocumentChunker with ChunkDocument(LayoutResult, ChunkOptions) → IEnumerable&lt;DocumentChunk&gt;.
+      Otherwise, use SemanticDocumentChunker as concrete type directly.
+    </step>
+    <step order="3" name="Create SemanticDocumentChunker.cs">
+      Create src/server/api/Sprk.Bff.Api/Services/Ai/SemanticDocumentChunker.cs:
+      - ChunkDocument(AnalyzeResult layoutResult, ChunkOptions options) → IReadOnlyList&lt;DocumentChunk&gt;
+      - ChunkOptions: { MaxTokens, OverlapTokens, IncludeSectionContext }
+      - Boundary detection: prefer paragraph breaks, then sentence breaks, then word breaks
+      - Include section title as chunk prefix: "[Section: Contract Parties]\nContent..."
+      - DocumentChunk record: { Content, SectionTitle, PageNumber, ChunkIndex, TokenCount }
+    </step>
+    <step order="4" name="Create ChunkOptions and DocumentChunk types">
+      Add static factory methods for common configurations:
+      - ChunkOptions.ForKnowledgeIndex() → { MaxTokens=512, OverlapTokens=50 }
+      - ChunkOptions.ForDiscoveryIndex() → { MaxTokens=1024, OverlapTokens=100 }
+    </step>
+    <step order="5" name="Register in Program.cs">
+      Add: builder.Services.AddSingleton&lt;SemanticDocumentChunker&gt;();
+      Update DI count in CLAUDE.md.
+    </step>
+    <step order="6" name="Write unit tests">
+      Create tests/unit/Services/Ai/SemanticDocumentChunkerTests.cs:
+      - Test: chunks respect paragraph boundaries (no mid-paragraph splits)
+      - Test: overlap is present between consecutive chunks
+      - Test: section title included in chunk content
+      - Test: ForKnowledgeIndex() produces chunks &lt;= 512 tokens
+      - Test: ForDiscoveryIndex() produces chunks &lt;= 1024 tokens
+      - Test: empty document produces empty chunk list
+    </step>
+    <step order="7" name="Verify build and tests">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Run: dotnet test tests/unit/ --filter "SemanticDocumentChunker"
+      Both must pass.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticDocumentChunker.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/IDocumentChunker.cs (if justified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/DocumentChunk.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/ChunkOptions.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (registration added)</output>
+    <output type="test">tests/unit/Services/Ai/SemanticDocumentChunkerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SemanticDocumentChunker respects paragraph boundaries in output chunks</criterion>
+    <criterion testable="true">ChunkOptions.ForKnowledgeIndex() produces chunks with MaxTokens=512</criterion>
+    <criterion testable="true">Section title context is included in each chunk's content</criterion>
+    <criterion testable="true">Unit tests pass with 6+ test cases</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

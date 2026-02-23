@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-015" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Build KnowledgeBaseEndpoints — CRUD, Search, and Health API</title>
+    <phase>2 — Workstream A: Retrieval Foundation</phase>
+    <tags>bff-api, api, retrieval, endpoints</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPL-013, AIPL-014</dependencies>
+    <blocks>AIPL-018 (Phase 2 API deploy), AIPL-071 (evaluation harness)</blocks>
+  </metadata>
+
+  <prompt>
+    Build KnowledgeBaseEndpoints.cs — the Minimal API endpoint group for managing and querying
+    the knowledge base indexes. This includes CRUD operations for indexed documents, a test-search
+    endpoint for RAG quality validation, and a health endpoint that returns document counts and
+    last-updated timestamps.
+
+    Follow the AnalysisEndpoints.cs pattern for Minimal API structure and endpoint filters.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with .NET 8 Minimal API patterns, endpoint filters for
+    authorization, and the existing Spaarke endpoint conventions.
+  </role>
+
+  <goal>
+    KnowledgeBaseEndpoints.cs provides all endpoints defined in the spec. All endpoints
+    require authorization via endpoint filter. Integration tests pass against the running API.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API patterns only — no controllers, no Azure Functions</constraint>
+    <constraint source="ADR-008">All endpoints must use AddEndpointFilter&lt;AiAuthorizationFilter&gt;()</constraint>
+    <constraint source="ADR-013">Extend BFF — add to existing Sprk.Bff.Api project, not a separate service</constraint>
+    <constraint source="ADR-014">Search endpoint must accept tenantId and scope queries to tenant's documents only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagQueryBuilder.cs</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read AnalysisEndpoints.cs pattern">
+      Read AnalysisEndpoints.cs to understand the Minimal API pattern: MapGroup, extension
+      method convention, endpoint filter application, SSE pattern, response types.
+    </step>
+    <step order="2" name="Create KnowledgeBaseEndpoints.cs">
+      Create src/server/api/Sprk.Bff.Api/Api/Ai/KnowledgeBaseEndpoints.cs:
+
+      Endpoints (all in group /api/ai/knowledge):
+      - GET /indexes/health → { KnowledgeDocCount, DiscoveryDocCount, LastUpdated }
+      - GET /indexes/{indexName}/documents → paged list of indexed documents for tenant
+      - DELETE /indexes/{indexName}/documents/{documentId} → remove document chunks from index
+      - POST /indexes/reindex/{documentId} → trigger re-indexing job for a document
+      - POST /test-search → { Query, IndexName, Top } → raw RAG results (for evaluation/admin only)
+
+      Each endpoint:
+      - Uses .AddEndpointFilter&lt;AiAuthorizationFilter&gt;()
+      - Returns typed results using TypedResults
+      - Accepts tenantId from claims or header
+    </step>
+    <step order="3" name="Register endpoints in Program.cs">
+      Add: app.MapGroup("/api/ai/knowledge").MapKnowledgeBaseEndpoints();
+      Follow existing endpoint group registration pattern.
+    </step>
+    <step order="4" name="Write integration tests">
+      Create tests/integration/Api/Ai/KnowledgeBaseEndpointsTests.cs:
+      - Test: GET /health returns doc counts
+      - Test: DELETE document removes chunks from index
+      - Test: POST test-search returns results for known indexed document
+      - Test: Unauthenticated request returns 401
+    </step>
+    <step order="5" name="Verify build">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/KnowledgeBaseEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (endpoint group registered)</output>
+    <output type="test">tests/integration/Api/Ai/KnowledgeBaseEndpointsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 5 endpoints exist under /api/ai/knowledge</criterion>
+    <criterion testable="true">All endpoints have AddEndpointFilter&lt;AiAuthorizationFilter&gt;()</criterion>
+    <criterion testable="true">GET /health returns KnowledgeDocCount and DiscoveryDocCount</criterion>
+    <criterion testable="true">Integration tests pass (4 test cases minimum)</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

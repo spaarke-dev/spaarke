@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-002" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Add Agent Framework NuGet Packages and Verify Build</title>
+    <phase>1 — Foundation &amp; Environment</phase>
+    <tags>bff-api, packages, foundation, agent-framework</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <blocks>AIPL-050 (Agent Framework integration)</blocks>
+  </metadata>
+
+  <prompt>
+    Add the Microsoft Agent Framework RC NuGet packages to Sprk.Bff.Api, verify the build
+    passes, and configure the foundational LlamaParse options in appsettings. This is a
+    prerequisite for all Workstream C tasks.
+
+    Packages to add:
+    - Microsoft.Extensions.AI (Agent Framework abstractions)
+    - Microsoft.Agents.AI (Agent Framework implementation)
+    - Pin to the RC version available as of Feb 19, 2026
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with NuGet package management, Directory.Packages.props (CPM),
+    and Microsoft.Extensions.AI integration patterns.
+  </role>
+
+  <goal>
+    Agent Framework packages are added to Sprk.Bff.Api.csproj, the project builds with 0 errors,
+    and appsettings includes configuration sections for LlamaParse API key reference and
+    two-index Azure AI Search configuration.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API patterns only — no Azure Functions NuGet packages</constraint>
+    <constraint source="ADR-010">Do not introduce unnecessary package dependencies</constraint>
+    <constraint source="project">Pin exact RC version of Agent Framework — note version in CLAUDE.md</constraint>
+    <constraint source="project">LlamaParse API key must reference Key Vault, not be hardcoded</constraint>
+    <constraint source="project">Must disable/restore Directory.Packages.props (CPM) when running pac commands later</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Add NuGet packages">
+      Add Microsoft.Extensions.AI and Microsoft.Agents.AI to Sprk.Bff.Api.csproj.
+      Check Directory.Packages.props for CPM — add version entries there if CPM is enabled.
+    </step>
+    <step order="2" name="Add appsettings configuration sections">
+      Add to appsettings.json:
+      - LlamaParse section: { "ApiKeySecretName": "LlamaParseApiKey", "BaseUrl": "https://api.cloud.llamaindex.ai" }
+      - AiSearch section: add KnowledgeIndexName and DiscoveryIndexName fields
+    </step>
+    <step order="3" name="Verify build">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Fix any package resolution errors. Build must succeed with 0 errors.
+    </step>
+    <step order="4" name="Record pinned version">
+      Add pinned Agent Framework version to projects/ai-spaarke-platform-enhancements-r1/CLAUDE.md
+      "Important Context" section.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build verification</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/appsettings.json</output>
+    <output type="code">Directory.Packages.props (if CPM enabled)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ succeeds with 0 errors</criterion>
+    <criterion testable="true">Microsoft.Extensions.AI and Microsoft.Agents.AI appear in project references</criterion>
+    <criterion testable="true">appsettings.json includes LlamaParse and dual AI Search index configuration sections</criterion>
+    <criterion testable="true">Pinned version recorded in project CLAUDE.md</criterion>
+  </acceptance-criteria>
+</task>

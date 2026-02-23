@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-010" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Implement RagQueryBuilder — Metadata-Aware RAG Query Strategy</title>
+    <phase>2 — Workstream A: Retrieval Foundation</phase>
+    <tags>bff-api, api, foundation, retrieval</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPL-004</dependencies>
+    <blocks>AIPL-015 (KnowledgeBaseEndpoints), AIPL-017 (retrieval instrumentation)</blocks>
+  </metadata>
+
+  <prompt>
+    Replace the existing first-500-characters RAG query approach in AnalysisOrchestrationService
+    with a metadata-aware RagQueryBuilder. The builder constructs targeted queries from
+    DocumentAnalysisResult metadata (entities, key phrases, document type, section titles) to
+    dramatically improve retrieval relevance.
+
+    The existing RagService.cs performs vector search but uses a naive query. RagQueryBuilder
+    sits between AnalysisOrchestrationService and RagService, building a richer query from
+    the analysis result context before vector search executes.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with Azure AI Search vector search, RAG patterns,
+    and the existing Spaarke AI orchestration pipeline.
+  </role>
+
+  <goal>
+    RagQueryBuilder.cs is implemented and registered in DI. AnalysisOrchestrationService uses
+    it to build queries. Unit tests pass. Build succeeds with 0 errors.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-010">Register as concrete type: services.AddSingleton&lt;RagQueryBuilder&gt;()</constraint>
+    <constraint source="ADR-013">All retrieval logic stays in BFF — no separate retrieval service</constraint>
+    <constraint source="ADR-014">Queries must be tenant-scoped; include tenantId in filter expressions</constraint>
+    <constraint source="spec">Must use DocumentAnalysisResult metadata fields: entities, keyPhrases, documentType, sectionTitles</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>docs/guides/RAG-ARCHITECTURE.md</file>
+      <file>docs/guides/RAG-CONFIGURATION.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing RAG code">
+      Read AnalysisOrchestrationService.cs and RagService.cs to understand current query construction
+      and how the first-500-chars approach is used. Note the method signatures.
+    </step>
+    <step order="2" name="Create RagQueryBuilder.cs">
+      Create src/server/api/Sprk.Bff.Api/Services/Ai/RagQueryBuilder.cs:
+      - Method: BuildQuery(DocumentAnalysisResult result, string tenantId) → RagQuery
+      - Extract: entities (top 5 by relevance), keyPhrases (top 10), documentType, sectionTitles
+      - Combine into semantic search text with entity emphasis
+      - Add tenant filter expression for Azure AI Search
+      - Add document type filter if strongly typed (e.g., "NDA", "Lease")
+      - RagQuery record: { SearchText, FilterExpression, Top, MinRelevanceScore }
+    </step>
+    <step order="3" name="Update RagService to accept RagQuery">
+      Modify RagService.cs to accept RagQuery parameter instead of raw string.
+      Keep backward-compatible overload if needed by other callers.
+    </step>
+    <step order="4" name="Update AnalysisOrchestrationService">
+      Inject RagQueryBuilder into AnalysisOrchestrationService.
+      Replace first-500-chars call with: var query = _ragQueryBuilder.BuildQuery(result, tenantId)
+      Pass query to RagService.
+    </step>
+    <step order="5" name="Register in Program.cs">
+      Add: builder.Services.AddSingleton&lt;RagQueryBuilder&gt;();
+      Verify DI count stays within ADR-010 budget (update CLAUDE.md count).
+    </step>
+    <step order="6" name="Write unit tests">
+      Create tests/unit/Services/Ai/RagQueryBuilderTests.cs:
+      - Test: entities extracted from result appear in search text
+      - Test: tenant filter expression contains tenantId
+      - Test: document type filter applied when type is known
+      - Test: empty result produces reasonable fallback query
+    </step>
+    <step order="7" name="Verify build and tests">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Run: dotnet test tests/unit/ --filter "RagQueryBuilder"
+      Both must pass with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/RagQueryBuilder.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (registration added)</output>
+    <output type="test">tests/unit/Services/Ai/RagQueryBuilderTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RagQueryBuilder.BuildQuery() returns a query using entity + keyphrase metadata</criterion>
+    <criterion testable="true">AnalysisOrchestrationService no longer uses first-500-chars approach</criterion>
+    <criterion testable="true">Unit tests pass (4 test cases minimum)</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+    <criterion testable="true">DI count in CLAUDE.md updated</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-016" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Provision Two-Index Azure AI Search Schema and Semantic Config</title>
+    <phase>2 — Workstream A: Retrieval Foundation</phase>
+    <tags>bff-api, ai-search, infrastructure, retrieval</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPL-003</dependencies>
+    <blocks>AIPL-018 (Phase 2 API deploy)</blocks>
+  </metadata>
+
+  <prompt>
+    Create or verify the two Azure AI Search index schemas in the dev environment
+    (spaarke-search-dev). The knowledge index and discovery index have different field schemas
+    optimized for their respective query patterns and chunk sizes.
+
+    This task provisions the actual indexes in Azure, distinct from the appsettings configuration
+    done in task 003. Use the Azure AI Search REST API or az CLI to create/update index schemas.
+  </prompt>
+
+  <role>
+    DevOps/infrastructure engineer familiar with Azure AI Search index schema definition,
+    semantic configuration, and the az CLI for Azure AI Search management.
+  </role>
+
+  <goal>
+    Both knowledge-index and discovery-index exist in spaarke-search-dev with correct field
+    schemas, vector profiles, and semantic configurations. Verified via az CLI query.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-014">Include tenantId as filterable/facetable field in both indexes for tenant isolation</constraint>
+    <constraint source="spec">Knowledge index: 512-token chunks, text-embedding-3-small (1536 dimensions)</constraint>
+    <constraint source="spec">Discovery index: 1024-token chunks, same embedding model</constraint>
+    <constraint source="project">Use az search index create or REST API — do not create indexes from application startup code</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>docs/guides/RAG-CONFIGURATION.md</file>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Check existing index schema">
+      Run: az search index show --service-name spaarke-search-dev --resource-group spe-infrastructure-westus2 --name knowledge-index
+      And: az search index show ... --name discovery-index
+      Note what fields exist and what needs to be created/modified.
+    </step>
+    <step order="2" name="Define knowledge-index schema">
+      Field schema for knowledge-index:
+      - id (string, key)
+      - documentId (string, filterable)
+      - tenantId (string, filterable, facetable)
+      - content (string, searchable)
+      - contentVector (Collection(Edm.Single), dimensions=1536, vectorSearchProfile="default")
+      - sectionTitle (string, searchable, filterable)
+      - documentType (string, filterable, facetable)
+      - pageNumber (int32, filterable, sortable)
+      - chunkIndex (int32, filterable, sortable)
+      - indexedAt (DateTimeOffset, filterable, sortable)
+
+      Semantic config: prioritize content and sectionTitle fields.
+    </step>
+    <step order="3" name="Define discovery-index schema">
+      Same fields as knowledge-index but:
+      - contentVector dimensions=1536 (same model, different chunk size)
+      - Add: entityMentions (Collection(Edm.String), searchable) for broader discovery
+    </step>
+    <step order="4" name="Create/update indexes via az CLI or REST API">
+      Use az CLI or az rest to create both indexes with the defined schemas.
+      If indexes exist with different schema, carefully merge new fields (non-breaking only).
+    </step>
+    <step order="5" name="Verify indexes">
+      Run: az search index show ... --name knowledge-index
+      Run: az search index show ... --name discovery-index
+      Confirm tenantId, contentVector, and sectionTitle fields exist in both.
+    </step>
+    <step order="6" name="Document in notes">
+      Create projects/ai-spaarke-platform-enhancements-r1/notes/design/ai-search-schema.md
+      with the actual field definitions as deployed. Reference for all A+C tasks.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for AI Search management</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="infrastructure">Azure AI Search: knowledge-index schema in spaarke-search-dev</output>
+    <output type="infrastructure">Azure AI Search: discovery-index schema in spaarke-search-dev</output>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/design/ai-search-schema.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">az search index show returns knowledge-index with tenantId and contentVector fields</criterion>
+    <criterion testable="true">az search index show returns discovery-index with tenantId and contentVector fields</criterion>
+    <criterion testable="true">Both indexes have semantic configuration defined</criterion>
+    <criterion testable="true">ai-search-schema.md documents both index schemas</criterion>
+  </acceptance-criteria>
+</task>

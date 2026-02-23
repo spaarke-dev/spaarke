@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-004" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Wire Foundational DI Registrations and Audit Baseline Count</title>
+    <phase>1 — Foundation &amp; Environment</phase>
+    <tags>bff-api, foundation, di</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>AIPL-002, AIPL-003</dependencies>
+    <blocks>AIPL-010 (RagQueryBuilder DI), AIPL-050 (IChatClient DI)</blocks>
+  </metadata>
+
+  <prompt>
+    Audit the current non-framework DI registrations in Program.cs to establish the Phase 1
+    baseline count. ADR-010 limits total non-framework registrations to 15. This project will
+    add approximately 12-15 new services across Workstreams A, B, and C — so knowing the
+    baseline is critical for planning.
+
+    Also wire the configuration binding stubs for the new LlamaParse and AiSearch option classes
+    so tasks 010-015 (Workstream A) and tasks 050-054 (Workstream C) can depend on them being
+    registered.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with .NET 8 Minimal API DI patterns, IOptions&lt;T&gt; binding,
+    and ADR-010 DI minimalism constraint enforcement.
+  </role>
+
+  <goal>
+    Current non-framework DI registration count documented in CLAUDE.md. LlamaParseOptions and
+    AiSearchOptions classes created and bound to configuration sections. Build passes with 0 errors.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-010">Total non-framework DI registrations must stay &lt;= 15. Count carefully.</constraint>
+    <constraint source="ADR-010">Use concrete types unless a genuine seam is required (interface has 2+ implementations)</constraint>
+    <constraint source="project">Document the baseline count in CLAUDE.md Important Context section</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>projects/ai-spaarke-platform-enhancements-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Audit current DI registrations">
+      Read Program.cs and count all non-framework service registrations (anything that is NOT
+      from Microsoft.Extensions.*, ASP.NET Core, or Entity Framework). Document count in notes.
+    </step>
+    <step order="2" name="Create LlamaParseOptions class">
+      Create src/server/api/Sprk.Bff.Api/Options/LlamaParseOptions.cs:
+      - ApiKeySecretName: string
+      - BaseUrl: string
+      - ParseTimeoutSeconds: int (default 120)
+      - MaxPages: int (default 500)
+      - Enabled: bool (default false)
+    </step>
+    <step order="3" name="Create AiSearchOptions class (if not exists)">
+      Ensure src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs has:
+      - KnowledgeIndexName: string
+      - DiscoveryIndexName: string
+      - SemanticConfigName: string
+      - Plus any existing fields (Endpoint, ApiKeySecretName)
+    </step>
+    <step order="4" name="Register options in Program.cs">
+      Add to Program.cs:
+        builder.Services.Configure&lt;LlamaParseOptions&gt;(builder.Configuration.GetSection("LlamaParse"));
+      Verify AiSearchOptions binding already exists or add it.
+    </step>
+    <step order="5" name="Record baseline count in CLAUDE.md">
+      Update projects/ai-spaarke-platform-enhancements-r1/CLAUDE.md Important Context section:
+      Add line: "DI Baseline (Phase 1): X registrations. Budget: 15 max. Remaining: Y"
+    </step>
+    <step order="6" name="Verify build">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build verification</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Options/LlamaParseOptions.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs (modified or created)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (options binding added)</output>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/CLAUDE.md (baseline count added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">LlamaParseOptions.cs exists with all required fields</criterion>
+    <criterion testable="true">AiSearchOptions.cs has KnowledgeIndexName and DiscoveryIndexName</criterion>
+    <criterion testable="true">Program.cs binds LlamaParseOptions to "LlamaParse" config section</criterion>
+    <criterion testable="true">CLAUDE.md contains DI baseline count</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

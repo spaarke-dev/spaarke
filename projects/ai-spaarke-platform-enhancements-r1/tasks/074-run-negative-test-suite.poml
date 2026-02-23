@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-074" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>D5: Run Negative Test Suite — Error Handling and Edge Cases</title>
+    <phase>5 — Workstream D: End-to-End Validation</phase>
+    <tags>testing, validation, e2e-test</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPL-072</dependencies>
+    <blocks>AIPL-090 (wrap-up)</blocks>
+  </metadata>
+
+  <prompt>
+    Build and run a negative test suite that validates system behavior under failure conditions:
+    1. Missing skills (playbook references non-existent skill)
+    2. Empty knowledge base (no documents indexed for tenant)
+    3. Handler timeout (tool takes too long to respond)
+    4. Malformed documents (corrupted PDF, empty file, unsupported format)
+    5. Token budget exceeded (message triggers cost control middleware)
+    6. Invalid session ID (expired or non-existent session)
+
+    The system must handle all these gracefully with appropriate error responses.
+    No 500 errors — all should return structured error responses.
+  </prompt>
+
+  <role>
+    QA engineer familiar with negative testing patterns, HTTP error codes, and the
+    Spaarke API error response format (ProblemDetails).
+  </role>
+
+  <goal>
+    All 6 negative scenarios return structured error responses (ProblemDetails).
+    No unhandled exceptions. Error messages are user-friendly. Tests documented.
+  </goal>
+
+  <constraints>
+    <constraint source="project">All error responses must use ProblemDetails format</constraint>
+    <constraint source="project">No stack traces in error responses</constraint>
+    <constraint source="spec">Handler timeout: return 408 with user-friendly message</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>tests/e2e/PlaybookE2ETests/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Write negative test cases">
+      Add NegativeE2ETests.cs to tests/e2e/PlaybookE2ETests/:
+      - Test: Missing skill reference → 422 with message "Skill not found"
+      - Test: Empty knowledge base → 200 with analysis noting no relevant sources found
+      - Test: Malformed PDF upload → 400 with message "Document format not supported"
+      - Test: Invalid session ID → 404 with message "Session not found or expired"
+      - Test: Token budget exceeded → 429 with message "Token budget exceeded for this session"
+    </step>
+    <step order="2" name="Fix any failures">
+      For each failing negative test: identify the handler code path and add proper error handling.
+      Ensure ProblemDetails format is returned.
+    </step>
+    <step order="3" name="Run full negative suite">
+      Run all negative tests in dev environment.
+      Document pass/fail in notes/design/negative-test-results.md.
+    </step>
+    <step order="4" name="Update E2E test results documentation">
+      Update notes/design/e2e-test-results.md with negative test section.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run tests</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/e2e/PlaybookE2ETests/NegativeE2ETests.cs</output>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/design/negative-test-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 5 negative test scenarios return structured ProblemDetails responses (no 500 errors)</criterion>
+    <criterion testable="true">No stack traces in any error response</criterion>
+    <criterion testable="true">negative-test-results.md documents all results</criterion>
+  </acceptance-criteria>
+</task>

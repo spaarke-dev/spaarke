@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPL-012" project="AI Platform Foundation Phase 1">
+  <metadata>
+    <title>Implement DocumentParserRouter + LlamaParseClient with Fallback</title>
+    <phase>2 — Workstream A: Retrieval Foundation</phase>
+    <tags>bff-api, api, retrieval, llamaparse</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPL-004</dependencies>
+    <blocks>AIPL-013 (RagIndexingPipeline)</blocks>
+  </metadata>
+
+  <prompt>
+    Implement DocumentParserRouter and LlamaParseClient to provide dual-parser capability:
+    Azure Document Intelligence (existing) as primary + LlamaParse as enhancement for complex
+    legal documents (>30 pages, scanned, heavy tables).
+
+    The router selects the parser based on document characteristics and LlamaParse availability
+    (feature flag). If LlamaParse is unavailable or fails, it automatically falls back to
+    Azure Document Intelligence. The fallback must be silent to callers.
+
+    LlamaParse is an ENHANCEMENT — the system must work perfectly without it.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with HTTP client patterns in .NET 8, IHttpClientFactory,
+    circuit breaker patterns, and the existing Spaarke DocumentIntelligenceService.
+  </role>
+
+  <goal>
+    DocumentParserRouter routes documents to the optimal parser. LlamaParseClient calls the
+    LlamaParse REST API. Fallback to Azure Doc Intel works when LlamaParse is disabled/fails.
+    Unit tests cover routing logic and fallback behavior.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-007">All document bytes must arrive via SpeFileStore — LlamaParseClient receives content, not storage references</constraint>
+    <constraint source="ADR-010">Register DocumentParserRouter as concrete singleton; LlamaParseClient registered via IHttpClientFactory</constraint>
+    <constraint source="project">LlamaParse Enabled=false by default; check LlamaParseOptions.Enabled before any call</constraint>
+    <constraint source="project">LlamaParse API key loaded from Key Vault via configuration; never hardcoded</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Options/LlamaParseOptions.cs</file>
+      <file>.claude/adr/ADR-007-spe-file-store.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read DocumentIntelligenceService">
+      Read DocumentIntelligenceService.cs to understand the current parsing interface and output type.
+      Note the return type (likely AnalyzeResult or similar wrapper).
+    </step>
+    <step order="2" name="Create LlamaParseClient.cs">
+      Create src/server/api/Sprk.Bff.Api/Services/Ai/LlamaParseClient.cs:
+      - Inject IHttpClientFactory, IOptions&lt;LlamaParseOptions&gt;, ILogger
+      - ParseDocumentAsync(byte[] content, string fileName, CancellationToken) → ParsedDocument
+      - Call LlamaParse REST API (POST /api/parsing/upload)
+      - Poll for completion with timeout (from LlamaParseOptions.ParseTimeoutSeconds)
+      - ParsedDocument: { Text, Pages, Tables, ExtractedAt }
+    </step>
+    <step order="3" name="Create DocumentParserRouter.cs">
+      Create src/server/api/Sprk.Bff.Api/Services/Ai/DocumentParserRouter.cs:
+      - Inject DocumentIntelligenceService, LlamaParseClient, IOptions&lt;LlamaParseOptions&gt;, ILogger
+      - ParseDocumentAsync(byte[] content, string fileName, string mimeType, CancellationToken) → ParsedDocument
+      - Routing logic:
+        * If LlamaParseOptions.Enabled == false → use DocumentIntelligenceService
+        * If page count > 30 OR document has "scanned" characteristics → prefer LlamaParse
+        * On LlamaParseClient exception → log warning, fall back to DocumentIntelligenceService
+    </step>
+    <step order="4" name="Register HTTP client and services in Program.cs">
+      Add:
+        builder.Services.AddHttpClient&lt;LlamaParseClient&gt;(client => { client.BaseAddress = ...; });
+        builder.Services.AddSingleton&lt;DocumentParserRouter&gt;();
+      Update DI count in CLAUDE.md.
+    </step>
+    <step order="5" name="Write unit tests">
+      Create tests/unit/Services/Ai/DocumentParserRouterTests.cs:
+      - Test: LlamaParse disabled → always routes to Document Intelligence
+      - Test: LlamaParse enabled, large doc → routes to LlamaParse
+      - Test: LlamaParse throws → falls back to Document Intelligence, logs warning
+      - Test: small doc with LlamaParse enabled → routes to Document Intelligence
+    </step>
+    <step order="6" name="Verify build and tests">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Run: dotnet test tests/unit/ --filter "DocumentParserRouter"
+      Both must pass with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="git">Stage changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/LlamaParseClient.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/DocumentParserRouter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/ParsedDocument.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (registrations added)</output>
+    <output type="test">tests/unit/Services/Ai/DocumentParserRouterTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">When LlamaParseOptions.Enabled=false, DocumentParserRouter always uses DocumentIntelligenceService</criterion>
+    <criterion testable="true">When LlamaParseClient throws, DocumentParserRouter falls back silently and logs a warning</criterion>
+    <criterion testable="true">Unit tests pass (4 test cases minimum)</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>
