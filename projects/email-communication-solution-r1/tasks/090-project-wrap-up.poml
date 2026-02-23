@@ -2,7 +2,7 @@
   <metadata>
     <title>Project wrap-up (extended scope)</title>
     <phase>Wrap-up</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimate>4h</estimate>
     <tags>documentation, wrap-up</tags>
     <dependencies>082</dependencies>
