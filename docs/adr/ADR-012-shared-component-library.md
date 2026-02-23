@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Accepted** |
+| Status | **Accepted** (Revised) |
 | Date | 2025-10-03 |
-| Updated | 2025-12-12 |
+| Updated | 2026-02-23 |
 | Authors | Spaarke Engineering |
 | Sprint | Sprint 5 - Universal Dataset PCF |
 
@@ -24,10 +24,10 @@
 ## Context
 
 Spaarke is building multiple front-end surfaces:
-1. **PCF Controls** (model-driven apps, custom pages) - TypeScript/React
-2. **Future React SPA** (planned) - React/TypeScript
-3. **Office Add-ins** (potential) - TypeScript/React
-4. **Power Pages customizations** (potential) - TypeScript/React
+1. **PCF Controls** (model-driven app forms — field-bound) - TypeScript/React 16/17 (platform-provided)
+2. **React Code Pages** (standalone dialogs/pages opened via navigateTo) - TypeScript/React 18 (bundled)
+3. **Office Add-ins** - TypeScript/React 18 (bundled)
+4. **Future React SPA** (planned) - React/TypeScript
 
 Without a shared component library, we risk:
 - **Code duplication** - Implementing the same UI components multiple times
@@ -85,11 +85,21 @@ src/client/shared/Spaarke.UI.Components/
 ├── .eslintrc.json                  # Shared linting rules
 ├── src/
 │   ├── components/                 # Reusable React components
-│   │   ├── DataGrid/               # Generic data grid
-│   │   │   ├── DataGrid.tsx
-│   │   │   ├── DataGrid.types.ts
-│   │   │   └── index.ts
-│   │   ├── CommandBar/             # Command bar with actions
+│   │   ├── layout/
+│   │   │   ├── WizardDialog/       # Multi-step wizard for Code Page dialogs
+│   │   │   ├── SidePanel/          # Slide-in filter/detail panel
+│   │   │   └── PageLayout/         # Top-level page wrapper
+│   │   ├── data/
+│   │   │   ├── DataGrid/           # Generic data grid
+│   │   │   │   ├── DataGrid.tsx
+│   │   │   │   ├── DataGrid.types.ts
+│   │   │   │   └── index.ts
+│   │   │   ├── FilterPanel/        # Filter panel component
+│   │   │   └── CommandBar/         # Command bar with actions
+│   │   ├── feedback/
+│   │   │   ├── LoadingState/       # Loading placeholder
+│   │   │   ├── EmptyState/         # Empty data state
+│   │   │   └── ErrorState/         # Error state with retry
 │   │   ├── EntityPicker/           # Dataverse entity picker
 │   │   ├── FileUploader/           # File upload component
 │   │   ├── StatusBadge/            # Status indicator badges
@@ -128,26 +138,37 @@ src/client/shared/Spaarke.UI.Components/
 ### Consumption Pattern
 
 **PCF Control (`src/client/pcf/UniversalDatasetGrid/`):**
+
+PCF controls use the **platform-provided** React 16/17 and Fluent v9 — do NOT bundle React in PCF output (see ADR-022).
+
 ```json
 // package.json
 {
   "dependencies": {
-    "@spaarke/ui-components": "workspace:*",  // Workspace link
-    "@fluentui/react-components": "^9.46.2",
-    "react": "^18.2.0"
+    "@spaarke/ui-components": "workspace:*"
+    // NO React/Fluent here — platform-provided at runtime
+  },
+  "devDependencies": {
+    "@types/react": "^16.14.0",
+    "@types/react-dom": "^16.9.0",
+    "react": "^16.14.0",
+    "react-dom": "^16.14.0",
+    "@fluentui/react-components": "^9.46.0"
   }
 }
 ```
 
 ```typescript
-// index.ts - PCF entry point
-import { DataGrid, useDataverseFetch, formatters } from "@spaarke/ui-components";
+// index.ts - PCF entry point (React 16/17 APIs — ReactDOM.render, not createRoot)
+import * as React from "react";
+import * as ReactDOM from "react-dom";  // NOT react-dom/client
+import { DataGrid, formatters } from "@spaarke/ui-components";
 import { FluentProvider } from "@fluentui/react-components";
 import { spaarkeLight } from "@spaarke/ui-components/theme";
 
 export class UniversalDataset implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   public updateView(context: ComponentFramework.Context<IInputs>): void {
-    ReactDOM.render(
+    ReactDOM.render(  // React 16 API — NOT createRoot()
       React.createElement(FluentProvider, { theme: spaarkeLight },
         React.createElement(DataGrid, {
           data: transformedData,
@@ -161,25 +182,31 @@ export class UniversalDataset implements ComponentFramework.StandardControl<IInp
 }
 ```
 
-**Future React SPA:**
+**React Code Page (`src/client/code-pages/`):**
+
+React Code Pages bundle their own React 18 — use React 18 `createRoot()` and list React/Fluent as regular `dependencies`.
+
 ```json
 // package.json
 {
   "dependencies": {
-    "@spaarke/ui-components": "^1.0.0",  // Published package
-    "@fluentui/react-components": "^9.46.2"
+    "@spaarke/ui-components": "workspace:*",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "@fluentui/react-components": "^9.46.0",
+    "@fluentui/react-icons": "^2.0.0"
   }
 }
 ```
 
 ```typescript
-// App.tsx
-import { DataGrid, EntityPicker, CommandBar } from "@spaarke/ui-components";
-import { spaarkeLight } from "@spaarke/ui-components/theme";
+// index.tsx - Code Page entry point (React 18)
+import { createRoot } from "react-dom/client";  // React 18 — allowed in Code Pages
+import { FluentProvider, webLightTheme } from "@fluentui/react-components";
+import { DataGrid } from "@spaarke/ui-components";
 
-export const App = () => (
-  <FluentProvider theme={spaarkeLight}>
-    <CommandBar actions={actions} />
+createRoot(document.getElementById("root")!).render(
+  <FluentProvider theme={webLightTheme}>
     <DataGrid data={data} />
   </FluentProvider>
 );
@@ -192,6 +219,9 @@ export const App = () => (
 ### Package Configuration
 
 **src/shared/Spaarke.UI.Components/package.json:**
+
+The shared library is consumed by **both** PCF controls (React 16/17, platform-provided) and React Code Pages (React 18, bundled). The `peerDependencies` range must therefore accept React `>=16.14.0` so both consumers can satisfy the peer requirement. Development and testing use React 18.
+
 ```json
 {
   "name": "@spaarke/ui-components",
@@ -207,8 +237,8 @@ export const App = () => (
   },
   "peerDependencies": {
     "@fluentui/react-components": "^9.46.2",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react": ">=16.14.0",
+    "react-dom": ">=16.14.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",
@@ -684,7 +714,9 @@ Use this as a **pass/fail** review gate for PRs that add or change shared compon
 **Packaging & API hygiene**
 - Public exports are intentional (barrel exports); no accidental deep import dependencies.
 - Component APIs are typed; breaking changes are versioned appropriately.
-- Shared library does not take dependencies on app-specific modules (keep it reusable across PCF/SPA).
+- Shared library does not take dependencies on app-specific modules (keep it reusable across PCF/Code Pages/SPA).
+- Library `peerDependencies` specifies `"react": ">=16.14.0"` — NOT `^18.x` — so both PCF (React 16/17) and Code Pages (React 18) can consume the library.
+- Components do NOT use React 18-only APIs (e.g., `useId`, `useDeferredValue`, concurrent features) when targeting PCF consumption; if React 18 APIs are used, document that the component is Code Page / SPA only.
 
 ---
 
@@ -711,6 +743,7 @@ Use this as a **pass/fail** review gate for PRs that add or change shared compon
 |------|---------|---------|--------|
 | 2025-10-03 | 1.0 | Initial ADR creation | Spaarke Engineering |
 | 2025-12-12 | 1.1 | Added explicit UI/UX standards and compliance checklist (Fluent + MDA fit + dark-mode compatibility) | Spaarke Engineering |
+| 2026-02-23 | 1.2 | Updated for two-tier architecture (ADR-006 revision): PCF consumption uses React 16 devDependency (not React 18); Code Page consumption uses React 18; library peerDependencies widened to `>=16.14.0`; added WizardDialog and SidePanel to directory structure; added Code Page consumption pattern. | Spaarke Engineering |
 
 ---
 

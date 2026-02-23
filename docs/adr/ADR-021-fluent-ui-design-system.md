@@ -2,8 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Accepted** |
+| Status | **Accepted** (Revised) |
 | Date | 2025-12-22 |
+| Updated | 2026-02-23 |
 | Authors | Spaarke Engineering |
 
 ---
@@ -22,11 +23,11 @@
 ## Context
 
 Spaarke builds UI across multiple surfaces:
-- **PCF Controls** embedded in Dataverse model-driven apps
-- **Custom Pages** (Canvas Apps) within model-driven apps
-- **Ribbon/Command Bar** customizations
-- **Office Add-ins** (future)
-- **Power Pages** customizations (future)
+- **PCF Controls** — field-bound controls embedded on Dataverse model-driven app forms
+- **React Code Pages** — standalone HTML web resources opened as dialogs via `Xrm.Navigation.navigateTo` (React 18, bundled)
+- **Ribbon/Command Bar** — thin JavaScript invocation scripts (no business logic)
+- **Office Add-ins** — React 18 applications (bundled)
+- **Shared Component Library** (`@spaarke/ui-components`) — consumed by all surfaces above
 
 Without a unified design system standard, we risk:
 - **Inconsistent user experience** across different surfaces
@@ -51,14 +52,26 @@ This ADR serves as the **authoritative reference** for all UI/UX design decision
 
 **All Spaarke UI must follow the Microsoft Fluent UI v9.x design system.**
 
-| Rule | Description |
-|------|-------------|
-| **Fluent v9 Only** | Use `@fluentui/react-components` (v9.x) exclusively. No Fluent v8 (`@fluentui/react`). |
-| **React 16 APIs** | Use React 16.14.0 APIs (`ReactDOM.render`, `unmountComponentAtNode`). Runtime is 16.14.0 (canvas) or 17.0.2 (model-driven). See [ADR-022](./ADR-022-pcf-platform-libraries.md). |
-| **Semantic Tokens** | Use Fluent design tokens for all styling. No hard-coded colors or pixel values. |
-| **Dark Mode Ready** | All components must render correctly in light, dark, and high-contrast modes |
-| **Accessibility First** | WCAG 2.1 AA compliance required for all interactive components |
-| **Platform Libraries** | PCF controls MUST use platform-library declarations to avoid bundling React/Fluent |
+| Rule | Applies To | Description |
+|------|-----------|-------------|
+| **Fluent v9 Only** | All surfaces | Use `@fluentui/react-components` (v9.x) exclusively. No Fluent v8 (`@fluentui/react`). |
+| **React 16/17 APIs** | PCF controls only | Use `ReactDOM.render()` / `unmountComponentAtNode()`. Runtime is 16.14.0 (canvas) or 17.0.2 (model-driven). See [ADR-022](./ADR-022-pcf-platform-libraries.md). |
+| **React 18 APIs** | React Code Pages, Office Add-ins | Use `createRoot()` from `react-dom/client`. React 18 is bundled in the Code Page output. |
+| **Semantic Tokens** | All surfaces | Use Fluent design tokens for all styling. No hard-coded colors or pixel values. |
+| **Dark Mode Ready** | All surfaces | All components must render correctly in light, dark, and high-contrast modes. |
+| **Accessibility First** | All surfaces | WCAG 2.1 AA compliance required for all interactive components. |
+| **Platform Libraries** | PCF controls only | MUST use `platform-library` declarations in manifest to avoid bundling React/Fluent. |
+
+### React Version by Surface
+
+> **Critical**: The React version constraint depends on the UI surface.
+
+| Surface | React Version | Entry Point | Where React Lives |
+|---------|---------------|-------------|-------------------|
+| **PCF controls** (form-bound) | 16.14.0 manifest / 17.0.2 runtime | `ReactDOM.render()` | Platform-provided — DO NOT bundle |
+| **React Code Pages** (standalone dialogs) | **React 18** | `createRoot()` from `react-dom/client` | Bundled in Code Page output |
+| **Office Add-ins** | **React 18** | `createRoot()` | Bundled |
+| **Shared component library** | `>=16.14.0` (peerDependency) | — | Provided by consumer |
 
 ---
 
@@ -227,11 +240,13 @@ const useStyles = makeStyles({
 
 ---
 
-## PCF Control Packaging
+## PCF Control Packaging (Field-Bound Controls Only)
+
+> **Scope**: This section applies only to field-bound PCF controls. React Code Pages use a completely different packaging model — see [React Code Page Packaging](#react-code-page-packaging) below.
 
 ### Platform Library Configuration
 
-PCF controls should externalize React and Fluent to reduce bundle size and ensure consistency:
+PCF controls must externalize React and Fluent to reduce bundle size and ensure compatibility with the platform-provided runtime:
 
 **ControlManifest.Input.xml:**
 ```xml
@@ -271,10 +286,47 @@ PCF controls should externalize React and Fluent to reduce bundle size and ensur
 - Bundle React/Fluent in PCF artifact
 - Mix platform-library with bundled React
 - Import from granular `@fluentui/react-*` packages
-- Use React 18.x or 19.x APIs (`createRoot`, `hydrateRoot`, concurrent features) - platform provides React 16/17 only
+- Use React 18.x APIs (`createRoot`, `hydrateRoot`, concurrent features) — platform provides React 16/17 only
 - Import from `react-dom/client` (React 18 entry point)
 
 See [PCF V9 Packaging Guide](../guides/PCF-V9-PACKAGING.md) for detailed instructions.
+
+---
+
+## React Code Page Packaging
+
+React Code Pages are standalone HTML web resources (not form-bound PCF controls). They **bundle their own React 18** — they are NOT subject to platform library constraints.
+
+**package.json for a React Code Page:**
+```json
+{
+  "dependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "@fluentui/react-components": "^9.46.0",
+    "@fluentui/react-icons": "^2.0.0",
+    "@spaarke/ui-components": "workspace:*"
+  }
+}
+```
+
+**index.tsx entry point:**
+```typescript
+import { createRoot } from "react-dom/client";  // React 18 ✅
+import { FluentProvider, webLightTheme, webDarkTheme } from "@fluentui/react-components";
+import { App } from "./App";
+
+const params = new URLSearchParams(window.location.search);
+const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+createRoot(document.getElementById("root")!).render(
+  <FluentProvider theme={isDark ? webDarkTheme : webLightTheme}>
+    <App params={params} />
+  </FluentProvider>
+);
+```
+
+**Parameters are passed via URL** (from `navigateTo` `data` field) and read with `URLSearchParams`. See [ADR-006](./ADR-006-prefer-pcf-over-webresources.md) for the Code Page architecture and opening pattern.
 
 ---
 
@@ -459,12 +511,18 @@ Use this checklist for PRs that add or modify UI components:
 - [ ] ARIA labels on icon-only buttons
 - [ ] Color contrast meets 4.5:1 ratio
 
-**PCF Packaging (if applicable):**
-- [ ] `platform-library` declared for React and Fluent
-- [ ] React/Fluent in `devDependencies` only
+**PCF Packaging (if PCF control):**
+- [ ] `platform-library` declared for React and Fluent in manifest
+- [ ] React/Fluent in `devDependencies` only (not `dependencies`)
 - [ ] Bundle size under 5MB
-- [ ] Uses `ReactDOM.render()` pattern (React 16) - NOT `createRoot`
+- [ ] Uses `ReactDOM.render()` pattern (React 16/17) — NOT `createRoot`
 - [ ] No imports from `react-dom/client`
+
+**React Code Page Packaging (if Code Page):**
+- [ ] React 18 in `dependencies` (bundled in output) — correct for Code Pages
+- [ ] Uses `createRoot()` from `react-dom/client`
+- [ ] Parameters read via `new URLSearchParams(window.location.search)`
+- [ ] Opened via `Xrm.Navigation.navigateTo({ pageType: "webresource", ... }, { target: 2 })`
 
 **Ribbon/Command Bar (if applicable):**
 - [ ] SVG icons with `currentColor`
@@ -477,25 +535,32 @@ Use this checklist for PRs that add or modify UI components:
 
 When creating or modifying UI code:
 
-1. **Always wrap in FluentProvider** with appropriate theme
-2. **Import from converged entry points**:
+1. **Determine the surface first**: PCF (form-bound) vs React Code Page (standalone dialog) — React version rules differ.
+2. **Always wrap in FluentProvider** with appropriate theme.
+3. **Import from converged entry points**:
    - Components: `@fluentui/react-components`
    - Icons: `@fluentui/react-icons`
-3. **Use Griffel for custom styles**: `makeStyles` and `tokens`
-4. **Test dark mode**: Toggle theme and verify rendering
-5. **Check accessibility**: Tab through all interactive elements
-6. **For PCF**: Declare `platform-library` in manifest
-7. **For ribbons**: Keep JavaScript minimal (invocation only)
+4. **Use Griffel for custom styles**: `makeStyles` and `tokens`.
+5. **Test dark mode**: Toggle theme and verify rendering.
+6. **Check accessibility**: Tab through all interactive elements.
+7. **For PCF**: Declare `platform-library` in manifest; use `ReactDOM.render()` (React 16/17 API).
+8. **For Code Pages**: Use `createRoot()` (React 18); pass params via URL; open via `navigateTo`.
+9. **For ribbons**: Keep JavaScript minimal (invocation only).
 
 **Red flags to catch in code review:**
-- `@fluentui/react` imports (v8 - should be v9)
-- Hard-coded hex colors (`#ffffff`, `rgb(0,0,0)`)
-- `react@^18.x` or `react@^19.x` in dependencies (should be devDependencies with ^16.14.0)
-- `@types/react@^18` or `@types/react@^19` (should be ^16.14.0)
-- `createRoot` or `import from 'react-dom/client'` (use `ReactDOM.render()`)
-- Missing `FluentProvider` wrapper
-- Icon buttons without `aria-label`
-- `font-family`, `font-size` in CSS (use tokens)
+
+| Flag | Context | Why |
+|------|---------|-----|
+| `@fluentui/react` imports | Any | Fluent v8 — must use v9 |
+| Hard-coded hex colors | Any | Use semantic tokens |
+| `react@^18.x` in `dependencies` of a **PCF** project | PCF only | PCF must use devDependencies with `^16.14.0` |
+| `react@^16.x` in `dependencies` of a **Code Page** | Code Page only | Code Pages SHOULD use React 18 |
+| `@types/react@^18` in a **PCF** project | PCF only | Should be `@types/react@^16.14.0` |
+| `createRoot` or `import from 'react-dom/client'` in **PCF** code | PCF only | Use `ReactDOM.render()` instead |
+| `ReactDOM.render()` in **Code Page** code | Code Page only | Use `createRoot()` instead |
+| Missing `FluentProvider` wrapper | Any | Required for theming |
+| Icon buttons without `aria-label` | Any | Accessibility requirement |
+| `font-family`, `font-size` in CSS | Any | Use Fluent tokens |
 
 ---
 
@@ -515,4 +580,5 @@ When creating or modifying UI code:
 |------|---------|---------|--------|
 | 2025-12-22 | 1.0 | Initial ADR creation - consolidated UI/UX standards | Spaarke Engineering |
 | 2026-01-20 | 1.1 | Aligned React version with ADR-022: React 16.14.0 APIs required (not React 18). Updated package.json examples, compliance checklist, and red flags. | Spaarke Engineering |
+| 2026-02-23 | 1.2 | Revised for two-tier architecture (ADR-006 revision): split React version rules by surface. PCF: React 16/17 platform-provided. React Code Pages: React 18 bundled. Added Code Page packaging section. Updated decision table and code review checklist to distinguish PCF vs Code Page rules. Red flags table updated — `react@^18.x in dependencies` is a red flag for PCF but correct for Code Pages. | Spaarke Engineering |
 

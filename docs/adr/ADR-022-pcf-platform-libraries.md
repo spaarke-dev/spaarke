@@ -1,10 +1,10 @@
-# ADR-022: PCF Platform Libraries (React 16 Compatibility)
+# ADR-022: PCF Platform Libraries — Field-Bound Controls Only
 
 | Field | Value |
 |-------|-------|
-| Status | **Accepted** |
+| Status | **Accepted** (Revised) |
 | Date | 2025-12-30 |
-| Updated | 2025-12-30 |
+| Updated | 2026-02-23 |
 | Authors | Spaarke Engineering |
 
 ---
@@ -16,6 +16,18 @@
 - [PCF Constraints](../../.claude/constraints/pcf.md) - MUST/MUST NOT rules for PCF development
 
 **When to load this full ADR**: Understanding platform library versioning, debugging React errors, planning React upgrades
+
+---
+
+## Scope
+
+**This ADR applies only to field-bound PCF controls** — controls that are embedded on Dataverse entity forms and use the `ComponentFramework` lifecycle (`init`, `updateView`, `destroy`).
+
+**This ADR does NOT apply to:**
+- **React Code Pages** (HTML web resources opened as standalone dialogs via `Xrm.Navigation.navigateTo`) — these bundle their own React 18. See [ADR-006](./ADR-006-prefer-pcf-over-webresources.md).
+- **Office Add-ins** — bundled independently.
+
+If you are building a standalone dialog (not embedded on a form), stop and use a React Code Page instead of a PCF in a custom page wrapper.
 
 ---
 
@@ -87,11 +99,42 @@ This ADR establishes the constraint that all PCF controls MUST use React 16-comp
 
 ---
 
+## React Code Pages: React 18 (Different Rules)
+
+React Code Pages are **not PCF controls**. They are HTML web resources bundled with React 18 and opened as standalone dialogs. They are entirely separate from this ADR.
+
+```typescript
+// Code Page index.tsx — React 18 ✅
+import { createRoot } from "react-dom/client";
+import { FluentProvider, webLightTheme } from "@fluentui/react-components";
+
+createRoot(document.getElementById("root")!).render(
+  <FluentProvider theme={webLightTheme}>
+    <App />
+  </FluentProvider>
+);
+```
+
+```json
+// Code Page package.json — React 18 as dependency ✅
+{
+  "dependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "@fluentui/react-components": "^9.46.0"
+  }
+}
+```
+
+These patterns are **correct for Code Pages** — they would be errors in PCF controls. See [ADR-006](./ADR-006-prefer-pcf-over-webresources.md) for the full Code Page architecture.
+
+---
+
 ## Alternatives Considered
 
 ### Bundle React 18 Anyway
 
-**Rejected**: Would result in 5MB+ bundles and potential conflicts with platform-provided React.
+**Rejected** (for PCF): Would result in 5MB+ bundles and potential conflicts with platform-provided React.
 
 ### Use Preact
 
@@ -280,14 +323,23 @@ Microsoft may update these versions. When they do:
 
 ## AI-Directed Coding Guidance
 
-When creating or modifying PCF controls:
+**IMPORTANT**: Before applying the rules below, confirm you are building a **field-bound PCF control**, not a standalone dialog. If it's a standalone dialog, use a React Code Page instead (see ADR-006). PCF rules do NOT apply to Code Pages.
+
+When creating or modifying **PCF controls** (field-bound only):
 1. **Always** import from `react-dom`, never `react-dom/client`
-2. **Always** use `ReactDOM.render(element, container)` pattern
-3. **Always** use `ReactDOM.unmountComponentAtNode(container)` in destroy()
+2. **Always** use `ReactDOM.render(element, container)` pattern (or ReactControl `updateView` returning element)
+3. **Always** use `ReactDOM.unmountComponentAtNode(container)` in `destroy()`
 4. **Check** manifest has `platform-library` for React and Fluent
 5. **Create** `featureconfig.json` with `{ "pcfReactPlatformLibraries": "on" }`
-6. **Verify** bundle size after build - if > 1MB, likely bundling React
+6. **Verify** bundle size after build — if > 1MB, likely bundling React
 7. **Test** in actual Dataverse environment, not just local harness
+
+When creating **React Code Pages** (standalone dialogs):
+1. **Use** `createRoot()` from `react-dom/client` — React 18 is correct here
+2. **Bundle** React 18 in `dependencies` (not devDependencies)
+3. **Read parameters** via `new URLSearchParams(window.location.search)`
+4. **Open** via `Xrm.Navigation.navigateTo({ pageType: "webresource", ... }, { target: 2 })`
+5. **Do NOT** add `platform-library` to manifest — Code Pages are plain HTML bundles
 
 ---
 
@@ -299,4 +351,11 @@ When creating or modifying PCF controls:
 
 ---
 
-*ADR created following React 16 compatibility issue discovered during Visual Host v1.1.0 deployment (2025-12-30)*
+---
+
+## Revision History
+
+| Date | Version | Changes | Author |
+|------|---------|---------|--------|
+| 2025-12-30 | 1.0 | Initial ADR — React 16 compatibility issue discovered during Visual Host v1.1.0 deployment | Spaarke Engineering |
+| 2026-02-23 | 1.1 | Revised for two-tier architecture (ADR-006 revision): added Scope section clarifying this ADR applies to field-bound PCF controls only — NOT React Code Pages. Added React Code Page section with React 18 patterns. Updated AI-Directed Coding Guidance to distinguish PCF vs Code Page rules. | Spaarke Engineering |

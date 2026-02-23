@@ -2,14 +2,14 @@
 
 > **Status**: Draft
 > **Created**: 2026-02-05
-> **Domain**: UI Components / PCF / Custom Pages
+> **Domain**: UI Components / PCF / React Code Pages
 > **Related ADRs**: [ADR-012](../adr/ADR-012-shared-components.md), [ADR-021](../adr/ADR-021-fluent-ui-design-system.md), [ADR-022](../adr/ADR-022-pcf-platform-libraries.md)
 
 ---
 
 ## Executive Summary
 
-This document defines the architecture for **universal dataset grid components** that provide consistent, Power Apps-native grid experiences across both PCF controls and Custom Pages (HTML web resources). The architecture emphasizes:
+This document defines the architecture for **universal dataset grid components** that provide consistent, Power Apps-native grid experiences across both PCF controls (form-embedded, React 16/17) and React Code Pages (standalone HTML web resources, React 18). The architecture emphasizes:
 
 1. **Shared codebase** - Core components and services live in a shared library
 2. **OOB appearance** - Grid looks identical to Power Apps native grids
@@ -625,31 +625,35 @@ Write shared components using **React 16 API** only:
 
 ---
 
-## When to Use PCF vs Custom Page
+## When to Use PCF vs React Code Page
+
+See [ADR-006](../adr/ADR-006-prefer-pcf-over-webresources.md) for the authoritative surface selection rule. Summary: **field-bound → PCF; standalone dialog/page → React Code Page**.
 
 ### Decision Matrix
 
-| Requirement | PCF Control | Custom Page (HTML) |
-|-------------|-------------|-------------------|
+| Requirement | PCF Control (React 16/17) | React Code Page (React 18) |
+|-------------|--------------------------|---------------------------|
 | Subgrid on entity form | **Required** | Not possible |
+| Standalone list/browse dialog | Not possible (needs wrapper) | **Native** |
 | Entity homepage with side panel | Cannot render outside container | **Required** |
 | Entity homepage with custom header | Limited | **Full control** |
-| Simple grid enhancement | Less code, platform handles chrome | Overkill |
+| Simple grid enhancement on form | Less code, platform handles chrome | Overkill |
 | Canvas app embedding | Supported | Not applicable |
-| Need React 18 features | Bundle yourself | **Native** |
+| Need React 18 features | Not available (platform constraint) | **Native** |
 | Complex page layout | Container-bound | **Full flexibility** |
-| Command bar | Platform provides | **Build yourself** |
-| View selector | Platform provides | **Build yourself** |
+| Multi-step wizard (e.g. Create Matter) | Not recommended | **Use WizardDialog component** |
+| Filter/detail side panel | Not recommended | **Use SidePanel component** |
 
 ### Recommendations
 
 | Scenario | Recommendation |
 |----------|----------------|
-| Form subgrids | **PCF** - Only option |
-| Entity homepage needing side panels | **Custom Page** - PCF can't render outside container |
-| Simple entity homepage enhancement | **PCF** - Less code, platform integration |
-| Dashboard embedded grid | **PCF** - Dashboard tile support |
-| Complex entity workspace | **Custom Page** - Full page control |
+| Form subgrids (dataset binding) | **PCF** — only option for form-embedded datasets |
+| Standalone list/browse dialog | **React Code Page** — no form binding needed |
+| Entity homepage needing side panels | **React Code Page** — PCF can't render outside container |
+| Simple entity homepage enhancement | **PCF** — less code, platform integration |
+| Dashboard embedded grid | **PCF** — dashboard tile support |
+| Complex entity workspace / wizard | **React Code Page** — full page control, React 18 |
 
 ---
 
