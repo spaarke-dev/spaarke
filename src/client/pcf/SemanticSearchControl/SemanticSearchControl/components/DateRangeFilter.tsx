@@ -2,8 +2,8 @@
  * DateRangeFilter component
  *
  * Date range picker for filtering by document creation date.
- * Supports from/to selection with quick presets.
- * Stacked vertical layout with icon-only empty state (v1.0.33).
+ * Section title doubles as a Quick Select dropdown for presets.
+ * Stacked vertical layout with From/To inputs below.
  *
  * @see ADR-021 for Fluent UI v9 requirements
  */
@@ -32,10 +32,6 @@ const useStyles = makeStyles({
         flexDirection: "column",
         gap: tokens.spacingVerticalXS,
     },
-    label: {
-        fontWeight: tokens.fontWeightSemibold,
-        fontSize: tokens.fontSizeBase200,
-    },
     inputGroup: {
         display: "flex",
         flexDirection: "column",
@@ -56,10 +52,11 @@ const useStyles = makeStyles({
             color: "transparent",
         },
     },
-    presets: {
-        display: "flex",
-        gap: tokens.spacingHorizontalS,
-        marginTop: tokens.spacingVerticalXXS,
+    titleButton: {
+        fontWeight: tokens.fontWeightSemibold,
+        fontSize: tokens.fontSizeBase200,
+        minWidth: "auto",
+        paddingLeft: "0px",
     },
 });
 
@@ -111,11 +108,8 @@ function calculatePresetRange(days: number): DateRange {
 
 /**
  * DateRangeFilter component for date filtering.
- *
- * @param props.label - Label text for the filter
- * @param props.value - Current date range (null for any)
- * @param props.onChange - Callback when range changes
- * @param props.disabled - Whether the filter is disabled
+ * The section title is a Quick Select dropdown for common presets.
+ * Below it are From/To date inputs for custom range.
  */
 export const DateRangeFilter: React.FC<IDateRangeFilterProps> = ({
     label,
@@ -211,7 +205,35 @@ export const DateRangeFilter: React.FC<IDateRangeFilterProps> = ({
 
     return (
         <div className={styles.container}>
-            <Label className={styles.label}>{label}</Label>
+            {/* Section title = Quick Select dropdown */}
+            <Menu>
+                <MenuTrigger disableButtonEnhancement>
+                    <Button
+                        className={styles.titleButton}
+                        appearance="subtle"
+                        size="small"
+                        icon={<ChevronDownRegular />}
+                        iconPosition="after"
+                        disabled={disabled}
+                    >
+                        {label}
+                    </Button>
+                </MenuTrigger>
+                <MenuPopover>
+                    <MenuList>
+                        {DATE_PRESETS.map((preset) => (
+                            <MenuItem
+                                key={preset.label}
+                                onClick={() => handlePresetSelect(preset.days)}
+                            >
+                                {preset.label}
+                            </MenuItem>
+                        ))}
+                    </MenuList>
+                </MenuPopover>
+            </Menu>
+
+            {/* From/To date inputs */}
             <div className={styles.inputGroup}>
                 <Label htmlFor={fromId} className={styles.fieldLabel} size="small">From</Label>
                 <Input
@@ -249,33 +271,6 @@ export const DateRangeFilter: React.FC<IDateRangeFilterProps> = ({
                     {validationError}
                 </span>
             )}
-            <div className={styles.presets}>
-                <Menu>
-                    <MenuTrigger disableButtonEnhancement>
-                        <Button
-                            appearance="subtle"
-                            size="small"
-                            icon={<ChevronDownRegular />}
-                            iconPosition="after"
-                            disabled={disabled}
-                        >
-                            Quick select
-                        </Button>
-                    </MenuTrigger>
-                    <MenuPopover>
-                        <MenuList>
-                            {DATE_PRESETS.map((preset) => (
-                                <MenuItem
-                                    key={preset.label}
-                                    onClick={() => handlePresetSelect(preset.days)}
-                                >
-                                    {preset.label}
-                                </MenuItem>
-                            ))}
-                        </MenuList>
-                    </MenuPopover>
-                </Menu>
-            </div>
         </div>
     );
 };

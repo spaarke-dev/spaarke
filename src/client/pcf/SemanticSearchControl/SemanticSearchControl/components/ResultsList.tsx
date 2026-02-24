@@ -9,7 +9,7 @@
  */
 
 import * as React from "react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
     makeStyles,
     tokens,
@@ -97,12 +97,14 @@ export const ResultsList: React.FC<IResultsListProps> = ({
     isLoadingMore,
     hasMore,
     totalCount,
+    threshold,
     onLoadMore,
     onResultClick,
     onOpenFile,
     onOpenRecord,
     onFindSimilar,
     onPreview,
+    onSummary,
     onViewAll,
     compactMode,
 }) => {
@@ -111,9 +113,16 @@ export const ResultsList: React.FC<IResultsListProps> = ({
     // After the user clicks "Show more" once, switch to infinite scroll
     const [infiniteScrollEnabled, setInfiniteScrollEnabled] = useState(false);
 
+    // Client-side threshold filtering — hide results below the minimum score
+    const thresholdDecimal = threshold / 100;
+    const filteredResults = useMemo(() => {
+        if (threshold <= 0) return results;
+        return results.filter((r) => r.combinedScore >= thresholdDecimal);
+    }, [results, threshold, thresholdDecimal]);
+
     // Check if DOM cap reached
-    const isDomCapReached = results.length >= DOM_CAP;
-    const displayedCount = Math.min(results.length, DOM_CAP);
+    const isDomCapReached = filteredResults.length >= DOM_CAP;
+    const displayedCount = Math.min(filteredResults.length, DOM_CAP);
 
     // Infinite scroll hook - only active after user clicks "Show more"
     const { sentinelRef } = useInfiniteScroll({
@@ -130,17 +139,23 @@ export const ResultsList: React.FC<IResultsListProps> = ({
         onLoadMore();
     }, [onLoadMore]);
 
+    // How many were hidden by threshold
+    const hiddenByThreshold = results.length - filteredResults.length;
+
     // Format result count message
     const getResultCountMessage = () => {
         if (isLoading) return "Searching...";
         if (totalCount === 0) return "No results";
+        if (hiddenByThreshold > 0) {
+            return `${filteredResults.length} of ${totalCount} results (${hiddenByThreshold} below ${threshold}% threshold)`;
+        }
         if (isDomCapReached) {
             return `Showing ${displayedCount} of ${totalCount} results`;
         }
-        if (results.length === totalCount) {
+        if (filteredResults.length === totalCount) {
             return `${totalCount} result${totalCount === 1 ? "" : "s"}`;
         }
-        return `Showing ${results.length} of ${totalCount} results`;
+        return `Showing ${filteredResults.length} of ${totalCount} results`;
     };
 
     // Create stable callbacks for result card
@@ -169,6 +184,11 @@ export const ResultsList: React.FC<IResultsListProps> = ({
         [onPreview]
     );
 
+    const handleSummary = useCallback(
+        (result: SearchResult) => () => onSummary(result),
+        [onSummary]
+    );
+
     return (
         <div className={styles.container}>
             {/* Results count header */}
@@ -181,8 +201,8 @@ export const ResultsList: React.FC<IResultsListProps> = ({
             {/* Scrollable results area */}
             <div className={styles.scrollContainer}>
                 <div className={styles.resultsList}>
-                    {/* Render result cards */}
-                    {results.slice(0, DOM_CAP).map((result: SearchResult) => (
+                    {/* Render result cards (filtered by threshold) */}
+                    {filteredResults.slice(0, DOM_CAP).map((result: SearchResult) => (
                         <ResultCard
                             key={result.documentId}
                             result={result}
@@ -191,6 +211,7 @@ export const ResultsList: React.FC<IResultsListProps> = ({
                             onOpenRecord={handleOpenRecord(result)}
                             onFindSimilar={handleFindSimilar(result)}
                             onPreview={handlePreview(result)}
+                            onSummary={handleSummary(result)}
                             compactMode={compactMode}
                         />
                     ))}
@@ -219,7 +240,7 @@ export const ResultsList: React.FC<IResultsListProps> = ({
                     {hasMore && !isDomCapReached && !isLoadingMore && !infiniteScrollEnabled && (
                         <div className={styles.showMoreLink}>
                             <Link onClick={handleShowMore}>
-                                Show more results ({results.length} of {totalCount})
+                                Show more results ({filteredResults.length} of {totalCount})
                             </Link>
                         </div>
                     )}

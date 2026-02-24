@@ -29,6 +29,7 @@ import {
     SearchFilters,
     SearchResult,
     SearchScope,
+    SummaryData,
 } from "./types";
 import {
     SearchInput,
@@ -446,6 +447,37 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         [apiService]
     );
 
+    // Summary cache — avoids redundant Dataverse calls for the same document
+    const summaryCache = useRef<Map<string, SummaryData>>(new Map());
+
+    // Handle Summary — fetches summary directly from Dataverse via PCF WebAPI
+    const handleSummary = useCallback(
+        async (result: SearchResult): Promise<SummaryData> => {
+            // Return cached data if available
+            const cached = summaryCache.current.get(result.documentId);
+            if (cached) return cached;
+
+            try {
+                const record = await context.webAPI.retrieveRecord(
+                    "sprk_document",
+                    result.documentId,
+                    "?$select=sprk_filesummary,sprk_filetldr"
+                );
+                const entity = record as Record<string, unknown>;
+                const data: SummaryData = {
+                    summary: (entity.sprk_filesummary as string) ?? null,
+                    tldr: (entity.sprk_filetldr as string) ?? null,
+                };
+                summaryCache.current.set(result.documentId, data);
+                return data;
+            } catch (err) {
+                console.error("[SemanticSearchControl] Failed to fetch summary from Dataverse:", err);
+                return { summary: null, tldr: null };
+            }
+        },
+        [context.webAPI]
+    );
+
     // Handle Add Document — opens document upload dialog custom page
     const handleAddDocument = useCallback(() => {
         void navigationService.openAddDocument(
@@ -518,12 +550,14 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
                     isLoadingMore={isLoadingMore}
                     hasMore={hasMore}
                     totalCount={totalCount}
+                    threshold={filters.threshold}
                     onLoadMore={loadMore}
                     onResultClick={handleResultClick}
                     onOpenFile={handleOpenFile}
                     onOpenRecord={handleOpenRecord}
                     onFindSimilar={handleFindSimilar}
                     onPreview={handlePreview}
+                    onSummary={handleSummary}
                     onViewAll={handleViewAll}
                     compactMode={compactMode}
                 />
@@ -580,6 +614,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
                                 searchScope={searchScope}
                                 scopeId={scopeId}
                                 onFiltersChange={handleFiltersChange}
+                                onApply={handleSearch}
                                 disabled={isLoading}
                                 onCollapse={handleToggleFilterPane}
                             />
@@ -604,7 +639,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
             {/* Version Footer (always visible) */}
             <div className={styles.versionFooter}>
-                <Text size={100}>v1.0.37 • Built 2026-02-24</Text>
+                <Text size={100}>v1.0.39 • Built 2026-02-24</Text>
             </div>
 
             {/* Find Similar — iframe dialog (no Dataverse chrome) */}

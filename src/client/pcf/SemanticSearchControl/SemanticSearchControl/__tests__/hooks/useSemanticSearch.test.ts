@@ -45,6 +45,8 @@ const emptyFilters: SearchFilters = {
     matterTypes: [],
     dateRange: null,
     fileTypes: [],
+    threshold: 0,
+    searchMode: "hybrid",
 };
 
 describe("useSemanticSearch", () => {
@@ -273,6 +275,8 @@ describe("useSemanticSearch", () => {
             matterTypes: [],
             dateRange: { from: "2026-01-01", to: "2026-01-31" },
             fileTypes: ["pdf"],
+            threshold: 0,
+            searchMode: "hybrid",
         };
 
         act(() => {
