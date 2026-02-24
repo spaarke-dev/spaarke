@@ -16,7 +16,7 @@
  *   - Node action bar: open record, view file, expand
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
     makeStyles,
     tokens,
@@ -53,6 +53,7 @@ type ViewMode = "graph" | "grid";
 
 interface AppProps {
     params: URLSearchParams;
+    isDark?: boolean;
 }
 
 const useStyles = makeStyles({
@@ -131,7 +132,7 @@ const useStyles = makeStyles({
     },
 });
 
-export const App: React.FC<AppProps> = ({ params }) => {
+export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
     const styles = useStyles();
 
     // Parse URL params
@@ -207,10 +208,8 @@ export const App: React.FC<AppProps> = ({ params }) => {
         setSelectedNode(null);
     }, []);
 
-    const isDarkMode = useMemo(
-        () => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false,
-        []
-    );
+    // Use theme from URL param (passed by PCF control) instead of system preference
+    const isDarkMode = isDark;
 
     // Missing params error
     if (!documentId || !tenantId) {
