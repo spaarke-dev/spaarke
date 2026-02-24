@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Sprk.Bff.Api.Models.Ai.Chat;
 
@@ -32,5 +31,5 @@ public interface ISprkChatAgent
     IAsyncEnumerable<ChatResponseUpdate> SendMessageAsync(
         string message,
         IReadOnlyList<AiChatMessage> history,
-        [EnumeratorCancellation] CancellationToken cancellationToken);
+        CancellationToken cancellationToken);
 }
