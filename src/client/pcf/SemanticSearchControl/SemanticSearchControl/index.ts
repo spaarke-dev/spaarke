@@ -76,15 +76,17 @@ export class SemanticSearchControl
             context,
             notifyOutputChanged: this.notifyOutputChanged,
             onDocumentSelect: this.handleDocumentSelect.bind(this),
+            isDarkMode: this._theme === webDarkTheme,
         };
 
         // Create the main SemanticSearchControl component
         const content = React.createElement(SemanticSearchControlComponent, props);
 
-        // Wrap in FluentProvider with resolved theme (ADR-021)
+        // Wrap in FluentProvider with resolved theme (ADR-021).
+        // Explicit width/height/flex ensure the provider fills the PCF-allocated container.
         return React.createElement(
             FluentProvider,
-            { theme: this._theme },
+            { theme: this._theme, style: { width: "100%", height: "100%", display: "flex", flexDirection: "column" } },
             content
         );
     }

@@ -2,7 +2,7 @@
 
 > **Purpose**: Documents architectural decisions for the Spaarke platform
 > **Audience**: Developers, architects, AI coding agents
-> **Last Updated**: 2025-12-25
+> **Last Updated**: 2026-02-23
 
 ## About ADRs
 
@@ -17,12 +17,12 @@ Architecture Decision Records capture important architectural decisions made dur
 | [ADR-003](ADR-003-lean-authorization-seams.md) | Lean Authorization Seams | Security | Accepted |
 | [ADR-004](ADR-004-async-job-contract.md) | Async Job Contract | Backend | Accepted |
 | [ADR-005](ADR-005-flat-storage-spe.md) | Flat Storage for SPE | Storage | Accepted |
-| [ADR-006](ADR-006-prefer-pcf-over-webresources.md) | PCF Controls Over Web Resources | Frontend | Accepted |
+| [ADR-006](ADR-006-prefer-pcf-over-webresources.md) | Anti-Legacy-JS: PCF for Form Controls, React Code Pages for Dialogs | Frontend | Accepted |
 | [ADR-007](ADR-007-spe-storage-seam-minimalism.md) | SPE Storage Seam Minimalism | Storage | Accepted |
 | [ADR-008](ADR-008-authorization-endpoint-filters.md) | Authorization Endpoint Filters | Security | Accepted |
 | [ADR-009](ADR-009-caching-redis-first.md) | Redis-First Caching Strategy | Caching | Accepted |
 | [ADR-010](ADR-010-di-minimalism.md) | Dependency Injection Minimalism | Backend | Accepted |
-| [ADR-011](ADR-011-dataset-pcf-over-subgrids.md) | Dataset PCF Over Native Subgrids | Frontend | Accepted |
+| [ADR-011](ADR-011-dataset-pcf-over-subgrids.md) | Dataset PCF for Form-Embedded List Controls | Frontend | Accepted |
 | [ADR-012](ADR-012-shared-component-library.md) | Shared Component Library | Frontend | Accepted |
 | [ADR-013](ADR-013-ai-architecture.md) | AI Tool Framework Architecture | AI | Accepted |
 | [ADR-014](ADR-014-ai-caching-and-reuse-policy.md) | AI Caching and Reuse Policy | AI | Accepted |
@@ -33,7 +33,7 @@ Architecture Decision Records capture important architectural decisions made dur
 | [ADR-019](ADR-019-api-errors-and-problemdetails.md) | API Errors and ProblemDetails | Backend | Accepted |
 | [ADR-020](ADR-020-versioning-strategy-apis-jobs-client-packages.md) | Versioning Strategy | Operations | Accepted |
 | [ADR-021](ADR-021-fluent-ui-design-system.md) | Fluent UI v9 Design System | **UI/UX** | **Accepted** |
-| [ADR-022](ADR-022-pcf-platform-libraries.md) | PCF Platform Libraries (React 16) | Frontend | Accepted |
+| [ADR-022](ADR-022-pcf-platform-libraries.md) | PCF Platform Libraries — Field-Bound Controls Only | Frontend | Accepted |
 
 ## ADRs by Domain
 
@@ -41,11 +41,11 @@ Architecture Decision Records capture important architectural decisions made dur
 
 | ADR | Summary |
 |-----|---------|
-| **[ADR-021](ADR-021-fluent-ui-design-system.md)** | **Authoritative UI/UX standard: Fluent v9, dark mode, accessibility** |
-| [ADR-006](ADR-006-prefer-pcf-over-webresources.md) | Use PCF controls, not legacy webresources |
-| [ADR-011](ADR-011-dataset-pcf-over-subgrids.md) | Dataset PCF for list-based UI |
-| [ADR-012](ADR-012-shared-component-library.md) | Shared component library with Fluent v9 |
-| [ADR-022](ADR-022-pcf-platform-libraries.md) | PCF must use React 16 APIs (platform-provided) |
+| **[ADR-021](ADR-021-fluent-ui-design-system.md)** | **Authoritative UI/UX standard: Fluent v9, dark mode, accessibility. React version differs by surface — PCF: 16/17 (platform); Code Pages: 18 (bundled).** |
+| [ADR-006](ADR-006-prefer-pcf-over-webresources.md) | Anti-legacy-JS: PCF for form-bound controls; React Code Pages for standalone dialogs/pages. No new legacy JS webresources. |
+| [ADR-011](ADR-011-dataset-pcf-over-subgrids.md) | Dataset PCF for list-based UI embedded on forms. Standalone dialogs with list/search UI → React Code Page. |
+| [ADR-012](ADR-012-shared-component-library.md) | Shared component library (`@spaarke/ui-components`): peerDependencies `>=16.14.0` to support both PCF (React 16/17) and Code Pages (React 18). Includes WizardDialog and SidePanel. |
+| [ADR-022](ADR-022-pcf-platform-libraries.md) | PCF controls (field-bound only): React 16/17 APIs, platform-provided. React Code Pages use React 18 bundled — NOT subject to this ADR. |
 
 ### Backend / API
 
@@ -105,7 +105,15 @@ Architecture Decision Records capture important architectural decisions made dur
 - When making architectural changes
 - To understand constraints and patterns
 
-**Key ADR for UI work**: Always load [ADR-021](ADR-021-fluent-ui-design-system.md) when working on any UI component.
+**Key ADRs for UI work**:
+- Always load [ADR-021](ADR-021-fluent-ui-design-system.md) for any UI component work (design system, theming, React version by surface).
+- Load [ADR-006](ADR-006-prefer-pcf-over-webresources.md) when choosing between PCF and React Code Page.
+- Load [ADR-022](ADR-022-pcf-platform-libraries.md) when working on PCF controls (field-bound only).
+
+**Two-tier UI architecture** (ADR-006):
+- Field-bound form controls → **PCF** (`src/client/pcf/`) — React 16/17, platform-provided
+- Standalone dialogs/pages → **React Code Page** (`src/client/code-pages/`) — React 18, bundled
+- Shared components → `src/client/shared/Spaarke.UI.Components/` — both surfaces
 
 ---
 

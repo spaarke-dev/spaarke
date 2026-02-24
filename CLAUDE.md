@@ -838,7 +838,8 @@ docs/
 
 **Spaarke** is a SharePoint Document Access Platform (SDAP) built with:
 - **.NET 8 Minimal API** (Backend) - SharePoint Embedded integration via Microsoft Graph
-- **Power Platform PCF Controls** (Frontend) - TypeScript/React components for Dataverse model-driven apps
+- **Power Platform PCF Controls** (Frontend) - Field-bound TypeScript/React controls for Dataverse forms
+- **React Code Pages** (Frontend) - Standalone React 18 dialogs and pages (document viewers, wizards, panels)
 - **Dataverse Plugins** (Platform) - Thin validation/projection plugins
 
 ## Repository Structure
@@ -855,9 +856,10 @@ projects/                      # Active development projects
 
 src/
 ├── client/                    # Frontend components
-│   ├── pcf/                   # PCF Controls (TypeScript/React)
-│   ├── office-addins/         # Office Add-ins
-│   └── shared/                # Shared UI components library
+│   ├── pcf/                   # PCF Controls (React 16/17, field-bound form controls)
+│   ├── code-pages/            # React Code Pages (React 18, standalone dialogs & pages)
+│   ├── office-addins/         # Office Add-ins (React 18)
+│   └── shared/                # Shared UI components library (React 18-compatible)
 ├── server/                    # Backend services
 │   ├── api/                   # .NET 8 Minimal API (Sprk.Bff.Api)
 │   └── shared/                # Shared .NET libraries
@@ -876,7 +878,7 @@ ADRs are in `.claude/adr/` (concise) and `docs/adr/` (full). The key constraints
 |-----|---------|----------------|
 | ADR-001 | Minimal API + BackgroundService | **No Azure Functions** |
 | ADR-002 | Thin Dataverse plugins | **No HTTP/Graph calls in plugins; <50ms p95** |
-| ADR-006 | PCF over webresources | **No new legacy JS webresources** |
+| ADR-006 | Anti-legacy-JS: PCF for form controls, React Code Pages for dialogs | **No legacy JS webresources; field-bound → PCF; standalone dialog → Code Page** |
 | ADR-007 | SpeFileStore facade | **No Graph SDK types leak above facade** |
 | ADR-008 | Endpoint filters for auth | **No global auth middleware; use endpoint filters** |
 | ADR-009 | Redis-first caching | **No hybrid L1 cache unless profiling proves need** |
@@ -884,7 +886,7 @@ ADRs are in `.claude/adr/` (concise) and `docs/adr/` (full). The key constraints
 | ADR-012 | Shared component library | **Reuse `@spaarke/ui-components` across modules** |
 | ADR-013 | AI Architecture | **AI Tool Framework; extend BFF, not separate service** |
 | ADR-021 | Fluent UI v9 Design System | **All UI must use Fluent v9; no hard-coded colors; dark mode required** |
-| ADR-022 | PCF Platform Libraries | **React 16 APIs only; unmanaged solutions only** |
+| ADR-022 | PCF Platform Libraries (field-bound controls only) | **PCF: React 16 APIs, platform-provided; Code Pages: React 18, bundled** |
 
 ## AI Architecture
 
@@ -922,7 +924,7 @@ public class BadController(GraphServiceClient graph) { } // WRONG
 app.UseMiddleware<AuthorizationMiddleware>(); // WRONG
 ```
 
-### TypeScript/PCF (Frontend)
+### TypeScript/PCF (Field-Bound Form Controls — React 16/17)
 
 ```typescript
 // ✅ DO: Import from shared component library
@@ -931,15 +933,37 @@ import { DataGrid, StatusBadge } from "@spaarke/ui-components";
 // ✅ DO: Use Fluent UI v9 exclusively
 import { Button, Input } from "@fluentui/react-components";
 
-// ✅ DO: Type all props and state
-interface IMyComponentProps {
-  items: IDataItem[];
-  onSelect: (item: IDataItem) => void;
+// ✅ DO: Use React 16 APIs (platform-provided, not bundled)
+// ReactControl returns element; ReactDOM.render() for StandardControl
+public updateView(context): React.ReactElement {
+    return React.createElement(FluentProvider, { theme }, React.createElement(MyComponent, { context }));
 }
 
-// ❌ DON'T: Create new legacy webresources
+// ❌ DON'T: Create new legacy webresources (no-framework JS, jQuery)
+// ❌ DON'T: Use React 18 createRoot() in PCF — platform only provides React 16/17
 // ❌ DON'T: Mix Fluent UI versions (v8 and v9)
 // ❌ DON'T: Hard-code Dataverse entity schemas
+// ❌ DON'T: Use custom page + PCF wrapper for standalone dialogs — use a Code Page instead
+```
+
+### TypeScript/React Code Pages (Standalone Dialogs & Pages — React 18)
+
+```typescript
+// ✅ DO: Use React 18 createRoot (bundled, not platform-provided)
+import { createRoot } from "react-dom/client";
+const params = new URLSearchParams(window.location.search);
+createRoot(document.getElementById("root")!).render(
+    <FluentProvider theme={webLightTheme}><App documentId={params.get("documentId") ?? ""} /></FluentProvider>
+);
+
+// ✅ DO: Use WizardDialog / SidePanel from shared library for common layouts
+import { WizardDialog, SidePanel } from "@spaarke/ui-components";
+
+// ✅ DO: Open Code Page dialogs via navigateTo webresource (no custom page needed)
+Xrm.Navigation.navigateTo(
+    { pageType: "webresource", webresourceName: "sprk_mypagename", data: `documentId=${id}` },
+    { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" } }
+);
 ```
 
 ### Dataverse Plugins

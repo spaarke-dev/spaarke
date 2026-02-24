@@ -3,6 +3,7 @@ using Azure;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Models;
 using Microsoft.Extensions.Logging;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.SemanticSearch;
 
@@ -34,6 +35,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
     private readonly IEmbeddingCache _embeddingCache;
     private readonly IQueryPreprocessor _queryPreprocessor;
     private readonly IResultPostprocessor _resultPostprocessor;
+    private readonly IDataverseService _dataverseService;
     private readonly ILogger<SemanticSearchService> _logger;
 
     // Semantic configuration name from the index definition
@@ -55,6 +57,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
         IEmbeddingCache embeddingCache,
         IQueryPreprocessor queryPreprocessor,
         IResultPostprocessor resultPostprocessor,
+        IDataverseService dataverseService,
         ILogger<SemanticSearchService> logger)
     {
         _deploymentService = deploymentService;
@@ -62,6 +65,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
         _embeddingCache = embeddingCache;
         _queryPreprocessor = queryPreprocessor;
         _resultPostprocessor = resultPostprocessor;
+        _dataverseService = dataverseService;
         _logger = logger;
     }
 
@@ -159,6 +163,9 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
             // Get total count from response
             var totalResults = searchResults.TotalCount ?? results.Count;
+
+            // Step 7b: Enrich results with Dataverse metadata (createdBy, summary, tldr)
+            results = await EnrichResultsWithDataverseMetadataAsync(results, cancellationToken);
 
             // Step 8: Build applied filters summary
             var appliedFilters = BuildAppliedFilters(processedRequest, filter);
@@ -469,6 +476,53 @@ public sealed class SemanticSearchService : ISemanticSearchService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Enriches search results with Dataverse metadata (createdBy, summary, tldr).
+    /// Performs a post-search lookup for each result with a documentId.
+    /// </summary>
+    private async Task<IReadOnlyList<SearchResult>> EnrichResultsWithDataverseMetadataAsync(
+        IReadOnlyList<SearchResult> results,
+        CancellationToken cancellationToken)
+    {
+        if (results.Count == 0) return results;
+
+        var enriched = new List<SearchResult>(results.Count);
+
+        foreach (var result in results)
+        {
+            if (string.IsNullOrEmpty(result.DocumentId))
+            {
+                enriched.Add(result);
+                continue;
+            }
+
+            try
+            {
+                var doc = await _dataverseService.GetDocumentAsync(result.DocumentId, cancellationToken);
+                if (doc != null)
+                {
+                    enriched.Add(result with
+                    {
+                        CreatedBy = doc.CreatedBy,
+                        Summary = doc.Summary,
+                        Tldr = doc.Tldr,
+                    });
+                }
+                else
+                {
+                    enriched.Add(result);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to enrich result {DocumentId} with Dataverse metadata", result.DocumentId);
+                enriched.Add(result);
+            }
+        }
+
+        return enriched;
     }
 
     /// <summary>

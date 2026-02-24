@@ -102,4 +102,22 @@ public sealed record SearchResult
     /// </summary>
     [JsonPropertyName("updatedAt")]
     public DateTimeOffset? UpdatedAt { get; init; }
+
+    /// <summary>
+    /// Name of user who created the document (from Dataverse post-search lookup).
+    /// </summary>
+    [JsonPropertyName("createdBy")]
+    public string? CreatedBy { get; init; }
+
+    /// <summary>
+    /// AI-generated full summary (from Dataverse post-search lookup).
+    /// </summary>
+    [JsonPropertyName("summary")]
+    public string? Summary { get; init; }
+
+    /// <summary>
+    /// AI-generated TL;DR (from Dataverse post-search lookup).
+    /// </summary>
+    [JsonPropertyName("tldr")]
+    public string? Tldr { get; init; }
 }

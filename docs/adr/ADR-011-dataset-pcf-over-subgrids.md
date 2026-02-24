@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Accepted** |
+| Status | **Accepted** (Revised) |
 | Date | 2025-09-30 |
-| Updated | 2025-12-04 |
+| Updated | 2026-02-23 |
 | Authors | Spaarke Engineering |
 | Sprint | Sprint 2 → Sprint 3 Transition |
 
@@ -55,10 +55,11 @@ During Sprint 2, we implemented JavaScript web resources for file management ope
 | Scenario | Technology |
 |----------|------------|
 | Related documents lists on entity main forms | ✅ Dataset PCF |
-| Document search/browse interfaces in custom pages | ✅ Dataset PCF |
-| Bulk document operations requiring selection | ✅ Dataset PCF |
-| Advanced filtering and sorting | ✅ Dataset PCF |
-| Custom visualizations (card view, tile view) | ✅ Dataset PCF |
+| Document search/browse embedded on a form (bound to form context) | ✅ Dataset PCF |
+| Bulk document operations requiring selection (form-embedded) | ✅ Dataset PCF |
+| Advanced filtering and sorting (form-embedded) | ✅ Dataset PCF |
+| Custom visualizations (card view, tile view) on a form | ✅ Dataset PCF |
+| Standalone document search/browse opened as a dialog | ✅ React Code Page (see ADR-006) |
 | Simple, read-only reference lists (no custom actions) | Native subgrid OK |
 | Admin/configuration scenarios | Native subgrid OK |
 
@@ -135,7 +136,7 @@ During Sprint 2, we implemented JavaScript web resources for file management ope
 | Category | Technology |
 |----------|------------|
 | PCF Framework | @microsoft/pcf-tools |
-| UI Framework | React ^18.x, Fluent UI React ^9.x |
+| UI Framework | React 16/17 (platform-provided at runtime), Fluent UI React ^9.x (platform-provided) |
 | Language | TypeScript ^5.x |
 | Virtual Scrolling | react-window ^1.x |
 | Testing | Jest ^29.x, React Testing Library ^14.x |
@@ -236,9 +237,11 @@ All exceptions require **explicit approval** from tech lead with documented rati
 
 ## AI-Directed Coding Guidance
 
-- Default for list-based document UX: implement/extend the Dataset PCF under `src/client/pcf/UniversalDatasetGrid/`.
+- **Form-embedded list UI** (bound to a Dataverse form): implement/extend the Dataset PCF under `src/client/pcf/UniversalDatasetGrid/`.
+- **Standalone list/search dialog** (opened via button, not form-bound): implement as a React Code Page under `src/client/code-pages/` — do NOT use Dataset PCF for this (see ADR-006).
 - Reuse shared components from `src/client/shared/Spaarke.UI.Components/` rather than duplicating UI primitives.
 - Avoid adding new native subgrids or bespoke JS webresources; if you must, document an explicit exception and plan the PCF replacement.
+- PCF controls use React 16/17 APIs (platform-provided). Do NOT use `createRoot` or import from `react-dom/client` in PCF code (see ADR-022).
 
 ---
 
@@ -257,3 +260,4 @@ All exceptions require **explicit approval** from tech lead with documented rati
 |------|---------|---------|--------|
 | 2025-09-30 | 1.0 | Initial ADR creation post-Sprint 2 | Spaarke Engineering |
 | 2025-12-04 | 1.1 | Format update for AI readability | Spaarke Engineering |
+| 2026-02-23 | 1.2 | Revised scope: Dataset PCF is for form-embedded lists only; standalone dialogs/search pages → React Code Page (ADR-006). Corrected React version in tech stack: PCF uses React 16/17 platform-provided, not React 18. | Spaarke Engineering |

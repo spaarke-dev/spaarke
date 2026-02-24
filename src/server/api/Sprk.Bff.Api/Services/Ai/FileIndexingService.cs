@@ -278,7 +278,9 @@ public sealed class FileIndexingService : IFileIndexingService
         }
 
         // Step 2: Build KnowledgeDocument objects for each chunk
-        var chunkIdBase = documentId ?? speFileId;
+        // Always use speFileId as chunk ID base so re-indexing with a documentId
+        // overwrites old chunks (instead of creating new ones alongside stale orphans).
+        var chunkIdBase = speFileId;
         var fileExtension = Path.GetExtension(fileName)?.TrimStart('.').ToLowerInvariant();
         var now = DateTimeOffset.UtcNow;
 

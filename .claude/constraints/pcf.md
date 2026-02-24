@@ -1,18 +1,31 @@
-# PCF Control Constraints
+# Frontend UI Constraints
 
-> **Domain**: PCF/Frontend Development
-> **Source ADRs**: ADR-006, ADR-011, ADR-012
-> **Last Updated**: 2025-12-19
+> **Domain**: PCF Controls & React Code Pages
+> **Source ADRs**: ADR-006, ADR-011, ADR-012, ADR-021, ADR-022
+> **Last Updated**: 2026-02-23
 
 ---
 
 ## When to Load This File
 
 Load when:
-- Creating new PCF controls
-- Building model-driven app UI
+- Creating new PCF controls or React Code Pages
+- Building model-driven app UI (forms, dialogs, standalone pages)
 - Working with shared component library
 - Reviewing PCF/frontend code
+
+---
+
+## First Decision: PCF or React Code Page?
+
+| Situation | Use |
+|-----------|-----|
+| Field bound to Dataverse form (bound property, `updateView()` lifecycle) | **PCF** |
+| Opened as a standalone dialog via `navigateTo` | **React Code Page** |
+| Dataset embedded on a form (subgrid replacement) | **Dataset PCF** |
+| Standalone list/browse page opened as dialog | **React Code Page** |
+| Multi-step wizard dialog (Create Matter, etc.) | **React Code Page** |
+| Side panel / filter panel inside a custom page | **React Code Page** |
 
 ---
 
@@ -20,18 +33,31 @@ Load when:
 
 ### Architecture (ADR-006)
 
-- ✅ **MUST** build new interactive UI as PCF controls
+- ✅ **MUST** use PCF for field-bound form controls
+- ✅ **MUST** use React Code Page for standalone dialogs and custom pages
 - ✅ **MUST** place PCF controls in `src/client/pcf/`
-- ✅ **MUST** use React for SPA surfaces (Power Pages, add-ins)
+- ✅ **MUST** place React Code Pages in `src/client/code-pages/`
 - ✅ **MUST** keep ribbon/command bar scripts minimal (invocation only)
+
+### PCF Controls (ADR-022)
+
+- ✅ **MUST** use React 16 APIs (`ReactDOM.render` or ReactControl pattern)
+- ✅ **MUST** declare platform libraries in `ControlManifest.Input.xml`
+- ✅ **MUST** use `devDependencies` for React in PCF projects (not `dependencies`)
+- ✅ **MUST** include `featureconfig.json` with `pcfReactPlatformLibraries: "on"`
+
+### React Code Pages (ADR-006, ADR-021)
+
+- ✅ **MUST** use React 18 `createRoot()` entry point
+- ✅ **MUST** bundle React 18 + Fluent v9 in Code Page output
+- ✅ **MUST** read parameters from `URLSearchParams` (passed via `navigateTo` `data` field)
+- ✅ **MUST** open via `Xrm.Navigation.navigateTo({ pageType: "webresource", ... })`
 
 ### Dataset PCF (ADR-011)
 
-- ✅ **MUST** use Dataset PCF for list-based document UX
+- ✅ **MUST** use Dataset PCF for list-based document UX on forms
 - ✅ **MUST** implement/extend `src/client/pcf/UniversalDatasetGrid/`
 - ✅ **MUST** achieve 80%+ test coverage on PCF controls
-- ✅ **MUST** include Storybook stories for components
-- ✅ **MUST** use virtual scrolling for large lists
 
 ### Shared Components (ADR-012)
 
@@ -39,7 +65,6 @@ Load when:
 - ✅ **MUST** import shared components via `@spaarke/ui-components`
 - ✅ **MUST** use semantic tokens for theming (no hard-coded colors)
 - ✅ **MUST** support dark mode and high-contrast
-- ✅ **MUST** match model-driven app interaction patterns
 - ✅ **MUST** export TypeScript types alongside components
 - ✅ **MUST** achieve 90%+ test coverage on shared components
 
@@ -49,9 +74,16 @@ Load when:
 
 ### Architecture (ADR-006)
 
-- ❌ **MUST NOT** create new legacy JavaScript webresources
+- ❌ **MUST NOT** create legacy JavaScript webresources (no-framework JS, jQuery, ad hoc scripts)
 - ❌ **MUST NOT** add business logic to ribbon scripts
 - ❌ **MUST NOT** make remote calls from ribbon scripts
+- ❌ **MUST NOT** wrap a standalone dialog in custom page + PCF when a Code Page is simpler
+
+### PCF Controls (ADR-022)
+
+- ❌ **MUST NOT** use React 18 APIs in PCF controls (`createRoot`, concurrent features)
+- ❌ **MUST NOT** import from `react-dom/client` in PCF code
+- ❌ **MUST NOT** bundle React/Fluent in PCF output
 
 ### Dataset PCF (ADR-011)
 
@@ -65,52 +97,33 @@ Load when:
 - ❌ **MUST NOT** reference PCF-specific APIs in shared components
 - ❌ **MUST NOT** hard-code Dataverse entity names or schemas
 - ❌ **MUST NOT** use custom CSS (Fluent tokens only)
-- ❌ **MUST NOT** export components without tests
+- ❌ **MUST NOT** use React 18-only APIs in components intended for PCF consumption
 
 ---
 
-## Quick Reference Patterns
+## Quick Reference: Opening a Dialog
 
-### PCF Control Entry Point
-
-```typescript
-import { DataGrid } from "@spaarke/ui-components";
-import { FluentProvider } from "@fluentui/react-components";
-import { spaarkeLight } from "@spaarke/ui-components/theme";
-
-export class MyControl implements ComponentFramework.StandardControl<IInputs, IOutputs> {
-    public updateView(context: ComponentFramework.Context<IInputs>): void {
-        ReactDOM.render(
-            <FluentProvider theme={spaarkeLight}>
-                <DataGrid items={items} columns={columns} />
-            </FluentProvider>,
-            this.container
-        );
-    }
-}
-```
-
-### Shared Component Import
+### PCF → React Code Page dialog
 
 ```typescript
-import {
-    DataGrid,
-    StatusBadge,
-    CommandBar,
-    useDataverseFetch,
-    formatters
-} from "@spaarke/ui-components";
+// NavigationService.ts
+Xrm.Navigation.navigateTo(
+    {
+        pageType: "webresource",
+        webresourceName: "sprk_documentrelationshipviewer",
+        data: `documentId=${documentId}`,
+    },
+    { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" } }
+);
 ```
 
-### When to Use Dataset PCF vs Native Subgrid
+### Code Page: reading the parameter
 
-| Scenario | Technology |
-|----------|------------|
-| Related documents on forms | ✅ Dataset PCF |
-| Bulk operations with selection | ✅ Dataset PCF |
-| Custom actions needed | ✅ Dataset PCF |
-| Simple read-only reference (<20 records) | Native subgrid OK |
-| Admin/configuration lists | Native subgrid OK |
+```typescript
+// index.tsx
+const params = new URLSearchParams(window.location.search);
+const documentId = params.get("documentId") ?? "";
+```
 
 ---
 
@@ -118,39 +131,48 @@ import {
 
 ```
 src/client/
-├── pcf/                                    # PCF Controls
-│   ├── UniversalDatasetGrid/               # Main dataset PCF
-│   └── UniversalQuickCreate/               # Quick create dialog
+├── pcf/                                    # Field-bound PCF controls (React 16/17)
+│   ├── SemanticSearchControl/              # Form-embedded document search
+│   ├── UniversalDatasetGrid/              # Dataset PCF for form subgrids
+│   └── DocumentRelationshipViewer/        # (legacy — migrate to code-pages/)
+├── code-pages/                            # Standalone dialogs & pages (React 18)
+│   ├── DocumentRelationshipViewer/        # Graph visualization dialog
+│   ├── CreateMatterWizard/                # Multi-step matter creation
+│   └── DocumentUploadDialog/              # File upload wizard
 ├── shared/
-│   └── Spaarke.UI.Components/              # Shared React library
-│       ├── src/components/                 # DataGrid, CommandBar, etc.
-│       ├── src/hooks/                      # useDataverseFetch, etc.
-│       ├── src/theme/                      # spaarkeLight, spaarkeDark
-│       └── src/utils/                      # formatters, validators
-└── office-addins/                          # Office Add-ins
+│   └── Spaarke.UI.Components/             # Shared React library (both surfaces)
+│       ├── src/components/layout/         # WizardDialog, SidePanel, PageLayout
+│       ├── src/components/data/           # DataGrid, FilterPanel, CommandBar
+│       ├── src/components/feedback/       # LoadingState, EmptyState, ErrorState
+│       ├── src/hooks/
+│       ├── src/theme/
+│       └── src/utils/
+└── office-addins/                         # Office Add-ins (React 18)
 ```
 
 ---
 
-## Pattern Files (Complete Examples)
+## Pattern Files
 
-- [PCF Control Initialization](../patterns/pcf/control-initialization.md) - Lifecycle and React root
-- [Theme Management](../patterns/pcf/theme-management.md) - Dark mode and theme resolution
-- [Dataverse Queries](../patterns/pcf/dataverse-queries.md) - WebAPI and environment variables
-- [Error Handling](../patterns/pcf/error-handling.md) - Error boundaries and user experience
-- [Dialog Patterns](../patterns/pcf/dialog-patterns.md) - Dialog close and navigation
+- [Dialog Patterns](../patterns/pcf/dialog-patterns.md) — PCF dialog close, Code Page dialog opening
+- [PCF Control Initialization](../patterns/pcf/control-initialization.md) — Lifecycle and React root
+- [Theme Management](../patterns/pcf/theme-management.md) — Dark mode and theme resolution
+- [Dataverse Queries](../patterns/pcf/dataverse-queries.md) — WebAPI and environment variables
+- [Error Handling](../patterns/pcf/error-handling.md) — Error boundaries and user experience
 
 ---
 
-## Source ADRs (Full Context)
+## Source ADRs
 
 | ADR | Focus | When to Load |
 |-----|-------|--------------|
-| [ADR-006](../adr/ADR-006-pcf-over-webresources.md) | PCF vs webresources | Exception approval |
-| [ADR-011](../adr/ADR-011-dataset-pcf.md) | Dataset PCF vs subgrids | Implementation phases |
+| [ADR-006](../adr/ADR-006-pcf-over-webresources.md) | Two-tier: PCF vs Code Page | Surface selection |
+| [ADR-011](../adr/ADR-011-dataset-pcf.md) | Dataset PCF vs subgrids | List/grid decisions |
 | [ADR-012](../adr/ADR-012-shared-components.md) | Shared library | Component governance |
+| [ADR-021](../adr/ADR-021-fluent-design-system.md) | Fluent v9 + React version split | Styling, theming |
+| [ADR-022](../adr/ADR-022-pcf-platform-libraries.md) | PCF platform libraries | PCF-specific React rules |
 
 ---
 
-**Lines**: ~145
-**Purpose**: Single-file reference for all PCF development constraints
+**Lines**: ~165
+**Purpose**: Single-file reference for all frontend UI development constraints

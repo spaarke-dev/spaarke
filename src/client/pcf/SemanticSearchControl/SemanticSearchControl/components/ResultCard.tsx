@@ -3,12 +3,13 @@
  *
  * Displays a single search result with document info, similarity score,
  * metadata, highlighted snippet, and action buttons.
+ * v1.0.33: createdOn/createdBy metadata, Preview popover, Summary popover.
  *
  * @see ADR-021 for Fluent UI v9 requirements
  */
 
 import * as React from "react";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import {
     makeStyles,
     tokens,
@@ -21,7 +22,11 @@ import {
     MenuPopover,
     MenuList,
     MenuItem,
-    Divider,
+    Popover,
+    PopoverTrigger,
+    PopoverSurface,
+    Tooltip,
+    Spinner,
 } from "@fluentui/react-components";
 import {
     DocumentRegular,
@@ -29,9 +34,13 @@ import {
     Document20Regular,
     FolderOpenRegular,
     OpenRegular,
-    MoreHorizontalRegular,
+    BranchRegular,
+    GlobeRegular,
+    ArrowDownloadRegular,
+    Eye20Regular,
+    Sparkle20Regular,
 } from "@fluentui/react-icons";
-import { IResultCardProps, SearchResult } from "../types";
+import { IResultCardProps } from "../types";
 import { SimilarityBadge } from "./SimilarityBadge";
 import { HighlightedSnippet } from "./HighlightedSnippet";
 
@@ -68,15 +77,22 @@ const useStyles = makeStyles({
     metadata: {
         display: "flex",
         flexWrap: "wrap",
-        gap: tokens.spacingHorizontalS,
+        gap: tokens.spacingHorizontalXS,
         marginTop: tokens.spacingVerticalXS,
+        alignItems: "center",
     },
-    metaItem: {
+    metaLabel: {
+        fontWeight: tokens.fontWeightSemibold,
+        color: tokens.colorNeutralForeground3,
+        fontSize: tokens.fontSizeBase200,
+    },
+    metaValue: {
         color: tokens.colorNeutralForeground2,
         fontSize: tokens.fontSizeBase200,
     },
     metaSeparator: {
         color: tokens.colorNeutralForeground3,
+        fontSize: tokens.fontSizeBase200,
     },
     snippet: {
         marginTop: tokens.spacingVerticalS,
@@ -87,9 +103,30 @@ const useStyles = makeStyles({
         gap: tokens.spacingHorizontalS,
         marginTop: tokens.spacingVerticalS,
         paddingLeft: `calc(24px + ${tokens.spacingHorizontalM})`,
+        flexWrap: "wrap",
     },
     badge: {
         flexShrink: 0,
+    },
+    previewPopover: {
+        width: "480px",
+        height: "640px",
+        padding: "0px",
+        overflow: "hidden",
+    },
+    previewFrame: {
+        width: "100%",
+        height: "100%",
+        border: "none",
+        display: "block",
+    },
+    summaryPopover: {
+        maxWidth: "420px",
+        maxHeight: "300px",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: tokens.spacingVerticalS,
     },
 });
 
@@ -114,12 +151,12 @@ function getFileIcon(fileType: string): React.ReactElement {
  */
 function formatDate(dateString: string | null): string {
     if (!dateString) {
-        return "—";
+        return "";
     }
     try {
         const date = new Date(dateString);
         if (isNaN(date.getTime())) {
-            return "—";
+            return "";
         }
         return date.toLocaleDateString(undefined, {
             year: "numeric",
@@ -127,7 +164,7 @@ function formatDate(dateString: string | null): string {
             day: "numeric",
         });
     } catch {
-        return "—";
+        return "";
     }
 }
 
@@ -138,6 +175,8 @@ function formatDate(dateString: string | null): string {
  * @param props.onClick - Callback when card is clicked
  * @param props.onOpenFile - Callback to open file
  * @param props.onOpenRecord - Callback to open record (inModal: boolean)
+ * @param props.onFindSimilar - Callback to find similar documents
+ * @param props.onPreview - Callback to get preview URL (lazy-loaded)
  * @param props.compactMode - Whether in compact mode
  */
 export const ResultCard: React.FC<IResultCardProps> = ({
@@ -145,9 +184,16 @@ export const ResultCard: React.FC<IResultCardProps> = ({
     onClick,
     onOpenFile,
     onOpenRecord,
+    onFindSimilar,
+    onPreview,
     compactMode,
 }) => {
     const styles = useStyles();
+
+    // Preview popover state — URL is lazy-loaded via onPreview callback
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const [previewLoading, setPreviewLoading] = useState(false);
+    const [previewError, setPreviewError] = useState(false);
 
     // Handle card click
     const handleCardClick = useCallback(
@@ -161,11 +207,20 @@ export const ResultCard: React.FC<IResultCardProps> = ({
         [onClick]
     );
 
-    // Handle Open File
-    const handleOpenFile = useCallback(
+    // Handle Open File in Web
+    const handleOpenFileWeb = useCallback(
         (ev: React.MouseEvent) => {
             ev.stopPropagation();
-            onOpenFile();
+            onOpenFile("web");
+        },
+        [onOpenFile]
+    );
+
+    // Handle Open File in Desktop Application
+    const handleOpenFileDesktop = useCallback(
+        (ev: React.MouseEvent) => {
+            ev.stopPropagation();
+            onOpenFile("desktop");
         },
         [onOpenFile]
     );
@@ -180,9 +235,21 @@ export const ResultCard: React.FC<IResultCardProps> = ({
         onOpenRecord(false);
     }, [onOpenRecord]);
 
+    // Handle Find Similar
+    const handleFindSimilar = useCallback(
+        (ev: React.MouseEvent) => {
+            ev.stopPropagation();
+            onFindSimilar();
+        },
+        [onFindSimilar]
+    );
+
     const cardClassName = compactMode
         ? `${styles.card} ${styles.cardCompact}`
         : styles.card;
+
+    const formattedDate = formatDate(result.createdAt);
+    const hasSummary = Boolean(result.summary || result.tldr);
 
     return (
         <Card
@@ -198,23 +265,19 @@ export const ResultCard: React.FC<IResultCardProps> = ({
                             {result.name}
                         </Text>
                         <div className={styles.metadata}>
-                            <Text className={styles.metaItem}>
-                                {result.documentType}
-                            </Text>
-                            {result.matterName && (
+                            {formattedDate && (
                                 <>
-                                    <Text className={styles.metaSeparator}>
-                                        |
-                                    </Text>
-                                    <Text className={styles.metaItem}>
-                                        {result.matterName}
-                                    </Text>
+                                    <Text className={styles.metaLabel}>createdOn:</Text>
+                                    <Text className={styles.metaValue}>{formattedDate}</Text>
                                 </>
                             )}
-                            <Text className={styles.metaSeparator}>|</Text>
-                            <Text className={styles.metaItem}>
-                                {formatDate(result.createdAt)}
-                            </Text>
+                            {result.createdBy && (
+                                <>
+                                    {formattedDate && <Text className={styles.metaSeparator}>&middot;</Text>}
+                                    <Text className={styles.metaLabel}>createdBy:</Text>
+                                    <Text className={styles.metaValue}>{result.createdBy}</Text>
+                                </>
+                            )}
                         </div>
                     </div>
                 }
@@ -226,7 +289,7 @@ export const ResultCard: React.FC<IResultCardProps> = ({
             />
 
             {/* Highlighted snippet */}
-            {!compactMode && result.highlights.length > 0 && (
+            {!compactMode && (result.highlights?.length ?? 0) > 0 && (
                 <div className={styles.snippet}>
                     <HighlightedSnippet
                         text={result.highlights[0]}
@@ -237,14 +300,27 @@ export const ResultCard: React.FC<IResultCardProps> = ({
 
             {/* Action buttons */}
             <div className={styles.actions}>
-                <Button
-                    appearance="subtle"
-                    size="small"
-                    icon={<FolderOpenRegular />}
-                    onClick={handleOpenFile}
-                >
-                    Open File
-                </Button>
+                <Menu>
+                    <MenuTrigger disableButtonEnhancement>
+                        <Button
+                            appearance="subtle"
+                            size="small"
+                            icon={<FolderOpenRegular />}
+                        >
+                            Open File
+                        </Button>
+                    </MenuTrigger>
+                    <MenuPopover>
+                        <MenuList>
+                            <MenuItem icon={<GlobeRegular />} onClick={handleOpenFileWeb}>
+                                Open in Web
+                            </MenuItem>
+                            <MenuItem icon={<ArrowDownloadRegular />} onClick={handleOpenFileDesktop}>
+                                Open in Desktop
+                            </MenuItem>
+                        </MenuList>
+                    </MenuPopover>
+                </Menu>
 
                 <Menu>
                     <MenuTrigger disableButtonEnhancement>
@@ -267,6 +343,95 @@ export const ResultCard: React.FC<IResultCardProps> = ({
                         </MenuList>
                     </MenuPopover>
                 </Menu>
+
+                <Button
+                    appearance="subtle"
+                    size="small"
+                    icon={<BranchRegular />}
+                    onClick={handleFindSimilar}
+                >
+                    Find Similar
+                </Button>
+
+                {/* Preview — lazy-loads document URL on popover open */}
+                <Popover
+                    positioning="after"
+                    withArrow
+                    onOpenChange={(_ev, data) => {
+                        if (data.open && !previewUrl && !previewLoading) {
+                            setPreviewLoading(true);
+                            setPreviewError(false);
+                            void onPreview()
+                                .then((url) => {
+                                    setPreviewUrl(url);
+                                    setPreviewLoading(false);
+                                    return url;
+                                })
+                                .catch(() => {
+                                    setPreviewError(true);
+                                    setPreviewLoading(false);
+                                });
+                        }
+                    }}
+                >
+                    <PopoverTrigger disableButtonEnhancement>
+                        <Tooltip content="Preview document" relationship="label">
+                            <Button
+                                appearance="subtle"
+                                size="small"
+                                icon={<Eye20Regular />}
+                                onClick={(ev) => ev.stopPropagation()}
+                            >
+                                Preview
+                            </Button>
+                        </Tooltip>
+                    </PopoverTrigger>
+                    <PopoverSurface className={styles.previewPopover}>
+                        {previewLoading && (
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+                                <Spinner size="medium" label="Loading preview..." />
+                            </div>
+                        )}
+                        {previewError && (
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", padding: "16px" }}>
+                                <Text>Preview not available for this document.</Text>
+                            </div>
+                        )}
+                        {previewUrl && !previewLoading && (
+                            <iframe
+                                src={previewUrl}
+                                title={result.name}
+                                className={styles.previewFrame}
+                            />
+                        )}
+                    </PopoverSurface>
+                </Popover>
+
+                {/* Summary — AI summary popover */}
+                {hasSummary && (
+                    <Popover positioning="above" withArrow>
+                        <PopoverTrigger disableButtonEnhancement>
+                            <Tooltip content="View AI summary" relationship="label">
+                                <Button
+                                    appearance="subtle"
+                                    size="small"
+                                    icon={<Sparkle20Regular />}
+                                    onClick={(ev) => ev.stopPropagation()}
+                                >
+                                    Summary
+                                </Button>
+                            </Tooltip>
+                        </PopoverTrigger>
+                        <PopoverSurface className={styles.summaryPopover}>
+                            {result.tldr && (
+                                <Text weight="semibold">{result.tldr}</Text>
+                            )}
+                            {result.summary && (
+                                <Text style={{ whiteSpace: "pre-wrap" }}>{result.summary}</Text>
+                            )}
+                        </PopoverSurface>
+                    </Popover>
+                )}
             </div>
         </Card>
     );

@@ -14,6 +14,8 @@ export interface ISemanticSearchControlProps {
     context: ComponentFramework.Context<IInputs>;
     notifyOutputChanged: () => void;
     onDocumentSelect: (documentId: string) => void;
+    /** Whether the resolved Fluent theme is dark mode (from PCF context) */
+    isDarkMode?: boolean;
 }
 
 /**
@@ -25,6 +27,7 @@ export interface ISearchInputProps {
     disabled: boolean;
     onValueChange: (value: string) => void;
     onSearch: () => void;
+    onAddDocument: () => void;
 }
 
 /**
@@ -36,6 +39,7 @@ export interface IFilterPanelProps {
     scopeId: string | null;
     onFiltersChange: (filters: SearchFilters) => void;
     disabled: boolean;
+    onCollapse?: () => void;
 }
 
 /**
@@ -79,8 +83,10 @@ export interface IResultsListProps {
     totalCount: number;
     onLoadMore: () => void;
     onResultClick: (result: SearchResult) => void;
-    onOpenFile: (result: SearchResult) => void;
+    onOpenFile: (result: SearchResult, mode: "web" | "desktop") => void;
     onOpenRecord: (result: SearchResult, inModal: boolean) => void;
+    onFindSimilar: (result: SearchResult) => void;
+    onPreview: (result: SearchResult) => Promise<string | null>;
     onViewAll: () => void;
     compactMode: boolean;
 }
@@ -91,8 +97,10 @@ export interface IResultsListProps {
 export interface IResultCardProps {
     result: SearchResult;
     onClick: () => void;
-    onOpenFile: () => void;
+    onOpenFile: (mode: "web" | "desktop") => void;
     onOpenRecord: (inModal: boolean) => void;
+    onFindSimilar: () => void;
+    onPreview: () => Promise<string | null>;
     compactMode: boolean;
 }
 

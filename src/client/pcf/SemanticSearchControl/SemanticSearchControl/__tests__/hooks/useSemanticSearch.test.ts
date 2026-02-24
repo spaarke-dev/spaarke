@@ -28,6 +28,9 @@ const createMockResponse = (results: number, total: number): SearchResponse => (
         highlights: ["test highlight"],
         fileUrl: `https://example.com/doc-${i}`,
         recordUrl: `https://crm.dynamics.com/doc-${i}`,
+        createdBy: null,
+        summary: null,
+        tldr: null,
     })),
     totalCount: total,
     metadata: {

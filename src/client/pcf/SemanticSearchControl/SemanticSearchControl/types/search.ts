@@ -68,6 +68,9 @@ export interface SearchResult {
     recordUrl: string;
     entityLogicalName?: string;
     recordId?: string;
+    createdBy: string | null;
+    summary: string | null;
+    tldr: string | null;
 }
 
 /**

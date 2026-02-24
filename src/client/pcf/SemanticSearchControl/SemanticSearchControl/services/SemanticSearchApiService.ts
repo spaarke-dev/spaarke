@@ -24,6 +24,29 @@ interface ApiErrorResponse {
 }
 
 /**
+ * Response from GET /api/documents/{id}/open-links
+ */
+export interface OpenLinksResponse {
+    desktopUrl: string | null;
+    webUrl: string;
+    mimeType: string;
+    fileName: string;
+}
+
+/**
+ * Response from GET /api/documents/{id}/preview-url
+ */
+export interface PreviewUrlResponse {
+    previewUrl: string;
+    documentInfo: {
+        name: string;
+        mimeType: string;
+    } | null;
+    checkoutStatus: unknown;
+    correlationId: string;
+}
+
+/**
  * Service for semantic search API calls
  */
 export class SemanticSearchApiService {
@@ -88,11 +111,16 @@ export class SemanticSearchApiService {
             // Parse response
             const data: SearchResponse = await response.json();
 
-            // DEBUG: Log the API response
+            // DEBUG: Log the API response including documentId fields
             console.log("[SemanticSearchApiService] API response:", {
                 totalCount: data.totalCount,
                 resultsCount: data.results?.length ?? 0,
                 metadata: data.metadata,
+                firstResults: data.results?.slice(0, 3).map((r) => ({
+                    documentId: r.documentId,
+                    name: r.name,
+                    keys: Object.keys(r as object),
+                })),
             });
 
             return this.validateResponse(data);
@@ -117,6 +145,119 @@ export class SemanticSearchApiService {
                 "UNKNOWN_ERROR",
                 true
             );
+        }
+    }
+
+    /**
+     * Get open links (web URL and desktop protocol URL) for a document.
+     * Calls GET /api/documents/{documentId}/open-links which fetches SPE file URLs
+     * via Graph API and constructs the appropriate desktop protocol URL.
+     * @param documentId - Dataverse sprk_document record GUID
+     * @returns OpenLinksResponse with webUrl and optional desktopUrl
+     */
+    async getOpenLinks(documentId: string): Promise<OpenLinksResponse> {
+        const endpoint = `${this.apiBaseUrl}/api/documents/${encodeURIComponent(documentId)}/open-links`;
+
+        try {
+            const token = await this.authProvider.getAccessToken();
+            if (!token) {
+                throw this.createError(
+                    "Authentication required. Please sign in.",
+                    "AUTH_REQUIRED",
+                    true
+                );
+            }
+
+            console.log("[SemanticSearchApiService] getOpenLinks:", { documentId, endpoint });
+
+            const response = await fetch(endpoint, {
+                method: "GET",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+
+            if (!response.ok) {
+                const errorMessage = `Failed to get open links (HTTP ${response.status})`;
+                throw this.createError(errorMessage, `HTTP_${response.status}`, false);
+            }
+
+            const data = await response.json() as OpenLinksResponse;
+
+            console.log("[SemanticSearchApiService] getOpenLinks response:", {
+                hasDesktopUrl: !!data.desktopUrl,
+                hasWebUrl: !!data.webUrl,
+                mimeType: data.mimeType,
+            });
+
+            return data;
+        } catch (error) {
+            if (this.isSearchError(error)) {
+                throw error;
+            }
+            if (error instanceof TypeError && error.message.includes("fetch")) {
+                throw this.createError(
+                    "Unable to connect to the search service.",
+                    "NETWORK_ERROR",
+                    true
+                );
+            }
+            throw this.createError(
+                "Failed to get file open links.",
+                "OPEN_LINKS_ERROR",
+                false
+            );
+        }
+    }
+
+    /**
+     * Get a read-only preview URL for a document.
+     * Calls GET /api/documents/{documentId}/preview-url which uses the Graph API
+     * preview endpoint to return an ephemeral embed URL (~10 min expiry).
+     * @param documentId - Dataverse sprk_document record GUID
+     * @returns Preview URL string, or null if not available
+     */
+    async getPreviewUrl(documentId: string): Promise<string | null> {
+        const endpoint = `${this.apiBaseUrl}/api/documents/${encodeURIComponent(documentId)}/preview-url`;
+
+        try {
+            const token = await this.authProvider.getAccessToken();
+            if (!token) {
+                throw this.createError(
+                    "Authentication required. Please sign in.",
+                    "AUTH_REQUIRED",
+                    true
+                );
+            }
+
+            console.log("[SemanticSearchApiService] getPreviewUrl:", { documentId, endpoint });
+
+            const response = await fetch(endpoint, {
+                method: "GET",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+
+            if (!response.ok) {
+                console.warn("[SemanticSearchApiService] getPreviewUrl failed:", response.status);
+                return null;
+            }
+
+            const data = await response.json() as PreviewUrlResponse;
+
+            console.log("[SemanticSearchApiService] getPreviewUrl response:", {
+                hasPreviewUrl: !!data.previewUrl,
+                documentInfo: data.documentInfo,
+            });
+
+            return data.previewUrl ?? null;
+        } catch (error) {
+            if (this.isSearchError(error)) {
+                throw error;
+            }
+            console.error("[SemanticSearchApiService] getPreviewUrl error:", error);
+            return null;
         }
     }
 
@@ -209,10 +350,21 @@ export class SemanticSearchApiService {
             );
         }
 
-        // Normalize response
+        // Normalize response — ensure array fields are never null (API may return null instead of [])
         return {
-            results: response.results,
-            totalCount: response.totalCount ?? response.results.length,
+            results: response.results.map((r) => ({
+                ...r,
+                highlights: Array.isArray(r.highlights) ? r.highlights : [],
+                documentType: r.documentType ?? "",
+                fileUrl: r.fileUrl ?? "",
+                recordUrl: r.recordUrl ?? "",
+                createdBy: r.createdBy ?? null,
+                summary: r.summary ?? null,
+                tldr: r.tldr ?? null,
+            })),
+            // BFF returns total count in metadata.totalResults, not at top level
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            totalCount: response.totalCount ?? (response.metadata as any)?.totalResults ?? response.results.length,
             metadata: response.metadata ?? {
                 searchTimeMs: 0,
                 query: "",

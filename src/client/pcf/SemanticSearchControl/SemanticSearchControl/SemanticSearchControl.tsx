@@ -10,14 +10,20 @@
  */
 
 import * as React from "react";
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
     makeStyles,
     tokens,
     shorthands,
     Text,
     Link,
+    Button,
+    Tooltip,
+    Dialog,
+    DialogSurface,
+    DialogBody,
 } from "@fluentui/react-components";
+import { ChevronRight20Regular } from "@fluentui/react-icons";
 import {
     ISemanticSearchControlProps,
     SearchFilters,
@@ -52,6 +58,8 @@ const useStyles = makeStyles({
         display: "flex",
         flexDirection: "column",
         height: "100%",
+        width: "100%",
+        boxSizing: "border-box",
         backgroundColor: tokens.colorNeutralBackground1,
         color: tokens.colorNeutralForeground1,
         fontFamily: tokens.fontFamilyBase,
@@ -88,7 +96,8 @@ const useStyles = makeStyles({
     sidebar: {
         width: "250px",
         flexShrink: 0,
-        ...shorthands.padding(tokens.spacingHorizontalM),
+        boxSizing: "border-box",
+        ...shorthands.padding(tokens.spacingHorizontalS),
         backgroundColor: tokens.colorNeutralBackground3,
         ...shorthands.borderRight(
             tokens.strokeWidthThin,
@@ -96,6 +105,23 @@ const useStyles = makeStyles({
             tokens.colorNeutralStroke1
         ),
         overflowY: "auto",
+        overflowX: "hidden",
+    },
+
+    // Collapsed sidebar strip
+    sidebarCollapsed: {
+        width: "36px",
+        flexShrink: 0,
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        paddingTop: tokens.spacingVerticalS,
+        backgroundColor: tokens.colorNeutralBackground3,
+        ...shorthands.borderRight(
+            tokens.strokeWidthThin,
+            "solid",
+            tokens.colorNeutralStroke1
+        ),
     },
 
     // Main region (results list)
@@ -142,6 +168,34 @@ const useStyles = makeStyles({
         fontSize: tokens.fontSizeBase100,
         color: tokens.colorNeutralForeground4,
     },
+
+    // Find Similar iframe dialog
+    findSimilarSurface: {
+        padding: "0px",
+        width: "85vw",
+        maxWidth: "85vw",
+        height: "85vh",
+        maxHeight: "85vh",
+        display: "flex",
+        flexDirection: "column",
+        ...shorthands.overflow("hidden"),
+        ...shorthands.borderRadius(tokens.borderRadiusXLarge),
+    },
+    findSimilarBody: {
+        padding: "0px",
+        flex: 1,
+        minHeight: 0,
+        position: "relative" as const,
+    },
+    findSimilarFrame: {
+        position: "absolute" as const,
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: "100%",
+        border: "none",
+        display: "block",
+    },
 });
 
 /**
@@ -153,6 +207,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     context,
     notifyOutputChanged,
     onDocumentSelect,
+    isDarkMode = false,
 }) => {
     const styles = useStyles();
 
@@ -218,6 +273,15 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     const [queryInput, setQueryInput] = useState("");
     const [hasSearched, setHasSearched] = useState(false);
 
+    // Find Similar dialog state — URL of the web resource to show in the iframe dialog
+    const [findSimilarUrl, setFindSimilarUrl] = useState<string | null>(null);
+
+    // Filter pane collapse state
+    const [isFilterPaneCollapsed, setIsFilterPaneCollapsed] = useState(false);
+    const handleToggleFilterPane = useCallback(() => {
+        setIsFilterPaneCollapsed((prev) => !prev);
+    }, []);
+
     // Initialize services (memoized to prevent recreation)
     const authProvider = useMemo(() => MsalAuthProvider.getInstance(), []);
     const apiService = useMemo(
@@ -229,6 +293,28 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     // Auth initialization state
     const [isAuthInitialized, setIsAuthInitialized] = useState(false);
     const [authError, setAuthError] = useState<string | null>(null);
+
+    // Filter state management — declared BEFORE auth effects so useEffect can reference filters
+    const {
+        filters,
+        setFilters,
+        clearFilters,
+        hasActiveFilters,
+    } = useFilters();
+
+    // Search state management — declared BEFORE auth effects so useEffect can reference search
+    const {
+        results,
+        totalCount,
+        isLoading,
+        isLoadingMore,
+        error,
+        hasMore,
+        query,
+        search,
+        loadMore,
+        reset,
+    } = useSemanticSearch(apiService, searchScope, scopeId);
 
     // Initialize MSAL on mount
     useEffect(() => {
@@ -244,46 +330,31 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         void initAuth();
     }, [authProvider]);
 
-    // Filter state management
-    const {
-        filters,
-        setFilters,
-        clearFilters,
-        hasActiveFilters,
-    } = useFilters();
+    // Auto-load all documents once auth is ready (shows documents without requiring a search query).
+    // search and filters intentionally omitted from deps — we only want to fire once on auth ready.
+    useEffect(() => {
+        if (isAuthInitialized) {
+            setHasSearched(true);
+            void search("", filters);
+        }
+    }, [isAuthInitialized]);
 
-    // Search state management
-    const {
-        results,
-        totalCount,
-        isLoading,
-        isLoadingMore,
-        error,
-        hasMore,
-        query,
-        search,
-        loadMore,
-        reset,
-    } = useSemanticSearch(apiService, searchScope, scopeId);
-
-    // Execute search
+    // Execute search — empty query is allowed (returns all documents in scope)
     const handleSearch = useCallback(() => {
         if (!isAuthInitialized) {
             console.warn("[SemanticSearchControl] Cannot search - auth not initialized");
             return;
         }
-        if (queryInput.trim()) {
-            setHasSearched(true);
-            void search(queryInput, filters);
-        }
+        setHasSearched(true);
+        void search(queryInput, filters);
     }, [queryInput, filters, search, isAuthInitialized]);
 
-    // Handle filter changes - trigger new search
+    // Handle filter changes - trigger new search even with no query
     const handleFiltersChange = useCallback(
         (newFilters: SearchFilters) => {
             setFilters(newFilters);
-            // Re-search if we have an active query
-            if (query.trim() && hasSearched) {
+            // Re-search whenever initial load has happened (supports filter-only queries)
+            if (hasSearched) {
                 void search(query, newFilters);
             }
         },
@@ -306,12 +377,26 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         [onDocumentSelect, notifyOutputChanged]
     );
 
-    // Handle open file
+    // Handle open file — mode is "web" (browser) or "desktop" (Office app).
+    // Calls the BFF /api/documents/{id}/open-links endpoint on demand to get the
+    // SharePoint webUrl and desktop protocol URL (ms-word://, ms-excel://, etc.)
+    // since search results do not pre-populate fileUrl.
     const handleOpenFile = useCallback(
-        (result: SearchResult) => {
-            navigationService.openFile(result.fileUrl);
+        (result: SearchResult, mode: "web" | "desktop") => {
+            apiService.getOpenLinks(result.documentId).then((openLinks) => {
+                if (mode === "web") {
+                    return window.open(openLinks.webUrl, "_blank", "noopener,noreferrer");
+                }
+                // Desktop: use protocol URL if available, otherwise fall back to web
+                if (openLinks.desktopUrl) {
+                    return window.open(openLinks.desktopUrl, "_self");
+                }
+                return window.open(openLinks.webUrl, "_blank", "noopener,noreferrer");
+            }).catch((err) => {
+                console.error("[SemanticSearchControl] Failed to open file:", err);
+            });
         },
-        [navigationService]
+        [apiService]
     );
 
     // Handle open record
@@ -330,6 +415,47 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     const handleViewAll = useCallback(() => {
         void navigationService.viewAllResults(query, searchScope, scopeId, filters);
     }, [navigationService, query, searchScope, scopeId, filters]);
+
+    // Handle Find Similar — opens DocumentRelationshipViewer as an in-page iframe dialog
+    const handleFindSimilar = useCallback(
+        (result: SearchResult) => {
+            const url = navigationService.getFindSimilarUrl(result, isDarkMode);
+            if (url) setFindSimilarUrl(url);
+        },
+        [navigationService, isDarkMode]
+    );
+
+    // Preview URL cache — avoids redundant BFF calls for the same document
+    const previewUrlCache = useRef<Map<string, string>>(new Map());
+
+    // Handle Preview — fetches a read-only preview URL via Graph API preview endpoint
+    const handlePreview = useCallback(
+        async (result: SearchResult): Promise<string | null> => {
+            // Return cached URL if available
+            const cached = previewUrlCache.current.get(result.documentId);
+            if (cached) return cached;
+
+            try {
+                const url = await apiService.getPreviewUrl(result.documentId);
+                if (url) {
+                    previewUrlCache.current.set(result.documentId, url);
+                }
+                return url;
+            } catch (err) {
+                console.error("[SemanticSearchControl] Failed to get preview URL:", err);
+                return null;
+            }
+        },
+        [apiService]
+    );
+
+    // Handle Add Document — opens document upload dialog custom page
+    const handleAddDocument = useCallback(() => {
+        void navigationService.openAddDocument(
+            scopeId,
+            searchScope !== "all" ? searchScope : null
+        );
+    }, [navigationService, scopeId, searchScope]);
 
     // Determine what content to show in main area
     const renderMainContent = () => {
@@ -399,6 +525,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
                     onResultClick={handleResultClick}
                     onOpenFile={handleOpenFile}
                     onOpenRecord={handleOpenRecord}
+                    onFindSimilar={handleFindSimilar}
+                    onPreview={handlePreview}
                     onViewAll={handleViewAll}
                     compactMode={compactMode}
                 />
@@ -428,6 +556,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
                     disabled={isLoading}
                     onValueChange={setQueryInput}
                     onSearch={handleSearch}
+                    onAddDocument={handleAddDocument}
                 />
             </div>
 
@@ -435,15 +564,30 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
             <div className={styles.content}>
                 {/* Sidebar Region: Filters (hidden in compact mode or when disabled) */}
                 {showFilters && !compactMode && (
-                    <div className={styles.sidebar}>
-                        <FilterPanel
-                            filters={filters}
-                            searchScope={searchScope}
-                            scopeId={scopeId}
-                            onFiltersChange={handleFiltersChange}
-                            disabled={isLoading}
-                        />
-                    </div>
+                    isFilterPaneCollapsed ? (
+                        <div className={styles.sidebarCollapsed}>
+                            <Tooltip content="Expand filters" relationship="label">
+                                <Button
+                                    appearance="subtle"
+                                    size="small"
+                                    icon={<ChevronRight20Regular />}
+                                    onClick={handleToggleFilterPane}
+                                    aria-label="Expand filters"
+                                />
+                            </Tooltip>
+                        </div>
+                    ) : (
+                        <div className={styles.sidebar}>
+                            <FilterPanel
+                                filters={filters}
+                                searchScope={searchScope}
+                                scopeId={scopeId}
+                                onFiltersChange={handleFiltersChange}
+                                disabled={isLoading}
+                                onCollapse={handleToggleFilterPane}
+                            />
+                        </div>
+                    )
                 )}
 
                 {/* Main Region: Results */}
@@ -463,8 +607,26 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
             {/* Version Footer (always visible) */}
             <div className={styles.versionFooter}>
-                <Text size={100}>v1.0.22 • Built 2026-01-26</Text>
+                <Text size={100}>v1.0.36 • Built 2026-02-24</Text>
             </div>
+
+            {/* Find Similar — iframe dialog (no Dataverse chrome) */}
+            <Dialog
+                open={!!findSimilarUrl}
+                onOpenChange={(_, data) => { if (!data.open) setFindSimilarUrl(null); }}
+            >
+                <DialogSurface className={styles.findSimilarSurface}>
+                    <DialogBody className={styles.findSimilarBody}>
+                        {findSimilarUrl && (
+                            <iframe
+                                src={findSimilarUrl}
+                                title="Document Relationships"
+                                className={styles.findSimilarFrame}
+                            />
+                        )}
+                    </DialogBody>
+                </DialogSurface>
+            </Dialog>
         </div>
     );
 };

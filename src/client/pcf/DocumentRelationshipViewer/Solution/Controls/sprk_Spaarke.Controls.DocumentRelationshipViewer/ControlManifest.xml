@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="DocumentRelationshipViewer" version="1.0.29" display-name-key="Document Relationship Viewer" description-key="Remove Open label, icon only (v1.0.29)" control-type="virtual" api-version="1.3.18">
+  <control namespace="Spaarke.Controls" constructor="DocumentRelationshipViewer" version="1.0.31" display-name-key="Document Relationship Viewer" description-key="Validate bound documentId is GUID — fallback to entity record ID (v1.0.31)" control-type="virtual" api-version="1.3.18">
     <external-service-usage enabled="true">
       <domain>spe-api-dev-67e2xz.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>

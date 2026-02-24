@@ -17,7 +17,7 @@ import {
     Button,
     Divider,
 } from "@fluentui/react-components";
-import { Dismiss20Regular } from "@fluentui/react-icons";
+import { Dismiss20Regular, ChevronLeft20Regular } from "@fluentui/react-icons";
 import { IFilterPanelProps, SearchFilters, DateRange } from "../types";
 import { FilterDropdown } from "./FilterDropdown";
 import { DateRangeFilter } from "./DateRangeFilter";
@@ -42,7 +42,15 @@ const useStyles = makeStyles({
         flexDirection: "column",
         gap: tokens.spacingVerticalXS,
     },
+    headerActions: {
+        display: "flex",
+        alignItems: "center",
+        gap: tokens.spacingHorizontalXXS,
+    },
     clearButton: {
+        minWidth: "auto",
+    },
+    collapseButton: {
         minWidth: "auto",
     },
 });
@@ -69,6 +77,7 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
     searchScope,
     onFiltersChange,
     disabled,
+    onCollapse,
 }) => {
     const styles = useStyles();
 
@@ -141,21 +150,33 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
 
     return (
         <div className={styles.container}>
-            {/* Header with Clear button */}
+            {/* Header with Clear and Collapse buttons */}
             <div className={styles.header}>
                 <Text className={styles.title}>Filters</Text>
-                {hasActiveFilters && (
-                    <Button
-                        className={styles.clearButton}
-                        appearance="subtle"
-                        size="small"
-                        icon={<Dismiss20Regular />}
-                        onClick={handleClearFilters}
-                        disabled={disabled}
-                    >
-                        Clear
-                    </Button>
-                )}
+                <div className={styles.headerActions}>
+                    {hasActiveFilters && (
+                        <Button
+                            className={styles.clearButton}
+                            appearance="subtle"
+                            size="small"
+                            icon={<Dismiss20Regular />}
+                            onClick={handleClearFilters}
+                            disabled={disabled}
+                        >
+                            Clear
+                        </Button>
+                    )}
+                    {onCollapse && (
+                        <Button
+                            className={styles.collapseButton}
+                            appearance="subtle"
+                            size="small"
+                            icon={<ChevronLeft20Regular />}
+                            onClick={onCollapse}
+                            aria-label="Collapse filters"
+                        />
+                    )}
+                </div>
             </div>
 
             <Divider />
