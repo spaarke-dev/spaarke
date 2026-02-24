@@ -74,7 +74,19 @@ public class ChatSessionManager
             sessionId, tenantId, documentId, playbookId);
 
         // 1. Persist to Dataverse (cold storage — authoritative record)
-        await _dataverseRepository.CreateSessionAsync(session, ct);
+        // Non-fatal: if the sprk_aichatsummary entity is not yet deployed, log and continue.
+        // Redis is the hot path and sufficient for session functionality (Phase 1).
+        try
+        {
+            await _dataverseRepository.CreateSessionAsync(session, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex,
+                "Dataverse persistence failed for session {SessionId} — continuing with Redis only. " +
+                "Ensure sprk_aichatsummary entity exists in the environment.",
+                sessionId);
+        }
 
         // 2. Warm the Redis cache (hot path — fast lookup)
         await CacheSessionAsync(session, ct);

@@ -8,7 +8,7 @@
     <Descriptions>
       <Description description="AI Document Analysis Workspace with SprkChat integration" languagecode="1033" />
     </Descriptions>
-    <Version>1.3.1</Version>
+    <Version>1.3.4</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>

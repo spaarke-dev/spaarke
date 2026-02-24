@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="AnalysisWorkspace" version="1.3.1" display-name-key="Analysis Workspace" description-key="Fix SprkChat API URL normalization to prevent double /api prefix (v1.3.1)" control-type="standard">
+  <control namespace="Spaarke.Controls" constructor="AnalysisWorkspace" version="1.3.4" display-name-key="Analysis Workspace" description-key="Bundle React 18 fully - no platform-library externalization (v1.3.4)" control-type="standard">
     <external-service-usage enabled="false">
     </external-service-usage>
 
@@ -51,9 +51,8 @@
     <resources>
       <code path="index.ts" order="1" />
       <css path="css/AnalysisWorkspace.css" order="1" />
-      <!-- Host-provided libraries: DO NOT bundle React/Fluent -->
-      <platform-library name="React" version="16.14.0" />
-      <platform-library name="Fluent" version="9.46.2" />
+      <!-- Bundle React 18 fully (no platform-library) to avoid React 16/18 mismatch -->
+      <!-- Fluent UI v9 also bundled to use same React instance -->
     </resources>
 
     <feature-usage>

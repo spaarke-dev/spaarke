@@ -53,13 +53,30 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
     /**
      * Make an authenticated API request.
      */
+    /**
+     * Extract tenant ID from JWT access token for X-Tenant-Id header.
+     * Azure AD tokens include 'tid' claim with the tenant GUID.
+     */
+    const extractTenantId = (token: string): string | null => {
+        try {
+            const parts = token.split(".");
+            if (parts.length !== 3) return null;
+            const payload = JSON.parse(atob(parts[1]));
+            return payload.tid || null;
+        } catch {
+            return null;
+        }
+    };
+
     const apiRequest = useCallback(
         async (url: string, init?: RequestInit): Promise<Response> => {
+            const tenantId = extractTenantId(accessToken);
             const response = await fetch(url, {
                 ...init,
                 headers: {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${accessToken}`,
+                    ...(tenantId ? { "X-Tenant-Id": tenantId } : {}),
                     ...(init?.headers || {}),
                 },
             });
