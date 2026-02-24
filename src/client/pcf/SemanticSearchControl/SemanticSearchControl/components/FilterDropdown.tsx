@@ -110,6 +110,7 @@ export const FilterDropdown: React.FC<IFilterDropdownProps> = ({
             <Dropdown
                 id={dropdownId}
                 className={styles.dropdown}
+                style={{ maxWidth: "100%", boxSizing: "border-box" }}
                 placeholder="All"
                 value={selectedValue}
                 selectedOptions={selectedKeys}

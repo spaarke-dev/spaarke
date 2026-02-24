@@ -87,13 +87,11 @@ const useStyles = makeStyles({
         fontWeight: tokens.fontWeightSemibold,
         fontSize: tokens.fontSizeBase200,
     },
-    sliderControl: {
+    controlWrapper: {
         width: "100%",
         maxWidth: "100%",
-    },
-    dropdownControl: {
-        width: "100%",
-        maxWidth: "100%",
+        overflow: "hidden",
+        boxSizing: "border-box",
     },
 });
 
@@ -323,16 +321,18 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
                         {filters.threshold}%
                     </Text>
                 </div>
-                <Slider
-                    className={styles.sliderControl}
-                    min={0}
-                    max={100}
-                    step={10}
-                    value={filters.threshold}
-                    onChange={handleThresholdChange}
-                    disabled={disabled}
-                    size="small"
-                />
+                <div className={styles.controlWrapper}>
+                    <Slider
+                        style={{ maxWidth: "100%" }}
+                        min={0}
+                        max={100}
+                        step={10}
+                        value={filters.threshold}
+                        onChange={handleThresholdChange}
+                        disabled={disabled}
+                        size="small"
+                    />
+                </div>
             </div>
 
             {/* Search Mode Dropdown */}
@@ -340,20 +340,22 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
                 <Label className={styles.modeLabel} size="small">
                     Mode
                 </Label>
-                <Dropdown
-                    className={styles.dropdownControl}
-                    size="small"
-                    value={currentModeLabel}
-                    selectedOptions={[filters.searchMode]}
-                    onOptionSelect={handleSearchModeChange}
-                    disabled={disabled}
-                >
-                    {SEARCH_MODE_OPTIONS.map((option) => (
-                        <Option key={option.value} value={option.value}>
-                            {option.label}
-                        </Option>
-                    ))}
-                </Dropdown>
+                <div className={styles.controlWrapper}>
+                    <Dropdown
+                        style={{ maxWidth: "100%", boxSizing: "border-box" }}
+                        size="small"
+                        value={currentModeLabel}
+                        selectedOptions={[filters.searchMode]}
+                        onOptionSelect={handleSearchModeChange}
+                        disabled={disabled}
+                    >
+                        {SEARCH_MODE_OPTIONS.map((option) => (
+                            <Option key={option.value} value={option.value}>
+                                {option.label}
+                            </Option>
+                        ))}
+                    </Dropdown>
+                </div>
             </div>
         </div>
     );
