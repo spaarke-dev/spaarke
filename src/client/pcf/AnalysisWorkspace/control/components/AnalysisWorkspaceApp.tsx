@@ -46,8 +46,8 @@ import { SprkChat } from "@spaarke/ui-components/dist/components/SprkChat";
 import type { IChatSession } from "@spaarke/ui-components/dist/components/SprkChat";
 
 // Build info for version footer
-const VERSION = "1.3.0";
-const BUILD_DATE = "2026-02-23";
+const VERSION = "1.3.4";
+const BUILD_DATE = "2026-02-24";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles - 3-Column Layout
@@ -1494,7 +1494,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                                 sessionId={sprkChatSessionId}
                                 documentId={resolvedDocumentId}
                                 playbookId={playbookId || ""}
-                                apiBaseUrl={apiBaseUrl.replace(/\/+$/, "")}
+                                apiBaseUrl={apiBaseUrl.replace(/\/+$/, "").replace(/\/api\/?$/, "")}
                                 accessToken={sprkChatAccessToken}
                                 onSessionCreated={handleSprkChatSessionCreated}
                             />

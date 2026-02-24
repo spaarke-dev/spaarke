@@ -78,7 +78,17 @@ public sealed class ChatHistoryManager
             message.Role, session.SessionId, message.SequenceNumber, session.TenantId);
 
         // 1. Persist to Dataverse (audit trail — cold storage)
-        await _dataverseRepository.AddMessageAsync(message, ct);
+        // Non-fatal: if chat entities are not yet deployed, log and continue with Redis.
+        try
+        {
+            await _dataverseRepository.AddMessageAsync(message, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex,
+                "Dataverse message persistence failed for session {SessionId} — continuing with Redis only",
+                session.SessionId);
+        }
 
         // 2. Rebuild session with new message appended
         var updatedMessages = new List<ChatMessage>(session.Messages) { message };

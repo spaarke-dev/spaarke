@@ -1,4 +1,4 @@
-$version = "1.3.1"
+$version = "1.3.4"
 $solutionName = "AnalysisWorkspaceSolution"
 $controlName = "sprk_Spaarke.Controls.AnalysisWorkspace"
 

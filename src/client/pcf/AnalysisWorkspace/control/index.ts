@@ -20,7 +20,7 @@
  * - ADR-006: PCF over webresources
  * - ADR-010: Configuration Over Code
  *
- * @version 1.3.0
+ * @version 1.3.3
  */
 
 // Declare global Xrm
@@ -308,7 +308,7 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<IIn
 
         logInfo("AnalysisWorkspace", `Rendering with analysisId: ${analysisId}, apiUrl: ${apiBaseUrl.substring(0, 30)}..., useLegacyChat: ${useLegacyChat}`);
 
-        // Create or update React root
+        // Create or update React root (React 18 bundled, no platform-library)
         if (!this._root) {
             this._root = ReactDOM.createRoot(this._container);
         }

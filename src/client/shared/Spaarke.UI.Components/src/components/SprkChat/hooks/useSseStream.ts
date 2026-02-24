@@ -74,6 +74,20 @@ export function useSseStream(): IUseSseStreamResult {
         setIsStreaming(false);
     }, []);
 
+    /**
+     * Extract tenant ID from JWT access token for X-Tenant-Id header.
+     */
+    const extractTenantId = (token: string): string | null => {
+        try {
+            const parts = token.split(".");
+            if (parts.length !== 3) return null;
+            const payload = JSON.parse(atob(parts[1]));
+            return payload.tid || null;
+        } catch {
+            return null;
+        }
+    };
+
     const startStream = useCallback(
         (url: string, body: Record<string, unknown>, token: string) => {
             // Cancel any existing stream
@@ -92,11 +106,13 @@ export function useSseStream(): IUseSseStreamResult {
 
             const fetchStream = async () => {
                 try {
+                    const tenantId = extractTenantId(token);
                     const response = await fetch(url, {
                         method: "POST",
                         headers: {
                             "Content-Type": "application/json",
                             Authorization: `Bearer ${token}`,
+                            ...(tenantId ? { "X-Tenant-Id": tenantId } : {}),
                         },
                         body: JSON.stringify(body),
                         signal: controller.signal,
