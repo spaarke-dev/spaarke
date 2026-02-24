@@ -36,8 +36,10 @@ const useStyles = makeStyles({
         display: "flex",
         flexDirection: "column",
         gap: tokens.spacingVerticalXS,
+        width: "100%",
         minWidth: 0,
         overflow: "hidden",
+        boxSizing: "border-box",
     },
     header: {
         display: "flex",
@@ -55,6 +57,7 @@ const useStyles = makeStyles({
         flexDirection: "column",
         gap: tokens.spacingVerticalXS,
         paddingBottom: tokens.spacingVerticalS,
+        minWidth: 0,
     },
     sliderSection: {
         display: "flex",
@@ -90,8 +93,20 @@ const useStyles = makeStyles({
     controlWrapper: {
         width: "100%",
         maxWidth: "100%",
+        minWidth: 0,
         overflow: "hidden",
-        boxSizing: "border-box",
+        boxSizing: "border-box" as const,
+        "& > *": {
+            width: "100%",
+            maxWidth: "100%",
+            minWidth: 0,
+            boxSizing: "border-box" as const,
+        },
+        "& button": {
+            maxWidth: "100%",
+            minWidth: 0,
+            boxSizing: "border-box" as const,
+        },
     },
 });
 
@@ -323,7 +338,6 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
                 </div>
                 <div className={styles.controlWrapper}>
                     <Slider
-                        style={{ maxWidth: "100%" }}
                         min={0}
                         max={100}
                         step={10}
@@ -342,7 +356,6 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
                 </Label>
                 <div className={styles.controlWrapper}>
                     <Dropdown
-                        style={{ maxWidth: "100%", boxSizing: "border-box" }}
                         size="small"
                         value={currentModeLabel}
                         selectedOptions={[filters.searchMode]}

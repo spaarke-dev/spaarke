@@ -33,6 +33,15 @@ const useStyles = makeStyles({
     },
     dropdown: {
         width: "100%",
+        maxWidth: "100%",
+        minWidth: 0,
+        boxSizing: "border-box" as const,
+        "& > button": {
+            width: "100%",
+            maxWidth: "100%",
+            minWidth: 0,
+            boxSizing: "border-box" as const,
+        },
     },
     loading: {
         display: "flex",
@@ -110,7 +119,6 @@ export const FilterDropdown: React.FC<IFilterDropdownProps> = ({
             <Dropdown
                 id={dropdownId}
                 className={styles.dropdown}
-                style={{ maxWidth: "100%", boxSizing: "border-box" }}
                 placeholder="All"
                 value={selectedValue}
                 selectedOptions={selectedKeys}
