@@ -31,6 +31,26 @@ public interface IRagService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Search for relevant knowledge documents using a structured <see cref="RagQuery"/>.
+    /// The query is built by <see cref="RagQueryBuilder"/> from document analysis metadata,
+    /// providing metadata-aware retrieval with tenant-scoped filtering.
+    /// </summary>
+    /// <param name="ragQuery">
+    /// A structured query containing composite search text and an OData filter expression.
+    /// Built from DocumentAnalysisResult metadata (entities, key phrases, document type).
+    /// </param>
+    /// <param name="deploymentId">
+    /// Optional deployment ID for explicit index selection.
+    /// If null, uses the default deployment for the tenant resolved from the filter expression.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Ranked search results with relevance scores.</returns>
+    Task<RagSearchResponse> SearchAsync(
+        RagQuery ragQuery,
+        Guid? deploymentId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Index a document chunk into the knowledge base.
     /// </summary>
     /// <param name="document">The document chunk to index.</param>

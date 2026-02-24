@@ -13,12 +13,26 @@
   <ItemGroup>
     <!-- Expose internal members to test assemblies -->
     <InternalsVisibleTo Include="Sprk.Bff.Api.Tests" />
+    <!-- Allow Moq dynamic proxy generation to intercept internal virtual methods (e.g. UpdateSessionCacheAsync) -->
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
+    <!-- Allow integration test assembly to access internal members -->
+    <InternalsVisibleTo Include="Spe.Integration.Tests" />
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Agent Framework (Phase 1 - AIPL-002, AIPL-050) - PINNED: Do NOT upgrade without testing -->
+    <!-- Microsoft.Agents.AI 1.0.0-rc1 requires Microsoft.Extensions.AI >= 10.3.0 -->
+    <!-- Microsoft.Extensions.AI.OpenAI 10.3.0 requires OpenAI >= 2.8.0 (added in AIPL-050 for IChatClient bridge) -->
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.3.0" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.3.0" />
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.0.0-rc1" />
+    <!-- OpenAI pinned to 2.8.0: required by Microsoft.Extensions.AI.OpenAI 10.3.0 IChatClient bridge -->
+    <PackageReference Include="OpenAI" Version="2.8.0" />
+
     <!-- Azure packages -->
     <PackageReference Include="Azure.AI.DocumentIntelligence" Version="1.0.0" />
-    <PackageReference Include="Azure.AI.OpenAI" Version="2.1.0" />
+    <!-- Azure.AI.OpenAI 2.8.0-beta.1: restores compat with OpenAI 2.8.0 (2.1.0 threw MissingMethodException on SerializedAdditionalRawData) -->
+    <PackageReference Include="Azure.AI.OpenAI" Version="2.8.0-beta.1" />
     <PackageReference Include="Azure.Identity" Version="1.17.1" />
     <PackageReference Include="Azure.Storage.Blobs" Version="12.27.0" />
     <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.18.1" />
@@ -28,7 +42,8 @@
     <PackageReference Include="Microsoft.ApplicationInsights.AspNetCore" Version="2.23.0" />
 
     <!-- Caching -->
-    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.1" />
+    <!-- Microsoft.Extensions.Caching.Abstractions 10.0.3: bumped from 10.0.1 to satisfy Microsoft.Extensions.AI 10.3.0 dependency chain -->
+    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.3" />
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
 

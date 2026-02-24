@@ -1,8 +1,10 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Models;
 using Sprk.Bff.Api.Services.Finance.Tools;
 using Sprk.Bff.Api.Telemetry;
 using Xunit;
@@ -49,32 +51,32 @@ public class InvoiceExtractionToolHandlerTests
             ["matterId"] = matterId
         });
 
-        var extractionResult = new InvoiceExtractionResult
+        var extractionResult = new ExtractionResult
         {
-            Success = true,
-            Facts = new InvoiceFacts
+            Header = new InvoiceHeader
             {
                 InvoiceNumber = "12345",
-                InvoiceDate = new DateTime(2024, 1, 15),
+                InvoiceDate = "2024-01-15",
                 TotalAmount = 15000m,
                 Currency = "USD",
-                VendorName = "Acme Corp",
-                LineItems = new List<InvoiceLineItem>
+                VendorName = "Acme Corp"
+            },
+            LineItems =
+            [
+                new BillingEventLine
                 {
-                    new()
-                    {
-                        Description = "Legal services - January",
-                        Quantity = 1,
-                        UnitPrice = 15000m,
-                        Amount = 15000m
-                    }
+                    Description = "Legal services - January",
+                    Amount = 15000m,
+                    CostType = "Fee",
+                    Currency = "USD"
                 }
-            }
+            ],
+            ExtractionConfidence = 0.95m
         };
 
         _invoiceAnalysisService.ExtractInvoiceFactsAsync(
             documentText,
-            Arg.Any<string>(),
+            Arg.Any<InvoiceHints?>(),
             Arg.Any<CancellationToken>())
             .Returns(extractionResult);
 
@@ -89,29 +91,25 @@ public class InvoiceExtractionToolHandlerTests
         var invoiceIdValue = (Guid)data!.InvoiceId;
         var aiSummary = (string)data.AiSummary;
         var extractedJson = (string)data.ExtractedJson;
-        var facts = data.Facts as InvoiceFacts;
 
         invoiceIdValue.Should().Be(invoiceId);
         aiSummary.Should().NotBeNullOrEmpty();
         aiSummary.Should().Contain("12345");
         aiSummary.Should().Contain("Acme Corp");
         extractedJson.Should().NotBeNullOrEmpty();
-        facts.Should().NotBeNull();
-        facts!.InvoiceNumber.Should().Be("12345");
-        facts.TotalAmount.Should().Be(15000m);
 
         await _invoiceAnalysisService.Received(1).ExtractInvoiceFactsAsync(
             documentText,
-            Arg.Any<string>(),
+            Arg.Any<InvoiceHints?>(),
             Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task ExecuteAsync_ExtractionFails_ReturnsError()
+    public async Task ExecuteAsync_ServiceReturnsNullHeader_ReturnsSuccessWithNoSummary()
     {
         // Arrange
         var invoiceId = Guid.NewGuid();
-        var documentText = "Invalid invoice text";
+        var documentText = "Partial invoice text";
 
         var parameters = new ToolParameters(new Dictionary<string, object>
         {
@@ -119,15 +117,17 @@ public class InvoiceExtractionToolHandlerTests
             ["invoiceId"] = invoiceId
         });
 
-        var extractionResult = new InvoiceExtractionResult
+        // ExtractionResult with no header (edge case — extraction returned partial data)
+        var extractionResult = new ExtractionResult
         {
-            Success = false,
-            Error = "Unable to extract invoice facts"
+            Header = null!,
+            LineItems = [],
+            ExtractionConfidence = 0m
         };
 
         _invoiceAnalysisService.ExtractInvoiceFactsAsync(
             documentText,
-            Arg.Any<string>(),
+            Arg.Any<InvoiceHints?>(),
             Arg.Any<CancellationToken>())
             .Returns(extractionResult);
 
@@ -135,9 +135,10 @@ public class InvoiceExtractionToolHandlerTests
         var result = await _handler.ExecuteAsync(parameters, CancellationToken.None);
 
         // Assert
-        result.Success.Should().BeFalse();
-        result.Error.Should().Contain("Extraction failed");
-        result.Error.Should().Contain("Unable to extract invoice facts");
+        result.Success.Should().BeTrue();
+        var data = result.Data as dynamic;
+        var aiSummary = (string)data!.AiSummary;
+        aiSummary.Should().Contain("no facts extracted");
     }
 
     [Fact]
@@ -172,17 +173,24 @@ public class InvoiceExtractionToolHandlerTests
             // matterId omitted
         });
 
-        var extractionResult = new InvoiceExtractionResult
+        var extractionResult = new ExtractionResult
         {
-            Success = true,
-            Facts = new InvoiceFacts
+            Header = new InvoiceHeader
             {
                 InvoiceNumber = "12345",
-                TotalAmount = 10000m
-            }
+                TotalAmount = 10000m,
+                Currency = "USD",
+                VendorName = "Test Vendor",
+                InvoiceDate = "2024-01-01"
+            },
+            LineItems = [],
+            ExtractionConfidence = 0.9m
         };
 
-        _invoiceAnalysisService.ExtractInvoiceFactsAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+        _invoiceAnalysisService.ExtractInvoiceFactsAsync(
+            Arg.Any<string>(),
+            Arg.Any<InvoiceHints?>(),
+            Arg.Any<CancellationToken>())
             .Returns(extractionResult);
 
         // Act
@@ -206,30 +214,36 @@ public class InvoiceExtractionToolHandlerTests
         });
 
         // Create invoice with many line items to exceed 5000 char limit
-        var lineItems = new List<InvoiceLineItem>();
+        var lineItems = new List<BillingEventLine>();
         for (int i = 0; i < 100; i++)
         {
-            lineItems.Add(new InvoiceLineItem
+            lineItems.Add(new BillingEventLine
             {
                 Description = $"Line item {i} - This is a very long description that will contribute to exceeding the 5000 character limit for the AI summary field in Dataverse",
-                Quantity = 1,
-                UnitPrice = 100m,
-                Amount = 100m
+                Amount = 100m,
+                CostType = "Fee",
+                Currency = "USD"
             });
         }
 
-        var extractionResult = new InvoiceExtractionResult
+        var extractionResult = new ExtractionResult
         {
-            Success = true,
-            Facts = new InvoiceFacts
+            Header = new InvoiceHeader
             {
                 InvoiceNumber = "12345",
                 TotalAmount = 10000m,
-                LineItems = lineItems
-            }
+                Currency = "USD",
+                VendorName = "Test Vendor",
+                InvoiceDate = "2024-01-01"
+            },
+            LineItems = lineItems.ToArray(),
+            ExtractionConfidence = 0.9m
         };
 
-        _invoiceAnalysisService.ExtractInvoiceFactsAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+        _invoiceAnalysisService.ExtractInvoiceFactsAsync(
+            Arg.Any<string>(),
+            Arg.Any<InvoiceHints?>(),
+            Arg.Any<CancellationToken>())
             .Returns(extractionResult);
 
         // Act
@@ -259,7 +273,10 @@ public class InvoiceExtractionToolHandlerTests
             ["invoiceId"] = invoiceId
         });
 
-        _invoiceAnalysisService.ExtractInvoiceFactsAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+        _invoiceAnalysisService.ExtractInvoiceFactsAsync(
+            Arg.Any<string>(),
+            Arg.Any<InvoiceHints?>(),
+            Arg.Any<CancellationToken>())
             .Throws(new InvalidOperationException("AI service unavailable"));
 
         // Act
@@ -284,27 +301,33 @@ public class InvoiceExtractionToolHandlerTests
             ["invoiceId"] = invoiceId
         });
 
-        var extractionResult = new InvoiceExtractionResult
+        var extractionResult = new ExtractionResult
         {
-            Success = true,
-            Facts = new InvoiceFacts
+            Header = new InvoiceHeader
             {
                 InvoiceNumber = "12345",
-                InvoiceDate = new DateTime(2024, 1, 15),
+                InvoiceDate = "2024-01-15",
                 TotalAmount = 15000m,
                 Currency = "USD",
-                LineItems = new List<InvoiceLineItem>
+                VendorName = "Test Corp"
+            },
+            LineItems =
+            [
+                new BillingEventLine
                 {
-                    new()
-                    {
-                        Description = "Legal services",
-                        Amount = 15000m
-                    }
+                    Description = "Legal services",
+                    Amount = 15000m,
+                    CostType = "Fee",
+                    Currency = "USD"
                 }
-            }
+            ],
+            ExtractionConfidence = 0.95m
         };
 
-        _invoiceAnalysisService.ExtractInvoiceFactsAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+        _invoiceAnalysisService.ExtractInvoiceFactsAsync(
+            Arg.Any<string>(),
+            Arg.Any<InvoiceHints?>(),
+            Arg.Any<CancellationToken>())
             .Returns(extractionResult);
 
         // Act

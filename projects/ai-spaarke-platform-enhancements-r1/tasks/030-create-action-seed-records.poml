@@ -4,16 +4,25 @@
     <title>Create 8 System Action Records (sprk_systemprompt ACT-001–008)</title>
     <phase>3 — Workstream B: Scope Library &amp; Seed Data</phase>
     <tags>dataverse, seed-data, scope-library, foundation</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>AIPL-004</dependencies>
     <blocks>AIPL-034 (Playbooks), AIPL-036 (handler discovery)</blocks>
   </metadata>
 
   <prompt>
-    Create 8 system Action records in the sprk_systemprompt Dataverse entity. Actions are
-    the primary system prompt definitions that define how the AI behaves for each document
-    analysis scenario. Each Action gets a production-quality system prompt.
+    Create 8 system Action records in the sprk_analysisaction Dataverse entity (collection:
+    sprk_analysisactions). Actions define the system prompt for each document analysis scenario.
+    Each Action gets a production-quality system prompt and a unique sprk_actioncode alternate key.
+
+    IMPORTANT ENTITY/FIELD CORRECTIONS (verified from source code 2026-02-23):
+    - Entity logical name: sprk_analysisaction (NOT sprk_systemprompt — that is a FIELD)
+    - Entity collection: sprk_analysisactions
+    - System prompt field: sprk_systemprompt (multiline text field on the entity)
+    - Code/alternate key field: sprk_actioncode (NOT sprk_externalid — that field does not exist)
+    - ActionLookupService.GetByCodeAsync() resolves by sprk_actioncode alternate key
+    - No sprk_isactive, sprk_issystem, or sprk_version fields — use statecode/statuscode only
+    - 19 existing action records exist with NO sprk_actioncode set — create NEW records
 
     Actions to create (ACT-001 through ACT-008):
     1. Contract Review — extract obligations, parties, dates, payment terms
@@ -27,20 +36,22 @@
   </prompt>
 
   <role>
-    Dataverse developer familiar with sprk_systemprompt entity schema, Power Platform CLI,
+    Dataverse developer familiar with sprk_analysisaction entity schema, Dataverse Web API,
     and prompt engineering for legal document analysis.
   </role>
 
   <goal>
-    8 sprk_systemprompt records exist in spaarkedev1.crm.dynamics.com with IDs ACT-001 through
-    ACT-008. Each has a production-quality system prompt. ScopeResolverService can resolve them.
+    8 sprk_analysisaction records exist in spaarkedev1.crm.dynamics.com with sprk_actioncode
+    values ACT-001 through ACT-008. Each has a production-quality system prompt in sprk_systemprompt.
+    ActionLookupService.GetByCodeAsync("ACT-001") resolves correctly via the alternate key.
   </goal>
 
   <constraints>
-    <constraint source="ADR-002">No AI processing in plugins — records are data only, created via PAC CLI or data import</constraint>
-    <constraint source="project">Use sprk_ field prefix. ExternalId field: "ACT-001" through "ACT-008"</constraint>
+    <constraint source="ADR-002">No AI processing in plugins — records are data only, created via Dataverse Web API</constraint>
+    <constraint source="project">sprk_actioncode is the alternate key field (NOT sprk_externalid). Values: "ACT-001" through "ACT-008"</constraint>
+    <constraint source="project">System prompts go in sprk_systemprompt field (multiline text). Minimum 200 words per prompt.</constraint>
+    <constraint source="project">19 existing action records exist with no sprk_actioncode — create NEW records, do not modify existing</constraint>
     <constraint source="project">System prompts must be in English, professional legal analysis tone</constraint>
-    <constraint source="project">Document schema in notes/design/dataverse-chat-schema.md first if not done in task 001</constraint>
   </constraints>
 
   <knowledge>
@@ -53,31 +64,37 @@
   </knowledge>
 
   <steps>
-    <step order="1" name="Check existing sprk_systemprompt records">
-      Use pac or query Dataverse to check if any ACT-001–008 records already exist.
-      List current records to avoid duplicates.
+    <step order="1" name="Verify no ACT-001-008 records exist">
+      Query sprk_analysisactions for existing records with sprk_actioncode set.
+      GET https://spaarkedev1.crm.dynamics.com/api/data/v9.2/sprk_analysisactions?$select=sprk_name,sprk_actioncode&$filter=sprk_actioncode ne null
+      Confirm none of ACT-001 through ACT-008 already exist. (19 existing records have no sprk_actioncode.)
     </step>
     <step order="2" name="Author 8 system prompts">
       Write production-quality system prompts for each of the 8 Actions.
       Each prompt should:
-      - Define the AI's role and expertise
+      - Define the AI's role and expertise for that document type
       - Specify what to extract (entities, dates, obligations, etc.)
-      - Define output format (structured sections)
+      - Define output format (structured sections with headings)
       - Include instructions to cite document sections
-      Minimum 200 words per prompt.
+      Minimum 200 words per prompt. Store in notes/design/action-prompts/ for review.
     </step>
-    <step order="3" name="Create records via data import or PAC CLI">
-      Use pac data export/import or direct Dataverse API to create the 8 records.
-      Required fields: sprk_name, sprk_externalid, sprk_prompttext, sprk_isactive=true,
-      sprk_issystem=true, sprk_version="1.0"
+    <step order="3" name="Create 8 records via Dataverse Web API">
+      POST to https://spaarkedev1.crm.dynamics.com/api/data/v9.2/sprk_analysisactions
+      Required fields per record:
+        - sprk_name: action display name (e.g., "Contract Review")
+        - sprk_description: brief description
+        - sprk_systemprompt: the full system prompt text (200+ words)
+        - sprk_actioncode: "ACT-001" through "ACT-008" (this is the alternate key)
+      Use az account get-access-token for Bearer token auth.
     </step>
-    <step order="4" name="Verify records exist">
-      Query sprk_systemprompt to confirm 8 records exist with correct ExternalIds.
-      Verify ScopeResolverService can resolve ACT-001 by ExternalId.
+    <step order="4" name="Verify records and alternate key">
+      Query sprk_analysisactions?$select=sprk_name,sprk_actioncode&$filter=sprk_actioncode ne null
+      Confirm 8 records with ACT-001 through ACT-008.
+      Test alternate key lookup: GET sprk_analysisactions(sprk_actioncode='ACT-001')
     </step>
     <step order="5" name="Document in notes">
-      Create/update projects/ai-spaarke-platform-enhancements-r1/notes/design/scope-library-catalog.md
-      with the Action catalog (ID, name, purpose).
+      Create projects/ai-spaarke-platform-enhancements-r1/notes/design/scope-library-catalog.md
+      with the Action catalog (Code, Name, Purpose, System Prompt excerpt).
     </step>
   </steps>
 
@@ -87,14 +104,59 @@
   </tools>
 
   <outputs>
-    <output type="dataverse">8 sprk_systemprompt records in spaarkedev1 (ACT-001–008)</output>
+    <output type="dataverse">8 sprk_analysisaction records in spaarkedev1 (ACT-001–008 via sprk_actioncode)</output>
     <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/design/scope-library-catalog.md</output>
+    <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/design/action-prompts/ (8 prompt files)</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">8 sprk_systemprompt records exist with ExternalIds ACT-001 through ACT-008</criterion>
-    <criterion testable="true">Each record has sprk_prompttext with at least 200 words</criterion>
-    <criterion testable="true">All records have sprk_isactive=true and sprk_issystem=true</criterion>
+    <criterion testable="true">8 sprk_analysisaction records exist with sprk_actioncode ACT-001 through ACT-008</criterion>
+    <criterion testable="true">Each record has sprk_systemprompt with at least 200 words</criterion>
+    <criterion testable="true">Alternate key lookup works: GET sprk_analysisactions(sprk_actioncode='ACT-001') returns 200</criterion>
     <criterion testable="true">scope-library-catalog.md documents all 8 Actions</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-02-23" author="AIPL-030 task-execute">
+      STATUS: completed — all 8 Action records created in spaarkedev1.crm.dynamics.com.
+
+      COMPLETED STEPS:
+      - Step 1: Verified 0 records with sprk_actioncode existed before creation. All clear.
+      - Step 2: All 8 production-quality system prompts authored (512-668 words each, all exceed 200-word minimum)
+        - notes/design/action-prompts/ACT-001-contract-review.md (512 words)
+        - notes/design/action-prompts/ACT-002-nda-analysis.md (546 words)
+        - notes/design/action-prompts/ACT-003-lease-agreement-review.md (584 words)
+        - notes/design/action-prompts/ACT-004-invoice-processing.md (532 words)
+        - notes/design/action-prompts/ACT-005-sla-analysis.md (562 words)
+        - notes/design/action-prompts/ACT-006-employment-agreement-review.md (598 words)
+        - notes/design/action-prompts/ACT-007-statement-of-work-analysis.md (659 words)
+        - notes/design/action-prompts/ACT-008-general-legal-document-review.md (668 words)
+      - Step 3: All 8 records created via Dataverse Web API (POST sprk_analysisactions)
+        - ACT-001 Contract Review: 41e3beef-cb10-f111-8342-7c1e520aa4df
+        - ACT-002 NDA Analysis: 34c9ecf2-cb10-f111-8342-7ced8d1dc988
+        - ACT-003 Lease Agreement Review: fb19c1f5-cb10-f111-8342-7c1e520aa4df
+        - ACT-004 Invoice Processing: 38c9ecf2-cb10-f111-8342-7ced8d1dc988
+        - ACT-005 SLA Analysis: fe19c1f5-cb10-f111-8342-7c1e520aa4df
+        - ACT-006 Employment Agreement Review: 3cc9ecf2-cb10-f111-8342-7ced8d1dc988
+        - ACT-007 Statement of Work Analysis: 3fc9ecf2-cb10-f111-8342-7ced8d1dc988
+        - ACT-008 General Legal Document Review: 41c9ecf2-cb10-f111-8342-7ced8d1dc988
+      - Step 4: Verification confirmed 8 records with sprk_actioncode ACT-001-008.
+        Alternate key lookup for ACT-001 returned HTTP 200: "Contract Review".
+        Alternate key lookup for ACT-008 returned HTTP 200: "General Legal Document Review".
+      - Step 5: notes/design/scope-library-catalog.md updated with Actions section including
+        Dataverse IDs, alternate key lookup documentation, and prompt file references.
+
+      ACCEPTANCE CRITERIA STATUS:
+      [PASS] 8 sprk_analysisaction records exist with ACT-001 through ACT-008
+      [PASS] Each record has sprk_systemprompt with 512-668 words (all exceed 200-word minimum)
+      [PASS] Alternate key lookup: GET sprk_analysisactions(sprk_actioncode='ACT-001') returns 200
+      [PASS] scope-library-catalog.md documents all 8 Actions with IDs
+
+      IMPLEMENTATION NOTES:
+      - Used Create-ActionSeedRecords.ps1 script with PowerShell Invoke-RestMethod
+      - Auth: az account get-access-token --resource https://spaarkedev1.crm.dynamics.com
+      - System prompts cover: commercial contracts, NDAs, leases, invoices, SLAs,
+        employment agreements, statements of work, and general legal documents
+    </note>
+  </notes>
 </task>

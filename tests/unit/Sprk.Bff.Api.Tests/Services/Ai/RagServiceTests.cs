@@ -10,6 +10,9 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Xunit;
 
+// Disambiguate between our pipeline result type and the Azure SDK indexing result type.
+using AzureSdkIndexingResult = Azure.Search.Documents.Models.IndexingResult;
+
 namespace Sprk.Bff.Api.Tests.Services.Ai;
 
 /// <summary>
@@ -1028,7 +1031,7 @@ public class RagServiceTests
 
         // Create successful index result (key, errorMessage, succeeded, status)
         var indexResult = SearchModelFactory.IndexDocumentsResult(
-            new List<IndexingResult>
+            new List<AzureSdkIndexingResult>
             {
                 SearchModelFactory.IndexingResult("doc-1", null, true, 201)
             });

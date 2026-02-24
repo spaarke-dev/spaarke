@@ -4,7 +4,7 @@
     <title>Wire Foundational DI Registrations and Audit Baseline Count</title>
     <phase>1 — Foundation &amp; Environment</phase>
     <tags>bff-api, foundation, di</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <dependencies>AIPL-002, AIPL-003</dependencies>
     <blocks>AIPL-010 (RagQueryBuilder DI), AIPL-050 (IChatClient DI)</blocks>
@@ -100,4 +100,12 @@
     <criterion testable="true">CLAUDE.md contains DI baseline count</criterion>
     <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-02-23. LlamaParseOptions.cs and AiSearchOptions.cs created in Options/.
+    Program.cs updated with Configure&lt;LlamaParseOptions&gt; and Configure&lt;AiSearchOptions&gt; bindings
+    (using Sprk.Bff.Api.Options namespace; placed after ReindexingOptions block).
+    DI Baseline: 89 non-framework registrations in Program.cs. Budget ADR-010 ≤15 (already exceeded
+    by prior projects). New Workstream A/B/C services must use feature module extension methods.
+    Build: 0 errors, 0 warnings.
+  </notes>
 </task>

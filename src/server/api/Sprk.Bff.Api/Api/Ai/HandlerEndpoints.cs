@@ -6,6 +6,8 @@ namespace Sprk.Bff.Api.Api.Ai;
 /// <summary>
 /// Handler discovery endpoints following ADR-001 (Minimal API) and ADR-008 (endpoint filters).
 /// Provides metadata for registered tool handlers to enable frontend configuration validation.
+/// Includes a simple IAiToolHandler class-name discovery endpoint at /api/ai/tools/handlers
+/// for ScopeConfigEditorPCF handler dropdown population (AIPL-036).
 /// </summary>
 public static class HandlerEndpoints
 {
@@ -14,6 +16,30 @@ public static class HandlerEndpoints
 
     public static IEndpointRouteBuilder MapHandlerEndpoints(this IEndpointRouteBuilder app)
     {
+        // -----------------------------------------------------------------------
+        // GET /api/ai/tools/handlers
+        // Simple handler class-name discovery for ScopeConfigEditorPCF (AIPL-036).
+        // Returns ClassName + Description for every registered IAiToolHandler.
+        // Protected via RequireAuthorization() — no document-level resource check
+        // needed for this metadata-only listing endpoint.
+        // -----------------------------------------------------------------------
+        var toolsGroup = app.MapGroup("/api/ai/tools")
+            .RequireAuthorization()
+            .WithTags("AI Tools");
+
+        toolsGroup.MapGet("/handlers", GetToolHandlers)
+            .WithName("GetToolHandlers")
+            .WithSummary("Get all registered IAiToolHandler class names and descriptions")
+            .WithDescription(
+                "Returns the class name and description for every IAiToolHandler registered in DI. " +
+                "Used by ScopeConfigEditorPCF to populate the handler class dropdown on Tool records.")
+            .Produces<ToolHandlerListResponse>()
+            .ProducesProblem(401)
+            .ProducesProblem(500);
+
+        // -----------------------------------------------------------------------
+        // Existing rich-metadata handler registry endpoints at /api/ai/handlers
+        // -----------------------------------------------------------------------
         var group = app.MapGroup("/api/ai/handlers")
             .RequireAuthorization()
             .WithTags("AI Handlers");
@@ -38,6 +64,60 @@ public static class HandlerEndpoints
             .ProducesProblem(500);
 
         return app;
+    }
+
+    /// <summary>
+    /// GET /api/ai/tools/handlers - Returns class name and description for every
+    /// registered IAiToolHandler (playbook tool handlers).
+    /// Used by ScopeConfigEditorPCF to populate the handler class dropdown on Tool records.
+    /// </summary>
+    private static IResult GetToolHandlers(
+        IEnumerable<IAiToolHandler> handlers,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("HandlerEndpoints");
+
+        try
+        {
+            var items = handlers
+                .Select(h => new ToolHandlerInfoDto(
+                    ClassName: h.GetType().Name,
+                    ToolName: h.ToolName,
+                    Description: GetHandlerDescription(h)))
+                .OrderBy(h => h.ClassName)
+                .ToArray();
+
+            logger.LogDebug("[HANDLERS] GET /api/ai/tools/handlers returning {Count} IAiToolHandler entries", items.Length);
+            return Results.Ok(new ToolHandlerListResponse(items));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[HANDLERS] Failed to enumerate IAiToolHandler registrations");
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to enumerate registered tool handlers");
+        }
+    }
+
+    /// <summary>
+    /// Extracts a human-readable description from an IAiToolHandler.
+    /// Uses the XML summary comment where available via a naming convention;
+    /// falls back to the ToolName if no description attribute is found.
+    /// </summary>
+    private static string GetHandlerDescription(IAiToolHandler handler)
+    {
+        // Check for a [Description] attribute first (if handlers opt in).
+        var descAttr = handler.GetType()
+            .GetCustomAttributes(typeof(System.ComponentModel.DescriptionAttribute), inherit: false)
+            .OfType<System.ComponentModel.DescriptionAttribute>()
+            .FirstOrDefault();
+
+        if (descAttr != null)
+            return descAttr.Description;
+
+        // Fall back to ToolName — clear and consistent.
+        return handler.ToolName;
     }
 
     /// <summary>
@@ -141,6 +221,29 @@ public static class HandlerEndpoints
 }
 
 #region Response DTOs
+
+// ---------------------------------------------------------------------------
+// DTOs for GET /api/ai/tools/handlers  (AIPL-036 — ScopeConfigEditorPCF)
+// ---------------------------------------------------------------------------
+
+/// <summary>
+/// Response for GET /api/ai/tools/handlers.
+/// Contains class names and descriptions for all registered IAiToolHandler implementations.
+/// </summary>
+/// <param name="Handlers">Array of handler class-name entries.</param>
+public record ToolHandlerListResponse(ToolHandlerInfoDto[] Handlers);
+
+/// <summary>
+/// Lightweight handler descriptor for ScopeConfigEditorPCF dropdown population.
+/// </summary>
+/// <param name="ClassName">The C# class name of the handler (e.g. "FinancialCalculationToolHandler").</param>
+/// <param name="ToolName">The handler's ToolName property used by playbooks to invoke it.</param>
+/// <param name="Description">Human-readable description of what the handler does.</param>
+public record ToolHandlerInfoDto(string ClassName, string ToolName, string Description);
+
+// ---------------------------------------------------------------------------
+// DTOs for GET /api/ai/handlers  (rich registry metadata)
+// ---------------------------------------------------------------------------
 
 /// <summary>
 /// Response containing all registered handlers.

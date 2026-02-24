@@ -62,6 +62,8 @@ export interface IAnalysisWorkspaceAppProps {
     getAccessToken: () => Promise<string>;
     /** Whether authentication is ready (MSAL initialized) */
     isAuthReady: boolean;
+    /** Feature flag: true = use legacy /continue endpoint, false = use new SprkChat component (default false) */
+    useLegacyChat?: boolean;
     onWorkingDocumentChange: (content: string) => void;
     onChatHistoryChange: (history: string) => void;
     onStatusChange: (status: string) => void;

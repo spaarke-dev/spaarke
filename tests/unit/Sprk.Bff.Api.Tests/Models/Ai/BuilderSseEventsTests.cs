@@ -67,11 +67,11 @@ public class BuilderSseEventsTests
     {
         var recordId = Guid.NewGuid();
         var evt = DataverseOperationEvent.Create(
-            "created", "sprk_aiaction", recordId, "Created summarization action");
+            "created", "sprk_analysisaction", recordId, "Created summarization action");
 
         evt.Type.Should().Be(BuilderSseEventTypes.DataverseOperation);
         evt.Operation.Should().Be("created");
-        evt.EntityType.Should().Be("sprk_aiaction");
+        evt.EntityType.Should().Be("sprk_analysisaction");
         evt.RecordId.Should().Be(recordId);
         evt.Description.Should().Be("Created summarization action");
     }
@@ -79,13 +79,13 @@ public class BuilderSseEventsTests
     [Fact]
     public void DataverseOperationEvent_SerializesToCorrectJson()
     {
-        var evt = DataverseOperationEvent.Create("created", "sprk_aiskill");
+        var evt = DataverseOperationEvent.Create("created", "sprk_analysisskill");
 
         var json = JsonSerializer.Serialize(evt, JsonOptions);
 
         json.Should().Contain("\"type\":\"dataverse_operation\"");
         json.Should().Contain("\"operation\":\"created\"");
-        json.Should().Contain("\"entityType\":\"sprk_aiskill\"");
+        json.Should().Contain("\"entityType\":\"sprk_analysisskill\"");
     }
 
     #endregion

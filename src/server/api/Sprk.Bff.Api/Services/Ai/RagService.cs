@@ -29,7 +29,7 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// - Embedding generation: ~50ms (cached), ~150ms (uncached)
 /// - Search execution: ~100-300ms depending on index size
 /// </remarks>
-public class RagService : IRagService
+public partial class RagService : IRagService
 {
     private readonly IKnowledgeDeploymentService _deploymentService;
     private readonly IOpenAiClient _openAiClient;
@@ -41,6 +41,9 @@ public class RagService : IRagService
 
     // Semantic configuration name from the index definition
     private const string SemanticConfigurationName = "knowledge-semantic-config";
+
+    // Maximum query text length for structured logging (PII/compliance — do not log full query)
+    private const int MaxQueryTextLength = 200;
 
     // Vector field name and dimensions (3072-dim text-embedding-3-large)
     private const string VectorFieldName = "contentVector3072";
@@ -131,6 +134,14 @@ public class RagService : IRagService
 
             // Step 4: Execute search (with optional resilience)
             var searchText = options.UseKeywordSearch ? query : "*";
+
+            // Log structured RetrievalQuery event before executing search.
+            // QueryText is truncated to MaxQueryTextLength — never log full content (PII/compliance).
+            LogRetrievalQuery(
+                tenantId: options.TenantId,
+                indexName: searchClient.IndexName,
+                queryText: query.Length > MaxQueryTextLength ? query[..MaxQueryTextLength] : query,
+                topK: options.TopK);
             SearchResults<KnowledgeDocument> searchResults;
 
             if (_resilientClient != null)
@@ -183,6 +194,15 @@ public class RagService : IRagService
             totalCount = searchResults.TotalCount ?? results.Count;
 
             totalStopwatch.Stop();
+
+            // Log structured RetrievalResults event — IDs and scores for Recall@K / nDCG@K evaluation.
+            // Document content and embeddings are intentionally excluded from this event.
+            LogRetrievalResults(
+                tenantId: options.TenantId,
+                resultCount: results.Count,
+                documentIds: string.Join(",", results.Select(r => r.DocumentId ?? r.Id)),
+                scores: string.Join(",", results.Select(r => r.Score.ToString("F4"))),
+                elapsedMs: totalStopwatch.ElapsedMilliseconds);
 
             _logger.LogInformation(
                 "RAG search completed for tenant {TenantId}: {ResultCount} results in {TotalMs}ms " +
@@ -257,6 +277,44 @@ public class RagService : IRagService
                 errorCode: "unexpected_error");
             throw;
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<RagSearchResponse> SearchAsync(
+        RagQuery ragQuery,
+        Guid? deploymentId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ragQuery);
+        ArgumentException.ThrowIfNullOrEmpty(ragQuery.SearchText);
+        ArgumentException.ThrowIfNullOrEmpty(ragQuery.FilterExpression);
+
+        // Extract tenantId from the filter expression for logging purposes.
+        // The filter already contains the full OData expression including tenantId.
+        _logger.LogDebug(
+            "Starting RagQuery search, searchText length={SearchTextLength}, filter={Filter}, Top={Top}",
+            ragQuery.SearchText.Length, ragQuery.FilterExpression, ragQuery.Top);
+
+        // Translate RagQuery into RagSearchOptions.
+        // The FilterExpression from RagQuery is applied via the DocumentType field
+        // to pass through to BuildSearchOptions. However, since the existing RagSearchOptions
+        // does not support arbitrary OData expressions, we use a delegating approach:
+        // extract the tenant and document type from the filter and map to RagSearchOptions fields.
+        var (tenantId, documentType) = ParseFilterExpression(ragQuery.FilterExpression);
+
+        var options = new RagSearchOptions
+        {
+            TenantId = tenantId,
+            DeploymentId = deploymentId,
+            TopK = ragQuery.Top,
+            MinScore = (float)ragQuery.MinRelevanceScore,
+            DocumentType = documentType,
+            UseSemanticRanking = true,
+            UseVectorSearch = true,
+            UseKeywordSearch = true
+        };
+
+        return await SearchAsync(ragQuery.SearchText, options, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -683,6 +741,41 @@ public class RagService : IRagService
     }
 
     /// <summary>
+    /// Parses a RagQuery OData filter expression to extract tenantId and optional documentType.
+    /// Expected format: "tenantId eq 'value' [and documentType eq 'value']"
+    /// </summary>
+    /// <param name="filterExpression">OData filter expression from RagQuery.</param>
+    /// <returns>Tuple of (tenantId, documentType). DocumentType is null if not present.</returns>
+    private static (string TenantId, string? DocumentType) ParseFilterExpression(string filterExpression)
+    {
+        var tenantId = string.Empty;
+        string? documentType = null;
+
+        // Parse "tenantId eq 'value'" clause
+        var tenantMatch = System.Text.RegularExpressions.Regex.Match(
+            filterExpression,
+            @"tenantId eq '([^']*(?:''[^']*)*)'");
+
+        if (tenantMatch.Success)
+        {
+            // Unescape single quotes (OData '' → ')
+            tenantId = tenantMatch.Groups[1].Value.Replace("''", "'");
+        }
+
+        // Parse optional "documentType eq 'value'" clause
+        var docTypeMatch = System.Text.RegularExpressions.Regex.Match(
+            filterExpression,
+            @"documentType eq '([^']*(?:''[^']*)*)'");
+
+        if (docTypeMatch.Success)
+        {
+            documentType = docTypeMatch.Groups[1].Value.Replace("''", "'");
+        }
+
+        return (tenantId, documentType);
+    }
+
+    /// <summary>
     /// Populates file metadata fields (fileType) from fileName if not already set.
     /// </summary>
     /// <param name="document">The document to populate metadata for.</param>
@@ -779,6 +872,29 @@ public class RagService : IRagService
 
         return result;
     }
+
+    #endregion
+
+    #region High-Performance Structured Log Events
+
+    /// <summary>
+    /// Logged before each retrieval search. QueryText is truncated to 200 chars — never log full content.
+    /// </summary>
+    [LoggerMessage(
+        EventId = 5100,
+        Level = LogLevel.Information,
+        Message = "RetrievalQuery tenant={TenantId} index={IndexName} queryText={QueryText} topK={TopK}")]
+    private partial void LogRetrievalQuery(string tenantId, string indexName, string queryText, int topK);
+
+    /// <summary>
+    /// Logged after each retrieval search. Contains the IDs and scores needed by the evaluation harness (AIPL-071).
+    /// Vectors and document content are intentionally excluded.
+    /// </summary>
+    [LoggerMessage(
+        EventId = 5101,
+        Level = LogLevel.Information,
+        Message = "RetrievalResults tenant={TenantId} resultCount={ResultCount} documentIds={DocumentIds} scores={Scores} elapsedMs={ElapsedMs}")]
+    private partial void LogRetrievalResults(string tenantId, int resultCount, string documentIds, string scores, long elapsedMs);
 
     #endregion
 }

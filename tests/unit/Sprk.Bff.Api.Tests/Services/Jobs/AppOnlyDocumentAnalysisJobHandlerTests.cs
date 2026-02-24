@@ -136,7 +136,7 @@ public class AppOnlyDocumentAnalysisJobHandlerTests
 
         _analysisServiceMock
             .Setup(x => x.AnalyzeDocumentAsync(documentId, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DocumentAnalysisResult.Success(documentId, new Spaarke.Dataverse.UpdateDocumentRequest()));
+            .ReturnsAsync(AppOnlyDocumentAnalysisResult.Success(documentId, new Spaarke.Dataverse.UpdateDocumentRequest()));
 
         // Act
         var result = await _handler.ProcessAsync(job, CancellationToken.None);
@@ -157,7 +157,7 @@ public class AppOnlyDocumentAnalysisJobHandlerTests
 
         _analysisServiceMock
             .Setup(x => x.AnalyzeDocumentAsync(documentId, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DocumentAnalysisResult.Success(documentId, new Spaarke.Dataverse.UpdateDocumentRequest()));
+            .ReturnsAsync(AppOnlyDocumentAnalysisResult.Success(documentId, new Spaarke.Dataverse.UpdateDocumentRequest()));
 
         // Act
         var result = await _handler.ProcessAsync(job, CancellationToken.None);
@@ -181,7 +181,7 @@ public class AppOnlyDocumentAnalysisJobHandlerTests
 
         _analysisServiceMock
             .Setup(x => x.AnalyzeDocumentAsync(documentId, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DocumentAnalysisResult.Success(documentId, new Spaarke.Dataverse.UpdateDocumentRequest()));
+            .ReturnsAsync(AppOnlyDocumentAnalysisResult.Success(documentId, new Spaarke.Dataverse.UpdateDocumentRequest()));
 
         // Act
         var result = await _handler.ProcessAsync(job, CancellationToken.None);
@@ -202,7 +202,7 @@ public class AppOnlyDocumentAnalysisJobHandlerTests
 
         _analysisServiceMock
             .Setup(x => x.AnalyzeDocumentAsync(documentId, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DocumentAnalysisResult.Success(documentId, new Spaarke.Dataverse.UpdateDocumentRequest()));
+            .ReturnsAsync(AppOnlyDocumentAnalysisResult.Success(documentId, new Spaarke.Dataverse.UpdateDocumentRequest()));
 
         // Act
         var result = await _handler.ProcessAsync(job, CancellationToken.None);
@@ -223,7 +223,7 @@ public class AppOnlyDocumentAnalysisJobHandlerTests
 
         _analysisServiceMock
             .Setup(x => x.AnalyzeDocumentAsync(documentId, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DocumentAnalysisResult.Success(documentId, new Spaarke.Dataverse.UpdateDocumentRequest()));
+            .ReturnsAsync(AppOnlyDocumentAnalysisResult.Success(documentId, new Spaarke.Dataverse.UpdateDocumentRequest()));
 
         // Act
         var result = await _handler.ProcessAsync(job, CancellationToken.None);
@@ -247,7 +247,7 @@ public class AppOnlyDocumentAnalysisJobHandlerTests
 
         _analysisServiceMock
             .Setup(x => x.AnalyzeDocumentAsync(documentId, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DocumentAnalysisResult.Success(documentId, new Spaarke.Dataverse.UpdateDocumentRequest()));
+            .ReturnsAsync(AppOnlyDocumentAnalysisResult.Success(documentId, new Spaarke.Dataverse.UpdateDocumentRequest()));
 
         // Act
         var result = await _handler.ProcessAsync(job, CancellationToken.None);
@@ -269,7 +269,7 @@ public class AppOnlyDocumentAnalysisJobHandlerTests
 
         _analysisServiceMock
             .Setup(x => x.AnalyzeDocumentAsync(documentId, playbookName, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DocumentAnalysisResult.Success(documentId, new Spaarke.Dataverse.UpdateDocumentRequest()));
+            .ReturnsAsync(AppOnlyDocumentAnalysisResult.Success(documentId, new Spaarke.Dataverse.UpdateDocumentRequest()));
 
         // Act
         var result = await _handler.ProcessAsync(job, CancellationToken.None);
@@ -410,7 +410,7 @@ public class AppOnlyDocumentAnalysisJobHandlerTests
 
         _analysisServiceMock
             .Setup(x => x.AnalyzeDocumentAsync(documentId, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DocumentAnalysisResult.Failed(documentId, "Document not found")); // Permanent failure
+            .ReturnsAsync(AppOnlyDocumentAnalysisResult.Failed(documentId, "Document not found")); // Permanent failure
 
         // Act
         var result = await _handler.ProcessAsync(job, CancellationToken.None);
@@ -430,7 +430,7 @@ public class AppOnlyDocumentAnalysisJobHandlerTests
 
         _analysisServiceMock
             .Setup(x => x.AnalyzeDocumentAsync(documentId, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DocumentAnalysisResult.Failed(documentId, "File type not supported")); // Permanent failure
+            .ReturnsAsync(AppOnlyDocumentAnalysisResult.Failed(documentId, "File type not supported")); // Permanent failure
 
         // Act
         var result = await _handler.ProcessAsync(job, CancellationToken.None);
@@ -449,7 +449,7 @@ public class AppOnlyDocumentAnalysisJobHandlerTests
 
         _analysisServiceMock
             .Setup(x => x.AnalyzeDocumentAsync(documentId, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DocumentAnalysisResult.Failed(documentId, "Service temporarily unavailable")); // Transient
+            .ReturnsAsync(AppOnlyDocumentAnalysisResult.Failed(documentId, "Service temporarily unavailable")); // Transient
 
         // Act
         var result = await _handler.ProcessAsync(job, CancellationToken.None);
@@ -506,7 +506,7 @@ public class AppOnlyDocumentAnalysisJobHandlerTests
 
         _analysisServiceMock
             .Setup(x => x.AnalyzeDocumentAsync(documentId, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DocumentAnalysisResult.Failed(documentId, "Analysis failed"));
+            .ReturnsAsync(AppOnlyDocumentAnalysisResult.Failed(documentId, "Analysis failed"));
 
         // Act
         var result = await _handler.ProcessAsync(job, CancellationToken.None);

@@ -4,7 +4,7 @@
     <title>Deploy Workstream A — BFF API to Azure App Service</title>
     <phase>2 — Workstream A: Retrieval Foundation</phase>
     <tags>bff-api, deploy, azure</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <dependencies>AIPL-015, AIPL-016, AIPL-017</dependencies>
     <blocks>AIPL-070 (test corpus setup)</blocks>

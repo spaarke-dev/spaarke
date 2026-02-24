@@ -4,7 +4,7 @@
     <title>Add Retrieval Instrumentation — Recall@K and nDCG@K Logging</title>
     <phase>2 — Workstream A: Retrieval Foundation</phase>
     <tags>bff-api, api, retrieval, evaluation, logging</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>AIPL-010, AIPL-013</dependencies>
     <blocks>AIPL-071 (evaluation harness)</blocks>

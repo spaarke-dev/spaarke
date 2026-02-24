@@ -4,7 +4,7 @@
     <title>C3: Implement ChatSessionManager + ChatHistoryManager</title>
     <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
     <tags>bff-api, api, agent-framework, dataverse, redis</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>AIPL-051, AIPL-001</dependencies>
     <blocks>AIPL-054 (ChatEndpoints)</blocks>
@@ -119,4 +119,31 @@
     <criterion testable="true">Unit tests pass</criterion>
     <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-02-23.
+
+    Files created:
+    - src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatMessage.cs — record with ChatMessageRole enum (User/Assistant/System mapping Dataverse option set values 726490000-2)
+    - src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs — record with SessionId, TenantId, DocumentId, PlaybookId, CreatedAt, LastActivity, Messages
+    - src/server/api/Sprk.Bff.Api/Services/Ai/Chat/IChatDataverseRepository.cs — testability seam (ADR-010 justified: production vs test implementations)
+    - src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs — Dataverse persistence (sprk_aichatsummary + sprk_aichatmessage)
+    - src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs — Redis hot path (24h sliding TTL) + Dataverse cold path; cache key: "chat:session:{tenantId}:{sessionId}"
+    - src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryManager.cs — AddMessageAsync, GetHistoryAsync, TriggerSummarisationAsync (threshold=15), ArchiveHistoryAsync (threshold=50)
+    - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ChatSessionManagerTests.cs — 13 tests (Redis hit/miss, TTL, cache key pattern, Dataverse persistence, delete)
+    - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ChatHistoryManagerTests.cs — 12 tests (message persistence, summarisation trigger, archive trigger, history retrieval)
+
+    Files modified:
+    - src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs — added IChatDataverseRepository/ChatDataverseRepository (scoped), ChatSessionManager (scoped), ChatHistoryManager (scoped)
+
+    DI count updated: 97 → 99 (3 new scoped registrations added)
+
+    Build: 0 errors, 0 warnings.
+    Tests: 25 passing (ChatSessionManagerTests + ChatHistoryManagerTests).
+    All 56 Chat tests pass (ChatSessionManager + ChatHistoryManager + SprkChatAgent + SprkChatAgentFactory + Tools).
+
+    Known limitation (Phase 1): ChatDataverseRepository.GetSessionAsync uses text-field query workaround.
+    Full FetchXML query support deferred to AIPL-054 (ChatEndpoints). Redis hot path is the primary path.
+    Dataverse GUID caching for UpdateSessionActivityAsync and UpdateSessionSummaryAsync deferred to AIPL-054.
+  </notes>
 </task>

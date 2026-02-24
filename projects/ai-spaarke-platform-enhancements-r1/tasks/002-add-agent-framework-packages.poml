@@ -4,7 +4,7 @@
     <title>Add Agent Framework NuGet Packages and Verify Build</title>
     <phase>1 — Foundation &amp; Environment</phase>
     <tags>bff-api, packages, foundation, agent-framework</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>none</dependencies>
     <blocks>AIPL-050 (Agent Framework integration)</blocks>
@@ -86,4 +86,14 @@
     <criterion testable="true">appsettings.json includes LlamaParse and dual AI Search index configuration sections</criterion>
     <criterion testable="true">Pinned version recorded in project CLAUDE.md</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-02-23. Microsoft.Extensions.AI 10.3.0 and Microsoft.Agents.AI 1.0.0-rc1 added.
+    Build verified: 0 errors, 0 warnings. LlamaParse config section (Enabled: false, ApiKeySecretName: LlamaParseApiKey),
+    AiSearch dual-index section (KnowledgeIndexName, DiscoveryIndexName, SemanticConfigName), and
+    AzureOpenAI.EmbeddingModelName added to appsettings.template.json.
+    Microsoft.Extensions.Caching.Abstractions bumped from 10.0.1 to 10.0.3 to satisfy Microsoft.Extensions.AI 10.3.0
+    transitive dependency chain. Pinned versions recorded in project CLAUDE.md.
+    Note: Microsoft.Agents.AI 1.0.0-rc1 requires Microsoft.Extensions.AI >= 10.3.0 — these are tightly coupled.
+  </notes>
 </task>

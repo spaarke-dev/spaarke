@@ -42,10 +42,12 @@ import { SourceDocumentViewer } from "./SourceDocumentViewer";
 import { ResumeSessionDialog } from "./ResumeSessionDialog";
 import { useSseStream } from "../hooks/useSseStream";
 import { MsalAuthProvider, loginRequest } from "../services/auth";
+import { SprkChat } from "@spaarke/ui-components/dist/components/SprkChat";
+import type { IChatSession } from "@spaarke/ui-components/dist/components/SprkChat";
 
 // Build info for version footer
-const VERSION = "1.2.24";
-const BUILD_DATE = "2026-01-05";
+const VERSION = "1.3.0";
+const BUILD_DATE = "2026-02-23";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles - 3-Column Layout
@@ -259,6 +261,12 @@ const useStyles = makeStyles({
         color: tokens.colorBrandForeground1,
         minHeight: "24px"
     },
+    sprkChatWrapper: {
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden"
+    },
     // Choice Dialog Styles (ADR-023)
     choiceDialogContent: {
         display: "flex",
@@ -368,6 +376,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     webApi,
     // Note: getAccessToken and isAuthReady props are available but not used
     // Component uses internal MSAL auth provider instead
+    useLegacyChat = false,
     onWorkingDocumentChange,
     onChatHistoryChange,
     onStatusChange
@@ -421,6 +430,10 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     // Ref to track current chatMessages for save operations (avoids stale closure)
     const chatMessagesRef = React.useRef<IChatMessage[]>([]);
 
+    // SprkChat state (new chat system - used when useLegacyChat=false)
+    const [sprkChatAccessToken, setSprkChatAccessToken] = React.useState<string>("");
+    const [sprkChatSessionId, setSprkChatSessionId] = React.useState<string | undefined>(undefined);
+
     // Initial execution state - tracks if we're running the first AI analysis
     const [isExecuting, setIsExecuting] = React.useState(false);
     const [executionProgress, setExecutionProgress] = React.useState("");
@@ -455,7 +468,34 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         return authProviderRef.current.getToken(loginRequest.scopes);
     }, []);
 
-    // SSE Stream Hook for AI Chat
+    // Acquire and refresh access token for SprkChat component (new chat system)
+    React.useEffect(() => {
+        if (!isAuthInitialized || useLegacyChat) return;
+        let isMounted = true;
+        const acquireToken = async () => {
+            try {
+                const token = await getAccessToken();
+                if (isMounted) {
+                    setSprkChatAccessToken(token);
+                    logInfo("AnalysisWorkspaceApp", "SprkChat access token acquired");
+                }
+            } catch (err) {
+                logError("AnalysisWorkspaceApp", "Failed to acquire SprkChat access token", err);
+            }
+        };
+        acquireToken();
+        // Refresh token every 45 minutes (tokens typically expire in 60min)
+        const refreshInterval = setInterval(acquireToken, 45 * 60 * 1000);
+        return () => { isMounted = false; clearInterval(refreshInterval); };
+    }, [isAuthInitialized, useLegacyChat, getAccessToken]);
+
+    // SprkChat session created handler
+    const handleSprkChatSessionCreated = React.useCallback((session: IChatSession) => {
+        logInfo("AnalysisWorkspaceApp", `SprkChat session created: ${session.sessionId}`);
+        setSprkChatSessionId(session.sessionId);
+    }, []);
+
+    // SSE Stream Hook for AI Chat (legacy)
     const [sseState, sseActions] = useSseStream({
         apiBaseUrl,
         analysisId,
@@ -859,8 +899,9 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
 
                 // Parse chat history FIRST - if exists, show choice dialog (ADR-023)
                 // This must happen before draft execution check to ensure dialog is shown
+                // Note: SprkChat manages its own sessions via Redis/Dataverse — skip legacy parsing
                 let hasChatHistory = false;
-                if (result.sprk_chathistory) {
+                if (useLegacyChat && result.sprk_chathistory) {
                     try {
                         const parsed = JSON.parse(result.sprk_chathistory);
                         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -1353,97 +1394,112 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                     <div className={styles.panelHeader}>
                         <div className={styles.panelHeaderLeft}>
                             <Text weight="semibold">CONVERSATION</Text>
-                            {chatMessages.length > 0 && (
+                            {useLegacyChat && chatMessages.length > 0 && (
                                 <Badge appearance="filled" color="brand" size="small">
                                     {chatMessages.length}
                                 </Badge>
                             )}
                         </div>
                     </div>
-                    <div className={styles.chatContainer}>
-                        <div className={styles.chatMessages}>
-                            {chatMessages.length === 0 ? (
-                                <div style={{
-                                    textAlign: "center",
-                                    padding: "24px",
-                                    color: tokens.colorNeutralForeground3
-                                }}>
-                                    <ChatRegular style={{ fontSize: "32px", marginBottom: "12px" }} />
-                                    <Text block size={300}>Start a conversation</Text>
-                                    <Text block size={200} style={{ marginTop: "8px" }}>
-                                        Ask questions or request changes to refine your analysis
-                                    </Text>
-                                </div>
-                            ) : (
-                                chatMessages.map((msg) => (
+                    {useLegacyChat ? (
+                        /* Legacy chat panel — uses /api/ai/analysis/{id}/continue SSE */
+                        <div className={styles.chatContainer}>
+                            <div className={styles.chatMessages}>
+                                {chatMessages.length === 0 ? (
+                                    <div style={{
+                                        textAlign: "center",
+                                        padding: "24px",
+                                        color: tokens.colorNeutralForeground3
+                                    }}>
+                                        <ChatRegular style={{ fontSize: "32px", marginBottom: "12px" }} />
+                                        <Text block size={300}>Start a conversation</Text>
+                                        <Text block size={200} style={{ marginTop: "8px" }}>
+                                            Ask questions or request changes to refine your analysis
+                                        </Text>
+                                    </div>
+                                ) : (
+                                    chatMessages.map((msg) => (
+                                        <div
+                                            key={msg.id}
+                                            className={`${styles.chatMessage} ${
+                                                msg.role === "user"
+                                                    ? styles.chatMessageUser
+                                                    : styles.chatMessageAssistant
+                                            }`}
+                                        >
+                                            <div className={styles.chatMessageRole}>
+                                                {msg.role === "user" ? "You" : "AI Assistant"}
+                                            </div>
+                                            <div className={styles.chatMessageContent}>
+                                                {msg.content}
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                                {/* Streaming response - show in real-time */}
+                                {sseState.isStreaming && (
                                     <div
-                                        key={msg.id}
-                                        className={`${styles.chatMessage} ${
-                                            msg.role === "user"
-                                                ? styles.chatMessageUser
-                                                : styles.chatMessageAssistant
-                                        }`}
+                                        className={`${styles.chatMessage} ${styles.chatMessageAssistant}`}
                                     >
                                         <div className={styles.chatMessageRole}>
-                                            {msg.role === "user" ? "You" : "AI Assistant"}
+                                            AI Assistant
                                         </div>
                                         <div className={styles.chatMessageContent}>
-                                            {msg.content}
+                                            {streamingResponse || (
+                                                <span className={styles.streamingIndicator}>
+                                                    <Spinner size="tiny" />
+                                                    <Text size={200}>Thinking...</Text>
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
-                                ))
-                            )}
-                            {/* Streaming response - show in real-time */}
-                            {sseState.isStreaming && (
-                                <div
-                                    className={`${styles.chatMessage} ${styles.chatMessageAssistant}`}
-                                >
-                                    <div className={styles.chatMessageRole}>
-                                        AI Assistant
+                                )}
+                            </div>
+                            <div className={styles.chatInputContainer}>
+                                {isResumingSession ? (
+                                    <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px", justifyContent: "center" }}>
+                                        <Spinner size="tiny" />
+                                        <Text size={200}>Initializing session...</Text>
                                     </div>
-                                    <div className={styles.chatMessageContent}>
-                                        {streamingResponse || (
-                                            <span className={styles.streamingIndicator}>
-                                                <Spinner size="tiny" />
-                                                <Text size={200}>Thinking...</Text>
-                                            </span>
-                                        )}
+                                ) : !isSessionResumed && showResumeDialog ? (
+                                    <div style={{ padding: "12px", textAlign: "center", color: tokens.colorNeutralForeground3 }}>
+                                        <Text size={200}>Choose how to continue...</Text>
                                     </div>
-                                </div>
-                            )}
+                                ) : (
+                                    <div className={styles.chatInputWrapper}>
+                                        <Textarea
+                                            className={styles.chatTextarea}
+                                            placeholder={isSessionResumed ? "Type a message..." : "Waiting for session..."}
+                                            value={chatInput}
+                                            onChange={(_e, data) => setChatInput(data.value)}
+                                            onKeyDown={handleChatKeyDown}
+                                            disabled={sseState.isStreaming || !isSessionResumed}
+                                            resize="vertical"
+                                            rows={2}
+                                        />
+                                        <Button
+                                            icon={<Send24Regular />}
+                                            appearance="primary"
+                                            onClick={handleSendMessage}
+                                            disabled={!chatInput.trim() || sseState.isStreaming || !isSessionResumed}
+                                        />
+                                    </div>
+                                )}
+                            </div>
                         </div>
-                        <div className={styles.chatInputContainer}>
-                            {isResumingSession ? (
-                                <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px", justifyContent: "center" }}>
-                                    <Spinner size="tiny" />
-                                    <Text size={200}>Initializing session...</Text>
-                                </div>
-                            ) : !isSessionResumed && showResumeDialog ? (
-                                <div style={{ padding: "12px", textAlign: "center", color: tokens.colorNeutralForeground3 }}>
-                                    <Text size={200}>Choose how to continue...</Text>
-                                </div>
-                            ) : (
-                                <div className={styles.chatInputWrapper}>
-                                    <Textarea
-                                        className={styles.chatTextarea}
-                                        placeholder={isSessionResumed ? "Type a message..." : "Waiting for session..."}
-                                        value={chatInput}
-                                        onChange={(_e, data) => setChatInput(data.value)}
-                                        onKeyDown={handleChatKeyDown}
-                                        disabled={sseState.isStreaming || !isSessionResumed}
-                                        resize="vertical"
-                                        rows={2}
-                                    />
-                                    <Button
-                                        icon={<Send24Regular />}
-                                        appearance="primary"
-                                        onClick={handleSendMessage}
-                                        disabled={!chatInput.trim() || sseState.isStreaming || !isSessionResumed}
-                                    />
-                                </div>
-                            )}
+                    ) : (
+                        /* New SprkChat component — uses /api/ai/chat/ endpoints */
+                        <div className={styles.sprkChatWrapper}>
+                            <SprkChat
+                                sessionId={sprkChatSessionId}
+                                documentId={resolvedDocumentId}
+                                playbookId={playbookId || ""}
+                                apiBaseUrl={apiBaseUrl.replace(/\/+$/, "")}
+                                accessToken={sprkChatAccessToken}
+                                onSessionCreated={handleSprkChatSessionCreated}
+                            />
                         </div>
-                    </div>
+                    )}
                 </div>
             </div>
 
@@ -1452,14 +1508,16 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                 v{VERSION} • Built {BUILD_DATE}
             </div>
 
-            {/* Resume Session Dialog */}
-            <ResumeSessionDialog
-                open={showResumeDialog}
-                chatMessageCount={pendingChatHistory ? pendingChatHistory.length : 0}
-                onResumeWithHistory={handleResumeWithHistory}
-                onStartFresh={handleStartFresh}
-                onDismiss={handleDismissResumeDialog}
-            />
+            {/* Resume Session Dialog (legacy chat only — SprkChat manages its own sessions) */}
+            {useLegacyChat && (
+                <ResumeSessionDialog
+                    open={showResumeDialog}
+                    chatMessageCount={pendingChatHistory ? pendingChatHistory.length : 0}
+                    onResumeWithHistory={handleResumeWithHistory}
+                    onStartFresh={handleStartFresh}
+                    onDismiss={handleDismissResumeDialog}
+                />
+            )}
         </div>
     );
 };

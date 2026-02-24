@@ -138,7 +138,7 @@ public static class BuilderScopeAdminEndpoints
         HttpRequest httpRequest,
         IConfiguration configuration,
         BuilderScopeImporter importer,
-        ImportScopeJsonRequest request,
+        [Microsoft.AspNetCore.Mvc.FromBody] ImportScopeJsonRequest request,
         ILogger<Program> logger,
         CancellationToken cancellationToken)
     {

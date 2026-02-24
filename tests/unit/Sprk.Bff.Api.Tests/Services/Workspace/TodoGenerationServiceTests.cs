@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -47,10 +48,24 @@ public class TodoGenerationServiceTests
     private TodoGenerationService CreateService(
         IOptions<TodoGenerationOptions>? options = null)
     {
-        return new TodoGenerationService(
-            _dataverseMock.Object,
+        // Build a ServiceProvider that resolves IDataverseService as the mock.
+        var services = new ServiceCollection();
+        services.AddSingleton(_dataverseMock.Object);
+        var serviceProvider = services.BuildServiceProvider();
+
+        var svc = new TodoGenerationService(
+            serviceProvider,
             _loggerMock.Object,
             options ?? _defaultOptions);
+
+        // Eagerly set the private _dataverse field via reflection so that internal
+        // methods (TodoExistsAsync, RunGenerationPassAsync, CreateTodoEventAsync) can
+        // exercise the Dataverse mock without running the full BackgroundService loop.
+        var dataverseField = typeof(TodoGenerationService)
+            .GetField("_dataverse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        dataverseField.SetValue(svc, _dataverseMock.Object);
+
+        return svc;
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -77,7 +92,7 @@ public class TodoGenerationServiceTests
     // ──────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Constructor_NullDataverse_ThrowsArgumentNullException()
+    public void Constructor_NullServiceProvider_ThrowsArgumentNullException()
     {
         var act = () => new TodoGenerationService(
             null!,
@@ -85,14 +100,18 @@ public class TodoGenerationServiceTests
             _defaultOptions);
 
         act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("dataverse");
+            .WithParameterName("serviceProvider");
     }
 
     [Fact]
     public void Constructor_NullLogger_ThrowsArgumentNullException()
     {
+        var services = new ServiceCollection();
+        services.AddSingleton(_dataverseMock.Object);
+        var sp = services.BuildServiceProvider();
+
         var act = () => new TodoGenerationService(
-            _dataverseMock.Object,
+            sp,
             null!,
             _defaultOptions);
 
@@ -103,8 +122,12 @@ public class TodoGenerationServiceTests
     [Fact]
     public void Constructor_NullOptions_ThrowsArgumentNullException()
     {
+        var services = new ServiceCollection();
+        services.AddSingleton(_dataverseMock.Object);
+        var sp = services.BuildServiceProvider();
+
         var act = () => new TodoGenerationService(
-            _dataverseMock.Object,
+            sp,
             _loggerMock.Object,
             null!);
 

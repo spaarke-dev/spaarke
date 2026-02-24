@@ -68,15 +68,14 @@ public class AiAuthorizationFilter : IEndpointFilter
                 type: "https://tools.ietf.org/html/rfc7235#section-3.1");
         }
 
-        // Extract document IDs from request arguments
+        // Extract document IDs from request arguments.
+        // If no document IDs are present (e.g. session-scoped endpoints where the session ID
+        // acts as the authorization scope), pass through to the next filter — the endpoint
+        // handler performs its own tenant/session ownership checks.
         var documentIds = ExtractDocumentIds(context);
         if (documentIds.Count == 0)
         {
-            return Results.Problem(
-                statusCode: 400,
-                title: "Bad Request",
-                detail: "No document identifier found in request",
-                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+            return await next(context);
         }
 
         try

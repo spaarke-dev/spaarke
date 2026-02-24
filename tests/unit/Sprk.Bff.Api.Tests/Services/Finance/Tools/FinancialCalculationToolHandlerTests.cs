@@ -9,6 +9,17 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Finance.Tools;
 
+/// <summary>
+/// Unit tests for FinancialCalculationToolHandler.
+///
+/// NOTE: The handler's CalculateMatterFinancialTotalsAsync / CalculateProjectFinancialTotalsAsync
+/// methods cast IDataverseService to ServiceClient (Microsoft.Xrm.Sdk) internally and call
+/// RetrieveMultiple — a Dataverse SDK operation that is not mockable via IDataverseService.
+/// Tests covering those paths require an integration test harness (WireMock + real SDK client).
+///
+/// These unit tests cover the handler's public contract layer: parameter validation,
+/// unsupported entity/operation detection, and basic constructor validation.
+/// </summary>
 public class FinancialCalculationToolHandlerTests
 {
     private readonly IDataverseService _dataverseService;
@@ -35,189 +46,41 @@ public class FinancialCalculationToolHandlerTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_RecalculateOperation_CalculatesFromAllInvoices()
+    public void Constructor_NullDataverseService_ThrowsArgumentNullException()
     {
-        // Arrange
-        var matterId = Guid.NewGuid();
-        var parameters = new ToolParameters(new Dictionary<string, object>
-        {
-            ["entityType"] = "sprk_matter",
-            ["recordId"] = matterId,
-            ["operation"] = "recalculate"
-        });
-
-        var matterRecord = new Dictionary<string, object>
-        {
-            ["sprk_totalbudget"] = new Money { Value = 100000m },
-            ["@odata.etag"] = "W/\"12345\""
-        };
-
-        var invoices = new List<Dictionary<string, object>>
-        {
-            new() { ["sprk_totalamount"] = new Money { Value = 15000m } },
-            new() { ["sprk_totalamount"] = new Money { Value = 22000m } },
-            new() { ["sprk_totalamount"] = new Money { Value = 18000m } }
-        };
-
-        _dataverseService.GetRecordAsync(
-            "sprk_matter",
-            matterId,
-            Arg.Any<string[]>(),
-            Arg.Any<CancellationToken>())
-            .Returns(matterRecord);
-
-        _dataverseService.QueryRecordsAsync(
-            "sprk_invoice",
-            $"_sprk_matter_value eq {matterId}",
-            Arg.Any<string[]>(),
-            Arg.Any<CancellationToken>())
-            .Returns(invoices);
-
-        _dataverseService.UpdateRecordAsync(
-            "sprk_matter",
-            matterId,
-            Arg.Any<Dictionary<string, object>>(),
-            Arg.Any<string>(),
-            Arg.Any<CancellationToken>())
-            .Returns(Task.CompletedTask);
-
         // Act
-        var result = await _handler.ExecuteAsync(parameters, CancellationToken.None);
+        var act = () => new FinancialCalculationToolHandler(null!, _telemetry, _logger);
 
         // Assert
-        result.Success.Should().BeTrue();
-        result.Data.Should().NotBeNull();
-
-        var totals = result.Data as MatterFinancialTotals;
-        totals.Should().NotBeNull();
-        totals!.TotalBudget.Should().Be(100000m);
-        totals.TotalSpendToDate.Should().Be(55000m); // 15000 + 22000 + 18000
-        totals.RemainingBudget.Should().Be(45000m); // 100000 - 55000
-        totals.BudgetUtilizationPercent.Should().BeApproximately(55m, 0.01m); // 55000 / 100000 * 100
-        totals.InvoiceCount.Should().Be(3);
-        totals.AverageInvoiceAmount.Should().BeApproximately(18333.33m, 0.01m); // 55000 / 3
-
-        await _dataverseService.Received(1).UpdateRecordAsync(
-            "sprk_matter",
-            matterId,
-            Arg.Is<Dictionary<string, object>>(d =>
-                ((Money)d["sprk_totalspendtodate"]).Value == 55000m &&
-                ((Money)d["sprk_remainingbudget"]).Value == 45000m &&
-                (decimal)d["sprk_budgetutilizationpercent"] == 55m &&
-                (int)d["sprk_invoicecount"] == 3),
-            "W/\"12345\"",
-            Arg.Any<CancellationToken>());
+        act.Should().Throw<ArgumentNullException>().WithParameterName("dataverseService");
     }
 
     [Fact]
-    public async Task ExecuteAsync_IncrementOperation_AddsInvoiceAmount()
+    public void Constructor_NullTelemetry_ThrowsArgumentNullException()
     {
-        // Arrange
-        var matterId = Guid.NewGuid();
-        var parameters = new ToolParameters(new Dictionary<string, object>
-        {
-            ["entityType"] = "sprk_matter",
-            ["recordId"] = matterId,
-            ["operation"] = "increment",
-            ["invoiceAmount"] = 15000m
-        });
-
-        var matterRecord = new Dictionary<string, object>
-        {
-            ["sprk_totalbudget"] = new Money { Value = 100000m },
-            ["sprk_totalspendtodate"] = new Money { Value = 40000m },
-            ["sprk_invoicecount"] = 2,
-            ["@odata.etag"] = "W/\"12345\""
-        };
-
-        _dataverseService.GetRecordAsync(
-            "sprk_matter",
-            matterId,
-            Arg.Any<string[]>(),
-            Arg.Any<CancellationToken>())
-            .Returns(matterRecord);
-
-        _dataverseService.UpdateRecordAsync(
-            "sprk_matter",
-            matterId,
-            Arg.Any<Dictionary<string, object>>(),
-            Arg.Any<string>(),
-            Arg.Any<CancellationToken>())
-            .Returns(Task.CompletedTask);
-
         // Act
-        var result = await _handler.ExecuteAsync(parameters, CancellationToken.None);
+        var act = () => new FinancialCalculationToolHandler(_dataverseService, null!, _logger);
 
         // Assert
-        result.Success.Should().BeTrue();
-        result.Data.Should().NotBeNull();
-
-        var totals = result.Data as MatterFinancialTotals;
-        totals.Should().NotBeNull();
-        totals!.TotalSpendToDate.Should().Be(55000m); // 40000 + 15000
-        totals.RemainingBudget.Should().Be(45000m); // 100000 - 55000
-        totals.BudgetUtilizationPercent.Should().BeApproximately(55m, 0.01m);
-        totals.InvoiceCount.Should().Be(3); // 2 + 1
-        totals.AverageInvoiceAmount.Should().BeApproximately(18333.33m, 0.01m); // 55000 / 3
+        act.Should().Throw<ArgumentNullException>().WithParameterName("telemetry");
     }
 
     [Fact]
-    public async Task ExecuteAsync_Project_UsesProjectEntity()
+    public void Constructor_NullLogger_ThrowsArgumentNullException()
     {
-        // Arrange
-        var projectId = Guid.NewGuid();
-        var parameters = new ToolParameters(new Dictionary<string, object>
-        {
-            ["entityType"] = "sprk_project",
-            ["recordId"] = projectId,
-            ["operation"] = "recalculate"
-        });
-
-        var projectRecord = new Dictionary<string, object>
-        {
-            ["sprk_totalbudget"] = new Money { Value = 50000m },
-            ["@odata.etag"] = "W/\"12345\""
-        };
-
-        _dataverseService.GetRecordAsync(
-            "sprk_project",
-            projectId,
-            Arg.Any<string[]>(),
-            Arg.Any<CancellationToken>())
-            .Returns(projectRecord);
-
-        _dataverseService.QueryRecordsAsync(
-            "sprk_invoice",
-            $"_sprk_project_value eq {projectId}",
-            Arg.Any<string[]>(),
-            Arg.Any<CancellationToken>())
-            .Returns(new List<Dictionary<string, object>>());
-
-        _dataverseService.UpdateRecordAsync(
-            "sprk_project",
-            projectId,
-            Arg.Any<Dictionary<string, object>>(),
-            Arg.Any<string>(),
-            Arg.Any<CancellationToken>())
-            .Returns(Task.CompletedTask);
-
         // Act
-        var result = await _handler.ExecuteAsync(parameters, CancellationToken.None);
+        var act = () => new FinancialCalculationToolHandler(_dataverseService, _telemetry, null!);
 
         // Assert
-        result.Success.Should().BeTrue();
-        await _dataverseService.Received(1).GetRecordAsync("sprk_project", Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>());
-        await _dataverseService.Received(1).UpdateRecordAsync("sprk_project", Arg.Any<Guid>(), Arg.Any<Dictionary<string, object>>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
     }
 
     [Fact]
-    public async Task ExecuteAsync_InvalidEntityType_ReturnsError()
+    public async Task ExecuteAsync_MissingBothMatterIdAndProjectId_ReturnsError()
     {
-        // Arrange
+        // Arrange — neither matterId nor projectId provided
         var parameters = new ToolParameters(new Dictionary<string, object>
         {
-            ["entityType"] = "sprk_invoice",
-            ["recordId"] = Guid.NewGuid(),
             ["operation"] = "recalculate"
         });
 
@@ -226,18 +89,18 @@ public class FinancialCalculationToolHandlerTests
 
         // Assert
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("Unsupported entity type");
+        result.Error.Should().Contain("matterId");
+        result.Error.Should().Contain("projectId");
     }
 
     [Fact]
-    public async Task ExecuteAsync_InvalidOperation_ReturnsError()
+    public async Task ExecuteAsync_BothMatterIdAndProjectIdProvided_ReturnsError()
     {
-        // Arrange
+        // Arrange — both matterId and projectId provided (mutually exclusive)
         var parameters = new ToolParameters(new Dictionary<string, object>
         {
-            ["entityType"] = "sprk_matter",
-            ["recordId"] = Guid.NewGuid(),
-            ["operation"] = "delete"
+            ["matterId"] = Guid.NewGuid(),
+            ["projectId"] = Guid.NewGuid()
         });
 
         // Act
@@ -245,86 +108,42 @@ public class FinancialCalculationToolHandlerTests
 
         // Assert
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("Unsupported operation");
+        result.Error.Should().Contain("Cannot specify both");
     }
 
     [Fact]
-    public async Task ExecuteAsync_ConcurrencyConflict_RetriesWithExponentialBackoff()
+    public async Task ExecuteAsync_MatterIdProvided_ServiceClientCastFails_ReturnsError()
     {
-        // Arrange
-        var matterId = Guid.NewGuid();
+        // Arrange — IDataverseService mock is NOT a ServiceClient, so the internal cast will fail.
+        // This is an expected failure mode when the handler is invoked in a test context
+        // without a real Dataverse ServiceClient wired up.
         var parameters = new ToolParameters(new Dictionary<string, object>
         {
-            ["entityType"] = "sprk_matter",
-            ["recordId"] = matterId,
-            ["operation"] = "recalculate"
+            ["matterId"] = Guid.NewGuid()
         });
 
-        var matterRecord = new Dictionary<string, object>
+        // Act — Should gracefully catch the InvalidOperationException from the cast
+        var result = await _handler.ExecuteAsync(parameters, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("Financial calculation failed");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ProjectIdProvided_ServiceClientCastFails_ReturnsError()
+    {
+        // Arrange — same as above but for project path
+        var parameters = new ToolParameters(new Dictionary<string, object>
         {
-            ["sprk_totalbudget"] = new Money { Value = 100000m },
-            ["@odata.etag"] = "W/\"12345\""
-        };
-
-        _dataverseService.GetRecordAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
-            .Returns(matterRecord);
-
-        _dataverseService.QueryRecordsAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Dictionary<string, object>>());
-
-        // Fail first 2 attempts with 412, succeed on 3rd
-        _dataverseService.UpdateRecordAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<Dictionary<string, object>>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(
-                x => throw new DataverseException("Precondition Failed", 412),
-                x => throw new DataverseException("Precondition Failed", 412),
-                x => Task.CompletedTask);
+            ["projectId"] = Guid.NewGuid()
+        });
 
         // Act
         var result = await _handler.ExecuteAsync(parameters, CancellationToken.None);
 
         // Assert
-        result.Success.Should().BeTrue();
-        await _dataverseService.Received(3).UpdateRecordAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<Dictionary<string, object>>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_ZeroBudget_CalculatesUtilizationAsZero()
-    {
-        // Arrange
-        var matterId = Guid.NewGuid();
-        var parameters = new ToolParameters(new Dictionary<string, object>
-        {
-            ["entityType"] = "sprk_matter",
-            ["recordId"] = matterId,
-            ["operation"] = "recalculate"
-        });
-
-        var matterRecord = new Dictionary<string, object>
-        {
-            ["sprk_totalbudget"] = new Money { Value = 0m }, // Zero budget
-            ["@odata.etag"] = "W/\"12345\""
-        };
-
-        var invoices = new List<Dictionary<string, object>>
-        {
-            new() { ["sprk_totalamount"] = new Money { Value = 15000m } }
-        };
-
-        _dataverseService.GetRecordAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
-            .Returns(matterRecord);
-
-        _dataverseService.QueryRecordsAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
-            .Returns(invoices);
-
-        _dataverseService.UpdateRecordAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<Dictionary<string, object>>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await _handler.ExecuteAsync(parameters, CancellationToken.None);
-
-        // Assert
-        result.Success.Should().BeTrue();
-        var totals = result.Data as MatterFinancialTotals;
-        totals!.BudgetUtilizationPercent.Should().Be(0m); // Avoid division by zero
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("Financial calculation failed");
     }
 }

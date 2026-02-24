@@ -40,6 +40,8 @@ public static class AnalysisEndpoints
             .ProducesProblem(500)
             .ProducesProblem(503);
 
+        // DEPRECATED: Being replaced by ChatEndpoints (/api/ai/chat/sessions/{id}/messages).
+        // Kept for backward compatibility with useLegacyChat=true. Will be removed in future release.
         // POST /api/ai/analysis/{analysisId}/continue - Continue analysis via chat
         group.MapPost("/{analysisId:guid}/continue", ContinueAnalysis)
             .AddAnalysisRecordAuthorizationFilter()
@@ -178,7 +180,8 @@ public static class AnalysisEndpoints
     }
 
     /// <summary>
-    /// Continue an existing analysis via conversational chat.
+    /// [DEPRECATED] Continue an existing analysis via conversational chat.
+    /// Being replaced by ChatEndpoints. Kept for useLegacyChat=true backward compatibility.
     /// POST /api/ai/analysis/{analysisId}/continue
     /// </summary>
     private static async Task ContinueAnalysis(

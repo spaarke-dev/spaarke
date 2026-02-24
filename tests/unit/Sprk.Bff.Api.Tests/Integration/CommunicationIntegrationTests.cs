@@ -1689,7 +1689,7 @@ public class CommunicationIntegrationTests
             "Dataverse UpdateAsync should be called to store subscription info on the account");
         capturedUpdateFields!.Should().ContainKey("sprk_subscriptionid",
             "sprk_subscriptionid should be populated after subscription creation");
-        capturedUpdateFields["sprk_subscriptionid"].Should().BeOfType<string>();
+        capturedUpdateFields!["sprk_subscriptionid"].Should().BeOfType<string>();
         ((string)capturedUpdateFields["sprk_subscriptionid"]).Should().NotBeNullOrEmpty(
             "Subscription ID should be a non-empty string from Graph");
         capturedUpdateFields.Should().ContainKey("sprk_subscriptionexpiry",
@@ -1869,7 +1869,7 @@ public class CommunicationIntegrationTests
             "sprk_subscriptionexpiry should be updated with the new extended expiry");
 
         // The expiry should be extended to ~3 days from now (subscription lifetime)
-        var updatedExpiry = (DateTime)capturedUpdateFields["sprk_subscriptionexpiry"];
+        var updatedExpiry = (DateTime)capturedUpdateFields!["sprk_subscriptionexpiry"];
         updatedExpiry.Should().BeAfter(DateTime.UtcNow.AddDays(2),
             "Renewed subscription expiry should be at least 2 days in the future (3-day lifetime)");
     }

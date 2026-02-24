@@ -17,6 +17,7 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
     "@azure/msal-browser": "^4.24.1",
     "@monaco-editor/react": "^4.6.0",
     "@lexical/react": "^0.17.0",

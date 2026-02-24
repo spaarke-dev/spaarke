@@ -4,7 +4,7 @@
     <title>Implement RagIndexingJobHandler — Service Bus Background Indexing</title>
     <phase>2 — Workstream A: Retrieval Foundation</phase>
     <tags>bff-api, api, jobs, retrieval, indexing</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>AIPL-013</dependencies>
     <blocks>AIPL-015 (KnowledgeBaseEndpoints)</blocks>

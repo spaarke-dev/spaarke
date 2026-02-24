@@ -4,7 +4,17 @@
     <title>Build ScopeConfigEditorPCF — Adaptive Scope Configuration Editor</title>
     <phase>3 — Workstream B: Scope Library &amp; Seed Data</phase>
     <tags>pcf, frontend, fluent-ui, scope-library</tags>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed-date>2026-02-23</completed-date>
+    <notes>
+      PCF control built at src/client/pcf/ScopeConfigEditor/.
+      Production bundle: 315 KB (well under 1MB target).
+      Dev bundle: 1.03 MB unminified (CodeMirror is main contributor).
+      All 35 unit tests pass.
+      Uses control-type="virtual" (ReactControl) per ADR-022 — no ReactDOM.render needed.
+      CodeMirror: minimal extensions only (@codemirror/view, @codemirror/state, @codemirror/commands, @codemirror/lang-json).
+      React and Fluent UI externalized via platform-library manifest (not bundled).
+    </notes>
     <estimated-effort>10 hours</estimated-effort>
     <dependencies>AIPL-030, AIPL-033</dependencies>
     <blocks>AIPL-037 (Phase 3 PCF deploy)</blocks>

@@ -3,6 +3,10 @@
   "compilerOptions": {
     "outDir": "./out/controls",
     "rootDir": "./control",
+    "baseUrl": ".",
+    "paths": {
+      "@spaarke/ui-components": ["node_modules/@spaarke/ui-components/dist"]
+    },
     "typeRoots": [
       "node_modules/@types",
       "../node_modules/@types"

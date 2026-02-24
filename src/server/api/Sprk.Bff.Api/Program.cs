@@ -554,6 +554,11 @@ if (analysisEnabled && documentIntelligenceEnabled)
     builder.Services.AddSemanticSearch();
     Console.WriteLine("✓ Semantic search enabled");
 
+    // AI Platform Foundation — DocumentParserRouter, LlamaParseClient, SemanticDocumentChunker, RagQueryBuilder
+    // (AIPL-010, AIPL-011, AIPL-012 — Workstream A: Retrieval Foundation)
+    builder.Services.AddAiModule(builder.Configuration);
+    Console.WriteLine("✓ AI Platform Foundation module enabled (DocumentParserRouter, SemanticDocumentChunker, RagQueryBuilder)");
+
     Console.WriteLine("✓ Analysis services enabled");
 }
 else if (!documentIntelligenceEnabled)
@@ -700,6 +705,16 @@ builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexin
 builder.Services.Configure<Sprk.Bff.Api.Configuration.ReindexingOptions>(
     builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.ReindexingOptions.SectionName));
 
+// ============================================================================
+// AI PLATFORM FOUNDATION OPTIONS (AIPL-004 — Phase 1 foundation bindings)
+// NOTE: Configure<T> calls do NOT count toward ADR-010 non-framework DI budget.
+// ============================================================================
+
+// LlamaParse - optional dual-parser enhancement with fallback to Azure Doc Intel (Workstream A)
+builder.Services.Configure<LlamaParseOptions>(builder.Configuration.GetSection("LlamaParse"));
+
+// AiSearch - Azure AI Search connectivity for RAG knowledge and discovery indexes (Workstreams A, C)
+builder.Services.Configure<AiSearchOptions>(builder.Configuration.GetSection("AiSearch"));
 
 builder.Logging.AddConsole();
 Console.WriteLine("✓ Job processing configured with Service Bus (queue: sdap-jobs)");
@@ -1714,6 +1729,17 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
 
 // RAG endpoints for knowledge base operations (R3)
 app.MapRagEndpoints();
+
+// Knowledge base management endpoints (AIPL-015 — Workstream A: Retrieval Foundation)
+// Provides: GET /indexes/health, GET /indexes/{indexName}/documents,
+//           DELETE /indexes/{indexName}/documents/{documentId},
+//           POST /indexes/reindex/{documentId}, POST /test-search
+app.MapKnowledgeBaseEndpoints();
+
+// SprkChat session and SSE streaming endpoints (AIPL-054 — Workstream C: SprkChat)
+// Provides: POST /sessions, GET /sessions/{id}/history, POST /sessions/{id}/messages (SSE),
+//           POST /sessions/{id}/refine (SSE), PATCH /sessions/{id}/context, DELETE /sessions/{id}
+app.MapChatEndpoints();
 
 // Semantic Search endpoints for hybrid search (R1)
 // Only map if semantic search services are registered (requires DocumentIntelligence + Analysis enabled)

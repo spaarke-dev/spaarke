@@ -4,7 +4,8 @@
     <title>Create 10 System Playbook Records (sprk_aiplaybook PB-001–010)</title>
     <phase>3 — Workstream B: Scope Library &amp; Seed Data</phase>
     <tags>dataverse, seed-data, scope-library</tags>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-note>Script created (Create-PlaybookSeedRecords.ps1) and scope-library-catalog.md updated. PAC CLI execution pending manual run (2026-02-23).</completion-note>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>AIPL-030, AIPL-031, AIPL-032, AIPL-033</dependencies>
     <blocks>AIPL-037 (Phase 3 deploy), AIPL-072 (E2E tests)</blocks>

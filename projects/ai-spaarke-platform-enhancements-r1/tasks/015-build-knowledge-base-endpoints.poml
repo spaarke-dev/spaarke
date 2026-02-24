@@ -4,7 +4,7 @@
     <title>Build KnowledgeBaseEndpoints — CRUD, Search, and Health API</title>
     <phase>2 — Workstream A: Retrieval Foundation</phase>
     <tags>bff-api, api, retrieval, endpoints</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>AIPL-013, AIPL-014</dependencies>
     <blocks>AIPL-018 (Phase 2 API deploy), AIPL-071 (evaluation harness)</blocks>
@@ -102,4 +102,20 @@
     <criterion testable="true">Integration tests pass (4 test cases minimum)</criterion>
     <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-02-23.
+    Files created:
+      - src/server/api/Sprk.Bff.Api/Api/Ai/KnowledgeBaseEndpoints.cs — all 5 endpoints implemented
+      - tests/integration/Spe.Integration.Tests/Api/Ai/KnowledgeBaseEndpointsTests.cs — 11 integration tests
+    Files modified:
+      - src/server/api/Sprk.Bff.Api/Program.cs — added app.MapKnowledgeBaseEndpoints()
+    Build: 0 errors, 0 warnings (both Sprk.Bff.Api and Spe.Integration.Tests).
+    Key decisions:
+      - Used ILogger&lt;RagIndexingPipeline&gt; instead of ILogger&lt;KnowledgeBaseEndpoints&gt; because
+        KnowledgeBaseEndpoints is a static class and cannot be used as a generic type argument.
+      - Internal MapGroup pattern chosen over external caller pattern (matches AnalysisEndpoints.cs).
+      - TenantId resolved from 'tid' JWT claim with fallback to X-Tenant-Id header (ADR-014).
+      - DELETE routes to IRagService for knowledge index; direct SearchClient for discovery index.
+  </notes>
 </task>

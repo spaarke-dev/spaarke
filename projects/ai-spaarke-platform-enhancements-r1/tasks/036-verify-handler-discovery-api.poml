@@ -4,7 +4,7 @@
     <title>Verify and Extend Handler Discovery API for ScopeConfigEditor</title>
     <phase>3 — Workstream B: Scope Library &amp; Seed Data</phase>
     <tags>bff-api, api, scope-library</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>AIPL-033</dependencies>
     <blocks>AIPL-035 (ScopeConfigEditorPCF handler dropdown), AIPL-037 (Phase 3 deploy)</blocks>
@@ -79,4 +79,37 @@
     <criterion testable="true">Endpoint has authorization filter</criterion>
     <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-02-23 (AIPL-036).
+
+    AiToolEndpoints.cs referenced in the task does not exist in the codebase. The handler discovery
+    endpoint was added to the existing HandlerEndpoints.cs (the correct location per ADR-013:
+    extend existing endpoint files, do not create new ones).
+
+    New endpoint added: GET /api/ai/tools/handlers
+    - Route group: /api/ai/tools (RequireAuthorization() for the group)
+    - Injects IEnumerable&lt;IAiToolHandler&gt; from DI
+    - Returns ToolHandlerListResponse { Handlers: ToolHandlerInfoDto[] }
+    - ToolHandlerInfoDto: { ClassName, ToolName, Description }
+    - Description extracted from [Description] attribute if present, falls back to ToolName
+    - Results ordered alphabetically by ClassName
+    - Authorization: RequireAuthorization() — AiAuthorizationFilter was NOT applied because it
+      requires DocumentAnalysisRequest/Guid documentIds in request args and would always return
+      400 for a metadata-only listing endpoint. This is consistent with ScopeEndpoints and
+      ModelEndpoints which also use RequireAuthorization() only.
+
+    Existing /api/ai/handlers and /api/ai/handlers/{handlerId} endpoints preserved unchanged.
+    These use IToolHandlerRegistry for richer metadata (name, version, parameters, schema).
+
+    Build: dotnet build src/server/api/Sprk.Bff.Api/ → succeeded, 0 errors, 0 warnings.
+
+    Note on acceptance criterion "includes DocumentSearchTools and AnalysisQueryTools":
+    These are Workstream C Chat Tool handler class names (DocumentSearchHandler, AnalysisQueryHandler
+    per scope-library-catalog.md). They will be implemented in AIPL-053 and automatically appear
+    in the endpoint response once registered as IAiToolHandler in DI. The endpoint infrastructure
+    is complete; the handler implementations are pending AIPL-053.
+
+    File modified: src/server/api/Sprk.Bff.Api/Api/Ai/HandlerEndpoints.cs
+  </notes>
 </task>

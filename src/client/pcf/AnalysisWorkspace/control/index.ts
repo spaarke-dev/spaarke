@@ -20,7 +20,7 @@
  * - ADR-006: PCF over webresources
  * - ADR-010: Configuration Over Code
  *
- * @version 1.0.0
+ * @version 1.3.0
  */
 
 // Declare global Xrm
@@ -302,7 +302,11 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<IIn
             this._context.parameters.apiBaseUrl?.raw ||
             "https://spe-api-dev-67e2xz.azurewebsites.net/api";
 
-        logInfo("AnalysisWorkspace", `Rendering with analysisId: ${analysisId}, apiUrl: ${apiBaseUrl.substring(0, 30)}...`);
+        // Feature flag: useLegacyChat (default false = use new SprkChat component)
+        // TwoOptions PCF property returns boolean, not string
+        const useLegacyChat = this._context.parameters.useLegacyChat?.raw === true;
+
+        logInfo("AnalysisWorkspace", `Rendering with analysisId: ${analysisId}, apiUrl: ${apiBaseUrl.substring(0, 30)}..., useLegacyChat: ${useLegacyChat}`);
 
         // Create or update React root
         if (!this._root) {
@@ -322,6 +326,7 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<IIn
                     webApi: this._context.webAPI,
                     getAccessToken: this.getAccessToken,
                     isAuthReady: this._isAuthReady,
+                    useLegacyChat,
                     onWorkingDocumentChange: this.handleWorkingDocumentChange.bind(this),
                     onChatHistoryChange: this.handleChatHistoryChange.bind(this),
                     onStatusChange: this.handleStatusChange.bind(this)

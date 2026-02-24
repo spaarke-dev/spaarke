@@ -4,7 +4,7 @@
     <title>Create 10 Knowledge Source Records with Content and Index to AI Search</title>
     <phase>3 — Workstream B: Scope Library &amp; Seed Data</phase>
     <tags>dataverse, seed-data, scope-library, ai-search, retrieval</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>AIPL-016, AIPL-013</dependencies>
     <blocks>AIPL-034 (Playbooks), AIPL-070 (test corpus)</blocks>
@@ -80,6 +80,17 @@
       Add Knowledge Sources section to catalog with all 10 entries.
     </step>
   </steps>
+
+  <notes>
+    Completed 2026-02-23. All 10 knowledge source content files authored (KNW-001 through KNW-010)
+    in notes/design/knowledge-sources/. PowerShell provisioning script created at
+    scripts/Create-KnowledgeSourceRecords.ps1 (follows Create-SkillSeedRecords.ps1 pattern).
+    scope-library-catalog.md updated with Knowledge Sources section.
+    ADR-014 compliant: sprk_tenantid="system" on all records.
+    ADR-002 compliant: records created via script, no plugin processing.
+    PENDING MANUAL RUN: PAC CLI execution (Create-KnowledgeSourceRecords.ps1) and
+    AI Search indexing via /api/ai/knowledge/index/batch after AIPL-018 deployment.
+  </notes>
 
   <tools>
     <tool name="pac">Power Platform CLI for Dataverse</tool>

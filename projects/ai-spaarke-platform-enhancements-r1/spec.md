@@ -346,7 +346,8 @@ A + B + C      ──▶ D (validation is the launch gate)
 
 *These may need answers during implementation:*
 
-- [ ] **Dataverse entity schema for chat messages**: Exact fields for `sprk_aichatmessage` and `sprk_aichatsummary` — Blocks: C2 (ChatSessionManager implementation)
+- [x] **Dataverse entity schema for chat messages**: Exact fields for `sprk_aichatmessage` and `sprk_aichatsummary` — Blocks: C2 (ChatSessionManager implementation)
+  - Resolved: 2026-02-23 — Schema defined in `notes/design/dataverse-chat-schema.md`. Entities: `sprk_aichatmessage`, `sprk_aichatsummary`, `sprk_aievaluationrun`, `sprk_aievaluationresult`. Deployment script at `projects/ai-spaarke-platform-enhancements-r1/scripts/Deploy-ChatEvaluationSchema.ps1`. Run with: `pwsh Deploy-ChatEvaluationSchema.ps1` (requires az login).
 - [ ] **LlamaParse tier selection logic**: Beyond document type, should users be able to force LlamaParse tier (Cost Effective vs Agentic vs Agentic Plus)? — Blocks: A3 configuration design
 - [ ] **Knowledge source content format**: Should KNW-* seed data content be markdown, plain text, or structured JSON? — Blocks: B3 content authoring
 - [ ] **Evaluation scoring thresholds**: What Recall@10 / nDCG@10 scores constitute "pass" vs "fail"? — Blocks: D3 harness configuration

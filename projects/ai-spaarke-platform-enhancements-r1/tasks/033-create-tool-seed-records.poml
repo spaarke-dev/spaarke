@@ -11,9 +11,19 @@
   </metadata>
 
   <prompt>
-    Create 8 system Tool records in the sprk_analysistool Dataverse entity. Tools define
-    callable functions that the AI agent can invoke during analysis. Each Tool record
-    specifies the handler class name and JSON Schema for the tool's parameters.
+    Create 8 system Tool records in the sprk_analysistool Dataverse entity (collection:
+    sprk_analysistools). Tools define callable functions that the AI agent can invoke during
+    analysis. Each Tool record specifies the handler class name and JSON configuration.
+
+    IMPORTANT ENTITY/FIELD CORRECTIONS (verified from source code 2026-02-23):
+    - Entity logical name: sprk_analysistool (collection: sprk_analysistools) — entity name IS correct
+    - Handler class field: sprk_handlerclass (NOT sprk_handlerclassname)
+    - Configuration/schema field: sprk_configuration (NOT sprk_parameterschema) — JSON blob
+    - Code/alternate key field: sprk_toolcode (NOT sprk_externalid — that field does not exist)
+    - ToolLookupService.GetByCodeAsync() resolves by sprk_toolcode alternate key
+    - No sprk_isactive, sprk_issystem fields on this entity
+    - 21 existing tool records exist with NO sprk_toolcode set — create NEW records
+    - MapHandlerClassToToolType() in ScopeResolverService maps handler class → ToolType enum
 
     Tools to create (TL-001 through TL-008):
     1. DocumentSearch — search the knowledge base for relevant content
@@ -27,20 +37,22 @@
   </prompt>
 
   <role>
-    Dataverse developer familiar with sprk_analysistool entity schema and JSON Schema specification.
+    Dataverse developer familiar with sprk_analysistool entity schema and JSON configuration.
   </role>
 
   <goal>
-    8 sprk_analysistool records exist in spaarkedev1 with IDs TL-001 through TL-008.
-    Each has a valid JSON Schema for parameters and a handler class name that resolves
-    to a registered handler in the BFF.
+    8 sprk_analysistool records exist in spaarkedev1 with sprk_toolcode values TL-001 through
+    TL-008. Each has a sprk_handlerclass that will map to a C# handler in Workstream C and
+    a sprk_configuration JSON blob with parameter schema. ToolLookupService resolves by code.
   </goal>
 
   <constraints>
     <constraint source="ADR-002">Records are data only — no AI processing in plugin context</constraint>
-    <constraint source="project">HandlerClassName must match actual C# class name that will be registered in Workstream C</constraint>
-    <constraint source="project">JSON Schema must be valid; use draft-07 schema format</constraint>
-    <constraint source="project">ExternalId: "TL-001" through "TL-008"</constraint>
+    <constraint source="project">sprk_toolcode is the alternate key field (NOT sprk_externalid). Values: "TL-001" through "TL-008"</constraint>
+    <constraint source="project">Handler class field is sprk_handlerclass (NOT sprk_handlerclassname)</constraint>
+    <constraint source="project">Config/schema field is sprk_configuration (NOT sprk_parameterschema) — store JSON Schema as string</constraint>
+    <constraint source="project">21 existing tool records exist with no sprk_toolcode — create NEW records, do not modify existing</constraint>
+    <constraint source="project">sprk_handlerclass values must match MapHandlerClassToToolType() mapping in ScopeResolverService.cs</constraint>
   </constraints>
 
   <knowledge>
@@ -48,50 +60,64 @@
       <file>projects/ai-spaarke-platform-enhancements-r1/spec.md</file>
       <file>docs/guides/HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md</file>
       <file>projects/ai-spaarke-platform-enhancements-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</file>
     </files>
   </knowledge>
 
   <steps>
-    <step order="1" name="Define handler class names and schemas">
-      For each tool, define:
-      - Handler class name (C# class that will be created in task 053):
-        * DocumentSearch → DocumentSearchTools
-        * AnalysisRetrieval → AnalysisQueryTools
-        * KnowledgeRetrieval → KnowledgeRetrievalTools
-        * TextRefinement → TextRefinementTools
-        * CitationExtractor, SummaryGenerator, RedFlagDetector, PartyExtractor → also in above tool classes
-      - JSON Schema for parameters (query string, top-k, filters, etc.)
+    <step order="1" name="Verify no TL-001-008 records exist">
+      Query Dataverse for existing records with sprk_toolcode set.
+      GET https://spaarkedev1.crm.dynamics.com/api/data/v9.2/sprk_analysistools?$select=sprk_name,sprk_toolcode&amp;$filter=sprk_toolcode ne null
+      Confirm none of TL-001 through TL-008 already exist. (21 existing records have no sprk_toolcode.)
     </step>
-    <step order="2" name="Create records in Dataverse">
-      Required fields: sprk_name, sprk_externalid, sprk_handlerclassname, sprk_parameterschema (JSON),
-      sprk_isactive=true, sprk_issystem=true, sprk_description
+    <step order="2" name="Define handler class names and JSON config">
+      For each tool, define sprk_handlerclass (must match MapHandlerClassToToolType in ScopeResolverService):
+        - TL-001 DocumentSearch → "DocumentSearchHandler" (contains "EntityExtractor" → no; use custom)
+        - TL-002 AnalysisRetrieval → "AnalysisQueryHandler"
+        - TL-003 KnowledgeRetrieval → "KnowledgeRetrievalHandler"
+        - TL-004 TextRefinement → "TextRefinementHandler"
+        - TL-005 CitationExtractor → "CitationExtractorHandler" (contains "EntityExtractor")
+        - TL-006 SummaryGenerator → "SummaryGeneratorHandler" (contains "Summary")
+        - TL-007 RedFlagDetector → "RedFlagDetectorHandler" (contains "RiskDetector")
+        - TL-008 PartyExtractor → "PartyExtractorHandler" (contains "EntityExtractor")
+      Define sprk_configuration as JSON Schema string for each tool's parameters.
     </step>
-    <step order="3" name="Verify handler class names">
-      Cross-reference with CLAUDE.md "Workstream C new files" list to ensure handler class names
-      match what will be implemented in task 053.
+    <step order="3" name="Create 8 records via Dataverse Web API">
+      POST to https://spaarkedev1.crm.dynamics.com/api/data/v9.2/sprk_analysistools
+      Required fields per record:
+        - sprk_name: tool display name
+        - sprk_description: brief description
+        - sprk_handlerclass: C# handler class name (e.g., "DocumentSearchHandler")
+        - sprk_configuration: JSON Schema string for tool parameters
+        - sprk_toolcode: "TL-001" through "TL-008" (alternate key)
+      Use az account get-access-token for Bearer token auth.
     </step>
-    <step order="4" name="Update scope-library-catalog.md">
-      Add Tools section to catalog.
+    <step order="4" name="Verify records and alternate key">
+      Query sprk_analysistools?$select=sprk_name,sprk_toolcode,sprk_handlerclass&amp;$filter=sprk_toolcode ne null
+      Confirm 8 records with TL-001 through TL-008.
+      Test alternate key lookup: GET sprk_analysistools(sprk_toolcode='TL-001')
     </step>
-    <step order="5" name="Verify records exist">
-      Confirm 8 records with correct ExternalIds.
+    <step order="5" name="Update scope-library-catalog.md">
+      Add Tools section to notes/design/scope-library-catalog.md with catalog of all 8 Tools.
     </step>
   </steps>
 
   <tools>
-    <tool name="pac">Power Platform CLI for Dataverse</tool>
+    <tool name="az">Azure CLI for Dataverse bearer token</tool>
+    <tool name="curl">Dataverse Web API calls</tool>
     <tool name="git">Stage documentation changes</tool>
   </tools>
 
   <outputs>
-    <output type="dataverse">8 sprk_analysistool records in spaarkedev1 (TL-001–008)</output>
+    <output type="dataverse">8 sprk_analysistool records in spaarkedev1 (TL-001–008 via sprk_toolcode)</output>
     <output type="docs">projects/ai-spaarke-platform-enhancements-r1/notes/design/scope-library-catalog.md (updated)</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">8 sprk_analysistool records with ExternalIds TL-001 through TL-008</criterion>
-    <criterion testable="true">Each record has a valid JSON Schema in sprk_parameterschema</criterion>
-    <criterion testable="true">Handler class names match Workstream C implementation plan</criterion>
+    <criterion testable="true">8 sprk_analysistool records with sprk_toolcode TL-001 through TL-008</criterion>
+    <criterion testable="true">Each record has sprk_handlerclass matching handler class naming convention</criterion>
+    <criterion testable="true">Each record has sprk_configuration with valid JSON Schema</criterion>
+    <criterion testable="true">Alternate key lookup works: GET sprk_analysistools(sprk_toolcode='TL-001') returns 200</criterion>
     <criterion testable="true">scope-library-catalog.md documents all 8 Tools</criterion>
   </acceptance-criteria>
 </task>

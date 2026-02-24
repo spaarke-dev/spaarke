@@ -4,7 +4,7 @@
     <title>Deploy Workstream C — Updated AnalysisWorkspace PCF to Dataverse</title>
     <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
     <tags>pcf, deploy, dataverse</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <dependencies>AIPL-056, AIPL-058</dependencies>
     <blocks>AIPL-070 (validation), AIPL-075 (SprkChat evaluation)</blocks>

@@ -4,7 +4,7 @@
     <title>Configure Two-Index Azure AI Search Architecture in appsettings</title>
     <phase>1 — Foundation &amp; Environment</phase>
     <tags>bff-api, configuration, foundation, ai-search</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <dependencies>AIPL-002</dependencies>
     <blocks>AIPL-010 (RagQueryBuilder), AIPL-016 (two-index provisioning)</blocks>
@@ -90,4 +90,10 @@
     <criterion testable="true">appsettings.json contains AzureOpenAI.EmbeddingModelName</criterion>
     <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ succeeds with 0 errors</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-02-23. appsettings.template.json verified/updated with dual-index AiSearch config
+    (KnowledgeIndexName: knowledge-index, DiscoveryIndexName: discovery-index, SemanticConfigName: semantic-config),
+    LlamaParse section (Enabled: false), and AzureOpenAI.EmbeddingModelName. Build: 0 errors.
+  </notes>
 </task>

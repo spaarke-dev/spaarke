@@ -75,6 +75,7 @@ public class AnalysisOrchestrationServiceTests
             _workingDocumentServiceMock.Object,
             _exportRegistry,
             _ragServiceMock.Object,
+            new RagQueryBuilder(),
             _playbookServiceMock.Object,
             _toolHandlerRegistryMock.Object,
             _httpContextAccessorMock.Object,

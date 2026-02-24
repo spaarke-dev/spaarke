@@ -19,7 +19,7 @@ public interface IAppOnlyAnalysisService
     /// <param name="playbookName">Optional playbook name override (default: "Document Profile").</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Analysis result with success status and any generated profile data.</returns>
-    Task<DocumentAnalysisResult> AnalyzeDocumentAsync(
+    Task<AppOnlyDocumentAnalysisResult> AnalyzeDocumentAsync(
         Guid documentId,
         string? playbookName = null,
         CancellationToken cancellationToken = default);
@@ -33,7 +33,7 @@ public interface IAppOnlyAnalysisService
     /// <param name="playbookName">Optional playbook name override (default: "Document Profile").</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Analysis result with success status and any generated profile data.</returns>
-    Task<DocumentAnalysisResult> AnalyzeDocumentFromStreamAsync(
+    Task<AppOnlyDocumentAnalysisResult> AnalyzeDocumentFromStreamAsync(
         Guid documentId,
         string fileName,
         Stream fileStream,

@@ -4,7 +4,7 @@
     <title>C2: Implement SprkChatAgent + Factory + IChatContextProvider</title>
     <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
     <tags>bff-api, api, agent-framework</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>AIPL-050, AIPL-001</dependencies>
     <blocks>AIPL-052 (ChatSessionManager), AIPL-053 (chat tools), AIPL-054 (ChatEndpoints)</blocks>
@@ -112,4 +112,21 @@
     <criterion testable="true">Unit tests pass</criterion>
     <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-02-23.
+
+    Key implementation decisions:
+    - SendMessageAsync return type: IAsyncEnumerable&lt;ChatResponseUpdate&gt; (Microsoft.Extensions.AI 10.3.0)
+      IChatClient.GetStreamingResponseAsync returns IAsyncEnumerable&lt;ChatResponseUpdate&gt;
+      NOT StreamingChatCompletionUpdate (that's OpenAI.Chat raw SDK type)
+    - Method name is GetStreamingResponseAsync (NOT CompleteStreamingAsync)
+    - Registrations in AiModule.cs (NOT Program.cs) per ADR-010 feature module pattern
+    - DI count after AIPL-051: 97 (SprkChatAgentFactory singleton + IChatContextProvider scoped)
+    - Captive dependency prevention: SprkChatAgentFactory creates IServiceScope per CreateAgentAsync call
+    - ChatContext model record placed in Models/Ai/Chat/ (not Services/) per project CLAUDE.md new files list
+    - SprkChatAgentFactory tests use BuildServiceProvider helper with ServiceCollection (not WebApplicationFactory)
+    - 16 tests total: 10 in SprkChatAgentTests + 4 in SprkChatAgentFactoryTests (all pass)
+    - Registrations added to AiModule.cs at lines 121-132 with full XML doc comments
+  </notes>
 </task>

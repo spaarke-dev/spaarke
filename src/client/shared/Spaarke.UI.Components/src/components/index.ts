@@ -27,3 +27,6 @@ export * from "./EventDueDateCard";
 
 // Side Pane components (reusable across entity detail side panes)
 export * from "./SidePane";
+
+// SprkChat - Reusable chat component with SSE streaming
+export * from "./SprkChat";

@@ -4,7 +4,7 @@
     <title>C4: Implement Chat Tool Classes — DocumentSearch, AnalysisQuery, KnowledgeRetrieval, TextRefinement</title>
     <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
     <tags>bff-api, api, agent-framework, retrieval</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>AIPL-051, AIPL-010, AIPL-015</dependencies>
     <blocks>AIPL-054 (ChatEndpoints)</blocks>

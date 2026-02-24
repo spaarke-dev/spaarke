@@ -4,7 +4,7 @@
     <title>Implement RagIndexingPipeline — Auto-Index After Document Analysis</title>
     <phase>2 — Workstream A: Retrieval Foundation</phase>
     <tags>bff-api, api, retrieval, indexing, jobs</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>AIPL-011, AIPL-012</dependencies>
     <blocks>AIPL-014 (RagIndexingJobHandler), AIPL-015 (KnowledgeBaseEndpoints)</blocks>

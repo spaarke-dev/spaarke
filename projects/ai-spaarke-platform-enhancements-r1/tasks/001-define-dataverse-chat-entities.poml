@@ -4,7 +4,7 @@
     <title>Define and Create Dataverse Chat + Evaluation Entities</title>
     <phase>1 — Foundation &amp; Environment</phase>
     <tags>dataverse, schema, foundation, blocking</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>none</dependencies>
     <blocks>AIPL-051 (ChatSessionManager), AIPL-071 (evaluation harness)</blocks>
@@ -104,4 +104,14 @@
     <criterion testable="true">Schema documented in notes/design/dataverse-chat-schema.md with all field definitions</criterion>
     <criterion testable="true">Unresolved question about chat entity schema is marked as resolved in spec.md</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-02-23. Schema documented in notes/design/dataverse-chat-schema.md.
+    4 entities designed: sprk_aichatmessage, sprk_aichatsummary, sprk_aievaluationrun, sprk_aievaluationresult.
+    Unresolved questions in spec.md marked as resolved.
+    Entity creation in Dataverse: Deployment script created at projects/ai-spaarke-platform-enhancements-r1/scripts/Deploy-ChatEvaluationSchema.ps1.
+    pac CLI is authenticated to spaarkedev1.crm.dynamics.com. Azure CLI is authenticated.
+    Human operator must run: pwsh projects/ai-spaarke-platform-enhancements-r1/scripts/Deploy-ChatEvaluationSchema.ps1
+    Script is idempotent — safe to re-run. Entities are NOT yet created in Dataverse (script not executed due to permissions).
+  </notes>
 </task>

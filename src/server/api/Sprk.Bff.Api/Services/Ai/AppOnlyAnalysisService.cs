@@ -69,7 +69,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     /// <param name="playbookName">Optional playbook name override (default: "Document Profile").</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Analysis result with success status and any generated profile data.</returns>
-    public async Task<DocumentAnalysisResult> AnalyzeDocumentAsync(
+    public async Task<AppOnlyDocumentAnalysisResult> AnalyzeDocumentAsync(
         Guid documentId,
         string? playbookName = null,
         CancellationToken cancellationToken = default)
@@ -86,7 +86,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             if (document == null)
             {
                 _logger.LogWarning("Document {DocumentId} not found in Dataverse", documentId);
-                return DocumentAnalysisResult.Failed(documentId, "Document not found");
+                return AppOnlyDocumentAnalysisResult.Failed(documentId, "Document not found");
             }
 
             _logger.LogDebug(
@@ -98,7 +98,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             {
                 _logger.LogWarning("Document {DocumentId} has no SPE file reference", documentId);
                 await UpdateSummaryStatusAsync(documentId, SummaryStatusNotSupported, cancellationToken);
-                return DocumentAnalysisResult.Failed(documentId, "Document has no file reference");
+                return AppOnlyDocumentAnalysisResult.Failed(documentId, "Document has no file reference");
             }
 
             // 3. Check if file type is supported for extraction
@@ -111,7 +111,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                     "File type {Extension} not supported for text extraction (Document: {DocumentId})",
                     extension, documentId);
                 await UpdateSummaryStatusAsync(documentId, SummaryStatusNotSupported, cancellationToken);
-                return DocumentAnalysisResult.Failed(documentId, $"File type '{extension}' not supported");
+                return AppOnlyDocumentAnalysisResult.Failed(documentId, $"File type '{extension}' not supported");
             }
 
             // Mark as pending before processing
@@ -131,7 +131,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             {
                 _logger.LogWarning("Failed to download document {DocumentId} from SPE", documentId);
                 await UpdateSummaryStatusAsync(documentId, SummaryStatusFailed, cancellationToken);
-                return DocumentAnalysisResult.Failed(documentId, "Failed to download file");
+                return AppOnlyDocumentAnalysisResult.Failed(documentId, "Failed to download file");
             }
 
             // 5. Extract text from document
@@ -143,7 +143,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                     "Text extraction failed for document {DocumentId}: {Error}",
                     documentId, extractionResult.ErrorMessage);
                 await UpdateSummaryStatusAsync(documentId, SummaryStatusFailed, cancellationToken);
-                return DocumentAnalysisResult.Failed(documentId, extractionResult.ErrorMessage ?? "Text extraction failed");
+                return AppOnlyDocumentAnalysisResult.Failed(documentId, extractionResult.ErrorMessage ?? "Text extraction failed");
             }
 
             _logger.LogInformation(
@@ -236,7 +236,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 _logger.LogWarning(updateEx, "Failed to update summary status for document {DocumentId}", documentId);
             }
 
-            return DocumentAnalysisResult.Failed(documentId, ex.Message);
+            return AppOnlyDocumentAnalysisResult.Failed(documentId, ex.Message);
         }
     }
 
@@ -250,7 +250,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     /// <param name="playbookName">Optional playbook name override (default: "Document Profile").</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Analysis result with success status and any generated profile data.</returns>
-    public async Task<DocumentAnalysisResult> AnalyzeDocumentFromStreamAsync(
+    public async Task<AppOnlyDocumentAnalysisResult> AnalyzeDocumentFromStreamAsync(
         Guid documentId,
         string fileName,
         Stream fileStream,
@@ -272,7 +272,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 _logger.LogWarning(
                     "File type {Extension} not supported for text extraction (Document: {DocumentId})",
                     extension, documentId);
-                return DocumentAnalysisResult.Failed(documentId, $"File type '{extension}' not supported");
+                return AppOnlyDocumentAnalysisResult.Failed(documentId, $"File type '{extension}' not supported");
             }
 
             // Extract text
@@ -283,7 +283,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 _logger.LogWarning(
                     "Text extraction failed for document {DocumentId}: {Error}",
                     documentId, extractionResult.ErrorMessage);
-                return DocumentAnalysisResult.Failed(documentId, extractionResult.ErrorMessage ?? "Text extraction failed");
+                return AppOnlyDocumentAnalysisResult.Failed(documentId, extractionResult.ErrorMessage ?? "Text extraction failed");
             }
 
             _logger.LogInformation(
@@ -321,7 +321,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error analyzing document {DocumentId} from stream", documentId);
-            return DocumentAnalysisResult.Failed(documentId, ex.Message);
+            return AppOnlyDocumentAnalysisResult.Failed(documentId, ex.Message);
         }
     }
 
@@ -335,7 +335,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     /// <param name="playbookName">The playbook name to execute.</param>
     /// <param name="dataverseAnalysisId">The Dataverse Analysis record ID (for linking outputs in task 003).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    private async Task<DocumentAnalysisResult> ExecutePlaybookAnalysisAsync(
+    private async Task<AppOnlyDocumentAnalysisResult> ExecutePlaybookAnalysisAsync(
         Guid documentId,
         string documentName,
         string fileName,
@@ -356,7 +356,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to load playbook '{PlaybookName}'", playbookName);
-            return DocumentAnalysisResult.Failed(documentId, $"Playbook '{playbookName}' not found");
+            return AppOnlyDocumentAnalysisResult.Failed(documentId, $"Playbook '{playbookName}' not found");
         }
 
         // 2. Resolve playbook scopes (Skills, Knowledge, Tools)
@@ -368,7 +368,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         if (scopes.Tools.Length == 0)
         {
             _logger.LogWarning("Playbook '{PlaybookName}' has no tools configured", playbookName);
-            return DocumentAnalysisResult.Failed(documentId, $"Playbook '{playbookName}' has no tools configured");
+            return AppOnlyDocumentAnalysisResult.Failed(documentId, $"Playbook '{playbookName}' has no tools configured");
         }
 
         // 3. Build execution context
@@ -478,7 +478,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         if (toolResults.Count == 0)
         {
             _logger.LogWarning("No tools executed successfully for document {DocumentId}", documentId);
-            return DocumentAnalysisResult.Failed(documentId, "No tools executed successfully");
+            return AppOnlyDocumentAnalysisResult.Failed(documentId, "No tools executed successfully");
         }
 
         // 5. Create AnalysisOutput records in Dataverse (best effort - dual-write pattern)
@@ -527,7 +527,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             "Playbook analysis completed for {DocumentId}: {ToolCount} tools executed, {OutputCount} outputs extracted",
             documentId, toolResults.Count, structuredOutputs.Count);
 
-        return DocumentAnalysisResult.Success(documentId, profileUpdate, dataverseAnalysisId);
+        return AppOnlyDocumentAnalysisResult.Success(documentId, profileUpdate, dataverseAnalysisId);
     }
 
     /// <summary>
@@ -1096,7 +1096,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     /// <summary>
     /// Execute Email Analysis playbook on the combined context.
     /// </summary>
-    private async Task<DocumentAnalysisResult> ExecuteEmailPlaybookAnalysisAsync(
+    private async Task<AppOnlyDocumentAnalysisResult> ExecuteEmailPlaybookAnalysisAsync(
         Guid documentId,
         string documentName,
         string combinedContext,
@@ -1169,9 +1169,11 @@ internal class AttachmentTextInfo
 }
 
 /// <summary>
-/// Result of a document analysis operation.
+/// Result of an app-only document analysis operation (background job context).
+/// Distinct from <c>Sprk.Bff.Api.Models.Ai.DocumentAnalysisResult</c> which holds the
+/// AI-extracted structured content (Summary, Keywords, Entities).
 /// </summary>
-public class DocumentAnalysisResult
+public class AppOnlyDocumentAnalysisResult
 {
     public Guid DocumentId { get; init; }
     public bool IsSuccess { get; init; }
@@ -1184,7 +1186,7 @@ public class DocumentAnalysisResult
     /// </summary>
     public Guid? AnalysisId { get; init; }
 
-    public static DocumentAnalysisResult Success(Guid documentId, UpdateDocumentRequest profileUpdate, Guid? analysisId = null)
+    public static AppOnlyDocumentAnalysisResult Success(Guid documentId, UpdateDocumentRequest profileUpdate, Guid? analysisId = null)
         => new()
         {
             DocumentId = documentId,
@@ -1193,7 +1195,7 @@ public class DocumentAnalysisResult
             AnalysisId = analysisId
         };
 
-    public static DocumentAnalysisResult Failed(Guid documentId, string errorMessage)
+    public static AppOnlyDocumentAnalysisResult Failed(Guid documentId, string errorMessage)
         => new()
         {
             DocumentId = documentId,

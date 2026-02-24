@@ -148,12 +148,37 @@ var tools = AIFunctionFactory.Create(DocumentSearchTools.SearchDocuments);
 | PCF with Fluent v9 | `src/client/pcf/AnalysisWorkspace/` | ScopeConfigEditorPCF base pattern |
 | Shared component | `src/client/shared/Spaarke.UI.Components/` | SprkChat component structure |
 
+## Package Versions (Pinned)
+
+| Package | Version | Notes |
+|---------|---------|-------|
+| `Microsoft.Extensions.AI` | `10.3.0` | AI abstractions (IChatClient, AIFunction, etc.) |
+| `Microsoft.Extensions.AI.OpenAI` | `10.3.0` | OpenAI/Azure OpenAI → IChatClient adapter bridge (added AIPL-050) |
+| `Microsoft.Agents.AI` | `1.0.0-rc1` | Agent Framework RC — shipped Feb 19, 2026 |
+| `OpenAI` | `2.8.0` | Pinned: required by Microsoft.Extensions.AI.OpenAI 10.3.0 (added AIPL-050) |
+| `Microsoft.Extensions.Caching.Abstractions` | `10.0.3` | Bumped from 10.0.1 to satisfy Microsoft.Extensions.AI 10.3.0 dependency chain |
+
+- Added: 2026-02-23 (Phase 1, AIPL-002); updated 2026-02-23 (AIPL-050)
+- **CRITICAL**: Do NOT upgrade `Microsoft.Agents.AI` or `Microsoft.Extensions.AI` without full build + test verification. The RC → GA transition may have breaking API changes.
+- `Microsoft.Agents.AI 1.0.0-rc1` requires `Microsoft.Extensions.AI >= 10.3.0` — these two packages are tightly coupled and must be upgraded together.
+- `Microsoft.Extensions.AI.OpenAI 10.3.0` requires `OpenAI >= 2.8.0`; `Azure.AI.OpenAI 2.1.0` depends on OpenAI >= 2.1.0 (compatible with 2.8.0). All three must be upgraded together.
+
+## DI Registration Budget (ADR-010)
+
+- **Baseline (Phase 1)**: 89 non-framework registrations in Program.cs
+- **Budget**: ≤15 per ADR-010 (aspirational — Program.cs has grown beyond the module pattern over prior projects)
+- **Status**: ADR-010 budget already exceeded by prior projects; new Workstream A/B/C services MUST use feature module extensions (e.g., `AddAiPlatformModule`) — do NOT add inline `AddScoped`/`AddSingleton` calls directly to Program.cs
+- **Expected additions**: ~10-12 new services across Workstreams A, B, C — all must go into module extension methods
+- **Note**: `Configure<T>` bindings (LlamaParseOptions, AiSearchOptions added in AIPL-004) do NOT count — they are Microsoft framework calls
+- **Current count (AIPL-052)**: 99 — IChatDataverseRepository/ChatDataverseRepository (scoped) + ChatSessionManager (scoped) + ChatHistoryManager (scoped) added in AiModule.cs (2026-02-23)
+- **Tracked**: Updated after each phase by implementing task (AIPL-004 baseline audit: 2026-02-23; AIPL-050 update: 2026-02-23; AIPL-051 update: 2026-02-23; AIPL-052 update: 2026-02-23)
+
 ## Important Context
 
-- **Agent Framework**: Using RC version (Feb 19, 2026); API surface stable; pin exact version
-- **LlamaParse**: Optional enhancement with mandatory fallback to Azure Doc Intel; get API key from Key Vault
+- **Agent Framework**: `Microsoft.Agents.AI 1.0.0-rc1` pinned; API surface stable per spec; do NOT upgrade without testing
+- **LlamaParse**: Optional enhancement with mandatory fallback to Azure Doc Intel; API key stored in Key Vault as `LlamaParseApiKey`; config in `appsettings.template.json` with `"Enabled": false` by default
 - **CodeMirror over Monaco**: ScopeConfigEditorPCF must stay < 1MB bundle (Monaco is 4MB+)
-- **DI count**: Monitor after each phase — must stay <= 15 non-framework registrations (ADR-010)
+- **DI count**: 89 non-framework registrations at Phase 1 baseline (see DI Registration Budget section above); new services must go into feature modules
 - **Dataverse entities**: `sprk_aichatmessage` and `sprk_aichatsummary` schema defined in task 001
 - **Old chat endpoint**: `/api/ai/analysis/{id}/continue` deprecated in C6; keep in parallel during transition
 

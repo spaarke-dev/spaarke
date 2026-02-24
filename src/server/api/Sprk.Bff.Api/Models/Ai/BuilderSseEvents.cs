@@ -89,7 +89,7 @@ public record DataverseOperationEvent : BuilderSseEvent
     [JsonPropertyName("operation")]
     public required string Operation { get; init; }
 
-    /// <summary>Entity type (e.g., "sprk_aiaction", "sprk_aiskill").</summary>
+    /// <summary>Entity type (e.g., "sprk_analysisaction", "sprk_analysisskill").</summary>
     [JsonPropertyName("entityType")]
     public required string EntityType { get; init; }
 

@@ -4,7 +4,7 @@
     <title>C1: Integrate Agent Framework — Register IChatClient via Azure OpenAI Provider</title>
     <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
     <tags>bff-api, api, agent-framework, foundation</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>AIPL-002, AIPL-004</dependencies>
     <blocks>AIPL-051 (SprkChatAgent), AIPL-053 (chat tools)</blocks>
@@ -94,4 +94,22 @@
     <criterion testable="true">CLAUDE.md DI count updated and within budget</criterion>
     <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-02-23.
+
+    Implementation approach:
+    - Added Microsoft.Extensions.AI.OpenAI 10.3.0 package (provides IChatClient bridge via OpenAIChatClient)
+    - Pinned OpenAI 2.8.0 explicitly (required by Microsoft.Extensions.AI.OpenAI; compatible with Azure.AI.OpenAI 2.1.0)
+    - Registered IChatClient in AiModule.cs using AddChatClient + AzureOpenAIClient.GetChatClient().AsIChatClient()
+    - Registration is config-guarded: only registers when AzureOpenAI:Endpoint and AzureOpenAI:ChatModelName are set
+    - Uses DefaultAzureCredential (Managed Identity in Azure; Azure CLI / VS credentials locally)
+    - Added AzureOpenAI:Endpoint and AzureOpenAI:ChatModelName keys to appsettings.template.json
+    - DI count updated to 95 in CLAUDE.md
+    - Build: 0 errors, 0 warnings
+
+    Key decision: IChatClient uses AsIChatClient() adapter (method name in this package version),
+    not AsChatClient() as some docs suggest. Runtime usage will call chatClient.AsAIAgent() in
+    SprkChatAgentFactory (AIPL-051).
+  </notes>
 </task>

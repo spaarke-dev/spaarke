@@ -1,6 +1,8 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Xrm.Sdk;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Tools;
@@ -49,10 +51,10 @@ public class DataverseUpdateToolHandlerTests
             ["fields"] = fields
         });
 
-        _dataverseService.UpdateRecordAsync(
+        _dataverseService.UpdateRecordFieldsAsync(
             "sprk_invoice",
             recordId,
-            Arg.Any<Dictionary<string, object>>(),
+            Arg.Any<Dictionary<string, object?>>(),
             Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
 
@@ -63,12 +65,12 @@ public class DataverseUpdateToolHandlerTests
         result.Success.Should().BeTrue();
         result.Data.Should().NotBeNull();
 
-        await _dataverseService.Received(1).UpdateRecordAsync(
+        await _dataverseService.Received(1).UpdateRecordFieldsAsync(
             "sprk_invoice",
             recordId,
-            Arg.Is<Dictionary<string, object>>(d =>
-                d["sprk_name"].ToString() == "Updated Name" &&
-                (int)d["sprk_status"] == 1),
+            Arg.Is<Dictionary<string, object?>>(d =>
+                d["sprk_name"]!.ToString() == "Updated Name" &&
+                (int)d["sprk_status"]! == 1),
             Arg.Any<CancellationToken>());
     }
 
@@ -90,22 +92,20 @@ public class DataverseUpdateToolHandlerTests
             ["fields"] = fields
         });
 
-        _dataverseService.UpdateRecordAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<Dictionary<string, object>>(), Arg.Any<CancellationToken>())
-            .Returns(Task.CompletedTask);
+        Dictionary<string, object?>? capturedFields = null;
+        await _dataverseService.UpdateRecordFieldsAsync(
+            Arg.Any<string>(), Arg.Any<Guid>(), Arg.Do<Dictionary<string, object?>>(d => capturedFields = d), Arg.Any<CancellationToken>());
 
         // Act
         var result = await _handler.ExecuteAsync(parameters, CancellationToken.None);
 
         // Assert
         result.Success.Should().BeTrue();
-
-        await _dataverseService.Received(1).UpdateRecordAsync(
-            Arg.Any<string>(),
-            Arg.Any<Guid>(),
-            Arg.Is<Dictionary<string, object>>(d =>
-                d["sprk_totalamount"] is Money amount && amount.Value == 15000.50m &&
-                d["sprk_budget"] is Money budget && budget.Value == 100000m),
-            Arg.Any<CancellationToken>());
+        capturedFields.Should().NotBeNull();
+        capturedFields!["sprk_totalamount"].Should().BeOfType<Money>()
+            .Which.Value.Should().Be(15000.50m);
+        capturedFields["sprk_budget"].Should().BeOfType<Money>()
+            .Which.Value.Should().Be(100000m);
     }
 
     [Fact]
@@ -130,23 +130,19 @@ public class DataverseUpdateToolHandlerTests
             ["fields"] = fields
         });
 
-        _dataverseService.UpdateRecordAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<Dictionary<string, object>>(), Arg.Any<CancellationToken>())
-            .Returns(Task.CompletedTask);
+        Dictionary<string, object?>? capturedFields = null;
+        await _dataverseService.UpdateRecordFieldsAsync(
+            Arg.Any<string>(), Arg.Any<Guid>(), Arg.Do<Dictionary<string, object?>>(d => capturedFields = d), Arg.Any<CancellationToken>());
 
         // Act
         var result = await _handler.ExecuteAsync(parameters, CancellationToken.None);
 
         // Assert
         result.Success.Should().BeTrue();
-
-        await _dataverseService.Received(1).UpdateRecordAsync(
-            Arg.Any<string>(),
-            Arg.Any<Guid>(),
-            Arg.Is<Dictionary<string, object>>(d =>
-                d["sprk_matter"] is EntityReference entityRef &&
-                entityRef.LogicalName == "sprk_matter" &&
-                entityRef.Id == matterId),
-            Arg.Any<CancellationToken>());
+        capturedFields.Should().NotBeNull();
+        capturedFields!["sprk_matter"].Should().BeOfType<EntityReference>()
+            .Which.LogicalName.Should().Be("sprk_matter");
+        ((EntityReference)capturedFields["sprk_matter"]!).Id.Should().Be(matterId);
     }
 
     [Fact]
@@ -223,7 +219,8 @@ public class DataverseUpdateToolHandlerTests
             ["fields"] = fields
         });
 
-        _dataverseService.UpdateRecordAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<Dictionary<string, object>>(), Arg.Any<CancellationToken>())
+        _dataverseService.UpdateRecordFieldsAsync(
+            Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<Dictionary<string, object?>>(), Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
 
         // Act
@@ -232,11 +229,11 @@ public class DataverseUpdateToolHandlerTests
         // Assert
         result.Success.Should().BeTrue();
 
-        await _dataverseService.Received(1).UpdateRecordAsync(
+        await _dataverseService.Received(1).UpdateRecordFieldsAsync(
             Arg.Any<string>(),
             Arg.Any<Guid>(),
-            Arg.Is<Dictionary<string, object>>(d =>
-                d["sprk_name"].ToString() == "Test" &&
+            Arg.Is<Dictionary<string, object?>>(d =>
+                d["sprk_name"]!.ToString() == "Test" &&
                 d["sprk_description"] == null),
             Arg.Any<CancellationToken>());
     }
@@ -258,25 +255,22 @@ public class DataverseUpdateToolHandlerTests
             ["fields"] = fields
         });
 
-        _dataverseService.UpdateRecordAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<Dictionary<string, object>>(), Arg.Any<CancellationToken>())
-            .Returns(Task.CompletedTask);
+        Dictionary<string, object?>? capturedFields = null;
+        await _dataverseService.UpdateRecordFieldsAsync(
+            Arg.Any<string>(), Arg.Any<Guid>(), Arg.Do<Dictionary<string, object?>>(d => capturedFields = d), Arg.Any<CancellationToken>());
 
         // Act
         var result = await _handler.ExecuteAsync(parameters, CancellationToken.None);
 
         // Assert
         result.Success.Should().BeTrue();
-
-        await _dataverseService.Received(1).UpdateRecordAsync(
-            Arg.Any<string>(),
-            Arg.Any<Guid>(),
-            Arg.Is<Dictionary<string, object>>(d =>
-                d["sprk_totalamount"] is Money money && money.Value == 15000m),
-            Arg.Any<CancellationToken>());
+        capturedFields.Should().NotBeNull();
+        capturedFields!["sprk_totalamount"].Should().BeOfType<Money>()
+            .Which.Value.Should().Be(15000m);
     }
 
     [Fact]
-    public async Task ExecuteAsync_DataverseException_ReturnsError()
+    public async Task ExecuteAsync_ServiceThrowsException_ReturnsError()
     {
         // Arrange
         var recordId = Guid.NewGuid();
@@ -292,8 +286,9 @@ public class DataverseUpdateToolHandlerTests
             ["fields"] = fields
         });
 
-        _dataverseService.UpdateRecordAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<Dictionary<string, object>>(), Arg.Any<CancellationToken>())
-            .Throws(new DataverseException("Update failed", 500));
+        _dataverseService.UpdateRecordFieldsAsync(
+            Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<Dictionary<string, object?>>(), Arg.Any<CancellationToken>())
+            .Throws(new InvalidOperationException("Update failed"));
 
         // Act
         var result = await _handler.ExecuteAsync(parameters, CancellationToken.None);

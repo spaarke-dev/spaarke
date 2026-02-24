@@ -11,7 +11,14 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Infrastructure.Resilience;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai.Export;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Telemetry;
+
+// Explicit aliases to resolve ambiguity with types in the same namespace (Sprk.Bff.Api.Services.Ai).
+// AppOnlyAnalysisService defines DocumentAnalysisResult; AnalysisEndpoints defines ExtractedEntities.
+using AnalysisDocumentResult = Sprk.Bff.Api.Models.Ai.DocumentAnalysisResult;
+using AiExtractedEntities = Sprk.Bff.Api.Models.Ai.ExtractedEntities;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -39,11 +46,13 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     private readonly IRagService _ragService;
     private readonly IPlaybookService _playbookService;
     private readonly IToolHandlerRegistry _toolHandlerRegistry;
+    private readonly RagQueryBuilder _ragQueryBuilder;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IStorageRetryPolicy _storageRetryPolicy;
     private readonly AnalysisOptions _options;
     private readonly ILogger<AnalysisOrchestrationService> _logger;
     private readonly AiTelemetry? _telemetry;
+    private readonly JobSubmissionService? _jobSubmissionService;
 
     // In-memory store for Phase 1 (will be replaced with Dataverse in Task 032)
     private static readonly Dictionary<Guid, AnalysisInternalModel> _analysisStore = new();
@@ -58,13 +67,15 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         IWorkingDocumentService workingDocumentService,
         ExportServiceRegistry exportRegistry,
         IRagService ragService,
+        RagQueryBuilder ragQueryBuilder,
         IPlaybookService playbookService,
         IToolHandlerRegistry toolHandlerRegistry,
         IHttpContextAccessor httpContextAccessor,
         IStorageRetryPolicy storageRetryPolicy,
         IOptions<AnalysisOptions> options,
         ILogger<AnalysisOrchestrationService> logger,
-        AiTelemetry? telemetry = null)
+        AiTelemetry? telemetry = null,
+        JobSubmissionService? jobSubmissionService = null)
     {
         _dataverseService = dataverseService;
         _speFileStore = speFileStore;
@@ -75,6 +86,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _workingDocumentService = workingDocumentService;
         _exportRegistry = exportRegistry;
         _ragService = ragService;
+        _ragQueryBuilder = ragQueryBuilder;
         _playbookService = playbookService;
         _toolHandlerRegistry = toolHandlerRegistry;
         _httpContextAccessor = httpContextAccessor;
@@ -82,6 +94,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _options = options.Value;
         _logger = logger;
         _telemetry = telemetry;
+        _jobSubmissionService = jobSubmissionService;
     }
 
     /// <inheritdoc />
@@ -196,8 +209,18 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         }
 
         // 6. Process RAG knowledge sources (query Azure AI Search)
+        // Wrap the raw document text in a minimal AnalysisDocumentResult for RagQueryBuilder.
+        // The Summary field is used as the semantic anchor for vector search.
+        // Entity/keyword enrichment occurs later in the pipeline (tool handlers); for
+        // action-based analysis without a playbook, use document text as the summary.
+        var ragAnalysisContext = new AnalysisDocumentResult
+        {
+            Summary = documentText.Length > 500 ? documentText[..500] : documentText,
+            Keywords = string.Empty,
+            Entities = new AiExtractedEntities()
+        };
         var processedKnowledge = await ProcessRagKnowledgeAsync(
-            scopes.Knowledge, documentText, cancellationToken);
+            scopes.Knowledge, ragAnalysisContext, cancellationToken);
 
         // 7. Build prompts
         var systemPrompt = _contextBuilder.BuildSystemPrompt(action, scopes.Skills);
@@ -253,6 +276,18 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
         _logger.LogInformation("Analysis {AnalysisId} completed: {InputTokens} input, {OutputTokens} output tokens",
             analysisId, inputTokens, outputTokens);
+
+        // Enqueue RAG indexing job after analysis completes (ADR-001 / ADR-004).
+        // The job runs as a background Service Bus task so it does not block the streaming response.
+        // Idempotency key: "{tenantId}:{documentId}" — prevents duplicate indexing (ADR-004).
+        var analysisTenantId = GetTenantIdFromClaims() ?? "unknown";
+        await EnqueueRagIndexingJobAsync(
+            analysisId.ToString(),
+            documentId.ToString(),
+            analysisTenantId,
+            document.GraphDriveId,
+            document.GraphItemId,
+            cancellationToken);
 
         // Emit completion chunk
         yield return AnalysisStreamChunk.Completed(analysisId, new TokenUsage(inputTokens, outputTokens));
@@ -678,14 +713,19 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     /// <summary>
     /// Process knowledge sources, replacing RAG types with inline content from search results.
     /// This implements RAG (Retrieval-Augmented Generation) by querying Azure AI Search.
+    /// Uses <see cref="RagQueryBuilder"/> to construct metadata-aware queries from the
+    /// DocumentAnalysisResult rather than the naive first-500-characters approach.
     /// </summary>
     /// <param name="knowledge">Original knowledge sources from scope resolution.</param>
-    /// <param name="documentText">Document text to use as search query for RAG.</param>
+    /// <param name="analysisResult">
+    /// Document analysis result containing entities, key phrases, and document type metadata.
+    /// Used by RagQueryBuilder to build targeted search queries.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Processed knowledge array with RAG sources replaced by inline content.</returns>
     private async Task<AnalysisKnowledge[]> ProcessRagKnowledgeAsync(
         AnalysisKnowledge[] knowledge,
-        string documentText,
+        AnalysisDocumentResult analysisResult,
         CancellationToken cancellationToken)
     {
         if (knowledge.Length == 0)
@@ -712,8 +752,14 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _logger.LogInformation("Processing {RagCount} RAG knowledge sources for tenant {TenantId}",
             ragSources.Length, tenantId);
 
-        // Build search query from document text (use first 500 chars for query efficiency)
-        var searchQuery = documentText.Length > 500 ? documentText[..500] : documentText;
+        // Build metadata-aware query from analysis result using RagQueryBuilder.
+        // This replaces the naive first-500-characters approach with a structured query
+        // derived from entities, key phrases, document type, and summary.
+        var ragQuery = _ragQueryBuilder.BuildQuery(analysisResult, tenantId);
+
+        _logger.LogDebug(
+            "Built RAG query: searchText length={SearchTextLength}, filter={Filter}",
+            ragQuery.SearchText.Length, ragQuery.FilterExpression);
 
         var processedKnowledge = new List<AnalysisKnowledge>();
 
@@ -728,7 +774,9 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
             try
             {
-                // Search RAG index for this knowledge source
+                // Search RAG index using the structured RagQuery.
+                // KnowledgeSourceId filtering is applied via the existing RagSearchOptions path
+                // (the RagQuery overload handles tenant + doc type; source scoping uses options).
                 var searchOptions = new RagSearchOptions
                 {
                     TenantId = tenantId,
@@ -744,7 +792,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 _logger.LogDebug("Searching RAG index for knowledge source {SourceId}: {SourceName}",
                     source.Id, source.Name);
 
-                var searchResult = await _ragService.SearchAsync(searchQuery, searchOptions, cancellationToken);
+                var searchResult = await _ragService.SearchAsync(ragQuery.SearchText, searchOptions, cancellationToken);
 
                 if (searchResult.Results.Count == 0)
                 {
@@ -1235,7 +1283,17 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             documentText.Length, documentId);
 
         // 7. Process RAG knowledge sources
-        var processedKnowledge = await ProcessRagKnowledgeAsync(scopes.Knowledge, documentText, cancellationToken);
+        // Build a minimal AnalysisDocumentResult for RagQueryBuilder.
+        // In playbook execution, full entity extraction runs as a tool step (EntityExtractorHandler).
+        // Since that tool hasn't run yet at this stage, we use document text as the summary.
+        // Future enhancement: run entity extraction before RAG if available in scope.
+        var ragAnalysisContext = new AnalysisDocumentResult
+        {
+            Summary = documentText.Length > 500 ? documentText[..500] : documentText,
+            Keywords = string.Empty,
+            Entities = new AiExtractedEntities()
+        };
+        var processedKnowledge = await ProcessRagKnowledgeAsync(scopes.Knowledge, ragAnalysisContext, cancellationToken);
 
         // Get tenant ID from claims
         var tenantId = GetTenantIdFromClaims() ?? "default";
@@ -1577,6 +1635,16 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _logger.LogInformation("Playbook execution completed: Analysis {AnalysisId}, {ToolCount} tools executed",
             analysisId, scopes.Tools.Length);
 
+        // Enqueue RAG indexing job after playbook execution completes (ADR-001 / ADR-004).
+        // Idempotency key: "{tenantId}:{documentId}" — prevents duplicate indexing (ADR-004).
+        await EnqueueRagIndexingJobAsync(
+            analysisId.ToString(),
+            documentId.ToString(),
+            tenantId,
+            document.GraphDriveId,
+            document.GraphItemId,
+            cancellationToken);
+
         // Include storage result in completion event for Document Profile
         yield return AnalysisStreamChunk.Completed(
             analysisId,
@@ -1697,6 +1765,89 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         }
 
         return string.Empty;
+    }
+
+    /// <summary>
+    /// Enqueues a <see cref="RagIndexingJobPayload"/> to the Service Bus queue so the document
+    /// is indexed into Azure AI Search in the background after analysis completes.
+    ///
+    /// Implements ADR-001 (BackgroundService pattern) and ADR-004 (idempotent job contract).
+    /// Idempotency key: "{tenantId}:{documentId}" — guarantees the same document is not indexed twice.
+    ///
+    /// The method is a soft-failure path: if <see cref="_jobSubmissionService"/> is not registered
+    /// (e.g. in test or minimal startup) or enqueueing throws, the analysis result is still returned
+    /// to the caller — indexing will be caught by the scheduled backfill (ScheduledRagIndexingService).
+    /// </summary>
+    private async Task EnqueueRagIndexingJobAsync(
+        string analysisId,
+        string documentId,
+        string tenantId,
+        string? driveId,
+        string? itemId,
+        CancellationToken cancellationToken)
+    {
+        if (_jobSubmissionService is null)
+        {
+            _logger.LogDebug(
+                "JobSubmissionService not available — skipping RAG indexing job enqueue for analysis {AnalysisId}",
+                analysisId);
+            return;
+        }
+
+        // Only enqueue if we have the SPE file reference needed to download the document.
+        if (string.IsNullOrEmpty(driveId) || string.IsNullOrEmpty(itemId))
+        {
+            _logger.LogWarning(
+                "Cannot enqueue RAG indexing job for analysis {AnalysisId}: missing DriveId or ItemId",
+                analysisId);
+            return;
+        }
+
+        try
+        {
+            // Idempotency key per ADR-004: "{tenantId}:{documentId}"
+            var idempotencyKey = $"{tenantId}:{documentId}";
+
+            var payload = new RagIndexingJobPayload
+            {
+                TenantId = tenantId,
+                DriveId = driveId,
+                ItemId = itemId,
+                DocumentId = documentId,
+                FileName = string.Empty, // Resolved by handler from Dataverse if needed
+                Source = "AnalysisOrchestration",
+                EnqueuedAt = DateTimeOffset.UtcNow
+            };
+
+            var job = new JobContract
+            {
+                JobId = Guid.NewGuid(),
+                JobType = RagIndexingJobHandler.JobTypeName,
+                SubjectId = documentId,
+                CorrelationId = analysisId,
+                IdempotencyKey = idempotencyKey,
+                Attempt = 1,
+                MaxAttempts = 3,
+                Payload = JsonDocument.Parse(JsonSerializer.Serialize(payload)),
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+
+            await _jobSubmissionService.SubmitJobAsync(job, cancellationToken);
+
+            _logger.LogInformation(
+                "Enqueued RAG indexing job {JobId} for document {DocumentId}, analysis {AnalysisId}, " +
+                "idempotency key {IdempotencyKey}",
+                job.JobId, documentId, analysisId, idempotencyKey);
+        }
+        catch (Exception ex)
+        {
+            // Soft failure — analysis result is already returned to the caller.
+            // Scheduled backfill (ScheduledRagIndexingService) will catch up unindexed documents.
+            _logger.LogWarning(ex,
+                "Failed to enqueue RAG indexing job for analysis {AnalysisId}, document {DocumentId}. " +
+                "Indexing will be retried by scheduled backfill.",
+                analysisId, documentId);
+        }
     }
 }
 

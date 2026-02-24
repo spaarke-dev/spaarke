@@ -4,7 +4,7 @@
     <title>C5: Build ChatEndpoints — SSE Streaming Chat API</title>
     <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
     <tags>bff-api, api, agent-framework, sse</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>AIPL-052, AIPL-053</dependencies>
     <blocks>AIPL-057 (agent middleware), AIPL-058 (API deploy)</blocks>
@@ -125,4 +125,21 @@
     <criterion testable="true">Integration tests pass</criterion>
     <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-02-23. All 11 ChatEndpointsTests and 13 KnowledgeBaseEndpointsTests pass.
+
+    Key implementation decisions:
+    1. AiAuthorizationFilter: changed empty-documentIds case from returning 400 to calling next()
+       so session-scoped chat endpoints (no document IDs in request) pass through correctly.
+    2. Integration test fixture required extensive service stubs for conditionally-registered
+       services: IOpenAiClient, ITextExtractor, IDataverseService, IAccessDataSource,
+       IAiAuthorizationService, IPlaybookService, IFileIndexingService, IKnowledgeDeploymentService,
+       and all AiModule chat services (ChatSessionManager, ChatHistoryManager, SprkChatAgentFactory).
+    3. Fixed pre-existing build errors in AgentContentSafetyMiddleware.cs and
+       AgentCostControlMiddleware.cs where ChatResponseUpdate.Text was assigned directly
+       (read-only property); fixed to use Contents.Add(new TextContent(...)).
+    4. KnowledgeBaseEndpointsTests: fixed SearchIndexClient mock to use SearchModelFactory
+       for valid SearchResults response, and mocked ServiceBusClient to prevent 19s timeouts.
+  </notes>
 </task>

@@ -4,7 +4,7 @@
     <title>Deploy Workstream B — Dataverse Records + ScopeConfigEditorPCF</title>
     <phase>3 — Workstream B: Scope Library &amp; Seed Data</phase>
     <tags>deploy, dataverse, pcf</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>AIPL-034, AIPL-035, AIPL-036</dependencies>
     <blocks>AIPL-072 (E2E tests for playbooks)</blocks>

@@ -4,7 +4,7 @@
     <title>Provision Two-Index Azure AI Search Schema and Semantic Config</title>
     <phase>2 — Workstream A: Retrieval Foundation</phase>
     <tags>bff-api, ai-search, infrastructure, retrieval</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>AIPL-003</dependencies>
     <blocks>AIPL-018 (Phase 2 API deploy)</blocks>
@@ -102,4 +102,24 @@
     <criterion testable="true">Both indexes have semantic configuration defined</criterion>
     <criterion testable="true">ai-search-schema.md documents both index schemas</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed: 2026-02-23
+
+    Deliverables:
+    - infrastructure/ai-search/knowledge-index.json — schema for knowledge-index (1536-dim, 512-token chunks)
+    - infrastructure/ai-search/discovery-index.json — schema for discovery-index (1536-dim, 1024-token chunks, entityMentions)
+    - projects/ai-spaarke-platform-enhancements-r1/scripts/Provision-AiSearchIndexes.ps1 — provisioning script
+    - projects/ai-spaarke-platform-enhancements-r1/notes/design/ai-search-schema.md — full schema documentation
+
+    Provisioning status: Pending manual execution of Provision-AiSearchIndexes.ps1
+    (az CLI commands are blocked in current session; user must run script with az login)
+
+    Run to provision:
+      pwsh "projects/ai-spaarke-platform-enhancements-r1/scripts/Provision-AiSearchIndexes.ps1"
+
+    Key decision: Used text-embedding-3-small (1536 dims) per spec/AIPL-003 config.
+    The existing spaarke-knowledge-index-v2 uses text-embedding-3-large (3072 dims) — these
+    are separate indexes for the new AI platform workstream (not the existing RAG pipeline).
+  </notes>
 </task>

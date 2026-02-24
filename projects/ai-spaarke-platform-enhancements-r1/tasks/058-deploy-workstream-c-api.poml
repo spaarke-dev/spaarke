@@ -4,7 +4,7 @@
     <title>Deploy Workstream C — BFF API to Azure App Service</title>
     <phase>4 — Workstream C: SprkChat &amp; Agent Framework</phase>
     <tags>bff-api, deploy, azure</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <dependencies>AIPL-054, AIPL-057</dependencies>
     <blocks>AIPL-059 (PCF deploy), AIPL-070 (validation)</blocks>

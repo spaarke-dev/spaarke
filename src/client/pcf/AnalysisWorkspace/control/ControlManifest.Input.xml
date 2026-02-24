@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="AnalysisWorkspace" version="1.2.24" display-name-key="Analysis Workspace" description-key="Fix chat auto-save with isChatDirty flag (v1.2.24)" control-type="standard">
+  <control namespace="Spaarke.Controls" constructor="AnalysisWorkspace" version="1.3.1" display-name-key="Analysis Workspace" description-key="Fix SprkChat API URL normalization to prevent double /api prefix (v1.3.1)" control-type="standard">
     <external-service-usage enabled="false">
     </external-service-usage>
 
@@ -44,6 +44,9 @@
 
     <!-- Analysis Status (OUTPUT - for status tracking) -->
     <property name="analysisStatus" display-name-key="Analysis Status" description-key="Current status: Draft, InProgress, Completed, Failed" of-type="SingleLine.Text" usage="output" required="false" />
+
+    <!-- Feature Flag: Use Legacy Chat (default: false = use new SprkChat component) -->
+    <property name="useLegacyChat" display-name-key="Use Legacy Chat" description-key="Use legacy chat endpoint (/continue) instead of SprkChat. Default false (new SprkChat)." of-type="TwoOptions" usage="input" required="false" default-value="false" />
 
     <resources>
       <code path="index.ts" order="1" />

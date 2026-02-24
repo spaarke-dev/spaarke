@@ -4,7 +4,7 @@
     <title>Implement DocumentParserRouter + LlamaParseClient with Fallback</title>
     <phase>2 — Workstream A: Retrieval Foundation</phase>
     <tags>bff-api, api, retrieval, llamaparse</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>AIPL-004</dependencies>
     <blocks>AIPL-013 (RagIndexingPipeline)</blocks>
@@ -111,4 +111,28 @@
     <criterion testable="true">Unit tests pass (4 test cases minimum)</criterion>
     <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-02-23. All 14 unit tests pass (dotnet test --filter DocumentParserRouter: 14 passed, 0 failed).
+    Build succeeds with 0 errors, 0 warnings.
+
+    Implementation summary:
+    - ParsedDocument.cs: model with Text, Pages, ParserUsed (DocumentParser enum), ExtractedAt, Metadata
+    - DocumentIntelligenceService.cs: wraps Azure Document Intelligence SDK, implements IDocumentParser
+    - LlamaParseClient.cs: HTTP client for LlamaParse cloud API with polling; namespace Sprk.Bff.Api.Configuration
+      for LlamaParseOptions (moved from Sprk.Bff.Api.Options to avoid collision with Microsoft.Extensions.Options.Options)
+    - DocumentParserRouter.cs: routes by Enabled flag + page-count heuristic (>30 pages or scanned MIME) with
+      silent fallback on LlamaParse failure, logs warning
+    - AiModule.cs: DI registrations for all three services
+    - Program.cs: wires LlamaParseOptions configuration from appsettings
+
+    Pre-existing test project compilation errors fixed in this task (enabling the test run):
+    - LlamaParseOptions + AiSearchOptions moved to Sprk.Bff.Api.Configuration namespace
+    - DataverseUpdateToolHandlerTests.cs: UpdateRecordAsync -> UpdateRecordFieldsAsync, added Microsoft.Xrm.Sdk using,
+      replaced DataverseException with InvalidOperationException, fixed Arg.Is expression-tree is-pattern errors
+      by switching to Arg.Do capture + direct FluentAssertions
+    - CommunicationIntegrationTests.cs: added null-forgiving operator on nullable dictionary indexer accesses
+    - Several other test files updated for constructor/model changes from other tasks (AppOnlyDocumentAnalysisJobHandler,
+      AnalysisOrchestrationService, InvoiceExtractionToolHandler, FinancialCalculationToolHandler, TodoGenerationService)
+  </notes>
 </task>

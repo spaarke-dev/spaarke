@@ -1,7 +1,7 @@
 # TASK-INDEX.md — AI Platform Foundation Phase 1
 
 > **Auto-updated by task-execute skill on task completion**
-> **Last Updated**: 2026-02-22
+> **Last Updated**: 2026-02-23
 > **Project**: ai-spaarke-platform-enhancements-r1
 
 ---
@@ -21,10 +21,10 @@
 
 | ID | Task | Est. | Status | Blocks |
 |----|------|------|--------|--------|
-| AIPL-001 | Define and Create Dataverse Chat + Evaluation Entities | 4h | 🔲 | AIPL-051, AIPL-071 |
-| AIPL-002 | Add Agent Framework NuGet Packages and Verify Build | 2h | 🔲 | AIPL-050 |
-| AIPL-003 | Configure Two-Index Azure AI Search Architecture | 1h | 🔲 | AIPL-010, AIPL-016 |
-| AIPL-004 | Wire Foundational DI Registrations and Audit Baseline | 1h | 🔲 | AIPL-010, AIPL-050 |
+| AIPL-001 | Define and Create Dataverse Chat + Evaluation Entities | 4h | ✅ | AIPL-051, AIPL-071 |
+| AIPL-002 | Add Agent Framework NuGet Packages and Verify Build | 2h | ✅ | AIPL-050 |
+| AIPL-003 | Configure Two-Index Azure AI Search Architecture | 1h | ✅ | AIPL-010, AIPL-016 |
+| AIPL-004 | Wire Foundational DI Registrations and Audit Baseline | 1h | ✅ | AIPL-010, AIPL-050 |
 
 **Phase 1 Total Estimate**: 8 hours
 
@@ -34,15 +34,15 @@
 
 | ID | Task | Est. | Status | Blocks |
 |----|------|------|--------|--------|
-| AIPL-010 | Implement RagQueryBuilder | 3h | 🔲 | AIPL-015, AIPL-017 |
-| AIPL-011 | Implement SemanticDocumentChunker | 4h | 🔲 | AIPL-013 |
-| AIPL-012 | Implement DocumentParserRouter + LlamaParseClient | 4h | 🔲 | AIPL-013 |
-| AIPL-013 | Implement RagIndexingPipeline | 4h | 🔲 | AIPL-014, AIPL-015 |
-| AIPL-014 | Implement RagIndexingJobHandler | 3h | 🔲 | AIPL-015 |
-| AIPL-015 | Build KnowledgeBaseEndpoints | 4h | 🔲 | AIPL-018, AIPL-071 |
-| AIPL-016 | Provision Two-Index Azure AI Search Schema | 2h | 🔲 | AIPL-018 |
-| AIPL-017 | Add Retrieval Instrumentation (Recall@K logging) | 2h | 🔲 | AIPL-071 |
-| AIPL-018 | Deploy Workstream A to Azure App Service | 1h | 🔲 | AIPL-070 |
+| AIPL-010 | Implement RagQueryBuilder | 3h | ✅ | AIPL-015, AIPL-017 |
+| AIPL-011 | Implement SemanticDocumentChunker | 4h | ✅ | AIPL-013 |
+| AIPL-012 | Implement DocumentParserRouter + LlamaParseClient | 4h | ✅ | AIPL-013 |
+| AIPL-013 | Implement RagIndexingPipeline | 4h | ✅ | AIPL-014, AIPL-015 |
+| AIPL-014 | Implement RagIndexingJobHandler | 3h | ✅ | AIPL-015 |
+| AIPL-015 | Build KnowledgeBaseEndpoints | 4h | ✅ | AIPL-018, AIPL-071 |
+| AIPL-016 | Provision Two-Index Azure AI Search Schema | 2h | ✅ | AIPL-018 |
+| AIPL-017 | Add Retrieval Instrumentation (Recall@K logging) | 2h | ✅ | AIPL-071 |
+| AIPL-018 | Deploy Workstream A to Azure App Service | 1h | ✅ | AIPL-070 |
 
 **Phase 2 Total Estimate**: 27 hours
 **Parallel Group**: AIPL-010, AIPL-011, AIPL-012 can start after AIPL-004 (independent)
@@ -53,14 +53,14 @@
 
 | ID | Task | Est. | Status | Blocks |
 |----|------|------|--------|--------|
-| AIPL-030 | Create 8 Action Records (ACT-001–008) | 3h | 🔲 | AIPL-034, AIPL-036 |
-| AIPL-031 | Create 10 Skill Records (SKL-001–010) | 2h | 🔲 | AIPL-034 |
-| AIPL-032 | Create 10 Knowledge Source Records + Index to AI Search | 4h | 🔲 | AIPL-034, AIPL-070 |
-| AIPL-033 | Create 8 Tool Records (TL-001–008) | 2h | 🔲 | AIPL-034, AIPL-036 |
-| AIPL-034 | Create 10 Playbook Records (PB-001–010) | 3h | 🔲 | AIPL-037, AIPL-072 |
-| AIPL-035 | Build ScopeConfigEditorPCF | 10h | 🔲 | AIPL-037 |
-| AIPL-036 | Verify Handler Discovery API | 2h | 🔲 | AIPL-035, AIPL-037 |
-| AIPL-037 | Deploy Workstream B (Dataverse + PCF) | 2h | 🔲 | AIPL-072 |
+| AIPL-030 | Create 8 Action Records (ACT-001–008) | 3h | ✅ | AIPL-034, AIPL-036 |
+| AIPL-031 | Create 10 Skill Records (SKL-001–010) | 2h | ✅ | AIPL-034 |
+| AIPL-032 | Create 10 Knowledge Source Records + Index to AI Search | 4h | ✅ | AIPL-034, AIPL-070 |
+| AIPL-033 | Create 8 Tool Records (TL-001–008) | 2h | ✅ | AIPL-034, AIPL-036 |
+| AIPL-034 | Create 10 Playbook Records (PB-001–010) | 3h | ✅ | AIPL-037, AIPL-072 |
+| AIPL-035 | Build ScopeConfigEditorPCF | 10h | ✅ | AIPL-037 |
+| AIPL-036 | Verify Handler Discovery API | 2h | ✅ | AIPL-035, AIPL-037 |
+| AIPL-037 | Deploy Workstream B (Dataverse + PCF) | 2h | ✅ | AIPL-072 |
 
 **Phase 3 Total Estimate**: 28 hours
 **Parallel Group**: AIPL-030, AIPL-031, AIPL-032, AIPL-033 can run in parallel (different entities)
@@ -72,16 +72,16 @@
 
 | ID | Task | Est. | Status | Blocks |
 |----|------|------|--------|--------|
-| AIPL-050 | C1: Integrate Agent Framework (IChatClient DI) | 2h | 🔲 | AIPL-051, AIPL-053 |
-| AIPL-051 | C2: Implement SprkChatAgent + Factory + ContextProvider | 4h | 🔲 | AIPL-052, AIPL-053, AIPL-054 |
-| AIPL-052 | C3: Implement ChatSessionManager + ChatHistoryManager | 4h | 🔲 | AIPL-054 |
-| AIPL-053 | C4: Implement Chat Tools (4 tool classes) | 4h | 🔲 | AIPL-054 |
-| AIPL-054 | C5: Build ChatEndpoints SSE | 4h | 🔲 | AIPL-057, AIPL-058 |
-| AIPL-055 | C6: Build SprkChat React Shared Component | 8h | 🔲 | AIPL-056 |
-| AIPL-056 | C7: Integrate SprkChat into AnalysisWorkspace PCF | 4h | 🔲 | AIPL-059 |
-| AIPL-057 | C8: Build Agent Middleware (telemetry, cost, safety) | 3h | 🔲 | AIPL-058 |
-| AIPL-058 | Deploy Workstream C — BFF API | 1h | 🔲 | AIPL-059, AIPL-070 |
-| AIPL-059 | Deploy Workstream C — AnalysisWorkspace PCF | 1h | 🔲 | AIPL-070, AIPL-075 |
+| AIPL-050 | C1: Integrate Agent Framework (IChatClient DI) | 2h | ✅ | AIPL-051, AIPL-053 |
+| AIPL-051 | C2: Implement SprkChatAgent + Factory + ContextProvider | 4h | ✅ | AIPL-052, AIPL-053, AIPL-054 |
+| AIPL-052 | C3: Implement ChatSessionManager + ChatHistoryManager | 4h | ✅ | AIPL-054 |
+| AIPL-053 | C4: Implement Chat Tools (4 tool classes) | 4h | ✅ | AIPL-054 |
+| AIPL-054 | C5: Build ChatEndpoints SSE | 4h | ✅ | AIPL-057, AIPL-058 |
+| AIPL-055 | C6: Build SprkChat React Shared Component | 8h | ✅ | AIPL-056 |
+| AIPL-056 | C7: Integrate SprkChat into AnalysisWorkspace PCF | 4h | ✅ | AIPL-059 |
+| AIPL-057 | C8: Build Agent Middleware (telemetry, cost, safety) | 3h | ✅ | AIPL-058 |
+| AIPL-058 | Deploy Workstream C — BFF API | 1h | ✅ | AIPL-059, AIPL-070 |
+| AIPL-059 | Deploy Workstream C — AnalysisWorkspace PCF | 1h | ✅ | AIPL-070, AIPL-075 |
 
 **Phase 4 Total Estimate**: 35 hours
 **Dependencies**: AIPL-001 ✓ (Dataverse schema), AIPL-002 ✓ (Agent Framework packages)
@@ -120,10 +120,10 @@
 
 | Phase | Tasks | Est. Hours | Status |
 |-------|-------|-----------|--------|
-| Phase 1: Foundation | 4 | 8h | 🔲 Not started |
-| Phase 2: Workstream A (Retrieval) | 9 | 27h | 🔲 Not started |
-| Phase 3: Workstream B (Scope Library) | 8 | 28h | 🔲 Not started |
-| Phase 4: Workstream C (SprkChat) | 10 | 35h | 🔲 Not started |
+| Phase 1: Foundation | 4 | 8h | ✅ Complete |
+| Phase 2: Workstream A (Retrieval) | 9 | 27h | ✅ Complete |
+| Phase 3: Workstream B (Scope Library) | 8 | 28h | ✅ Complete |
+| Phase 4: Workstream C (SprkChat) | 10 | 35h | ✅ Complete |
 | Phase 5: Workstream D (Validation) | 6 | 26h | 🔲 Not started |
 | Phase 6: Wrap-Up | 1 | 2h | 🔲 Not started |
 | **Total** | **38** | **~126h** | **🔲** |
@@ -206,17 +206,18 @@ Estimated critical path length: ~35 hours of sequential work
 
 ## Next Action
 
-**Start with**: AIPL-001 — Define and Create Dataverse Chat + Evaluation Entities
+**Phase 1**: ✅ Complete
 
-```
-work on task 001
-```
+**Phase 2 (Workstream A)**: ✅ Complete (all 9 tasks). AIPL-018 deployed to spe-api-dev-67e2xz (2026-02-23).
 
-Or to start Phase 2 and Phase 3 in parallel (after Phase 1 complete):
-```
-work on task 010  ← Workstream A: RagQueryBuilder
-work on task 030  ← Workstream B: Action records (separate session/worktree)
-```
+**Phase 3 (Workstream B)**: ✅ Complete (all 8 tasks). AIPL-037 deployed ScopeConfigEditor PCF v1.0.0 to spaarkedev1 (2026-02-23).
+Entity name fix applied: ScopeConfigEditor PCF entity routing corrected — sprk_analysisaction, sprk_analysisskill, sprk_analysisknowledge.
+
+**Phase 4 (Workstream C)**: ✅ Complete (all 10 tasks).
+AIPL-018+058: BFF API deployed to spe-api-dev-67e2xz; new App Service settings added (AzureOpenAI, AiSearch) (2026-02-23).
+AIPL-059: AnalysisWorkspace PCF v1.3.0 deployed to spaarkedev1 with SprkChat integration (2026-02-23).
+
+**Next**: Phase 5 — Workstream D: End-to-End Validation. First task: AIPL-070 (Setup Test Document Corpus).
 
 ---
 
