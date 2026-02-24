@@ -39,7 +39,7 @@
     <PackageReference Include="Azure.Search.Documents" Version="11.6.0" />
     <PackageReference Include="Azure.Security.KeyVault.Secrets" Version="4.6.0" />
     <PackageReference Include="Handlebars.Net" Version="2.1.6" />
-    <PackageReference Include="Microsoft.ApplicationInsights.AspNetCore" Version="2.23.0" />
+    <PackageReference Include="Microsoft.ApplicationInsights.AspNetCore" Version="3.0.0" />
 
     <!-- Caching -->
     <!-- Microsoft.Extensions.Caching.Abstractions 10.0.3: bumped from 10.0.1 to satisfy Microsoft.Extensions.AI 10.3.0 dependency chain -->
@@ -70,7 +70,7 @@
     <PackageReference Include="OpenTelemetry" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.0" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.14.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.15.0" />
 
     <!-- Polly (CRITICAL - must be 8.x) -->
     <PackageReference Include="Polly" Version="8.6.5" />
