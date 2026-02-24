@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Reflection;
 using FluentAssertions;
 using Moq;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 using Xunit;
@@ -280,6 +281,147 @@ public class DocumentSearchToolsTests
         // Assert
         result.Should().Contain("Discovery search found 1 document");
         result.Should().Contain("Policy Document.pdf");
+    }
+
+    // === Knowledge scope tests ===
+
+    [Fact]
+    public async Task SearchDocumentsAsync_PassesKnowledgeSourceIds_WhenScopeProvided()
+    {
+        // Arrange
+        var knowledgeSourceIds = new List<string> { "knw-001", "knw-002" };
+        var scope = new ChatKnowledgeScope(knowledgeSourceIds, null, null, null);
+
+        var ragServiceMock = new Mock<IRagService>();
+        ragServiceMock
+            .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateEmptyResponse(TestQuery));
+
+        var sut = new DocumentSearchTools(ragServiceMock.Object, scope);
+
+        // Act
+        await sut.SearchDocumentsAsync(TestQuery, TestTenantId);
+
+        // Assert — knowledge source IDs from scope should be passed to search
+        ragServiceMock.Verify(
+            r => r.SearchAsync(
+                TestQuery,
+                It.Is<RagSearchOptions>(o =>
+                    o.KnowledgeSourceIds != null &&
+                    o.KnowledgeSourceIds.Count == 2 &&
+                    o.KnowledgeSourceIds.Contains("knw-001") &&
+                    o.KnowledgeSourceIds.Contains("knw-002")),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SearchDocumentsAsync_DoesNotSetKnowledgeSourceIds_WhenNoScope()
+    {
+        // Arrange
+        var ragServiceMock = new Mock<IRagService>();
+        ragServiceMock
+            .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateEmptyResponse(TestQuery));
+
+        var sut = new DocumentSearchTools(ragServiceMock.Object); // No scope
+
+        // Act
+        await sut.SearchDocumentsAsync(TestQuery, TestTenantId);
+
+        // Assert — no knowledge source filtering when scope is null
+        ragServiceMock.Verify(
+            r => r.SearchAsync(
+                TestQuery,
+                It.Is<RagSearchOptions>(o => o.KnowledgeSourceIds == null),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SearchDiscoveryAsync_DoesNotSetKnowledgeSourceIds_EvenWhenScopeProvided()
+    {
+        // Arrange — SearchDiscovery is intentionally tenant-wide (no knowledge scoping)
+        var knowledgeSourceIds = new List<string> { "knw-001" };
+        var scope = new ChatKnowledgeScope(knowledgeSourceIds, null, null, null);
+
+        var ragServiceMock = new Mock<IRagService>();
+        ragServiceMock
+            .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateEmptyResponse(TestQuery));
+
+        var sut = new DocumentSearchTools(ragServiceMock.Object, scope);
+
+        // Act
+        await sut.SearchDiscoveryAsync(TestQuery, TestTenantId);
+
+        // Assert — discovery search must remain tenant-wide
+        ragServiceMock.Verify(
+            r => r.SearchAsync(
+                TestQuery,
+                It.Is<RagSearchOptions>(o => o.KnowledgeSourceIds == null),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    // === Entity scope tests ===
+
+    [Fact]
+    public async Task SearchDiscoveryAsync_WithEntityScope_PassesEntityFieldsToRagSearchOptions()
+    {
+        // Arrange
+        var scope = new ChatKnowledgeScope(
+            RagKnowledgeSourceIds: new List<string>(),
+            InlineContent: null,
+            SkillInstructions: null,
+            ActiveDocumentId: null,
+            ParentEntityType: "matter",
+            ParentEntityId: "entity-123");
+
+        var ragServiceMock = new Mock<IRagService>();
+        ragServiceMock
+            .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateEmptyResponse(TestQuery));
+
+        var sut = new DocumentSearchTools(ragServiceMock.Object, scope);
+
+        // Act
+        await sut.SearchDiscoveryAsync(TestQuery, TestTenantId);
+
+        // Assert — entity scope fields must be passed through to RagSearchOptions
+        ragServiceMock.Verify(
+            r => r.SearchAsync(
+                TestQuery,
+                It.Is<RagSearchOptions>(o =>
+                    o.ParentEntityType == "matter" &&
+                    o.ParentEntityId == "entity-123"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SearchDiscoveryAsync_WithoutEntityScope_NullEntityFields()
+    {
+        // Arrange
+        var ragServiceMock = new Mock<IRagService>();
+        ragServiceMock
+            .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateEmptyResponse(TestQuery));
+
+        var sut = new DocumentSearchTools(ragServiceMock.Object); // No scope
+
+        // Act
+        await sut.SearchDiscoveryAsync(TestQuery, TestTenantId);
+
+        // Assert — without scope, entity fields should be null
+        ragServiceMock.Verify(
+            r => r.SearchAsync(
+                TestQuery,
+                It.Is<RagSearchOptions>(o =>
+                    o.ParentEntityType == null &&
+                    o.ParentEntityId == null),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     // === Constructor validation ===

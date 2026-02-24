@@ -144,16 +144,54 @@ public record RagSearchOptions
     public string? KnowledgeSourceId { get; init; }
 
     /// <summary>
+    /// Optional filter by multiple knowledge source IDs.
+    /// When set, limits search to chunks from ANY of the specified sources (OR filter).
+    /// Takes precedence over single <see cref="KnowledgeSourceId"/> when both are set.
+    /// </summary>
+    public IReadOnlyList<string>? KnowledgeSourceIds { get; init; }
+
+    /// <summary>
+    /// Optional exclusion filter for knowledge source IDs.
+    /// When set, excludes chunks from ANY of the specified sources (NOT filter).
+    /// </summary>
+    public IReadOnlyList<string>? ExcludeKnowledgeSourceIds { get; init; }
+
+    /// <summary>
     /// Optional filter by document type.
     /// e.g., "contract", "policy", "procedure"
     /// </summary>
     public string? DocumentType { get; init; }
 
     /// <summary>
-    /// Optional filter by tags.
+    /// Optional filter by tags (OR semantics).
     /// Returns documents matching any of the specified tags.
     /// </summary>
     public IList<string>? Tags { get; init; }
+
+    /// <summary>
+    /// Optional required tags filter (AND semantics).
+    /// Returns only documents that have ALL of the specified tags.
+    /// </summary>
+    public IReadOnlyList<string>? RequiredTags { get; init; }
+
+    /// <summary>
+    /// Optional tag exclusion filter.
+    /// Excludes documents that have any of the specified tags.
+    /// </summary>
+    public IReadOnlyList<string>? ExcludeTags { get; init; }
+
+    /// <summary>
+    /// Optional parent entity type filter for entity-scoped search.
+    /// e.g., "matter", "project", "invoice", "account", "contact"
+    /// Both ParentEntityType and ParentEntityId must be set for entity scoping.
+    /// </summary>
+    public string? ParentEntityType { get; init; }
+
+    /// <summary>
+    /// Optional parent entity ID filter for entity-scoped search.
+    /// Both ParentEntityType and ParentEntityId must be set for entity scoping.
+    /// </summary>
+    public string? ParentEntityId { get; init; }
 
     /// <summary>
     /// Whether to use semantic ranking.

@@ -1,6 +1,6 @@
 # CLAUDE.md - Sprk.Bff.Api Module
 
-> **Last Updated**: January 9, 2026
+> **Last Updated**: February 24, 2026
 >
 > **Purpose**: Module-specific instructions for the Spaarke BFF (Backend-for-Frontend) API.
 
@@ -12,24 +12,45 @@
 - Container management for SPE storage
 - Dataverse integration for document metadata
 - Health checks and observability
-- (Future) AI service orchestration
+- AI service orchestration (document intelligence, RAG search, chat)
 
 ## Key Files
 
 ```
 Sprk.Bff.Api/
-├── Program.cs              # Entry point, DI configuration, middleware
-├── Endpoints/              # Minimal API endpoint definitions
+├── Program.cs                 # Entry point, DI configuration, middleware
+├── Api/
+│   ├── Ai/
+│   │   ├── ChatEndpoints.cs               # /api/ai/chat/* — session, message, playbook discovery
+│   │   ├── DocumentIntelligenceEndpoints.cs
+│   │   ├── AnalysisEndpoints.cs
+│   │   └── SemanticSearchEndpoints.cs
 │   ├── DocumentEndpoints.cs
 │   ├── ContainerEndpoints.cs
 │   └── HealthEndpoints.cs
+├── Models/Ai/Chat/
+│   ├── ChatSession.cs                     # Session record (includes HostContext)
+│   ├── ChatContext.cs                     # ChatContext + ChatKnowledgeScope
+│   └── ChatHostContext.cs                 # Entity-aware host context record
 ├── Services/
-│   ├── SpeFileStore.cs     # SPE operations facade (ADR-007)
+│   ├── SpeFileStore.cs                    # SPE operations facade (ADR-007)
 │   ├── AuthorizationService.cs
-│   └── GraphClientFactory.cs
-├── Filters/                # Endpoint filters for auth (ADR-008)
+│   ├── GraphClientFactory.cs
+│   └── Ai/
+│       ├── IRagService.cs                 # RAG search with extended filter options
+│       ├── RagService.cs                  # OData filter builder (search.in, boolean logic)
+│       ├── ScopeResolverService.cs        # Resolves knowledge source IDs from playbook
+│       └── Chat/
+│           ├── ChatSessionManager.cs      # Session lifecycle + HostContext storage
+│           ├── IChatContextProvider.cs     # Context resolution interface
+│           ├── PlaybookChatContextProvider.cs # Playbook-driven context + entity scope
+│           ├── SprkChatAgentFactory.cs     # Agent construction with context
+│           └── Tools/
+│               ├── DocumentSearchTools.cs  # Entity-scoped search discovery
+│               └── KnowledgeRetrievalTools.cs # Knowledge source-scoped retrieval
+├── Filters/                               # Endpoint filters for auth (ADR-008)
 │   └── DocumentAuthorizationFilter.cs
-└── appsettings.json        # Configuration template
+└── appsettings.json                       # Configuration template
 ```
 
 ## Architecture Constraints
@@ -186,6 +207,39 @@ catch (Exception ex)
         statusCode: 500);
 }
 ```
+
+## AI Chat System
+
+The Chat system provides playbook-driven conversational AI with entity-scoped RAG search.
+
+### Chat Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/ai/chat/sessions` | Create session (accepts `HostContext`) |
+| POST | `/api/ai/chat/sessions/{id}/switch` | Switch playbook/document context |
+| POST | `/api/ai/chat/sessions/{id}/messages` | Send message (SSE streaming) |
+| GET | `/api/ai/chat/playbooks` | List available playbooks (pre-session) |
+
+### Key Models
+
+- **ChatHostContext**: Record describing where SprkChat is embedded (EntityType, EntityId, WorkspaceType). Validates against `ParentEntityContext.EntityTypes`.
+- **ChatKnowledgeScope**: Carries knowledge source IDs, entity scope, and inline content for tool construction.
+- **RagSearchOptions**: Extended with `ExcludeKnowledgeSourceIds`, `RequiredTags`, `ExcludeTags`, `ParentEntityType`, `ParentEntityId` for boolean filter logic.
+
+### Pipeline Flow
+
+```
+ChatEndpoints → ChatSessionManager → SprkChatAgentFactory
+  → PlaybookChatContextProvider → ChatKnowledgeScope
+    → DocumentSearchTools / KnowledgeRetrievalTools → RagService → Azure AI Search
+```
+
+HostContext flows through every layer. When null, search remains tenant-wide (backward compatible).
+
+**See**: [SPAARKE-AI-ARCHITECTURE.md Section 18](../../../../docs/guides/SPAARKE-AI-ARCHITECTURE.md#18-sprkchat-system--conversational-ai-with-rag-scoping-2026-02-24)
+
+---
 
 ## Do's and Don'ts
 

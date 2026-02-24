@@ -22,8 +22,9 @@ import {
     tokens,
     Spinner,
     Text,
+    Button,
 } from "@fluentui/react-components";
-import { ISprkChatProps, IChatMessage } from "./types";
+import { ISprkChatProps, IChatMessage, IPlaybookOption } from "./types";
 import { SprkChatMessage } from "./SprkChatMessage";
 import { SprkChatInput } from "./SprkChatInput";
 import { SprkChatContextSelector } from "./SprkChatContextSelector";
@@ -31,6 +32,7 @@ import { SprkChatPredefinedPrompts } from "./SprkChatPredefinedPrompts";
 import { SprkChatHighlightRefine } from "./SprkChatHighlightRefine";
 import { useSseStream } from "./hooks/useSseStream";
 import { useChatSession } from "./hooks/useChatSession";
+import { useChatPlaybooks } from "./hooks/useChatPlaybooks";
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -75,6 +77,12 @@ const useStyles = makeStyles({
         fontSize: tokens.fontSizeBase200,
         textAlign: "center",
     },
+    playbookChips: {
+        display: "flex",
+        flexWrap: "wrap",
+        ...shorthands.gap(tokens.spacingHorizontalS),
+        ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
+    },
 });
 
 // ---------------------------------------------------------------------------
@@ -108,10 +116,27 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     predefinedPrompts = [],
     contentRef: externalContentRef,
     maxCharCount,
+    hostContext,
 }) => {
     const styles = useStyles();
     const messageListRef = React.useRef<HTMLDivElement>(null);
     const highlightContainerRef = externalContentRef || messageListRef;
+
+    // Playbook discovery (fetches available playbooks for quick-action chips)
+    const { playbooks: discoveredPlaybooks } = useChatPlaybooks({ apiBaseUrl, accessToken });
+
+    // Merge passed-in playbooks with discovered ones (deduplicate by id)
+    const allPlaybooks = React.useMemo((): IPlaybookOption[] => {
+        const seen = new Set<string>(playbooks.map((p) => p.id));
+        const merged = [...playbooks];
+        for (const pb of discoveredPlaybooks) {
+            if (!seen.has(pb.id)) {
+                seen.add(pb.id);
+                merged.push(pb);
+            }
+        }
+        return merged;
+    }, [playbooks, discoveredPlaybooks]);
 
     // Session management
     const chatSession = useChatSession({ apiBaseUrl, accessToken });
@@ -135,7 +160,6 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         isStreaming,
         error: streamError,
         startStream,
-        cancelStream,
     } = sseStream;
 
     // Track current streaming state
@@ -146,13 +170,13 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         const initSession = async () => {
             if (initialSessionId) {
                 // Resume existing session
-                const newSession = await createSession(documentId, playbookId);
+                const newSession = await createSession(documentId, playbookId, hostContext);
                 if (newSession) {
                     // loadHistory needs the session to be set first - handled by useChatSession
                 }
             } else {
                 // Create new session
-                const newSession = await createSession(documentId, playbookId);
+                const newSession = await createSession(documentId, playbookId, hostContext);
                 if (newSession && onSessionCreated) {
                     onSessionCreated(newSession);
                 }
@@ -286,18 +310,27 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         [session, addMessage, startStream, apiBaseUrl, accessToken]
     );
 
+    // Handle playbook chip selection — switches context to the selected playbook
+    const handlePlaybookChipClick = React.useCallback(
+        (pb: IPlaybookOption) => {
+            switchContext(documentId, pb.id, hostContext);
+        },
+        [switchContext, documentId, hostContext]
+    );
+
     const displayError = sessionError || streamError;
     const showPredefinedPrompts = messages.length === 0 && predefinedPrompts.length > 0 && !isSessionLoading;
+    const showPlaybookChips = messages.length === 0 && allPlaybooks.length > 1 && !isSessionLoading;
 
     return (
         <div className={className ? `${styles.root} ${className}` : styles.root} data-testid="sprkchat-root">
             {/* Context selector bar */}
-            {(documents.length > 0 || playbooks.length > 0) && (
+            {(documents.length > 0 || allPlaybooks.length > 0) && (
                 <SprkChatContextSelector
                     selectedDocumentId={documentId}
                     selectedPlaybookId={playbookId}
                     documents={documents}
-                    playbooks={playbooks}
+                    playbooks={allPlaybooks}
                     onDocumentChange={handleDocumentChange}
                     onPlaybookChange={handlePlaybookChange}
                     disabled={isStreaming}
@@ -322,6 +355,25 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                 {isSessionLoading && messages.length === 0 && (
                     <div className={styles.loadingContainer}>
                         <Spinner label="Loading chat..." />
+                    </div>
+                )}
+
+                {showPlaybookChips && (
+                    <div className={styles.playbookChips} data-testid="playbook-chips">
+                        {allPlaybooks
+                            .filter((pb) => pb.id !== playbookId)
+                            .map((pb) => (
+                                <Button
+                                    key={pb.id}
+                                    appearance="outline"
+                                    size="small"
+                                    onClick={() => handlePlaybookChipClick(pb)}
+                                    disabled={isStreaming || !session}
+                                    title={pb.description || pb.name}
+                                >
+                                    {pb.name}
+                                </Button>
+                            ))}
                     </div>
                 )}
 

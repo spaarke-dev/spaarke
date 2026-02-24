@@ -237,6 +237,118 @@ public class RagServiceTests
 
     #endregion
 
+    #region RagSearchOptions Extended Properties Tests
+
+    [Fact]
+    public void RagSearchOptions_ExcludeKnowledgeSourceIds_DefaultsToNull()
+    {
+        // Arrange & Act
+        var options = new RagSearchOptions { TenantId = "tenant-1" };
+
+        // Assert
+        options.ExcludeKnowledgeSourceIds.Should().BeNull();
+    }
+
+    [Fact]
+    public void RagSearchOptions_RequiredTags_DefaultsToNull()
+    {
+        // Arrange & Act
+        var options = new RagSearchOptions { TenantId = "tenant-1" };
+
+        // Assert
+        options.RequiredTags.Should().BeNull();
+    }
+
+    [Fact]
+    public void RagSearchOptions_ExcludeTags_DefaultsToNull()
+    {
+        // Arrange & Act
+        var options = new RagSearchOptions { TenantId = "tenant-1" };
+
+        // Assert
+        options.ExcludeTags.Should().BeNull();
+    }
+
+    [Fact]
+    public void RagSearchOptions_ParentEntityType_DefaultsToNull()
+    {
+        // Arrange & Act
+        var options = new RagSearchOptions { TenantId = "tenant-1" };
+
+        // Assert
+        options.ParentEntityType.Should().BeNull();
+    }
+
+    [Fact]
+    public void RagSearchOptions_ParentEntityId_DefaultsToNull()
+    {
+        // Arrange & Act
+        var options = new RagSearchOptions { TenantId = "tenant-1" };
+
+        // Assert
+        options.ParentEntityId.Should().BeNull();
+    }
+
+    [Fact]
+    public void RagSearchOptions_EntityScope_BothFieldsCanBeSet()
+    {
+        // Arrange & Act
+        var options = new RagSearchOptions
+        {
+            TenantId = "tenant-1",
+            ParentEntityType = "matter",
+            ParentEntityId = "matter-456"
+        };
+
+        // Assert
+        options.ParentEntityType.Should().Be("matter");
+        options.ParentEntityId.Should().Be("matter-456");
+    }
+
+    [Fact]
+    public void RagSearchOptions_ExcludeKnowledgeSourceIds_CanBeSet()
+    {
+        // Arrange & Act
+        var excludeIds = new List<string> { "ks-001", "ks-002", "ks-003" };
+        var options = new RagSearchOptions
+        {
+            TenantId = "tenant-1",
+            ExcludeKnowledgeSourceIds = excludeIds
+        };
+
+        // Assert
+        options.ExcludeKnowledgeSourceIds.Should().NotBeNull();
+        options.ExcludeKnowledgeSourceIds.Should().HaveCount(3);
+        options.ExcludeKnowledgeSourceIds.Should().ContainInOrder("ks-001", "ks-002", "ks-003");
+    }
+
+    [Fact]
+    public void RagSearchOptions_RequiredAndExcludeTags_CanCoexist()
+    {
+        // Arrange & Act
+        var requiredTags = new List<string> { "finance", "compliance" };
+        var excludeTags = new List<string> { "draft", "archived" };
+        var options = new RagSearchOptions
+        {
+            TenantId = "tenant-1",
+            RequiredTags = requiredTags,
+            ExcludeTags = excludeTags
+        };
+
+        // Assert
+        options.RequiredTags.Should().NotBeNull();
+        options.RequiredTags.Should().HaveCount(2);
+        options.RequiredTags.Should().Contain("finance");
+        options.RequiredTags.Should().Contain("compliance");
+
+        options.ExcludeTags.Should().NotBeNull();
+        options.ExcludeTags.Should().HaveCount(2);
+        options.ExcludeTags.Should().Contain("draft");
+        options.ExcludeTags.Should().Contain("archived");
+    }
+
+    #endregion
+
     #region IndexDocumentAsync Tests
 
     [Fact]

@@ -34,7 +34,7 @@ public class SprkChatAgentFactoryTests
 
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
-            .Setup(p => p.GetContextAsync(TestDocumentId, TestTenantId, TestPlaybookId, It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetContextAsync(TestDocumentId, TestTenantId, TestPlaybookId, It.IsAny<ChatHostContext?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(expectedContext);
 
         var services = BuildServiceProvider(contextProviderMock.Object);
@@ -61,6 +61,7 @@ public class SprkChatAgentFactoryTests
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<Guid>(),
+                It.IsAny<ChatHostContext?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
@@ -72,7 +73,7 @@ public class SprkChatAgentFactoryTests
 
         // Assert
         contextProviderMock.Verify(
-            p => p.GetContextAsync(TestDocumentId, TestTenantId, TestPlaybookId, It.IsAny<CancellationToken>()),
+            p => p.GetContextAsync(TestDocumentId, TestTenantId, TestPlaybookId, It.IsAny<ChatHostContext?>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -82,7 +83,7 @@ public class SprkChatAgentFactoryTests
         // Arrange
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
-            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         var services = BuildServiceProvider(contextProviderMock.Object);
@@ -107,10 +108,10 @@ public class SprkChatAgentFactoryTests
 
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
-            .Setup(p => p.GetContextAsync(doc1, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetContextAsync(doc1, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChatContext(prompt1, null, null, TestPlaybookId));
         contextProviderMock
-            .Setup(p => p.GetContextAsync(doc2, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetContextAsync(doc2, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChatContext(prompt2, null, null, TestPlaybookId));
 
         var services = BuildServiceProvider(contextProviderMock.Object);

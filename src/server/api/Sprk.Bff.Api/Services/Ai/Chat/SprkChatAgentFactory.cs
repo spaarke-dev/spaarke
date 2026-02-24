@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat.Middleware;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 
@@ -62,6 +63,7 @@ public sealed class SprkChatAgentFactory
         string documentId,
         Guid playbookId,
         string tenantId,
+        ChatHostContext? hostContext = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -79,12 +81,12 @@ public sealed class SprkChatAgentFactory
             documentId,
             tenantId,
             playbookId,
+            hostContext,
             cancellationToken);
 
-        // Resolve registered AIFunction tools from DI.
-        // Tools are registered as IEnumerable<AIFunction> (or individual items).
-        // If none are registered, the agent runs without tool calling.
-        var tools = ResolveTools(scope.ServiceProvider);
+        // Resolve registered AIFunction tools from DI, passing knowledge scope
+        // so search tools can constrain queries to the playbook's knowledge sources.
+        var tools = ResolveTools(scope.ServiceProvider, context.KnowledgeScope);
 
         _logger.LogInformation(
             "SprkChatAgent created: playbook={PlaybookId}, toolCount={ToolCount}, hasDocSummary={HasDocSummary}",
@@ -146,8 +148,14 @@ public sealed class SprkChatAgentFactory
     /// registered in DI and are resolved here from <paramref name="scopedProvider"/>.
     /// </summary>
     /// <param name="scopedProvider">The scoped DI provider for this agent creation call.</param>
+    /// <param name="knowledgeScope">
+    /// Knowledge scope from the playbook, containing RAG source IDs for search filtering.
+    /// Null when the playbook has no knowledge sources configured.
+    /// </param>
     /// <returns>List of registered <see cref="AIFunction"/> instances, or empty list on failure.</returns>
-    private IReadOnlyList<AIFunction> ResolveTools(IServiceProvider scopedProvider)
+    private IReadOnlyList<AIFunction> ResolveTools(
+        IServiceProvider scopedProvider,
+        ChatKnowledgeScope? knowledgeScope)
     {
         try
         {
@@ -159,10 +167,10 @@ public sealed class SprkChatAgentFactory
 
             var tools = new List<AIFunction>();
 
-            // DocumentSearchTools — requires IRagService
+            // DocumentSearchTools — requires IRagService, accepts knowledge scope for domain filtering
             if (ragService != null)
             {
-                var documentSearchTools = new DocumentSearchTools(ragService);
+                var documentSearchTools = new DocumentSearchTools(ragService, knowledgeScope);
                 tools.Add(AIFunctionFactory.Create(
                     documentSearchTools.SearchDocumentsAsync,
                     name: "SearchDocuments",
@@ -195,10 +203,10 @@ public sealed class SprkChatAgentFactory
                 _logger.LogWarning("IAnalysisOrchestrationService not available; AnalysisQueryTools will not be registered");
             }
 
-            // KnowledgeRetrievalTools — requires IRagService
+            // KnowledgeRetrievalTools — requires IRagService, accepts knowledge scope for domain filtering
             if (ragService != null)
             {
-                var knowledgeRetrievalTools = new KnowledgeRetrievalTools(ragService);
+                var knowledgeRetrievalTools = new KnowledgeRetrievalTools(ragService, knowledgeScope);
                 tools.Add(AIFunctionFactory.Create(
                     knowledgeRetrievalTools.GetKnowledgeSourceAsync,
                     name: "GetKnowledgeSource",

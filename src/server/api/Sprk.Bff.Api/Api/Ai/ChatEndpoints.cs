@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 
@@ -115,6 +117,15 @@ public static class ChatEndpoints
             .ProducesProblem(403)
             .ProducesProblem(404);
 
+        // GET /api/ai/chat/playbooks — discover available playbooks (no session required)
+        group.MapGet("/playbooks", ListPlaybooksAsync)
+            .AddAiAuthorizationFilter()
+            .WithName("ListChatPlaybooks")
+            .WithSummary("Discover available playbooks for SprkChat")
+            .WithDescription("Returns available playbooks for the current user. Merges user-owned and public playbooks, deduplicates by ID. Called before session creation to populate playbook selector UI.")
+            .Produces<ChatPlaybookListResponse>()
+            .ProducesProblem(401);
+
         return app;
     }
 
@@ -150,6 +161,7 @@ public static class ChatEndpoints
             tenantId,
             request.DocumentId,
             request.PlaybookId,
+            request.HostContext,
             cancellationToken);
 
         logger.LogInformation("Chat session created: {SessionId}", session.SessionId);
@@ -211,6 +223,7 @@ public static class ChatEndpoints
                 request.DocumentId ?? session.DocumentId ?? string.Empty,
                 session.PlaybookId,
                 tenantId,
+                session.HostContext,
                 cancellationToken);
 
             // Convert session history to AI framework messages for context
@@ -415,6 +428,7 @@ public static class ChatEndpoints
         {
             DocumentId = request.DocumentId ?? session.DocumentId,
             PlaybookId = request.PlaybookId ?? session.PlaybookId,
+            HostContext = request.HostContext ?? session.HostContext,
             LastActivity = DateTimeOffset.UtcNow
         };
 
@@ -460,6 +474,74 @@ public static class ChatEndpoints
         return Results.NoContent();
     }
 
+    /// <summary>
+    /// Discover available playbooks for SprkChat.
+    /// GET /api/ai/chat/playbooks
+    ///
+    /// Pre-session endpoint — called before the user starts chatting to populate
+    /// the playbook selector UI with quick-action chips.
+    /// Merges user-owned and public playbooks, deduplicates by ID.
+    /// </summary>
+    private static async Task<IResult> ListPlaybooksAsync(
+        IPlaybookService playbookService,
+        HttpContext httpContext,
+        ILogger<ChatSessionManager> logger,
+        string? nameFilter = null,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = ExtractUserId(httpContext);
+
+        var query = new PlaybookQueryParameters
+        {
+            NameFilter = nameFilter,
+            PageSize = 50
+        };
+
+        var seen = new HashSet<Guid>();
+        var playbooks = new List<ChatPlaybookInfo>();
+
+        // 1. Load user's own playbooks (if user ID is available)
+        if (userId.HasValue)
+        {
+            try
+            {
+                var userPlaybooks = await playbookService.ListUserPlaybooksAsync(userId.Value, query, cancellationToken);
+                foreach (var pb in userPlaybooks.Items)
+                {
+                    if (seen.Add(pb.Id))
+                    {
+                        playbooks.Add(new ChatPlaybookInfo(pb.Id.ToString(), pb.Name, pb.Description, pb.IsPublic));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to load user playbooks for userId={UserId}; continuing with public only", userId);
+            }
+        }
+
+        // 2. Load public/shared playbooks and merge (deduplicate by ID)
+        try
+        {
+            var publicPlaybooks = await playbookService.ListPublicPlaybooksAsync(query, cancellationToken);
+            foreach (var pb in publicPlaybooks.Items)
+            {
+                if (seen.Add(pb.Id))
+                {
+                    playbooks.Add(new ChatPlaybookInfo(pb.Id.ToString(), pb.Name, pb.Description, pb.IsPublic));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to load public playbooks; returning user playbooks only");
+        }
+
+        logger.LogDebug("ListPlaybooks returning {Count} playbooks (userId={UserId})", playbooks.Count, userId);
+
+        return Results.Ok(new ChatPlaybookListResponse(playbooks.ToArray()));
+    }
+
     // =========================================================================
     // Private Helpers
     // =========================================================================
@@ -480,6 +562,17 @@ public static class ChatEndpoints
         }
 
         return tenantId;
+    }
+
+    /// <summary>
+    /// Extracts the user's object ID from the JWT 'oid' claim (Azure AD).
+    /// Returns null if the claim is missing or not a valid GUID.
+    /// </summary>
+    private static Guid? ExtractUserId(HttpContext httpContext)
+    {
+        var oid = httpContext.User.FindFirst("oid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        return Guid.TryParse(oid, out var userId) ? userId : null;
     }
 
     /// <summary>
@@ -530,7 +623,8 @@ public static class ChatEndpoints
 /// <summary>Request body for POST /sessions.</summary>
 /// <param name="DocumentId">Optional document ID for the session context.</param>
 /// <param name="PlaybookId">Playbook that governs the agent's system prompt and tools.</param>
-public record ChatCreateSessionRequest(string? DocumentId, Guid PlaybookId);
+/// <param name="HostContext">Optional host context describing where SprkChat is embedded (entity type, entity ID, workspace).</param>
+public record ChatCreateSessionRequest(string? DocumentId, Guid PlaybookId, ChatHostContext? HostContext = null);
 
 /// <summary>Response body for POST /sessions (201 Created).</summary>
 /// <param name="SessionId">The newly created session identifier.</param>
@@ -550,7 +644,8 @@ public record ChatRefineRequest(string SelectedText, string Instruction);
 /// <summary>Request body for PATCH /sessions/{id}/context.</summary>
 /// <param name="DocumentId">New document ID (optional — null keeps current).</param>
 /// <param name="PlaybookId">New playbook ID (optional — null keeps current).</param>
-public record ChatSwitchContextRequest(string? DocumentId, Guid? PlaybookId);
+/// <param name="HostContext">Optional host context override (null keeps current session's host context).</param>
+public record ChatSwitchContextRequest(string? DocumentId, Guid? PlaybookId, ChatHostContext? HostContext = null);
 
 /// <summary>Response body for GET /sessions/{id}/history.</summary>
 /// <param name="SessionId">The session identifier.</param>
@@ -573,3 +668,16 @@ public record ChatSessionMessageInfo(string Role, string Content, DateTimeOffset
 /// <param name="Type">Event type: "token", "done", or "error".</param>
 /// <param name="Content">Text content for token events; error message for error events; null for done.</param>
 public record ChatSseEvent(string Type, string? Content);
+
+/// <summary>Response body for GET /playbooks — playbook discovery.</summary>
+/// <param name="Playbooks">Available playbooks (user-owned + public, deduplicated).</param>
+public record ChatPlaybookListResponse(ChatPlaybookInfo[] Playbooks);
+
+/// <summary>
+/// Playbook summary for the SprkChat playbook selector UI.
+/// </summary>
+/// <param name="Id">Playbook ID (GUID string).</param>
+/// <param name="Name">Playbook display name.</param>
+/// <param name="Description">Optional playbook description.</param>
+/// <param name="IsPublic">Whether the playbook is public/shared.</param>
+public record ChatPlaybookInfo(string Id, string Name, string? Description, bool IsPublic);

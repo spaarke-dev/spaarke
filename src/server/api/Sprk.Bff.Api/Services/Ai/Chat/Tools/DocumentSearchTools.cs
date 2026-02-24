@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
@@ -7,8 +8,10 @@ namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
 /// AI tool class providing document vector search capabilities to the SprkChatAgent.
 ///
 /// Exposes two search methods:
-///   - <see cref="SearchDocumentsAsync"/> — targeted search against the knowledge index
+///   - <see cref="SearchDocumentsAsync"/> — targeted search against the knowledge index,
+///     scoped to the playbook's knowledge sources when available
 ///   - <see cref="SearchDiscoveryAsync"/> — broad discovery search across all documents
+///     (intentionally tenant-wide, not knowledge-scoped)
 ///
 /// Both methods enforce ADR-014 tenant isolation by passing <paramref name="tenantId"/>
 /// directly to <see cref="IRagService.SearchAsync(string, RagSearchOptions, System.Threading.CancellationToken)"/>
@@ -21,10 +24,18 @@ namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
 public sealed class DocumentSearchTools
 {
     private readonly IRagService _ragService;
+    private readonly IReadOnlyList<string>? _knowledgeSourceIds;
+    private readonly string? _parentEntityType;
+    private readonly string? _parentEntityId;
 
-    public DocumentSearchTools(IRagService ragService)
+    public DocumentSearchTools(IRagService ragService, ChatKnowledgeScope? knowledgeScope = null)
     {
         _ragService = ragService ?? throw new ArgumentNullException(nameof(ragService));
+        _knowledgeSourceIds = knowledgeScope?.RagKnowledgeSourceIds is { Count: > 0 }
+            ? knowledgeScope.RagKnowledgeSourceIds
+            : null;
+        _parentEntityType = knowledgeScope?.ParentEntityType;
+        _parentEntityId = knowledgeScope?.ParentEntityId;
     }
 
     /// <summary>
@@ -49,6 +60,7 @@ public sealed class DocumentSearchTools
         {
             TenantId = tenantId,
             TopK = Math.Clamp(topK, 1, 20),
+            KnowledgeSourceIds = _knowledgeSourceIds,
             UseSemanticRanking = true,
             UseVectorSearch = true,
             UseKeywordSearch = true
@@ -105,7 +117,11 @@ public sealed class DocumentSearchTools
             MinScore = 0.5f, // Lower threshold for discovery to cast a wider net
             UseSemanticRanking = true,
             UseVectorSearch = true,
-            UseKeywordSearch = true
+            UseKeywordSearch = true,
+            // Entity scope: when HostContext is set, constrain discovery to the parent entity boundary.
+            // When null, discovery remains tenant-wide (backward compatible).
+            ParentEntityType = _parentEntityType,
+            ParentEntityId = _parentEntityId
         };
 
         var response = await _ragService.SearchAsync(query, options, cancellationToken);

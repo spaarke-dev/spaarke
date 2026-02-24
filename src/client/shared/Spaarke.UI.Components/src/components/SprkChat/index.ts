@@ -17,6 +17,7 @@ export { SprkChatHighlightRefine } from "./SprkChatHighlightRefine";
 // Hooks
 export { useSseStream } from "./hooks/useSseStream";
 export { useChatSession } from "./hooks/useChatSession";
+export { useChatPlaybooks } from "./hooks/useChatPlaybooks";
 
 // Types
 export type {
@@ -36,4 +37,6 @@ export type {
     IDocumentOption,
     IPlaybookOption,
     IPredefinedPrompt,
+    IHostContext,
 } from "./types";
+export type { IUseChatPlaybooksResult } from "./hooks/useChatPlaybooks";

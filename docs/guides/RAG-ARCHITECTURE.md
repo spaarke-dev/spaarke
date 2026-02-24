@@ -403,7 +403,27 @@ User Query: "What are the payment terms for contracts?"
 | `topK` | 10 | Maximum results to return |
 | `minScore` | 0.5 | Minimum relevance threshold |
 | `documentTypes` | null | Filter by document type |
-| `tags` | null | Filter by tags |
+| `knowledgeSourceIds` | null | Include chunks from these sources (OR logic) |
+| `excludeKnowledgeSourceIds` | null | Exclude chunks from these sources (NOT logic) |
+| `tags` | null | Include chunks with any of these tags (OR logic) |
+| `requiredTags` | null | Require ALL of these tags (AND logic) |
+| `excludeTags` | null | Exclude chunks with any of these tags (NOT logic) |
+| `parentEntityType` | null | Filter by parent entity type (e.g., "matter", "project") |
+| `parentEntityId` | null | Filter by parent entity ID — both type and ID must be set |
+
+#### OData Filter Generation
+
+The `BuildSearchOptions` method in `RagService` constructs OData filters with boolean logic:
+
+- **Include sources (≤10 items)**: OR chain — `(knowledgeSourceId eq 'a' or knowledgeSourceId eq 'b')`
+- **Include sources (>10 items)**: `search.in(knowledgeSourceId, 'a,b,...', ',')` — avoids Azure AI Search clause limits
+- **Exclude sources**: `not search.in(knowledgeSourceId, 'x,y', ',')`
+- **Required tags (AND)**: Individual `tags/any(t: t eq 'tag')` per tag, joined with `and`
+- **Include tags (OR)**: `tags/any(t: search.in(t, 'a,b', ','))`
+- **Exclude tags**: `not tags/any(t: search.in(t, 'a,b', ','))`
+- **Entity scope**: `parentEntityType eq 'matter' and parentEntityId eq 'guid'` — partial scope (only one set) is ignored
+
+All filters are combined with `and` semantics. The 10-item threshold for `search.in()` balances log readability (OR chains are easier to debug) with performance (search.in avoids clause limits).
 
 ---
 
@@ -694,6 +714,8 @@ public interface IRagService
 - Checks embedding cache before API calls
 - Routes to correct index via IKnowledgeDeploymentService
 - Includes telemetry (latency, cache hits)
+- Constructs OData filters with boolean logic from `RagSearchOptions` extended properties (see [Search Options](#search-options))
+- Entity scoping via `ParentEntityType`/`ParentEntityId` for workspace-level isolation
 
 ---
 
