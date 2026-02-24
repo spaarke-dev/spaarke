@@ -4,7 +4,7 @@
 |-------|-------|
 | Status | **Accepted** (Revised) |
 | Date | 2025-12-22 |
-| Updated | 2026-02-23 |
+| Updated | 2026-02-23 (v1.3 — React 19 for Code Pages) |
 | Authors | Spaarke Engineering |
 
 ---
@@ -24,7 +24,7 @@
 
 Spaarke builds UI across multiple surfaces:
 - **PCF Controls** — field-bound controls embedded on Dataverse model-driven app forms
-- **React Code Pages** — standalone HTML web resources opened as dialogs via `Xrm.Navigation.navigateTo` (React 18, bundled)
+- **React Code Pages** — standalone HTML web resources opened as dialogs via `Xrm.Navigation.navigateTo` (React 19, bundled)
 - **Ribbon/Command Bar** — thin JavaScript invocation scripts (no business logic)
 - **Office Add-ins** — React 18 applications (bundled)
 - **Shared Component Library** (`@spaarke/ui-components`) — consumed by all surfaces above
@@ -56,7 +56,8 @@ This ADR serves as the **authoritative reference** for all UI/UX design decision
 |------|-----------|-------------|
 | **Fluent v9 Only** | All surfaces | Use `@fluentui/react-components` (v9.x) exclusively. No Fluent v8 (`@fluentui/react`). |
 | **React 16/17 APIs** | PCF controls only | Use `ReactDOM.render()` / `unmountComponentAtNode()`. Runtime is 16.14.0 (canvas) or 17.0.2 (model-driven). See [ADR-022](./ADR-022-pcf-platform-libraries.md). |
-| **React 18 APIs** | React Code Pages, Office Add-ins | Use `createRoot()` from `react-dom/client`. React 18 is bundled in the Code Page output. |
+| **React 19 APIs** | React Code Pages | Use `createRoot()` from `react-dom/client`. React 19 is bundled in the Code Page output. React 19 stable since Dec 2024. |
+| **React 18 APIs** | Office Add-ins | Office add-ins currently bundle React 18 (upgrade to 19 separately). |
 | **Semantic Tokens** | All surfaces | Use Fluent design tokens for all styling. No hard-coded colors or pixel values. |
 | **Dark Mode Ready** | All surfaces | All components must render correctly in light, dark, and high-contrast modes. |
 | **Accessibility First** | All surfaces | WCAG 2.1 AA compliance required for all interactive components. |
@@ -69,9 +70,9 @@ This ADR serves as the **authoritative reference** for all UI/UX design decision
 | Surface | React Version | Entry Point | Where React Lives |
 |---------|---------------|-------------|-------------------|
 | **PCF controls** (form-bound) | 16.14.0 manifest / 17.0.2 runtime | `ReactDOM.render()` | Platform-provided — DO NOT bundle |
-| **React Code Pages** (standalone dialogs) | **React 18** | `createRoot()` from `react-dom/client` | Bundled in Code Page output |
-| **Office Add-ins** | **React 18** | `createRoot()` | Bundled |
-| **Shared component library** | `>=16.14.0` (peerDependency) | — | Provided by consumer |
+| **React Code Pages** (standalone dialogs) | **React 19** | `createRoot()` from `react-dom/client` | Bundled in Code Page output |
+| **Office Add-ins** | **React 18** | `createRoot()` | Bundled (upgrade to React 19 separately) |
+| **Shared component library** | `>=16.14.0` (peerDependency) | — | Provided by consumer — supports all surfaces |
 
 ---
 
@@ -295,15 +296,15 @@ See [PCF V9 Packaging Guide](../guides/PCF-V9-PACKAGING.md) for detailed instruc
 
 ## React Code Page Packaging
 
-React Code Pages are standalone HTML web resources (not form-bound PCF controls). They **bundle their own React 18** — they are NOT subject to platform library constraints.
+React Code Pages are standalone HTML web resources (not form-bound PCF controls). They **bundle their own React 19** — they are NOT subject to platform library constraints.
 
 **package.json for a React Code Page:**
 ```json
 {
   "dependencies": {
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
-    "@fluentui/react-components": "^9.46.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@fluentui/react-components": "^9.54.0",
     "@fluentui/react-icons": "^2.0.0",
     "@spaarke/ui-components": "workspace:*"
   }
@@ -312,7 +313,7 @@ React Code Pages are standalone HTML web resources (not form-bound PCF controls)
 
 **index.tsx entry point:**
 ```typescript
-import { createRoot } from "react-dom/client";  // React 18 ✅
+import { createRoot } from "react-dom/client";  // React 19 ✅
 import { FluentProvider, webLightTheme, webDarkTheme } from "@fluentui/react-components";
 import { App } from "./App";
 

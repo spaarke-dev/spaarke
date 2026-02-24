@@ -585,6 +585,7 @@ public class DataverseWebApiService : IDataverseService
                 : DocumentStatus.Draft,
             CreatedOn = GetDateTimeValue(data, "createdon") ?? DateTime.UtcNow,
             ModifiedOn = GetDateTimeValue(data, "modifiedon") ?? DateTime.UtcNow,
+            CreatedBy = GetStringValue(data, "_createdby_value@OData.Community.Display.V1.FormattedValue"),
 
             // Email metadata fields
             EmailSubject = GetStringValue(data, "sprk_emailsubject"),
@@ -604,7 +605,11 @@ public class DataverseWebApiService : IDataverseService
             ProjectId = GetStringValue(data, "_sprk_project_value"),
             ProjectName = GetStringValue(data, "_sprk_project_value@OData.Community.Display.V1.FormattedValue"),
             InvoiceId = GetStringValue(data, "_sprk_invoice_value"),
-            InvoiceName = GetStringValue(data, "_sprk_invoice_value@OData.Community.Display.V1.FormattedValue")
+            InvoiceName = GetStringValue(data, "_sprk_invoice_value@OData.Community.Display.V1.FormattedValue"),
+
+            // AI-generated summaries (populated by RAG pipeline)
+            Summary = GetStringValue(data, "sprk_summary"),
+            Tldr = GetStringValue(data, "sprk_tldr")
         };
     }
 

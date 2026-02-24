@@ -76,6 +76,7 @@ export class SemanticSearchControl
             context,
             notifyOutputChanged: this.notifyOutputChanged,
             onDocumentSelect: this.handleDocumentSelect.bind(this),
+            isDarkMode: this._theme === webDarkTheme,
         };
 
         // Create the main SemanticSearchControl component

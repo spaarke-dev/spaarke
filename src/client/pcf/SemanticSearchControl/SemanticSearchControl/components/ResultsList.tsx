@@ -9,7 +9,7 @@
  */
 
 import * as React from "react";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import {
     makeStyles,
     tokens,
@@ -61,6 +61,11 @@ const useStyles = makeStyles({
         padding: tokens.spacingVerticalM,
         gap: tokens.spacingHorizontalS,
     },
+    showMoreLink: {
+        display: "flex",
+        justifyContent: "center",
+        padding: tokens.spacingVerticalM,
+    },
     domCapMessage: {
         padding: tokens.spacingVerticalM,
         textAlign: "center" as const,
@@ -97,23 +102,33 @@ export const ResultsList: React.FC<IResultsListProps> = ({
     onOpenFile,
     onOpenRecord,
     onFindSimilar,
+    onPreview,
     onViewAll,
     compactMode,
 }) => {
     const styles = useStyles();
 
+    // After the user clicks "Show more" once, switch to infinite scroll
+    const [infiniteScrollEnabled, setInfiniteScrollEnabled] = useState(false);
+
     // Check if DOM cap reached
     const isDomCapReached = results.length >= DOM_CAP;
     const displayedCount = Math.min(results.length, DOM_CAP);
 
-    // Infinite scroll hook - connects sentinel to load-more
+    // Infinite scroll hook - only active after user clicks "Show more"
     const { sentinelRef } = useInfiniteScroll({
         onLoadMore,
-        hasMore: hasMore && !isDomCapReached,
+        hasMore: infiniteScrollEnabled && hasMore && !isDomCapReached,
         isLoading: isLoading || isLoadingMore,
         threshold: 0.1,
         rootMargin: "100px",
     });
+
+    // Handle "Show more" click — load next page and enable infinite scroll
+    const handleShowMore = useCallback(() => {
+        setInfiniteScrollEnabled(true);
+        onLoadMore();
+    }, [onLoadMore]);
 
     // Format result count message
     const getResultCountMessage = () => {
@@ -149,6 +164,11 @@ export const ResultsList: React.FC<IResultsListProps> = ({
         [onFindSimilar]
     );
 
+    const handlePreview = useCallback(
+        (result: SearchResult) => () => onPreview(result),
+        [onPreview]
+    );
+
     return (
         <div className={styles.container}>
             {/* Results count header */}
@@ -170,6 +190,7 @@ export const ResultsList: React.FC<IResultsListProps> = ({
                             onOpenFile={handleOpenFile(result)}
                             onOpenRecord={handleOpenRecord(result)}
                             onFindSimilar={handleFindSimilar(result)}
+                            onPreview={handlePreview(result)}
                             compactMode={compactMode}
                         />
                     ))}
@@ -194,8 +215,17 @@ export const ResultsList: React.FC<IResultsListProps> = ({
                         </div>
                     )}
 
-                    {/* Sentinel element for intersection observer */}
-                    {hasMore && !isDomCapReached && !isLoadingMore && (
+                    {/* Show more link (before infinite scroll is enabled) */}
+                    {hasMore && !isDomCapReached && !isLoadingMore && !infiniteScrollEnabled && (
+                        <div className={styles.showMoreLink}>
+                            <Link onClick={handleShowMore}>
+                                Show more results ({results.length} of {totalCount})
+                            </Link>
+                        </div>
+                    )}
+
+                    {/* Sentinel element for intersection observer (after Show more clicked) */}
+                    {hasMore && !isDomCapReached && !isLoadingMore && infiniteScrollEnabled && (
                         <div ref={sentinelRef} className={styles.sentinel} />
                     )}
                 </div>

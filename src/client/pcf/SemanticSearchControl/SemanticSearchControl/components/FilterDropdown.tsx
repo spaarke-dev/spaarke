@@ -25,7 +25,7 @@ const useStyles = makeStyles({
         display: "flex",
         flexDirection: "column",
         gap: tokens.spacingVerticalXS,
-        minWidth: "150px",
+        width: "100%",
     },
     label: {
         fontWeight: tokens.fontWeightSemibold,

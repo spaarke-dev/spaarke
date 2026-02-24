@@ -3,6 +3,7 @@
  *
  * Date range picker for filtering by document creation date.
  * Supports from/to selection with quick presets.
+ * Stacked vertical layout with icon-only empty state (v1.0.33).
  *
  * @see ADR-021 for Fluent UI v9 requirements
  */
@@ -37,21 +38,28 @@ const useStyles = makeStyles({
     },
     inputGroup: {
         display: "flex",
-        alignItems: "center",
-        gap: tokens.spacingHorizontalS,
+        flexDirection: "column",
+        alignItems: "stretch",
+        gap: tokens.spacingVerticalXS,
     },
-    dateInput: {
-        flex: 1,
-        minWidth: "120px",
-    },
-    separator: {
+    fieldLabel: {
+        fontSize: tokens.fontSizeBase200,
         color: tokens.colorNeutralForeground3,
     },
-    presets: {
-        marginTop: tokens.spacingVerticalXS,
+    dateInput: {
+        width: "100%",
     },
-    clearButton: {
-        marginLeft: tokens.spacingHorizontalS,
+    // Hide native date placeholder text when input is empty (Chromium/Edge)
+    dateInputEmpty: {
+        width: "100%",
+        "& input[type='date']::-webkit-datetime-edit": {
+            color: "transparent",
+        },
+    },
+    presets: {
+        display: "flex",
+        gap: tokens.spacingHorizontalS,
+        marginTop: tokens.spacingVerticalXXS,
     },
 });
 
@@ -205,27 +213,26 @@ export const DateRangeFilter: React.FC<IDateRangeFilterProps> = ({
         <div className={styles.container}>
             <Label className={styles.label}>{label}</Label>
             <div className={styles.inputGroup}>
+                <Label htmlFor={fromId} className={styles.fieldLabel} size="small">From</Label>
                 <Input
                     id={fromId}
-                    className={styles.dateInput}
+                    className={fromDate ? styles.dateInput : styles.dateInputEmpty}
                     type="date"
                     value={fromDate}
                     onChange={handleFromChange}
                     disabled={disabled}
                     contentBefore={<CalendarRegular />}
-                    placeholder="From"
                     aria-label="From date"
                 />
-                <span className={styles.separator}>to</span>
+                <Label htmlFor={toId} className={styles.fieldLabel} size="small">To</Label>
                 <Input
                     id={toId}
-                    className={styles.dateInput}
+                    className={toDate ? styles.dateInput : styles.dateInputEmpty}
                     type="date"
                     value={toDate}
                     onChange={handleToChange}
                     disabled={disabled}
                     contentBefore={<CalendarRegular />}
-                    placeholder="To"
                     aria-label="To date"
                 />
                 {hasValue && (
@@ -234,7 +241,6 @@ export const DateRangeFilter: React.FC<IDateRangeFilterProps> = ({
                         size="small"
                         onClick={handleClear}
                         disabled={disabled}
-                        className={styles.clearButton}
                     >
                         Clear
                     </Button>

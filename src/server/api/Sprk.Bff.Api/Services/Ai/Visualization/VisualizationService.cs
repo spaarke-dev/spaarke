@@ -465,12 +465,13 @@ public class VisualizationService : IVisualizationService
         string sourceDocumentId)
     {
         var result = new Dictionary<string, (VisualizationDocument Document, double Score, string RelationType)>();
+        var normalizedSourceId = sourceDocumentId.ToLowerInvariant();
 
         // Add hardcoded relationships first (they have priority)
         foreach (var (doc, score, relType) in hardcoded)
         {
             var uniqueId = doc.GetUniqueId();
-            if (uniqueId == sourceDocumentId) continue; // Exclude source
+            if (uniqueId == normalizedSourceId) continue; // Exclude source
 
             if (!result.ContainsKey(uniqueId))
             {
@@ -491,7 +492,7 @@ public class VisualizationService : IVisualizationService
         foreach (var (doc, score, relType) in semantic)
         {
             var uniqueId = doc.GetUniqueId();
-            if (uniqueId == sourceDocumentId) continue; // Exclude source
+            if (uniqueId == normalizedSourceId) continue; // Exclude source
 
             if (!result.ContainsKey(uniqueId))
             {
@@ -1310,11 +1311,14 @@ internal class VisualizationDocument
 
     /// <summary>
     /// Gets the unique identifier for this document (prefers documentId, falls back to speFileId).
+    /// Normalized to lowercase to ensure deduplication works regardless of GUID casing
+    /// (Dataverse may return mixed-case GUIDs while AI Search stores lowercase).
     /// </summary>
     public string GetUniqueId()
     {
-        return !string.IsNullOrEmpty(DocumentId) ? DocumentId :
-               !string.IsNullOrEmpty(SpeFileId) ? SpeFileId : Id;
+        var id = !string.IsNullOrEmpty(DocumentId) ? DocumentId :
+                 !string.IsNullOrEmpty(SpeFileId) ? SpeFileId : Id;
+        return id.ToLowerInvariant();
     }
 }
 

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.0.27" display-name-key="Semantic Search Control" description-key="PCF control for semantic document search with natural language queries" control-type="virtual" api-version="1.3.18">
+  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.0.36" display-name-key="Semantic Search Control" description-key="PCF control for semantic document search with natural language queries" control-type="virtual" api-version="1.3.18">
     <external-service-usage enabled="true">
       <domain>spe-api-dev-67e2xz.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>

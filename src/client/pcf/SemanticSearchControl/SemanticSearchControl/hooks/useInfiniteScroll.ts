@@ -7,7 +7,7 @@
  * @see spec.md for intersection observer configuration
  */
 
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect } from "react";
 
 interface UseInfiniteScrollOptions {
     /** Callback to load more items */
@@ -55,21 +55,9 @@ export function useInfiniteScroll({
 }: UseInfiniteScrollOptions): UseInfiniteScrollResult {
     const sentinelRef = useRef<HTMLDivElement>(null);
 
-    // Memoize the callback to prevent unnecessary observer recreations
-    const handleIntersect = useCallback(
-        (entries: IntersectionObserverEntry[]) => {
-            const [entry] = entries;
-
-            // Only trigger if:
-            // 1. Sentinel is intersecting (visible)
-            // 2. Not currently loading
-            // 3. There are more items to load
-            if (entry.isIntersecting && !isLoading && hasMore) {
-                onLoadMore();
-            }
-        },
-        [isLoading, hasMore, onLoadMore]
-    );
+    // Use a ref for the latest callback to avoid reconnecting the observer on every change
+    const callbackRef = useRef({ onLoadMore, isLoading, hasMore });
+    callbackRef.current = { onLoadMore, isLoading, hasMore };
 
     useEffect(() => {
         const sentinel = sentinelRef.current;
@@ -78,19 +66,26 @@ export function useInfiniteScroll({
         }
 
         // Create observer with specified options
-        const observer = new IntersectionObserver(handleIntersect, {
-            threshold,
-            rootMargin,
-        });
+        const observer = new IntersectionObserver(
+            (entries: IntersectionObserverEntry[]) => {
+                const [entry] = entries;
+                const { onLoadMore: load, isLoading: loading, hasMore: more } = callbackRef.current;
+
+                if (entry.isIntersecting && !loading && more) {
+                    load();
+                }
+            },
+            { threshold, rootMargin }
+        );
 
         // Start observing the sentinel element
         observer.observe(sentinel);
 
-        // Cleanup: disconnect observer when component unmounts or dependencies change
+        // Cleanup: disconnect observer when component unmounts or config changes
         return () => {
             observer.disconnect();
         };
-    }, [handleIntersect, threshold, rootMargin]);
+    }, [threshold, rootMargin]); // Observer only recreated when config changes
 
     return { sentinelRef };
 }

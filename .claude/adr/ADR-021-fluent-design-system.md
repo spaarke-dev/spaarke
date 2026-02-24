@@ -1,6 +1,6 @@
 # ADR-021: Fluent UI v9 Design System (Concise)
 
-> **Status**: Accepted (Revised 2026-02-23)
+> **Status**: Accepted (Revised 2026-02-23, Updated 2026-02-23)
 > **Domain**: UI/UX Design System
 > **Last Updated**: 2026-02-23
 
@@ -21,9 +21,9 @@ All Spaarke UI must follow the **Microsoft Fluent UI v9.x design system**. This 
 | Surface | React Version | Entry Point | Reason |
 |---------|---------------|-------------|--------|
 | **PCF controls** (form-bound) | 16.14.0 manifest / **17.0.2 runtime** | `ReactDOM.render()` | Dataverse platform provides React — cannot bundle |
-| **React Code Pages** (dialogs, standalone) | **React 18+** | `createRoot()` | Bundled independently — full React 18 available |
+| **React Code Pages** (dialogs, standalone) | **React 19** | `createRoot()` | Bundled independently — no Dataverse version constraint on HTML web resources |
 | **Office add-ins** | React 18+ | `createRoot()` | Bundled independently |
-| **Shared component library** | React 18-compatible, React 16/17-tested | — | Consumed by both surfaces |
+| **Shared component library** | peerDep `>=16.14.0` | — | Consumed by all surfaces |
 
 ---
 
@@ -48,8 +48,8 @@ All Spaarke UI must follow the **Microsoft Fluent UI v9.x design system**. This 
 
 ### MUST (React Code Pages Only)
 
-- **MUST** use React 18 `createRoot()` entry point
-- **MUST** bundle React 18 + Fluent v9 in the Code Page output
+- **MUST** use React 19 `createRoot()` entry point
+- **MUST** bundle React 19 + Fluent v9 in the Code Page output
 - **MUST** read parameters from `URLSearchParams` (not PCF context)
 
 ### MUST NOT (All Surfaces)
@@ -88,11 +88,11 @@ public updateView(context): void {
 }
 ```
 
-### React Code Page — React 18 (Bundled)
+### React Code Page — React 19 (Bundled)
 
 ```typescript
 // index.tsx — Code Page entry point
-import { createRoot } from "react-dom/client";  // React 18
+import { createRoot } from "react-dom/client";  // React 19
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 
 const params = new URLSearchParams(window.location.search);
@@ -114,14 +114,14 @@ createRoot(document.getElementById("root")!).render(
 </resources>
 ```
 
-### Code Page package.json (React 18)
+### Code Page package.json (React 19)
 
 ```json
 {
   "dependencies": {
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
-    "@fluentui/react-components": "^9.46.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@fluentui/react-components": "^9.54.0",
     "@fluentui/react-icons": "^2.0.0",
     "@spaarke/ui-components": "workspace:*"
   }

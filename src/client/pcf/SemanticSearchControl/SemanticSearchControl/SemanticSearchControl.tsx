@@ -10,14 +10,20 @@
  */
 
 import * as React from "react";
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
     makeStyles,
     tokens,
     shorthands,
     Text,
     Link,
+    Button,
+    Tooltip,
+    Dialog,
+    DialogSurface,
+    DialogBody,
 } from "@fluentui/react-components";
+import { ChevronRight20Regular } from "@fluentui/react-icons";
 import {
     ISemanticSearchControlProps,
     SearchFilters,
@@ -90,7 +96,8 @@ const useStyles = makeStyles({
     sidebar: {
         width: "250px",
         flexShrink: 0,
-        ...shorthands.padding(tokens.spacingHorizontalM),
+        boxSizing: "border-box",
+        ...shorthands.padding(tokens.spacingHorizontalS),
         backgroundColor: tokens.colorNeutralBackground3,
         ...shorthands.borderRight(
             tokens.strokeWidthThin,
@@ -98,6 +105,23 @@ const useStyles = makeStyles({
             tokens.colorNeutralStroke1
         ),
         overflowY: "auto",
+        overflowX: "hidden",
+    },
+
+    // Collapsed sidebar strip
+    sidebarCollapsed: {
+        width: "36px",
+        flexShrink: 0,
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        paddingTop: tokens.spacingVerticalS,
+        backgroundColor: tokens.colorNeutralBackground3,
+        ...shorthands.borderRight(
+            tokens.strokeWidthThin,
+            "solid",
+            tokens.colorNeutralStroke1
+        ),
     },
 
     // Main region (results list)
@@ -144,6 +168,34 @@ const useStyles = makeStyles({
         fontSize: tokens.fontSizeBase100,
         color: tokens.colorNeutralForeground4,
     },
+
+    // Find Similar iframe dialog
+    findSimilarSurface: {
+        padding: "0px",
+        width: "85vw",
+        maxWidth: "85vw",
+        height: "85vh",
+        maxHeight: "85vh",
+        display: "flex",
+        flexDirection: "column",
+        ...shorthands.overflow("hidden"),
+        ...shorthands.borderRadius(tokens.borderRadiusXLarge),
+    },
+    findSimilarBody: {
+        padding: "0px",
+        flex: 1,
+        minHeight: 0,
+        position: "relative" as const,
+    },
+    findSimilarFrame: {
+        position: "absolute" as const,
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: "100%",
+        border: "none",
+        display: "block",
+    },
 });
 
 /**
@@ -155,6 +207,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     context,
     notifyOutputChanged,
     onDocumentSelect,
+    isDarkMode = false,
 }) => {
     const styles = useStyles();
 
@@ -219,6 +272,15 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     // Query input state
     const [queryInput, setQueryInput] = useState("");
     const [hasSearched, setHasSearched] = useState(false);
+
+    // Find Similar dialog state — URL of the web resource to show in the iframe dialog
+    const [findSimilarUrl, setFindSimilarUrl] = useState<string | null>(null);
+
+    // Filter pane collapse state
+    const [isFilterPaneCollapsed, setIsFilterPaneCollapsed] = useState(false);
+    const handleToggleFilterPane = useCallback(() => {
+        setIsFilterPaneCollapsed((prev) => !prev);
+    }, []);
 
     // Initialize services (memoized to prevent recreation)
     const authProvider = useMemo(() => MsalAuthProvider.getInstance(), []);
@@ -354,14 +416,37 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         void navigationService.viewAllResults(query, searchScope, scopeId, filters);
     }, [navigationService, query, searchScope, scopeId, filters]);
 
-    // Handle Find Similar — opens DocumentRelationshipViewer custom page
+    // Handle Find Similar — opens DocumentRelationshipViewer as an in-page iframe dialog
     const handleFindSimilar = useCallback(
         (result: SearchResult) => {
-            navigationService.openFindSimilar(result).catch((err) => {
-                console.error("[SemanticSearchControl] Find Similar failed:", err);
-            });
+            const url = navigationService.getFindSimilarUrl(result, isDarkMode);
+            if (url) setFindSimilarUrl(url);
         },
-        [navigationService]
+        [navigationService, isDarkMode]
+    );
+
+    // Preview URL cache — avoids redundant BFF calls for the same document
+    const previewUrlCache = useRef<Map<string, string>>(new Map());
+
+    // Handle Preview — fetches a read-only preview URL via Graph API preview endpoint
+    const handlePreview = useCallback(
+        async (result: SearchResult): Promise<string | null> => {
+            // Return cached URL if available
+            const cached = previewUrlCache.current.get(result.documentId);
+            if (cached) return cached;
+
+            try {
+                const url = await apiService.getPreviewUrl(result.documentId);
+                if (url) {
+                    previewUrlCache.current.set(result.documentId, url);
+                }
+                return url;
+            } catch (err) {
+                console.error("[SemanticSearchControl] Failed to get preview URL:", err);
+                return null;
+            }
+        },
+        [apiService]
     );
 
     // Handle Add Document — opens document upload dialog custom page
@@ -441,6 +526,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
                     onOpenFile={handleOpenFile}
                     onOpenRecord={handleOpenRecord}
                     onFindSimilar={handleFindSimilar}
+                    onPreview={handlePreview}
                     onViewAll={handleViewAll}
                     compactMode={compactMode}
                 />
@@ -478,15 +564,30 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
             <div className={styles.content}>
                 {/* Sidebar Region: Filters (hidden in compact mode or when disabled) */}
                 {showFilters && !compactMode && (
-                    <div className={styles.sidebar}>
-                        <FilterPanel
-                            filters={filters}
-                            searchScope={searchScope}
-                            scopeId={scopeId}
-                            onFiltersChange={handleFiltersChange}
-                            disabled={isLoading}
-                        />
-                    </div>
+                    isFilterPaneCollapsed ? (
+                        <div className={styles.sidebarCollapsed}>
+                            <Tooltip content="Expand filters" relationship="label">
+                                <Button
+                                    appearance="subtle"
+                                    size="small"
+                                    icon={<ChevronRight20Regular />}
+                                    onClick={handleToggleFilterPane}
+                                    aria-label="Expand filters"
+                                />
+                            </Tooltip>
+                        </div>
+                    ) : (
+                        <div className={styles.sidebar}>
+                            <FilterPanel
+                                filters={filters}
+                                searchScope={searchScope}
+                                scopeId={scopeId}
+                                onFiltersChange={handleFiltersChange}
+                                disabled={isLoading}
+                                onCollapse={handleToggleFilterPane}
+                            />
+                        </div>
+                    )
                 )}
 
                 {/* Main Region: Results */}
@@ -506,8 +607,26 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
             {/* Version Footer (always visible) */}
             <div className={styles.versionFooter}>
-                <Text size={100}>v1.0.27 • Built 2026-02-22</Text>
+                <Text size={100}>v1.0.36 • Built 2026-02-24</Text>
             </div>
+
+            {/* Find Similar — iframe dialog (no Dataverse chrome) */}
+            <Dialog
+                open={!!findSimilarUrl}
+                onOpenChange={(_, data) => { if (!data.open) setFindSimilarUrl(null); }}
+            >
+                <DialogSurface className={styles.findSimilarSurface}>
+                    <DialogBody className={styles.findSimilarBody}>
+                        {findSimilarUrl && (
+                            <iframe
+                                src={findSimilarUrl}
+                                title="Document Relationships"
+                                className={styles.findSimilarFrame}
+                            />
+                        )}
+                    </DialogBody>
+                </DialogSurface>
+            </Dialog>
         </div>
     );
 };

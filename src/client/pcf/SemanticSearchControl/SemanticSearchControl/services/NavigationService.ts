@@ -8,6 +8,7 @@
  */
 
 import { SearchResult, SearchFilters, SearchScope } from "../types";
+import { msalConfig } from "./auth/msalConfig";
 
 /**
  * Navigation target modes
@@ -141,60 +142,27 @@ export class NavigationService {
     }
 
     /**
-     * Open the DocumentRelationshipViewer custom page for a document (Find Similar)
+     * Open the DocumentRelationshipViewer HTML web resource for a document (Find Similar)
      * @param result - Search result to find similar documents for
      */
-    async openFindSimilar(result: SearchResult): Promise<void> {
-        // Always use the document record ID (documentId), not the scope entity ID
+    /**
+     * Build the URL for the DocumentRelationshipViewer web resource.
+     * Returns null if the document ID is missing.
+     * Caller is responsible for opening/rendering the URL (e.g. in an iframe Dialog).
+     */
+    getFindSimilarUrl(result: SearchResult, isDarkMode: boolean = false): string | null {
         const rawId = result.documentId;
-
-        // Entry log — confirms button handler is firing
-        console.log("[NavigationService] openFindSimilar called", { rawId });
-
         if (!rawId) {
-            console.warn("NavigationService.openFindSimilar: Missing document ID");
-            return;
+            console.warn("NavigationService.getFindSimilarUrl: Missing document ID");
+            return null;
         }
 
-        const xrm = this.getXrm();
-        console.log("[NavigationService] openFindSimilar xrm status", {
-            hasXrm: !!xrm,
-            hasNavigation: !!xrm?.Navigation,
-            hasNavigateTo: !!xrm?.Navigation?.navigateTo,
-        });
-
-        if (!xrm?.Navigation?.navigateTo) {
-            console.warn("NavigationService.openFindSimilar: Xrm.Navigation not available");
-            return;
-        }
-
-        // Dataverse custom pages require {guid} format for recordId
-        const formattedId = rawId.startsWith("{") ? rawId : `{${rawId}}`;
-
-        console.log("[NavigationService] openFindSimilar navigating", {
-            name: "sprk_documentrelationshipviewer_ce8cf",
-            entityName: "sprk_document",
-            recordId: formattedId,
-        });
-
-        try {
-            await xrm.Navigation.navigateTo(
-                {
-                    pageType: "custom",
-                    name: "sprk_documentrelationshipviewer_ce8cf",
-                    entityName: "sprk_document",  // always the document entity
-                    recordId: formattedId,
-                },
-                {
-                    target: 2,
-                    width: { value: 85, unit: "%" },
-                    height: { value: 85, unit: "%" },
-                }
-            );
-            console.log("[NavigationService] openFindSimilar navigation resolved");
-        } catch (error) {
-            console.error("NavigationService.openFindSimilar: Navigation failed", error);
-        }
+        const authorityParts = msalConfig.auth.authority?.split("/") ?? [];
+        const tenantId = authorityParts[authorityParts.length - 1] ?? "";
+        const theme = isDarkMode ? "dark" : "light";
+        const data = new URLSearchParams({ documentId: rawId, tenantId, theme }).toString();
+        const clientUrl = this.getClientUrl();
+        return `${clientUrl}/WebResources/sprk_documentrelationshipviewer?data=${encodeURIComponent(data)}`;
     }
 
     /**

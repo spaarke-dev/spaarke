@@ -203,6 +203,9 @@ public class DocumentEntity
     public DateTime CreatedOn { get; set; }
     public DateTime ModifiedOn { get; set; }
 
+    /// <summary>Created by user display name. Maps to _createdby_value@OData.Community.Display.V1.FormattedValue.</summary>
+    public string? CreatedBy { get; set; }
+
     // Document Profile fields (populated by AI)
     /// <summary>TL;DR summary (1-2 sentences). Maps to sprk_tldr.</summary>
     public string? Tldr { get; set; }

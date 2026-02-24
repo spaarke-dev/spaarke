@@ -26,7 +26,7 @@ import type { DocumentNode } from "./types/graph";
 import { RELATIONSHIP_TYPES, type RelationshipTypeKey } from "./types/api";
 
 // Control version - must match ControlManifest.Input.xml
-const CONTROL_VERSION = "1.0.29";
+const CONTROL_VERSION = "1.0.31";
 
 /**
  * Props for the DocumentRelationshipViewer component
@@ -184,16 +184,11 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
     const darkMode = isDarkMode(context);
 
     // Get input parameters
-    // Priority: 1) Bound property (explicitly set, e.g. via Param() in a custom page)
-    //           2) Form context entity ID (when embedded on a record form)
-    // This order ensures the custom page dialog (opened from SemanticSearchControl's
-    // Find Similar) uses the correct document GUID passed via navigateTo recordId,
-    // rather than the parent form's entity ID (e.g. matter GUID).
-    const contextEntityId = (context.mode as ComponentFramework.Mode & { contextInfo?: { entityId?: string } })?.contextInfo?.entityId;
-    // Strip surrounding braces — Xrm.Navigation passes recordId as "{guid}" but the API expects bare GUIDs
-    const rawBoundId = context.parameters.documentId?.raw;
-    const boundDocumentId = rawBoundId ? rawBoundId.replace(/^\{|\}$/g, "") : null;
-    const documentId = boundDocumentId ?? contextEntityId ?? "";
+    // Use context.page.entityId (the record's GUID on the form) — same pattern as SemanticSearchControl.
+    // Note: context.page exists at runtime but isn't in @types/powerapps-component-framework
+    const pageContext = (context as unknown as { page?: { entityId?: string; entityTypeName?: string } }).page;
+    const pageEntityId = pageContext?.entityId ?? null;
+    const documentId = pageEntityId ?? "";
     const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? "https://spe-api-dev-67e2xz.azurewebsites.net";
     const tenantId = context.parameters.tenantId?.raw ?? "";
 

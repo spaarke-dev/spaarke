@@ -22,7 +22,7 @@ import { SemanticSearchApiService } from "../services";
  * Default search options
  */
 const DEFAULT_OPTIONS: SearchOptions = {
-    limit: 20,
+    limit: 5,
     offset: 0,
     includeHighlights: true,
 };
