@@ -690,6 +690,7 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | "save progress", "save my state", "context handoff", "checkpoint", "checkpoint before compaction" | `context-handoff` | Load `.claude/skills/context-handoff/SKILL.md` and save state for recovery |
 | "clean up dev", "clear caches", "fix auth issues", "azure cli issues", "dev environment cleanup" | `dev-cleanup` | Load `.claude/skills/dev-cleanup/SKILL.md` and run cleanup script |
 | "merge to master", "check unmerged branches", "reconcile branches", "sync master", "audit branches" | `merge-to-master` | Load `.claude/skills/merge-to-master/SKILL.md` and follow procedure |
+| "deploy code page", "deploy web resource", "build webresource", "update code page" | `code-page-deploy` | Load `.claude/skills/code-page-deploy/SKILL.md` and follow two-step build pipeline |
 
 ### Auto-Detection Rules
 
@@ -703,6 +704,9 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | Running `pac` commands, deploying to Dataverse | Load `dataverse-deploy` skill first |
 | Running `az` commands, deploying to Azure | Load `azure-deploy` skill first |
 | Modifying ribbon XML, `RibbonDiffXml`, or command bar | Load `ribbon-edit` skill first |
+| Deploying changes to `src/server/api/Sprk.Bff.Api/` | Load `bff-deploy` skill — use `scripts/Deploy-BffApi.ps1` |
+| Deploying changes to `src/client/pcf/` | Load `pcf-deploy` skill — build, copy, pack, import |
+| Deploying changes to `src/client/code-pages/` | Load `code-page-deploy` skill — two-step build (webpack + inline HTML) |
 | Resuming work on existing project (has tasks/, CLAUDE.md) | Run `project-continue` to sync and load context |
 | Starting new project from master | Run `merge-to-master` in audit mode to check for stranded branches |
 | Completing final task in a project | Prompt user to run `merge-to-master` to merge branch into master |
