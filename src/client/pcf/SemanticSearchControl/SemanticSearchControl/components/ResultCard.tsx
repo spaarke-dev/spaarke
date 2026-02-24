@@ -121,12 +121,18 @@ const useStyles = makeStyles({
         display: "block",
     },
     summaryPopover: {
-        maxWidth: "420px",
-        maxHeight: "300px",
+        width: "480px",
+        height: "620px",
         overflowY: "auto",
         display: "flex",
         flexDirection: "column",
         gap: tokens.spacingVerticalS,
+    },
+    summaryHeader: {
+        fontWeight: tokens.fontWeightSemibold,
+        fontSize: tokens.fontSizeBase400,
+        paddingBottom: tokens.spacingVerticalXS,
+        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     },
 });
 
@@ -414,7 +420,7 @@ export const ResultCard: React.FC<IResultCardProps> = ({
 
                 {/* Summary — lazy-loads from Dataverse via onSummary callback */}
                 <Popover
-                    positioning="above"
+                    positioning="after"
                     withArrow
                     onOpenChange={(_ev, data) => {
                         if (data.open && !summaryData && !summaryLoading) {
@@ -446,8 +452,9 @@ export const ResultCard: React.FC<IResultCardProps> = ({
                         </Tooltip>
                     </PopoverTrigger>
                     <PopoverSurface className={styles.summaryPopover}>
+                        <Text className={styles.summaryHeader}>Summary</Text>
                         {summaryLoading && (
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", flex: 1 }}>
                                 <Spinner size="small" label="Loading summary..." />
                             </div>
                         )}
