@@ -44,7 +44,7 @@
     <!-- Caching -->
     <!-- Microsoft.Extensions.Caching.Abstractions 10.0.3: bumped from 10.0.1 to satisfy Microsoft.Extensions.AI 10.3.0 dependency chain -->
     <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.3" />
-    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.3" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
 
     <!-- Microsoft Graph SDK v5.x (CRITICAL - must be 5.x or higher) -->
