@@ -452,8 +452,11 @@ export class SemanticSearchApiService {
                 documentTypes: request.filters.documentTypes,
                 matterTypes: request.filters.matterTypes,
                 fileTypes: request.filters.fileTypes,
-                dateFrom: request.filters.dateRange?.from,
-                dateTo: request.filters.dateRange?.to,
+                dateRange: request.filters.dateRange ? {
+                    field: "createdAt",
+                    from: request.filters.dateRange.from,
+                    to: request.filters.dateRange.to,
+                } : undefined,
             } : undefined,
             options: request.options ? {
                 top: request.options.limit,

@@ -23,7 +23,7 @@ import {
     MenuItem,
     useId,
 } from "@fluentui/react-components";
-import { CalendarRegular, ChevronDownRegular } from "@fluentui/react-icons";
+import { ChevronDownRegular } from "@fluentui/react-icons";
 import { IDateRangeFilterProps, DateRange } from "../types";
 
 const useStyles = makeStyles({
@@ -221,7 +221,6 @@ export const DateRangeFilter: React.FC<IDateRangeFilterProps> = ({
                     value={fromDate}
                     onChange={handleFromChange}
                     disabled={disabled}
-                    contentBefore={<CalendarRegular />}
                     aria-label="From date"
                 />
                 <Label htmlFor={toId} className={styles.fieldLabel} size="small">To</Label>
@@ -232,7 +231,6 @@ export const DateRangeFilter: React.FC<IDateRangeFilterProps> = ({
                     value={toDate}
                     onChange={handleToChange}
                     disabled={disabled}
-                    contentBefore={<CalendarRegular />}
                     aria-label="To date"
                 />
                 {hasValue && (

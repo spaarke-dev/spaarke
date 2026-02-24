@@ -33,6 +33,6 @@ if (!container) throw new Error("[DocumentRelationshipViewer] Root container #ro
 
 createRoot(container).render(
     <FluentProvider theme={isDark ? webDarkTheme : webLightTheme}>
-        <App params={params} />
+        <App params={params} isDark={isDark} />
     </FluentProvider>
 );

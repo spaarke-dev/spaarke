@@ -608,8 +608,9 @@ public class DataverseWebApiService : IDataverseService
             InvoiceName = GetStringValue(data, "_sprk_invoice_value@OData.Community.Display.V1.FormattedValue"),
 
             // AI-generated summaries (populated by RAG pipeline)
-            Summary = GetStringValue(data, "sprk_summary"),
-            Tldr = GetStringValue(data, "sprk_tldr")
+            // Dataverse fields: sprk_filesummary and sprk_filetldr (matching write operations)
+            Summary = GetStringValue(data, "sprk_filesummary"),
+            Tldr = GetStringValue(data, "sprk_filetldr")
         };
     }
 

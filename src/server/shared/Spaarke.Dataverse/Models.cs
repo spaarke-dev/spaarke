@@ -207,10 +207,10 @@ public class DocumentEntity
     public string? CreatedBy { get; set; }
 
     // Document Profile fields (populated by AI)
-    /// <summary>TL;DR summary (1-2 sentences). Maps to sprk_tldr.</summary>
+    /// <summary>TL;DR summary (1-2 sentences). Maps to sprk_filetldr.</summary>
     public string? Tldr { get; set; }
 
-    /// <summary>Full summary (2-4 paragraphs). Maps to sprk_summary.</summary>
+    /// <summary>Full summary (2-4 paragraphs). Maps to sprk_filesummary.</summary>
     public string? Summary { get; set; }
 
     /// <summary>Comma-separated keywords. Maps to sprk_keywords.</summary>

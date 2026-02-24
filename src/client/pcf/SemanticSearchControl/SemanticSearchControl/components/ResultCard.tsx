@@ -267,7 +267,7 @@ export const ResultCard: React.FC<IResultCardProps> = ({
                         <div className={styles.metadata}>
                             {formattedDate && (
                                 <>
-                                    <Text className={styles.metaLabel}>createdOn:</Text>
+                                    <Text className={styles.metaLabel}>Created On:</Text>
                                     <Text className={styles.metaValue}>{formattedDate}</Text>
                                 </>
                             )}

@@ -349,16 +349,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         void search(queryInput, filters);
     }, [queryInput, filters, search, isAuthInitialized]);
 
-    // Handle filter changes - trigger new search even with no query
+    // Handle filter changes - update filter state only.
+    // Search is triggered explicitly via Enter key or Search button click.
     const handleFiltersChange = useCallback(
         (newFilters: SearchFilters) => {
             setFilters(newFilters);
-            // Re-search whenever initial load has happened (supports filter-only queries)
-            if (hasSearched) {
-                void search(query, newFilters);
-            }
         },
-        [setFilters, query, hasSearched, search]
+        [setFilters]
     );
 
     // Handle retry after error
@@ -607,7 +604,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
             {/* Version Footer (always visible) */}
             <div className={styles.versionFooter}>
-                <Text size={100}>v1.0.36 • Built 2026-02-24</Text>
+                <Text size={100}>v1.0.37 • Built 2026-02-24</Text>
             </div>
 
             {/* Find Similar — iframe dialog (no Dataverse chrome) */}
