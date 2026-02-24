@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.SemanticSearch;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 using Xunit;
@@ -26,6 +27,7 @@ public class SemanticSearchServiceTests
     private readonly Mock<IEmbeddingCache> _embeddingCacheMock;
     private readonly Mock<IQueryPreprocessor> _queryPreprocessorMock;
     private readonly Mock<IResultPostprocessor> _resultPostprocessorMock;
+    private readonly Mock<IDataverseService> _dataverseServiceMock;
     private readonly Mock<ILogger<SemanticSearchService>> _loggerMock;
 
     private const string TestTenantId = "test-tenant-123";
@@ -42,6 +44,7 @@ public class SemanticSearchServiceTests
         _embeddingCacheMock = new Mock<IEmbeddingCache>();
         _queryPreprocessorMock = new Mock<IQueryPreprocessor>();
         _resultPostprocessorMock = new Mock<IResultPostprocessor>();
+        _dataverseServiceMock = new Mock<IDataverseService>();
         _loggerMock = new Mock<ILogger<SemanticSearchService>>();
 
         // Create a test embedding vector (3072 dimensions for text-embedding-3-large)
@@ -73,6 +76,7 @@ public class SemanticSearchServiceTests
             _embeddingCacheMock.Object,
             _queryPreprocessorMock.Object,
             _resultPostprocessorMock.Object,
+            _dataverseServiceMock.Object,
             _loggerMock.Object);
     }
 
