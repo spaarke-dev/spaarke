@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 Set-Location $PSScriptRoot
-$version = "1.0.40"
+$version = "1.0.41"
 $solutionName = "SpaarkeSemanticSearch"
 $zipPath = "bin\${solutionName}_v$version.zip"
 

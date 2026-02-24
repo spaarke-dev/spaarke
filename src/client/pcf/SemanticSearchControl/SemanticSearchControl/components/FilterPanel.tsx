@@ -36,6 +36,7 @@ const useStyles = makeStyles({
         display: "flex",
         flexDirection: "column",
         gap: tokens.spacingVerticalXS,
+        minWidth: 0,
         overflow: "hidden",
     },
     header: {
@@ -85,6 +86,14 @@ const useStyles = makeStyles({
     modeLabel: {
         fontWeight: tokens.fontWeightSemibold,
         fontSize: tokens.fontSizeBase200,
+    },
+    sliderControl: {
+        width: "100%",
+        maxWidth: "100%",
+    },
+    dropdownControl: {
+        width: "100%",
+        maxWidth: "100%",
     },
 });
 
@@ -315,6 +324,7 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
                     </Text>
                 </div>
                 <Slider
+                    className={styles.sliderControl}
                     min={0}
                     max={100}
                     step={10}
@@ -331,6 +341,7 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
                     Mode
                 </Label>
                 <Dropdown
+                    className={styles.dropdownControl}
                     size="small"
                     value={currentModeLabel}
                     selectedOptions={[filters.searchMode]}

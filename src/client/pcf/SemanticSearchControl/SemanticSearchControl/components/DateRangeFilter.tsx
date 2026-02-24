@@ -57,6 +57,7 @@ const useStyles = makeStyles({
         fontSize: tokens.fontSizeBase200,
         minWidth: "auto",
         paddingLeft: "0px",
+        alignSelf: "flex-start",
     },
 });
 
