@@ -16,7 +16,13 @@ import {
     Text,
     Spinner,
     Link,
+    Button,
+    Popover,
+    PopoverTrigger,
+    PopoverSurface,
+    Tooltip,
 } from "@fluentui/react-components";
+import { Info20Regular } from "@fluentui/react-icons";
 import { IResultsListProps, SearchResult } from "../types";
 import { ResultCard } from "./ResultCard";
 import { useInfiniteScroll } from "../hooks";
@@ -72,6 +78,25 @@ const useStyles = makeStyles({
         backgroundColor: tokens.colorNeutralBackground2,
         borderRadius: tokens.borderRadiusMedium,
     },
+    infoButton: {
+        minWidth: "auto",
+        padding: "0px",
+    },
+    infoPopover: {
+        maxWidth: "320px",
+        display: "flex",
+        flexDirection: "column",
+        gap: tokens.spacingVerticalS,
+    },
+    infoHeading: {
+        fontWeight: tokens.fontWeightSemibold,
+        fontSize: tokens.fontSizeBase300,
+    },
+    infoText: {
+        fontSize: tokens.fontSizeBase200,
+        color: tokens.colorNeutralForeground2,
+        lineHeight: tokens.lineHeightBase200,
+    },
 });
 
 // DOM cap constant per spec.md
@@ -112,6 +137,9 @@ export const ResultsList: React.FC<IResultsListProps> = ({
 
     // After the user clicks "Show more" once, switch to infinite scroll
     const [infiniteScrollEnabled, setInfiniteScrollEnabled] = useState(false);
+
+    // Info popover open state
+    const [infoOpen, setInfoOpen] = useState(false);
 
     // Client-side threshold filtering — hide results below the minimum score
     const thresholdDecimal = threshold / 100;
@@ -196,6 +224,50 @@ export const ResultsList: React.FC<IResultsListProps> = ({
                 <Text className={styles.resultCount}>
                     {getResultCountMessage()}
                 </Text>
+                <Popover
+                    open={infoOpen}
+                    onOpenChange={(_ev, data) => setInfoOpen(data.open)}
+                    positioning="below-end"
+                    withArrow
+                >
+                    <PopoverTrigger disableButtonEnhancement>
+                        <Tooltip content="How semantic search works" relationship="label">
+                            <Button
+                                className={styles.infoButton}
+                                appearance="subtle"
+                                size="small"
+                                icon={<Info20Regular />}
+                                aria-label="Search info"
+                            />
+                        </Tooltip>
+                    </PopoverTrigger>
+                    <PopoverSurface className={styles.infoPopover}>
+                        <Text className={styles.infoHeading}>How Semantic Search Works</Text>
+                        <Text className={styles.infoText}>
+                            Semantic search finds documents by <strong>meaning</strong>, not just keywords.
+                            Your query is converted to a mathematical representation of its concept,
+                            then matched against document content.
+                        </Text>
+                        <Text className={styles.infoHeading}>Highlighted Text</Text>
+                        <Text className={styles.infoText}>
+                            The yellow highlighted passages show the most <strong>semantically relevant</strong> section
+                            of each document. These may not contain your exact search words — they represent
+                            passages the AI identified as most related to your query{"'"}s meaning.
+                        </Text>
+                        <Text className={styles.infoHeading}>Similarity Score</Text>
+                        <Text className={styles.infoText}>
+                            The percentage badge (e.g., 45%) indicates how closely a document{"'"}s content
+                            matches your query{"'"}s meaning. Higher = more relevant.
+                            Use the <strong>Threshold</strong> slider to hide low-scoring results.
+                        </Text>
+                        <Text className={styles.infoHeading}>Search Modes</Text>
+                        <Text className={styles.infoText}>
+                            <strong>Hybrid</strong> (default): Combines meaning-based and keyword search for best overall results.{" "}
+                            <strong>Concept Only</strong>: Pure meaning-based search — good for abstract queries.{" "}
+                            <strong>Keyword Only</strong>: Traditional exact-word matching — good for specific terms or clause numbers.
+                        </Text>
+                    </PopoverSurface>
+                </Popover>
             </div>
 
             {/* Scrollable results area */}

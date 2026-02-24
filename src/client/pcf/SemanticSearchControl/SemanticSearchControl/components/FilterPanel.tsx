@@ -10,7 +10,7 @@
  */
 
 import * as React from "react";
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import {
     makeStyles,
     tokens,
@@ -21,15 +21,10 @@ import {
     Label,
     Dropdown,
     Option,
-    Popover,
-    PopoverTrigger,
-    PopoverSurface,
-    Tooltip,
 } from "@fluentui/react-components";
 import {
     Dismiss20Regular,
     ChevronLeft20Regular,
-    Info20Regular,
 } from "@fluentui/react-icons";
 import { IFilterPanelProps, SearchFilters, DateRange, SearchMode } from "../types";
 import { FilterDropdown } from "./FilterDropdown";
@@ -41,16 +36,12 @@ const useStyles = makeStyles({
         display: "flex",
         flexDirection: "column",
         gap: tokens.spacingVerticalXS,
+        overflow: "hidden",
     },
     header: {
         display: "flex",
-        justifyContent: "flex-end",
+        justifyContent: "space-between",
         alignItems: "center",
-    },
-    headerActions: {
-        display: "flex",
-        alignItems: "center",
-        gap: tokens.spacingHorizontalXXS,
     },
     clearButton: {
         minWidth: "auto",
@@ -88,31 +79,12 @@ const useStyles = makeStyles({
     modeSection: {
         display: "flex",
         flexDirection: "column",
-        gap: tokens.spacingVerticalXXS,
+        gap: tokens.spacingVerticalS,
         paddingBottom: tokens.spacingVerticalS,
     },
     modeLabel: {
         fontWeight: tokens.fontWeightSemibold,
         fontSize: tokens.fontSizeBase200,
-    },
-    infoButton: {
-        minWidth: "auto",
-        padding: "0px",
-    },
-    infoPopover: {
-        maxWidth: "320px",
-        display: "flex",
-        flexDirection: "column",
-        gap: tokens.spacingVerticalS,
-    },
-    infoHeading: {
-        fontWeight: tokens.fontWeightSemibold,
-        fontSize: tokens.fontSizeBase300,
-    },
-    infoText: {
-        fontSize: tokens.fontSizeBase200,
-        color: tokens.colorNeutralForeground2,
-        lineHeight: tokens.lineHeightBase200,
     },
 });
 
@@ -151,9 +123,6 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
     onCollapse,
 }) => {
     const styles = useStyles();
-
-    // Info popover open state
-    const [infoOpen, setInfoOpen] = useState(false);
 
     // Fetch filter options from Dataverse
     const {
@@ -255,78 +224,32 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
 
     return (
         <div className={styles.container}>
-            {/* Header — Clear and Collapse buttons only (no "Filters" label) */}
+            {/* Header — Clear (left) and Collapse (right) */}
             <div className={styles.header}>
-                <div className={styles.headerActions}>
-                    {/* Info button */}
-                    <Popover
-                        open={infoOpen}
-                        onOpenChange={(_ev, data) => setInfoOpen(data.open)}
-                        positioning="below-end"
-                        withArrow
+                {hasActiveFilters ? (
+                    <Button
+                        className={styles.clearButton}
+                        appearance="subtle"
+                        size="small"
+                        icon={<Dismiss20Regular />}
+                        onClick={handleClearFilters}
+                        disabled={disabled}
                     >
-                        <PopoverTrigger disableButtonEnhancement>
-                            <Tooltip content="How semantic search works" relationship="label">
-                                <Button
-                                    className={styles.infoButton}
-                                    appearance="subtle"
-                                    size="small"
-                                    icon={<Info20Regular />}
-                                    aria-label="Search info"
-                                />
-                            </Tooltip>
-                        </PopoverTrigger>
-                        <PopoverSurface className={styles.infoPopover}>
-                            <Text className={styles.infoHeading}>How Semantic Search Works</Text>
-                            <Text className={styles.infoText}>
-                                Semantic search finds documents by <strong>meaning</strong>, not just keywords.
-                                Your query is converted to a mathematical representation of its concept,
-                                then matched against document content.
-                            </Text>
-                            <Text className={styles.infoHeading}>Highlighted Text</Text>
-                            <Text className={styles.infoText}>
-                                The yellow highlighted passages show the most <strong>semantically relevant</strong> section
-                                of each document. These may not contain your exact search words — they represent
-                                passages the AI identified as most related to your query{"'"}s meaning.
-                            </Text>
-                            <Text className={styles.infoHeading}>Similarity Score</Text>
-                            <Text className={styles.infoText}>
-                                The percentage badge (e.g., 45%) indicates how closely a document{"'"}s content
-                                matches your query{"'"}s meaning. Higher = more relevant.
-                                Use the <strong>Threshold</strong> slider to hide low-scoring results.
-                            </Text>
-                            <Text className={styles.infoHeading}>Search Modes</Text>
-                            <Text className={styles.infoText}>
-                                <strong>Hybrid</strong> (default): Combines meaning-based and keyword search for best overall results.{" "}
-                                <strong>Concept Only</strong>: Pure meaning-based search — good for abstract queries.{" "}
-                                <strong>Keyword Only</strong>: Traditional exact-word matching — good for specific terms or clause numbers.
-                            </Text>
-                        </PopoverSurface>
-                    </Popover>
-
-                    {hasActiveFilters && (
-                        <Button
-                            className={styles.clearButton}
-                            appearance="subtle"
-                            size="small"
-                            icon={<Dismiss20Regular />}
-                            onClick={handleClearFilters}
-                            disabled={disabled}
-                        >
-                            Clear
-                        </Button>
-                    )}
-                    {onCollapse && (
-                        <Button
-                            className={styles.collapseButton}
-                            appearance="subtle"
-                            size="small"
-                            icon={<ChevronLeft20Regular />}
-                            onClick={onCollapse}
-                            aria-label="Collapse filters"
-                        />
-                    )}
-                </div>
+                        Clear
+                    </Button>
+                ) : (
+                    <div />
+                )}
+                {onCollapse && (
+                    <Button
+                        className={styles.collapseButton}
+                        appearance="subtle"
+                        size="small"
+                        icon={<ChevronLeft20Regular />}
+                        onClick={onCollapse}
+                        aria-label="Collapse filters"
+                    />
+                )}
             </div>
 
             <Divider />
@@ -394,7 +317,7 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
                 <Slider
                     min={0}
                     max={100}
-                    step={5}
+                    step={10}
                     value={filters.threshold}
                     onChange={handleThresholdChange}
                     disabled={disabled}
