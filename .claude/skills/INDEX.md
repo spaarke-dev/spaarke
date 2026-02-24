@@ -2,7 +2,7 @@
 
 > **Purpose**: Central registry of all Claude Code skills — the **single source of truth** for what skills exist, their triggers, and how to create new ones.
 >
-> **Last Updated**: February 22, 2026 (added pcf-deploy skill for PCF-specific deployment)
+> **Last Updated**: February 24, 2026 (added code-page-deploy skill, enhanced bff-deploy and pcf-deploy with path maps)
 
 ---
 
@@ -38,12 +38,14 @@
 | [script-aware](script-aware/SKILL.md) | Discover and reuse scripts from library before writing new code | **Yes** | Auto-applied |
 | [adr-check](adr-check/SKILL.md) | Validate code against Architecture Decision Records | No | `/adr-check`, "check ADRs" |
 | [azure-deploy](azure-deploy/SKILL.md) | Deploy Azure infrastructure, BFF API, and configure App Service | No | "deploy to azure", "deploy api", "azure deployment" |
+| [bff-deploy](bff-deploy/SKILL.md) | Deploy BFF API to Azure App Service using deployment script | No | "deploy bff", "publish bff", "bff deploy", "update bff api" |
 | [ci-cd](ci-cd/SKILL.md) | GitHub Actions CI/CD pipeline status and workflow management | No | `/ci-cd`, "check CI", "build status", "workflow failed" |
 | [code-review](code-review/SKILL.md) | Comprehensive code review (security, performance, style) | No | `/code-review`, "review code" |
 | [conflict-check](conflict-check/SKILL.md) | Detect file conflicts between active PRs and current work | No | `/conflict-check`, "check conflicts", "file overlap" |
 | [dataverse-create-schema](dataverse-create-schema/SKILL.md) | Create/update Dataverse entities, attributes, relationships via Web API | No | "create entity", "add column", "dataverse schema" |
 | [dataverse-deploy](dataverse-deploy/SKILL.md) | Deploy solutions, plugins, web resources to Dataverse | No | "deploy to dataverse", "deploy solution" |
 | [pcf-deploy](pcf-deploy/SKILL.md) | Build, pack, and deploy PCF controls via solution ZIP import | No | "deploy pcf", "build and deploy pcf", "pcf solution import" |
+| [code-page-deploy](code-page-deploy/SKILL.md) | Build and deploy React Code Page web resources to Dataverse | No | "deploy code page", "deploy web resource", "build webresource" |
 | [design-to-spec](design-to-spec/SKILL.md) | Transform human design documents into AI-optimized spec.md | No | `/design-to-spec`, "design to spec" |
 | [pull-from-github](pull-from-github/SKILL.md) | Pull latest changes from GitHub | No | `/pull-from-github`, "pull from github" |
 | [push-to-github](push-to-github/SKILL.md) | Commit changes and push to GitHub | No | `/push-to-github`, "push to github" |
@@ -88,11 +90,13 @@
 
 ### ☁️ Azure/Infrastructure
 - **azure-deploy** - Deploy Azure infrastructure, BFF API, App Service configuration
+- **bff-deploy** - Deploy BFF API to Azure App Service (focused procedure with packaging safeguards)
 
 ### ⚙️ Dataverse/Platform
 - **dataverse-create-schema** - Create/update Dataverse entities, attributes, relationships via Web API
 - **dataverse-deploy** - Deploy solutions, plugins, web resources via PAC CLI
 - **pcf-deploy** - Build, pack, and deploy PCF controls via solution ZIP import (PCF-specific)
+- **code-page-deploy** - Build and deploy React Code Page web resources (two-step: webpack + inline HTML)
 - **ribbon-edit** - Automate ribbon customization via solution export/import
 
 ### 🔄 Operations
@@ -332,6 +336,8 @@ alwaysApply: false  # Only true for universal skills like conventions
 │   └── SKILL.md
 ├── pcf-deploy/                   ← PCF control build, pack, and deploy (PCF-specific)
 │   └── SKILL.md
+├── code-page-deploy/             ← Code Page web resource build and deploy (React 18 HTML)
+│   └── SKILL.md
 ├── design-to-spec/               ← Transform design docs to AI-ready spec.md
 │   └── SKILL.md
 ├── project-continue/             ← Resume project after PR/session
@@ -364,4 +370,4 @@ alwaysApply: false  # Only true for universal skills like conventions
 
 ---
 
-*Last updated: February 22, 2026*
+*Last updated: February 24, 2026*

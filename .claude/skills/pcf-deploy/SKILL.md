@@ -83,6 +83,33 @@ Every deployment MUST increment the version in ALL 5 files:
 
 ---
 
+## Path Map — SemanticSearchControl
+
+All paths relative to the repository root. **Claude Code MUST use these exact paths.**
+
+| Purpose | Path |
+|---------|------|
+| **PCF project root** | `src/client/pcf/SemanticSearchControl/` |
+| **Control source dir** | `src/client/pcf/SemanticSearchControl/SemanticSearchControl/` |
+| **Source manifest** | `src/client/pcf/SemanticSearchControl/SemanticSearchControl/ControlManifest.Input.xml` |
+| **Main component** | `src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx` |
+| **Build output dir** | `src/client/pcf/SemanticSearchControl/out/controls/SemanticSearchControl/` |
+| **Build bundle.js** | `src/client/pcf/SemanticSearchControl/out/controls/SemanticSearchControl/bundle.js` |
+| **Build manifest** | `src/client/pcf/SemanticSearchControl/out/controls/SemanticSearchControl/ControlManifest.xml` |
+| **Solution dir** | `src/client/pcf/SemanticSearchControl/Solution/` |
+| **Solution controls** | `src/client/pcf/SemanticSearchControl/Solution/Controls/sprk_Sprk.SemanticSearchControl/` |
+| **Pack script** | `src/client/pcf/SemanticSearchControl/Solution/pack.ps1` |
+| **Solution ZIP** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v{X.Y.Z}.zip` |
+
+### Common Path Mistakes (NEVER)
+
+- ❌ Build from inner `SemanticSearchControl/SemanticSearchControl/` — build from the **outer** project root
+- ❌ Look for output at `SemanticSearchControl/SemanticSearchControl/out/` — output is at the **outer** level
+- ❌ Copy from `out/controls/bundle.js` — the **control name** is in the path: `out/controls/SemanticSearchControl/bundle.js`
+- ❌ Copy to `Solution/Controls/bundle.js` — the **full schema name** is in the path: `Solution/Controls/sprk_Sprk.SemanticSearchControl/`
+
+---
+
 ## Deployment Steps
 
 ### Step 1: Version Bump (ALL 5 Locations)
@@ -221,6 +248,31 @@ Hard refresh browser (`Ctrl+Shift+R`) and verify version footer in the PCF contr
 
 ---
 
+## Manual Quick Deploy (User-Performed)
+
+When the user wants to deploy manually for fastest iteration:
+
+1. **Build** (from repo root):
+   ```bash
+   cd src/client/pcf/SemanticSearchControl && npm run build
+   ```
+2. **Copy artifacts**:
+   ```bash
+   cp out/controls/SemanticSearchControl/bundle.js Solution/Controls/sprk_Sprk.SemanticSearchControl/
+   cp out/controls/SemanticSearchControl/ControlManifest.xml Solution/Controls/sprk_Sprk.SemanticSearchControl/
+   ```
+3. **Pack**: `cd Solution && powershell -File pack.ps1`
+4. **Import**: `pac solution import --path "Solution/bin/SpaarkeSemanticSearch_v{X.Y.Z}.zip" --publish-changes`
+5. **Verify**: Hard refresh browser (`Ctrl+Shift+R`), check version footer
+
+### When the User Says "I'll deploy manually"
+
+- Ensure the build is complete and artifacts are copied to `Solution/Controls/`
+- Tell the user: "Run `pack.ps1` in the Solution folder, then import the ZIP from `Solution/bin/`"
+- Provide the exact ZIP filename with the current version number
+
+---
+
 ## Troubleshooting
 
 | Error | Cause | Fix |
@@ -242,6 +294,8 @@ Hard refresh browser (`Ctrl+Shift+R`) and verify version footer in the PCF contr
 | **dataverse-deploy** | General Dataverse operations (plugins, web resources, solution export). This skill (`pcf-deploy`) is PCF-specific. |
 | **task-execute** | May invoke `pcf-deploy` when task tags include `pcf` + `deploy` |
 | **adr-aware** | ADR-006 (PCF over webresources), ADR-022 (React 16), ADR-021 (Fluent v9) |
+| **code-page-deploy** | For Code Page web resources (HTML). PCF solutions do NOT include code pages. |
+| **bff-deploy** | For BFF API deployment to Azure App Service |
 
 ---
 

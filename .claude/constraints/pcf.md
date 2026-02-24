@@ -53,6 +53,14 @@ Load when:
 - ✅ **MUST** read parameters from `URLSearchParams` (passed via `navigateTo` `data` field)
 - ✅ **MUST** open via `Xrm.Navigation.navigateTo({ pageType: "webresource", ... })`
 
+### Code Page Build & Deployment
+
+- ✅ **MUST** run `npm run build` AND `build-webresource.ps1` before deployment
+- ✅ **MUST** deploy the inlined HTML from `out/sprk_{name}.html` (NOT index.html or bundle.js separately)
+- ✅ **MUST** use `build-webresource.ps1` to produce a single self-contained HTML file
+- ❌ **MUST NOT** deploy `index.html` + `bundle.js` as separate web resources
+- ❌ **MUST NOT** skip the `build-webresource.ps1` inline step
+
 ### Dataset PCF (ADR-011)
 
 - ✅ **MUST** use Dataset PCF for list-based document UX on forms
