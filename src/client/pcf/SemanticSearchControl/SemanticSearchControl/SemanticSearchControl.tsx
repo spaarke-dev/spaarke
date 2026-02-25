@@ -248,15 +248,31 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     };
 
     // Determine search scope and entity context
-    // Priority: 1) Page context (record form), 2) Parameter binding (fallback)
-    const configuredScope = (context.parameters.searchScope?.raw ?? "all") as SearchScope;
+    // Priority: 1) Page context auto-detection, 2) Configured scope parameter
+    // When configured as "entity" (or legacy "matter"), auto-detect from form context.
+    // When configured as "all" or "custom", use as-is.
+    const configuredScope = (context.parameters.searchScope?.raw ?? "entity") as SearchScope;
     const parameterScopeId = context.parameters.scopeId?.raw ?? null;
 
-    // Use page context when available, otherwise fall back to parameters
+    // Auto-detect entity type from page context (works on any entity form)
     const detectedEntityType = getEntityTypeFromLogicalName(pageEntityTypeName);
-    const searchScope: SearchScope = pageEntityId && detectedEntityType
-        ? (detectedEntityType as SearchScope)  // Use detected entity type as scope
-        : configuredScope;
+
+    // Resolve final search scope:
+    // - If on a record form with a recognized entity → use detected entity type
+    // - If configured as "entity" but NOT on a form → fall back to "all"
+    // - If configured as "all" or "custom" → use as-is
+    // - Legacy: "matter" configured value still works (auto-detection overrides when on form)
+    let searchScope: SearchScope;
+    if (pageEntityId && detectedEntityType) {
+        // On a record form → auto-detect overrides any configured scope
+        searchScope = detectedEntityType as SearchScope;
+    } else if (configuredScope === "entity" || configuredScope === "matter") {
+        // Configured as "entity" (or legacy "matter") but NOT on a record form → fall back to "all"
+        searchScope = "all";
+    } else {
+        // "all", "custom", or explicit entity type → use as configured
+        searchScope = configuredScope;
+    }
 
     // Use page entityId (GUID) when on a record form, otherwise use bound parameter
     const scopeId = pageEntityId ?? parameterScopeId;
@@ -639,7 +655,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
             {/* Version Footer (always visible) */}
             <div className={styles.versionFooter}>
-                <Text size={100}>v1.0.46 • Built 2026-02-24</Text>
+                <Text size={100}>v1.0.47 • Built 2026-02-25</Text>
             </div>
 
             {/* Find Similar — iframe dialog (no Dataverse chrome) */}

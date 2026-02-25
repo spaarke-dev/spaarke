@@ -86,7 +86,7 @@ const MODE_OPTIONS = [
  * FilterPanel component for search filters.
  *
  * @param props.filters - Current filter values
- * @param props.searchScope - Current search scope (all, matter, custom)
+ * @param props.searchScope - Current search scope (all, entity, matter, project, etc.)
  * @param props.scopeId - ID for scoped search
  * @param props.onFiltersChange - Callback when filters change
  * @param props.onApply - Callback to apply filters (triggers search)
@@ -192,8 +192,9 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
         [filters, onFiltersChange]
     );
 
-    // Scope-aware visibility: hide Matter Type when scope is "matter"
-    const showMatterTypeFilter = searchScope !== "matter";
+    // Scope-aware visibility: hide Matter Type when on any entity-scoped form
+    // Only show when scope is "all" (system-wide) or "custom" (document IDs)
+    const showMatterTypeFilter = searchScope === "all" || searchScope === "custom";
 
     return (
         <div className={styles.container}>

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.0.46"
+  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.0.47"
            display-name-key="Semantic Search Control"
            description-key="PCF control for semantic document search with natural language queries"
            control-type="virtual">
@@ -18,11 +18,11 @@
     <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD tenant ID"
               of-type="SingleLine.Text" usage="input" required="false" />
 
-    <!-- Input: Search scope mode (all, matter, custom) -->
-    <property name="searchScope" display-name-key="Search Scope" description-key="Search scope mode"
+    <!-- Input: Search scope mode (all, entity, custom) -->
+    <property name="searchScope" display-name-key="Search Scope" description-key="Search scope mode: all=system-wide, entity=auto-detect from form, custom=document IDs"
               of-type="Enum" usage="input" required="false">
       <value name="all" display-name-key="All">all</value>
-      <value name="matter" display-name-key="Matter">matter</value>
+      <value name="entity" display-name-key="Entity">entity</value>
       <value name="custom" display-name-key="Custom">custom</value>
     </property>
 
