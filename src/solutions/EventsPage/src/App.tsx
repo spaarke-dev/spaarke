@@ -82,6 +82,7 @@ import {
   ViewSelectorDropdown,
   useViewSelection,
 } from "./components";
+import type { SavedView } from "./components";
 import {
   EVENT_DETAIL_PANE_ID,
   CALENDAR_PANE_ID,
@@ -90,7 +91,9 @@ import {
   EVENT_ENTITY_NAME,
   CALENDAR_WEB_RESOURCE_NAME,
   EVENT_DETAIL_WEB_RESOURCE_NAME,
+  discoverEntityViews,
 } from "./config";
+import type { IEventViewConfig } from "./config";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Xrm Type Declaration for Side Pane
@@ -104,15 +107,18 @@ declare const Xrm: any;
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const VERSION = "2.17.0"; // Fix: Remove aggressive visibility handler that closed side pane immediately
+const VERSION = "3.0.0"; // Embedded mode: context-aware entity form tab with view discovery
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Drill-Through Parameter Parsing
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Parameters passed from VisualHost PCF drill-through navigation.
- * Encoded as URL-encoded key=value pairs in the ?data= query parameter.
+ * Parameters passed via URL ?data= query parameter.
+ * Supports three modes:
+ * - dialog: Drill-through from VisualHost PCF (filterField/filterValue)
+ * - embedded: Context-aware tab in entity form (entityName/recordId)
+ * - (none): System-level Events page
  */
 interface DrillThroughParams {
   mode: string | null;
@@ -120,32 +126,58 @@ interface DrillThroughParams {
   filterField: string | null;
   filterValue: string | null;
   viewId: string | null;
+  /** Parent record GUID when embedded in entity form tab */
+  recordId: string | null;
 }
 
 /**
- * Parse drill-through parameters from the URL.
- * VisualHost passes context via: ?data=entityName=X&filterField=Y&filterValue=Z&mode=dialog
+ * Parse URL parameters from multiple sources.
+ *
+ * Dataverse passes context via two mechanisms:
+ * 1. **data** param: Custom string in ?data=key=value&key2=value2 format
+ *    - Used by drill-through: mode=dialog&entityName=X&filterField=Y&filterValue=Z
+ *    - Used by embedded (minimal): mode=embedded
+ * 2. **Standard params**: When "Pass record object-type code and unique identifier"
+ *    is checked on the web resource tab, Dataverse appends:
+ *    - id={recordGuid}&typename={entityLogicalName}&type={entityTypeCode}
+ *
+ * For embedded mode, we prefer the standard params (id/typename) over data params
+ * (recordId/entityName) because they're auto-populated by Dataverse with no
+ * placeholder syntax needed.
  */
 function parseDrillThroughParams(): DrillThroughParams {
   try {
     const urlParams = new URLSearchParams(window.location.search);
+
+    // Parse custom data parameter (always check this)
     const data = urlParams.get("data");
-    if (!data) {
-      return { mode: null, entityName: null, filterField: null, filterValue: null, viewId: null };
+    const dataParams = data ? new URLSearchParams(data) : null;
+
+    // Standard Dataverse params (from "Pass record object-type code..." checkbox)
+    const stdId = urlParams.get("id");
+    const stdTypename = urlParams.get("typename");
+
+    // Resilient mode parsing: handle "mode=embedded", "mode-embedded", or just "embedded"
+    let mode = dataParams?.get("mode") ?? null;
+    if (!mode && data && data.includes("embedded")) {
+      mode = "embedded";
     }
-    const dataParams = new URLSearchParams(data);
+
     const params: DrillThroughParams = {
-      mode: dataParams.get("mode"),
-      entityName: dataParams.get("entityName"),
-      filterField: dataParams.get("filterField"),
-      filterValue: dataParams.get("filterValue"),
-      viewId: dataParams.get("viewId"),
+      mode,
+      // entityName: prefer standard typename, fall back to data param
+      entityName: stdTypename || (dataParams?.get("entityName") ?? null),
+      filterField: dataParams?.get("filterField") ?? null,
+      filterValue: dataParams?.get("filterValue") ?? null,
+      viewId: dataParams?.get("viewId") ?? null,
+      // recordId: prefer standard id, fall back to data param
+      recordId: stdId || (dataParams?.get("recordId") ?? null),
     };
-    console.log("[EventsPage] Drill-through params:", params);
+    console.log("[EventsPage] Parsed URL params:", params);
     return params;
   } catch (e) {
-    console.warn("[EventsPage] Failed to parse drill-through params:", e);
-    return { mode: null, entityName: null, filterField: null, filterValue: null, viewId: null };
+    console.warn("[EventsPage] Failed to parse URL params:", e);
+    return { mode: null, entityName: null, filterField: null, filterValue: null, viewId: null, recordId: null };
   }
 }
 
@@ -154,6 +186,9 @@ const DRILL_THROUGH_PARAMS = parseDrillThroughParams();
 
 /** True when opened as a drill-through dialog from VisualHost */
 const IS_DIALOG_MODE = DRILL_THROUGH_PARAMS.mode === "dialog";
+
+/** True when embedded as a tab in an entity form (Matter, Project, Invoice, etc.) */
+const IS_EMBEDDED_MODE = DRILL_THROUGH_PARAMS.mode === "embedded";
 
 // Session storage key for calendar filter (must match CalendarSidePane)
 const CALENDAR_FILTER_STATE_KEY = "sprk_calendar_filter_state";
@@ -415,9 +450,12 @@ async function openEventDetailPane(
 
 /**
  * Navigate to a new Event form to create a new record.
+ * In embedded mode, pre-fills the parent record context (regarding lookup).
+ *
+ * @param parentContext - Optional parent record for pre-filling sprk_regardingrecordid
  */
-function openNewEventForm(): void {
-  console.log("[EventsPage] Opening new Event form");
+function openNewEventForm(parentContext?: { entityType: string; id: string; name: string }): void {
+  console.log("[EventsPage] Opening new Event form", parentContext ? `(parent: ${parentContext.entityType})` : "");
   const xrm = getXrm();
   if (!xrm?.Navigation) {
     console.warn("[EventsPage] Xrm.Navigation not available. Cannot open new form.");
@@ -425,9 +463,22 @@ function openNewEventForm(): void {
   }
 
   try {
-    xrm.Navigation.openForm({
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const formOptions: any = {
       entityName: EVENT_ENTITY_NAME,
-    });
+    };
+
+    // Pre-fill parent context in embedded mode
+    if (parentContext) {
+      formOptions.createFromEntity = {
+        entityType: parentContext.entityType,
+        id: parentContext.id,
+        name: parentContext.name,
+      };
+    }
+    /* eslint-enable @typescript-eslint/no-explicit-any */
+
+    xrm.Navigation.openForm(formOptions);
   } catch (error) {
     console.error("[EventsPage] Failed to open new Event form:", error);
   }
@@ -1091,6 +1142,8 @@ interface EventsViewToolbarProps {
   selectedViewId: string;
   selectedViewName: string;
   onViewChange: (viewId: string, viewName: string) => void;
+  /** Optional: Override views for embedded mode (entity-specific views) */
+  views?: SavedView[];
 }
 
 const useViewToolbarStyles = makeStyles({
@@ -1105,15 +1158,17 @@ const useViewToolbarStyles = makeStyles({
 const EventsViewToolbar: React.FC<EventsViewToolbarProps> = ({
   selectedViewId,
   onViewChange,
+  views,
 }) => {
   const styles = useViewToolbarStyles();
 
   return (
     <div className={styles.toolbar}>
-      {/* View Selector Dropdown (Task 093) */}
+      {/* View Selector Dropdown (Task 093) — views prop overrides default for embedded mode */}
       <ViewSelectorDropdown
         selectedViewId={selectedViewId}
         onViewChange={onViewChange}
+        views={views}
       />
     </div>
   );
@@ -1152,6 +1207,65 @@ const EventsPageContent: React.FC = () => {
 
   // View selection state with session storage persistence (Task 093)
   const [selectedViewId, setSelectedViewId, selectedViewName] = useViewSelection();
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Embedded Mode: Dynamic views + parent context (v3.0.0)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // Dynamic views for embedded mode (entity-specific views override system views)
+  const [embeddedViews, setEmbeddedViews] = React.useState<SavedView[] | null>(null);
+
+  // Parent record display name for +New pre-fill and UI subtitle
+  const parentRecordNameRef = React.useRef<string>("");
+
+  // Discover entity views and fetch parent name on mount (embedded mode only)
+  React.useEffect(() => {
+    if (!IS_EMBEDDED_MODE || !DRILL_THROUGH_PARAMS.entityName) return;
+
+    const entityName = DRILL_THROUGH_PARAMS.entityName;
+    const recordId = DRILL_THROUGH_PARAMS.recordId;
+
+    // Discover entity-specific views by naming convention
+    discoverEntityViews(entityName).then((discoveredViews: IEventViewConfig[]) => {
+      if (discoveredViews.length > 0) {
+        const mapped: SavedView[] = discoveredViews.map((v) => ({
+          id: v.id,
+          name: v.name,
+          entityName: "sprk_event",
+        }));
+        setEmbeddedViews(mapped);
+        // Select first discovered view
+        setSelectedViewId(mapped[0].id);
+        console.log("[EventsPage] Embedded mode: loaded entity views, selected:", mapped[0].name);
+      } else {
+        console.log("[EventsPage] Embedded mode: no entity views found, using system views");
+      }
+    });
+
+    // Fetch parent record display name for +New pre-fill
+    if (recordId) {
+      const xrm = getXrm();
+      if (xrm?.WebApi) {
+        const cleanId = recordId.replace(/[{}]/g, "");
+        // Try sprk_name first (Spaarke custom entities), then fall back to name
+        xrm.WebApi.retrieveRecord(entityName, cleanId, "?$select=sprk_name")
+          .then((result: Record<string, unknown>) => {
+            parentRecordNameRef.current = (result.sprk_name as string) || "";
+            console.log("[EventsPage] Parent record name:", parentRecordNameRef.current);
+          })
+          .catch(() => {
+            // Fallback: try standard 'name' field
+            xrm.WebApi.retrieveRecord(entityName, cleanId, "?$select=name")
+              .then((result: Record<string, unknown>) => {
+                parentRecordNameRef.current = (result.name as string) || "";
+              })
+              .catch(() => {
+                console.log("[EventsPage] Could not resolve parent record name");
+              });
+          });
+      }
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─────────────────────────────────────────────────────────────────────────
   // Calendar Side Pane Registration (Task 096)
@@ -1226,15 +1340,54 @@ const EventsPageContent: React.FC = () => {
       closeAllSidePanes();
     };
 
-    // v2.17.0: REMOVED visibility change handler - it was too aggressive
-    // It fired when side pane opened (iframe focus change), causing immediate pane closure
-    // The beforeunload and pagehide handlers are sufficient for real navigation
+    // v3.0.0: Visibility change handler — active in embedded mode for tab-switch cleanup
+    // In system mode: disabled (too aggressive, fires on side pane focus change)
+    // Note: visibilitychange fires for browser tab switches but NOT for Dataverse
+    // form tab switches (which use CSS display:none on the iframe container).
+    // For form tab detection, see iframe visibility polling below.
+    let visibilityDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     const handleVisibilityChange = () => {
-      // Only log for debugging, don't close panes
       if (document.visibilityState === "hidden") {
-        console.log("[EventsPage] v2.17.0 visibilitychange (hidden) - NOT closing panes (false positive)");
+        if (IS_EMBEDDED_MODE) {
+          visibilityDebounceTimer = setTimeout(() => {
+            console.log("[EventsPage] v3.0.0 Embedded browser tab hidden — closing side panes");
+            closeAllSidePanes();
+          }, 150);
+        } else {
+          console.log("[EventsPage] v3.0.0 visibilitychange (hidden) — system mode, ignoring");
+        }
+      } else if (visibilityDebounceTimer) {
+        clearTimeout(visibilityDebounceTimer);
+        visibilityDebounceTimer = null;
       }
     };
+
+    // v3.0.1: Embedded mode — iframe visibility polling for form tab switches
+    // When user switches Dataverse form tabs, the iframe is hidden via CSS (display:none).
+    // This does NOT trigger visibilitychange. We detect it by checking the iframe element's
+    // bounding rect — zero dimensions means the tab is hidden.
+    let iframeWasVisible = true;
+    let iframeVisibilityInterval: ReturnType<typeof setInterval> | null = null;
+
+    if (IS_EMBEDDED_MODE) {
+      iframeVisibilityInterval = setInterval(() => {
+        try {
+          const frame = window.frameElement;
+          if (!frame) return;
+          const rect = frame.getBoundingClientRect();
+          const isVisible = rect.width > 0 && rect.height > 0;
+
+          if (iframeWasVisible && !isVisible) {
+            // Tab just became hidden — close side panes
+            console.log("[EventsPage] v3.0.1 Embedded form tab hidden (iframe rect zero) — closing side panes");
+            closeAllSidePanes();
+          }
+          iframeWasVisible = isVisible;
+        } catch {
+          // Cross-origin or frameElement not accessible — ignore
+        }
+      }, 300);
+    }
 
     // v2.15.0: Proactive navigation detection - watch parent URL for changes
     // Dataverse SPA navigation changes the URL without firing unload events
@@ -1288,10 +1441,16 @@ const EventsPageContent: React.FC = () => {
 
     // Cleanup: Close all side panes when navigating away from Events page
     return () => {
-      console.log("[EventsPage] v2.15.0 React cleanup running");
+      console.log("[EventsPage] v3.0.0 React cleanup running");
       clearTimeout(timer);
+      if (visibilityDebounceTimer) {
+        clearTimeout(visibilityDebounceTimer);
+      }
       if (navigationCheckInterval) {
         clearInterval(navigationCheckInterval);
+      }
+      if (iframeVisibilityInterval) {
+        clearInterval(iframeVisibilityInterval);
       }
       closeAllSidePanes();
       window.removeEventListener("beforeunload", handleBeforeUnload);
@@ -1418,11 +1577,20 @@ const EventsPageContent: React.FC = () => {
   // ─────────────────────────────────────────────────────────────────────────
 
   /**
-   * Handle "New" button click - opens new Event form
+   * Handle "New" button click - opens new Event form.
+   * In embedded mode, pre-fills the parent record as the regarding record.
    */
   const handleNew = React.useCallback(() => {
     console.log("[EventsPage] New button clicked");
-    openNewEventForm();
+    if (IS_EMBEDDED_MODE && DRILL_THROUGH_PARAMS.entityName && DRILL_THROUGH_PARAMS.recordId) {
+      openNewEventForm({
+        entityType: DRILL_THROUGH_PARAMS.entityName,
+        id: DRILL_THROUGH_PARAMS.recordId,
+        name: parentRecordNameRef.current,
+      });
+    } else {
+      openNewEventForm();
+    }
   }, []);
 
   /**
@@ -1602,6 +1770,7 @@ const EventsPageContent: React.FC = () => {
             selectedViewId={selectedViewId}
             selectedViewName={selectedViewName}
             onViewChange={handleViewChange}
+            views={embeddedViews ?? undefined}
           />
         </div>
 
@@ -1620,9 +1789,13 @@ const EventsPageContent: React.FC = () => {
               onRowClick={handleRowClick}
               onSelectionChange={handleSelectionChange}
               contextFilter={
-                DRILL_THROUGH_PARAMS.filterField && DRILL_THROUGH_PARAMS.filterValue
-                  ? { fieldName: DRILL_THROUGH_PARAMS.filterField, value: DRILL_THROUGH_PARAMS.filterValue }
-                  : undefined
+                // v3.0.0: Embedded mode filters by parent record's regarding ID
+                IS_EMBEDDED_MODE && DRILL_THROUGH_PARAMS.recordId
+                  ? { fieldName: "sprk_regardingrecordid", value: DRILL_THROUGH_PARAMS.recordId }
+                  // Drill-through mode uses explicit filter field/value
+                  : DRILL_THROUGH_PARAMS.filterField && DRILL_THROUGH_PARAMS.filterValue
+                    ? { fieldName: DRILL_THROUGH_PARAMS.filterField, value: DRILL_THROUGH_PARAMS.filterValue }
+                    : undefined
               }
             />
           </section>
@@ -1631,10 +1804,12 @@ const EventsPageContent: React.FC = () => {
 
       {/* Calendar is now in Xrm.App.sidePanes menu (Task 096) */}
 
-      {/* Footer: Version */}
-      <footer className={styles.footer}>
-        <Text className={styles.footerVersion}>v{VERSION}</Text>
-      </footer>
+      {/* Footer: Version (hidden in embedded mode — form tab provides context) */}
+      {!IS_EMBEDDED_MODE && (
+        <footer className={styles.footer}>
+          <Text className={styles.footerVersion}>v{VERSION}</Text>
+        </footer>
+      )}
     </div>
   );
 };

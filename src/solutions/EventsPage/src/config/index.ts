@@ -13,6 +13,8 @@ export {
   getFormGuidForEventType,
   EVENT_VIEWS,
   getDefaultEventViewId,
+  discoverEntityViews,
+  getEntityViewPrefix,
   EVENT_DETAIL_PANE_ID,
   CALENDAR_PANE_ID,
   PANE_WIDTH,
