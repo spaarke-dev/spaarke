@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-045" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Implement URL Parameter Support — Deep-Link and Auto-Search</title>
+    <phase>5 — Interactive Features</phase>
+    <tags>code-page</tags>
+    <status>pending</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>020, 027, 041</dependencies>
+    <blocks>R3-047</blocks>
+    <parallel-group>phase5-features</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement URL parameter support in index.tsx and App.tsx to enable deep-linking into the
+    Semantic Search code page. When URL parameters are present, the app pre-populates state and
+    auto-executes search on load.
+
+    Supported parameters (from spec.md Section 9.3 / FR-13):
+    - theme: "light" | "dark" | "high-contrast" — selects theme (already handled in task 020)
+    - query: string — pre-populates the search query and auto-executes search
+    - domain: "Documents" | "Matters" | "Projects" | "Invoices" — pre-selects domain tab
+    - scope: string — for future use (pass-through, reserved)
+    - entityId: string — context entity ID (for matter-scoped searches from outside)
+    - savedSearchId: string — auto-loads a specific saved search by ID
+
+    Auto-search behavior: if query OR savedSearchId is present, execute search after initial render.
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer familiar with Dataverse web resource URL parameter
+    conventions and the ADR-026 data envelope unwrap pattern.
+  </role>
+
+  <goal>
+    URL parameters correctly initialize app state. If query param is present, search executes
+    automatically on load. If savedSearchId param is present, saved search is loaded and applied.
+    If domain param is present, correct tab is pre-selected.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-026">URL parameters in Dataverse web resources come as a "data" envelope — must unwrap: new URLSearchParams(window.location.search).get("data")</constraint>
+    <constraint source="ADR-026">The "data" value is itself a URL-encoded string — decode and parse as secondary URLSearchParams</constraint>
+    <constraint source="spec">Auto-search executes when query or savedSearchId URL param is present (FR-13)</constraint>
+    <constraint source="spec">domain param pre-selects the correct SearchDomainTab</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/index.tsx</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Dataverse web resources receive parameters via the "data" URL parameter, which is itself
+      a URL-encoded string. The unwrap pattern:
+
+      // In Dataverse: navigateTo passes "data" as URL param
+      const rawData = new URLSearchParams(window.location.search).get("data") ?? "";
+      const params = new URLSearchParams(decodeURIComponent(rawData));
+      // Now access: params.get("query"), params.get("domain"), etc.
+
+      For non-Dataverse testing (direct URL): also try reading parameters directly from
+      window.location.search as a fallback.
+
+      Auto-search on load: use useEffect in App.tsx with dependency on initial URL params.
+      If query param exists and is non-empty → call search() on the active hook.
+      If savedSearchId exists → load saved search from useSavedSearches and apply it.
+
+      DocumentRelationshipViewer/src/index.tsx shows the Dataverse data envelope unwrap pattern
+      used in this codebase.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read ADR-026 and DocRelViewer index.tsx">
+      Read ADR-026 and DocumentRelationshipViewer/src/index.tsx to understand the exact
+      data envelope unwrap pattern used in this codebase.
+    </step>
+    <step order="2" name="Update parseUrlParams utility">
+      Create or update src/client/code-pages/SemanticSearch/src/utils/parseUrlParams.ts:
+      - parseUrlParams(): AppUrlParams
+      - Try Dataverse data envelope: URLSearchParams(window.location.search).get("data")
+      - If data param found: decode and parse as secondary URLSearchParams
+      - Fallback: parse window.location.search directly (for direct URL testing)
+      - Return { theme, query, domain, scope, entityId, savedSearchId }
+    </step>
+    <step order="3" name="Update index.tsx">
+      Ensure index.tsx calls parseUrlParams() and passes all params as AppUrlParams to App component.
+      (Task 020 created this — verify the data envelope unwrap is correct per ADR-026).
+    </step>
+    <step order="4" name="Implement auto-search in App.tsx">
+      Add useEffect in App.tsx:
+      - If initialQuery is non-empty: call search() with the initial query after first render
+      - If initialDomain is set: set activeDomain state
+      - If initialSavedSearchId is set: find and apply saved search (after savedSearches loads)
+      - Use a ref to track whether auto-search has run (prevent re-run on re-render)
+    </step>
+    <step order="5" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read ADR-026 and DocRelViewer index for data envelope pattern</tool>
+    <tool name="Write">Create parseUrlParams.ts utility</tool>
+    <tool name="Edit">Update index.tsx and App.tsx</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/utils/parseUrlParams.ts</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/index.tsx (data envelope unwrap confirmed)</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/App.tsx (auto-search useEffect added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">Dataverse data envelope unwrap correctly extracts nested params from ?data=... format</criterion>
+    <criterion testable="true">Fallback to direct URLSearchParams parsing when data envelope absent</criterion>
+    <criterion testable="true">query param pre-populates search query and triggers auto-search on load</criterion>
+    <criterion testable="true">domain param pre-selects correct domain tab</criterion>
+    <criterion testable="true">savedSearchId param loads and applies the specified saved search</criterion>
+    <criterion testable="true">Auto-search runs only once on initial load (not on every re-render)</criterion>
+  </acceptance-criteria>
+</task>

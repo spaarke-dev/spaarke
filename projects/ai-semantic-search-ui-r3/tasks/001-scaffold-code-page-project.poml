@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-001" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Scaffold SemanticSearch Code Page Project</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>Claude Code</assigned>
+    <tags>code-page, scaffold, react-19</tags>
+    <phase>1</phase>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Create the project scaffold for the SemanticSearch code page at
+    src/client/code-pages/SemanticSearch/. Copy and adapt the DocumentRelationshipViewer
+    project structure (package.json, webpack.config.js, tsconfig.json, index.html,
+    build-webresource.ps1), update all package references for React 19, Fluent UI v9,
+    @xyflow/react, d3-force, and @azure/msal-browser, then create minimal App.tsx and
+    index.tsx entry points. Verify that npm install and npm run build complete
+    successfully without errors.
+  </prompt>
+
+  <role>
+    You are a senior TypeScript/React developer who specialises in Dataverse Code Pages
+    and the Spaarke platform. You know the DocumentRelationshipViewer project structure
+    intimately and understand the two-step build pipeline (webpack → build-webresource.ps1)
+    that produces a single self-contained HTML file for Dataverse web resource deployment.
+  </role>
+
+  <goal>
+    A working code page project scaffold at src/client/code-pages/SemanticSearch/ that:
+    - Has all configuration files adapted from DocumentRelationshipViewer
+    - Uses React 19, Fluent UI v9, @xyflow/react 12.x, d3-force 3.x, @azure/msal-browser 3.x
+    - Contains a minimal but valid index.tsx (createRoot entry) and App.tsx (FluentProvider wrapper)
+    - Passes npm install and npm run build without errors
+    - Is ready for Phase 3 component development
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-semantic-search-ui-r3/spec.md</file>
+    <file purpose="plan">projects/ai-semantic-search-ui-r3/plan.md</file>
+    <file purpose="project-context">projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    <file purpose="reference-package-json">src/client/code-pages/DocumentRelationshipViewer/package.json</file>
+    <file purpose="reference-webpack">src/client/code-pages/DocumentRelationshipViewer/webpack.config.js</file>
+    <file purpose="reference-tsconfig">src/client/code-pages/DocumentRelationshipViewer/tsconfig.json</file>
+    <file purpose="reference-index-html">src/client/code-pages/DocumentRelationshipViewer/index.html</file>
+    <file purpose="reference-build-script">src/client/code-pages/DocumentRelationshipViewer/build-webresource.ps1</file>
+    <file purpose="reference-entry-point">src/client/code-pages/DocumentRelationshipViewer/src/index.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">Deploy as a single self-contained HTML web resource (not a custom page). Two-step build: webpack bundles to out/bundle.js, then build-webresource.ps1 inlines into out/sprk_semanticsearch.html.</constraint>
+    <constraint source="ADR-022">Code Pages use React 19 bundled (not platform-provided). Use createRoot() from react-dom/client. No library declarations for React.</constraint>
+    <constraint source="ADR-021">Use @fluentui/react-components (Fluent UI v9) exclusively. Wrap all UI in FluentProvider. Use makeStyles (Griffel) for custom styles. No hard-coded colors.</constraint>
+    <constraint source="ADR-026">Single HTML output. Theme detection via URL parameter and Dataverse host Xrm frame-walk. Read parameters from URLSearchParams.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/DocumentRelationshipViewer/package.json</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/webpack.config.js</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/tsconfig.json</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/index.html</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/build-webresource.ps1</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/index.tsx</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+    </files>
+    <patterns>
+      <pattern name="Code Page Entry Point" location="src/client/code-pages/DocumentRelationshipViewer/src/index.tsx">
+        React 19 createRoot() entry point with FluentProvider, URL param parsing for theme,
+        and Xrm frame-walk for theme detection. Copy and adapt for SemanticSearch.
+      </pattern>
+      <pattern name="Two-Step Build Pipeline" location="src/client/code-pages/DocumentRelationshipViewer/">
+        Step 1: npm run build → out/bundle.js via webpack (bundles React 19, Fluent UI, all deps).
+        Step 2: build-webresource.ps1 → out/sprk_semanticsearch.html (inlines bundle.js into HTML).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <!-- No dependencies — this is the first task and must be done first -->
+    </dependencies>
+    <notes>
+      Tasks 002, 003, and 004 (investigation spikes) can run IN PARALLEL with each other
+      after this scaffold task completes. This task must complete first as it establishes
+      the project directory structure.
+
+      The output file name for the Dataverse web resource MUST be sprk_semanticsearch.html
+      (following the sprk_ prefix convention). The webpack output name should be bundle.js.
+
+      React version to use: 19.x (latest stable as of Feb 2026).
+      Do NOT use React 18 — the spec explicitly requires React 19.
+
+      The index.tsx entry point must be MINIMAL — just enough to render a placeholder
+      "Semantic Search" heading inside FluentProvider. Full components come in Phase 3.
+    </notes>
+  </context>
+
+  <steps>
+    <step order="1" name="Read reference files">
+      Read the DocumentRelationshipViewer package.json, webpack.config.js, tsconfig.json,
+      index.html, build-webresource.ps1, and src/index.tsx to understand the exact
+      structure and patterns to replicate.
+    </step>
+    <step order="2" name="Create directory structure">
+      Create the directory structure at src/client/code-pages/SemanticSearch/:
+        src/components/
+        src/hooks/
+        src/services/auth/
+        src/types/
+        out/ (will be populated by build)
+    </step>
+    <step order="3" name="Create package.json">
+      Create package.json adapted from DocumentRelationshipViewer with:
+      - name: "semantic-search-code-page"
+      - React 19.x, react-dom 19.x
+      - @fluentui/react-components 9.54+, @fluentui/react-icons 2.x
+      - @xyflow/react 12.x
+      - d3-force 3.x, @types/d3-force
+      - @azure/msal-browser 3.x
+      - webpack 5.x, ts-loader, typescript 5.4+, html-webpack-plugin
+      - Scripts: "build": "webpack --mode production", "build:dev": "webpack --mode development"
+    </step>
+    <step order="4" name="Create webpack.config.js">
+      Create webpack.config.js adapted from DocumentRelationshipViewer:
+      - Entry: ./src/index.tsx
+      - Output: out/bundle.js
+      - Resolve extensions: .tsx, .ts, .js
+      - ts-loader rule for .tsx/.ts
+      - NO externals (bundle everything including React 19, Fluent UI)
+      - Production mode with source maps
+    </step>
+    <step order="5" name="Create tsconfig.json">
+      Create tsconfig.json adapted from DocumentRelationshipViewer:
+      - target: ES2020, module: ESNext
+      - jsx: react-jsx (React 17+ transform, no import React required)
+      - strict: true
+      - moduleResolution: bundler
+      - lib: ["ES2020", "DOM"]
+    </step>
+    <step order="6" name="Create index.html">
+      Create index.html minimal HTML template:
+      - DOCTYPE html, lang="en"
+      - Meta charset, viewport
+      - div id="root"
+      - Script src="bundle.js" (replaced by build-webresource.ps1 with inline content)
+    </step>
+    <step order="7" name="Create build-webresource.ps1">
+      Copy and adapt build-webresource.ps1 from DocumentRelationshipViewer:
+      - Read out/bundle.js
+      - Read index.html template
+      - Replace script src with inline script tag containing bundle.js content
+      - Write to out/sprk_semanticsearch.html
+      - Output success message with file size
+    </step>
+    <step order="8" name="Create minimal index.tsx">
+      Create src/index.tsx with React 19 createRoot() entry point:
+      - Parse URL params: theme (light/dark), query, domain
+      - Detect theme from URL param (default light)
+      - createRoot(document.getElementById("root")).render(...)
+      - Wrap in FluentProvider with appropriate theme (webLightTheme or webDarkTheme)
+      - Render minimal App component
+    </step>
+    <step order="9" name="Create minimal App.tsx">
+      Create src/App.tsx with placeholder UI:
+      - Import from @fluentui/react-components
+      - Use makeStyles for layout styles (tokens only, no hard-coded colors)
+      - Render a simple div with "Semantic Search" Text heading
+      - Export AppProps interface with theme, query, domain optional props
+    </step>
+    <step order="10" name="Create types/index.ts placeholder">
+      Create src/types/index.ts with initial type stubs:
+      - SearchDomain enum: Documents, Matters, Projects, Invoices
+      - ViewMode enum: Grid, Graph
+      - Minimal AppProps interface
+      (Full types will be added in Phase 3 tasks)
+    </step>
+    <step order="11" name="Run npm install">
+      Run: cd src/client/code-pages/SemanticSearch and npm install
+      Verify no errors. Note any peer dependency warnings for resolution in Phase 3.
+    </step>
+    <step order="12" name="Run npm run build">
+      Run: npm run build from src/client/code-pages/SemanticSearch/
+      Verify webpack compiles successfully and out/bundle.js is produced.
+      Fix any TypeScript compilation errors before proceeding.
+    </step>
+    <step order="13" name="Run build-webresource.ps1">
+      Run: pwsh build-webresource.ps1 from src/client/code-pages/SemanticSearch/
+      Verify out/sprk_semanticsearch.html is produced with bundle inlined.
+      Verify file size is reasonable (React 19 + Fluent UI will be large, expected).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Install dependencies and run webpack build</tool>
+    <tool name="pwsh">Run PowerShell build-webresource.ps1 script</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/code-pages/SemanticSearch/package.json</output>
+    <output type="file">src/client/code-pages/SemanticSearch/webpack.config.js</output>
+    <output type="file">src/client/code-pages/SemanticSearch/tsconfig.json</output>
+    <output type="file">src/client/code-pages/SemanticSearch/index.html</output>
+    <output type="file">src/client/code-pages/SemanticSearch/build-webresource.ps1</output>
+    <output type="file">src/client/code-pages/SemanticSearch/src/index.tsx</output>
+    <output type="file">src/client/code-pages/SemanticSearch/src/App.tsx</output>
+    <output type="file">src/client/code-pages/SemanticSearch/src/types/index.ts</output>
+    <output type="artifact">src/client/code-pages/SemanticSearch/out/bundle.js (build artifact)</output>
+    <output type="artifact">src/client/code-pages/SemanticSearch/out/sprk_semanticsearch.html (build artifact)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">src/client/code-pages/SemanticSearch/ directory exists with all configuration files</criterion>
+    <criterion testable="true">npm install completes without errors (peer dependency warnings acceptable)</criterion>
+    <criterion testable="true">npm run build completes without TypeScript or webpack errors</criterion>
+    <criterion testable="true">out/bundle.js is produced by webpack</criterion>
+    <criterion testable="true">pwsh build-webresource.ps1 produces out/sprk_semanticsearch.html with inlined bundle</criterion>
+    <criterion testable="true">index.tsx uses createRoot() from react-dom/client (React 19 pattern)</criterion>
+    <criterion testable="true">index.tsx wraps App in FluentProvider with theme from URL param</criterion>
+    <criterion testable="true">No @fluentui/react (v8) imports anywhere — only @fluentui/react-components (v9)</criterion>
+    <criterion testable="true">No hard-coded colors in any file — only Fluent design tokens</criterion>
+    <criterion testable="true">webpack.config.js has NO externals (React 19 fully bundled)</criterion>
+  </acceptance-criteria>
+</task>

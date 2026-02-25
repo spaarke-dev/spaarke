@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R3-052" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Test DocumentRelationshipViewer Grid Migration</title>
+    <phase>6</phase>
+    <phase-name>DocumentRelationshipViewer Migration</phase-name>
+    <tags>testing, code-page</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>051</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>
+      You are a QA engineer verifying that a grid migration did not introduce regressions. You build, deploy, and manually verify the DocumentRelationshipViewer code page in the Dataverse dev environment, confirming all grid features work and the graph view is unaffected.
+    </role>
+    <goal>
+      Verify that the DocumentRelationshipViewer grid migration from task 051 works correctly end-to-end. Build the code page, deploy it to Dataverse dev, and verify all grid and graph functionality. Document any regressions found and resolve them before marking this task complete.
+    </goal>
+    <context>
+      The DocumentRelationshipViewer is at:
+        src/client/code-pages/DocumentRelationshipViewer/
+
+      Build pipeline for the code page (two-step per ADR-026 / code-page-deploy skill):
+        Step 1: npm run build (webpack, produces out/ directory)
+        Step 2: scripts/build-webresource.ps1 (inlines assets into single HTML)
+
+      Dataverse dev environment: https://spaarkedev1.crm.dynamics.com
+      Web resource name: sprk_documentrelationshipviewer (or as currently registered)
+
+      Verification points for the grid view:
+        - Grid renders with all expected columns
+        - Column sort works (click column header → sort applies)
+        - Row selection works (single or multi per implementation)
+        - Row click opens correct entity dialog or triggers expected action
+        - Dark mode applies correctly when theme=dark URL param is set
+        - No visual regressions vs. the pre-migration grid appearance
+
+      Verification points for the graph view (regression check):
+        - Graph view still renders nodes and edges
+        - Graph view switching is unaffected (if grid/graph toggle exists)
+        - No JavaScript errors in browser console
+
+      If any regressions are found, fix them in this task before marking complete.
+    </context>
+    <constraints>
+      - Deploy to dev environment only — do not deploy to any other environment
+      - Use the code-page-deploy skill for the deployment procedure
+      - Document all test results in notes/debug/docrelviewer-migration-test-results.md
+      - If a regression is found that requires changes to RelationshipGrid.tsx, apply the fix in this task
+      - Verify no JavaScript console errors during grid operations
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>notes/drafts/docrelviewer-grid-migration.md</file>
+    </files>
+  </knowledge>
+
+  <inputs>
+    <input>src/client/code-pages/DocumentRelationshipViewer/ (migrated code from task 051)</input>
+    <input>scripts/build-webresource.ps1 (or equivalent build script in DocumentRelationshipViewer)</input>
+  </inputs>
+
+  <steps>
+    <step order="1">Read code-page-deploy skill to confirm the two-step build and deploy procedure</step>
+    <step order="2">Run npm run build inside src/client/code-pages/DocumentRelationshipViewer/ and confirm it succeeds</step>
+    <step order="3">Run the build-webresource script to produce the single self-contained HTML file</step>
+    <step order="4">Deploy the HTML web resource to Dataverse dev (sprk_documentrelationshipviewer)</step>
+    <step order="5">Navigate to the DocumentRelationshipViewer in the Dataverse dev environment</step>
+    <step order="6">Verify grid renders with all expected columns</step>
+    <step order="7">Test column sorting: click each sortable column header and verify sort applies</step>
+    <step order="8">Test row selection: click rows and verify selection visual state</step>
+    <step order="9">Test row click: click a row and verify the expected action (entity dialog, navigation, etc.)</step>
+    <step order="10">Test dark mode: append ?theme=dark to URL and verify dark mode renders correctly with no hard-coded colors</step>
+    <step order="11">Test graph view: switch to graph view (if toggle exists) and verify graph renders without errors</step>
+    <step order="12">Check browser console for JavaScript errors during all operations</step>
+    <step order="13">Fix any regressions found (edit source → rebuild → redeploy → retest)</step>
+    <step order="14">Create notes/debug/docrelviewer-migration-test-results.md documenting test results</step>
+  </steps>
+
+  <tools>
+    <tool>Bash - npm run build inside DocumentRelationshipViewer directory</tool>
+    <tool>Bash - Run build-webresource.ps1 script (PowerShell)</tool>
+    <tool>Skill - code-page-deploy (for deployment procedure)</tool>
+    <tool>Edit - Fix any regressions in RelationshipGrid.tsx or related files</tool>
+    <tool>Write - Create notes/debug/docrelviewer-migration-test-results.md</tool>
+  </tools>
+
+  <outputs>
+    <output>Verified DocumentRelationshipViewer deployed to Dataverse dev with migrated grid</output>
+    <output>notes/debug/docrelviewer-migration-test-results.md — test results and any regressions found/fixed</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>npm run build and build-webresource script complete without errors</criterion>
+    <criterion>Web resource deployed successfully to Dataverse dev</criterion>
+    <criterion>Grid renders with all expected columns</criterion>
+    <criterion>Column sorting works correctly</criterion>
+    <criterion>Row selection works correctly</criterion>
+    <criterion>Row click triggers the expected action</criterion>
+    <criterion>Dark mode renders without hard-coded color artifacts</criterion>
+    <criterion>Graph view still renders correctly (no regression)</criterion>
+    <criterion>No JavaScript console errors during any operation</criterion>
+    <criterion>Test results documented in notes/debug/docrelviewer-migration-test-results.md</criterion>
+  </acceptance-criteria>
+</task>

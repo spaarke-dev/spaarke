@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-032" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create SearchResultsGraph — @xyflow/react v12 Canvas Setup</title>
+    <phase>4 — Grid &amp; Graph Views</phase>
+    <tags>code-page, graph</tags>
+    <status>pending</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>020, 023</dependencies>
+    <blocks>R3-033, R3-034, R3-035, R3-036</blocks>
+    <parallel-group>phase4-graph</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create SearchResultsGraph.tsx — the @xyflow/react v12 canvas container for the graph
+    clustering visualization. This task sets up the base canvas with custom node and edge types.
+    Actual node components (ClusterNode, RecordNode) are created in tasks 033-034. The layout
+    algorithm is in task 035.
+
+    Setup includes:
+    - ReactFlow canvas with useNodesState, useEdgesState
+    - Custom nodeTypes registration: { clusterNode: ClusterNode, recordNode: RecordNode }
+    - Custom edgeTypes registration: { clusterEdge: ClusterEdge }
+    - Background, Controls, MiniMap sub-components from @xyflow/react
+    - CSS import for @xyflow/react base styles
+    - Empty state when no results
+    - Node limit warning when results > 100 (graph limited to top 100)
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer with @xyflow/react v12 experience, referencing the
+    DocumentRelationshipViewer graph implementation.
+  </role>
+
+  <goal>
+    SearchResultsGraph renders a ReactFlow canvas with correct custom node/edge type registrations.
+    Background, controls, and minimap display correctly. Empty state shown when no results.
+    Graph canvas is ready for ClusterNode and RecordNode components (tasks 033-034).
+  </goal>
+
+  <constraints>
+    <constraint source="spec">Graph limited to top 100 results — show warning when results truncated</constraint>
+    <constraint source="spec">Background, Controls, MiniMap from @xyflow/react (matches DocRelViewer pattern)</constraint>
+    <constraint source="ADR-021">No hard-coded colors — Fluent v9 tokens for any overlay UI</constraint>
+    <constraint source="project">Use @xyflow/react v12 named export: import { ReactFlow } from "@xyflow/react"</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/components/DocumentGraph.tsx</file>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      DocumentRelationshipViewer/src/components/DocumentGraph.tsx is the primary reference.
+      It uses @xyflow/react v12 with custom DocumentNode and DocumentEdge types.
+
+      Key @xyflow/react v12 patterns:
+      - Import: import { ReactFlow, useNodesState, useEdgesState, Background, Controls, MiniMap } from "@xyflow/react"
+      - CSS: import "@xyflow/react/dist/style.css"
+      - nodeTypes must be defined outside the component to avoid re-registration on every render
+      - Node data type: Node&lt;ClusterNodeData&gt; | Node&lt;RecordNodeData&gt;
+
+      Props interface for SearchResultsGraph:
+      - nodes: Node[] (from useClusterLayout hook — task 035)
+      - edges: Edge[]
+      - onNodeClick: (nodeId: string, nodeType: "cluster" | "record") =&gt; void
+      - clusterBy: GraphClusterBy
+      - isLoading: boolean
+      - resultCount: number (to show warning when > 100)
+
+      For now (tasks 032), ClusterNode and RecordNode can be placeholder components.
+      Task 033-034 will implement the actual node renderers.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read DocumentRelationshipViewer graph">
+      Read DocumentRelationshipViewer/src/components/DocumentGraph.tsx carefully.
+      Note: ReactFlow setup, custom nodeTypes/edgeTypes, Background/Controls/MiniMap usage,
+      CSS import, and the useNodesState/useEdgesState pattern.
+    </step>
+    <step order="2" name="Create placeholder node components">
+      Create minimal placeholder ClusterNode.tsx and RecordNode.tsx that return a simple div.
+      These will be replaced by tasks 033-034. For now, just ensure the type registrations work.
+    </step>
+    <step order="3" name="Create SearchResultsGraph.tsx">
+      Create src/client/code-pages/SemanticSearch/src/components/SearchResultsGraph.tsx:
+      - Import ReactFlow, Background, Controls, MiniMap, useNodesState, useEdgesState
+      - Import "@xyflow/react/dist/style.css"
+      - Define nodeTypes const OUTSIDE component: { clusterNode: ClusterNode, recordNode: RecordNode }
+      - Define edgeTypes const OUTSIDE component: { clusterEdge: DefaultEdge }
+      - Sync nodes/edges props to useNodesState/useEdgesState on change
+      - Render: ReactFlow with fitView=true, nodeTypes, edgeTypes
+      - Add Background, Controls, MiniMap children
+      - Empty state: show text placeholder when nodes.length === 0 and !isLoading
+      - Truncation warning: show message banner when resultCount &gt; 100
+    </step>
+    <step order="4" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed. CSS import resolves correctly.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read DocRelViewer graph as reference</tool>
+    <tool name="Write">Create SearchResultsGraph.tsx and placeholder nodes</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/SearchResultsGraph.tsx</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/ClusterNode.tsx (placeholder)</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/RecordNode.tsx (placeholder)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">@xyflow/react CSS imported correctly</criterion>
+    <criterion testable="true">nodeTypes object defined outside component (no re-registration on render)</criterion>
+    <criterion testable="true">Background, Controls, MiniMap included as children of ReactFlow</criterion>
+    <criterion testable="true">Empty state message shown when nodes.length === 0</criterion>
+    <criterion testable="true">Warning message shown when resultCount &gt; 100</criterion>
+    <criterion testable="true">Uses @xyflow/react v12 named imports (not default import)</criterion>
+  </acceptance-criteria>
+</task>

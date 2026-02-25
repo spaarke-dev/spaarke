@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-003" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Investigate Universal DatasetGrid Headless Data Adapter</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>Claude Code</assigned>
+    <tags>investigation, spike, shared-library</tags>
+    <phase>1</phase>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Investigate whether the Universal DatasetGrid shared component (v2.0.7) can accept
+    search results from the BFF API as its data source instead of the normal FetchXML /
+    Dataverse WebAPI pathway. Read the UniversalDatasetGrid.tsx headlessConfig API,
+    GridView.tsx, VirtualizedGridView.tsx, and ViewService.ts to determine if there is
+    a supported headless/custom data adapter interface. Document the approach (or
+    limitations) so that Phase 4 task 030 knows exactly how to wire up grid view with
+    BFF search results.
+  </prompt>
+
+  <role>
+    You are a senior frontend engineer who understands the Universal DatasetGrid component
+    architecture and React component APIs. You can read TypeScript component source to
+    determine the exact props interface and data flow, and you can propose data adapter
+    patterns that bridge BFF API responses to the grid's expected format.
+  </role>
+
+  <goal>
+    A feasibility report at projects/ai-semantic-search-ui-r3/notes/spikes/grid-headless-adapter.md
+    that:
+    - Documents the headlessConfig prop API of UniversalDatasetGrid (exact TypeScript types)
+    - Confirms whether headlessConfig supports custom data sources (non-FetchXML)
+    - If YES: documents exactly how to pass BFF search results to the grid
+    - If NO: documents the fallback approach (custom Fluent UI v9 DataGrid or custom adapter)
+    - Provides a concrete TypeScript code snippet showing the adapter pattern
+    - Identifies any shared library changes needed (flag for ADR-012 compliance)
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-semantic-search-ui-r3/spec.md</file>
+    <file purpose="plan">projects/ai-semantic-search-ui-r3/plan.md</file>
+    <file purpose="project-context">projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">MUST import UniversalDatasetGrid from @spaarke/ui-components if headless data is supported. Only build a custom grid if UniversalDatasetGrid fundamentally cannot support headless data after thorough investigation.</constraint>
+    <constraint source="ADR-021">Any fallback grid implementation MUST use Fluent UI v9 DataGrid (not a third-party table library).</constraint>
+    <constraint source="spec.md FR-07">Grid requirements: sorting, selection, infinite scroll, 44px row height, domain-specific columns.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/UniversalDatasetGrid.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/GridView.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/VirtualizedGridView.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/ViewSelector.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts</file>
+      <file>docs/architecture/universal-dataset-grid-architecture.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern name="UniversalDatasetGrid headlessConfig" location="src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/UniversalDatasetGrid.tsx">
+        Read the full component props interface to find headlessConfig, dataSource,
+        or custom data adapter props. Document exact TypeScript types.
+      </pattern>
+      <pattern name="Grid Architecture" location="docs/architecture/universal-dataset-grid-architecture.md">
+        Read the architecture doc to understand the grid's data flow and extensibility points.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <!-- No dependencies — this investigation task can run in parallel with 002 and 004 -->
+    </dependencies>
+    <notes>
+      This is a SPIKE / INVESTIGATION task. Output is ONLY a markdown report — no code changes.
+
+      PARALLEL: This task can run in parallel with tasks 002 and 004.
+
+      The key question: UniversalDatasetGrid is designed for Dataverse FetchXML/WebAPI data.
+      The SemanticSearch code page needs to display search results from BFF API (not Dataverse
+      directly). Can the grid component accept custom data?
+
+      Investigation scenarios:
+      A) headlessConfig IS supported with custom data:
+         - Document the exact prop interface (data shape, column definitions, event handlers)
+         - Show how to map SemanticSearchResult[] to grid data format
+         - This is the PREFERRED outcome (ADR-012 compliance)
+
+      B) headlessConfig NOT supported but the grid accepts a data array directly:
+         - Document how to pass pre-fetched data (bypassing FetchXML)
+         - May require wrapping/adapter component
+
+      C) headlessConfig NOT supported and grid requires Dataverse WebAPI:
+         - FALLBACK: Use Fluent UI v9 DataGrid directly in SearchResultsGrid.tsx
+         - Document required DataGrid props for sorting, selection, virtual scroll
+         - This is the LAST RESORT (spec says prefer Universal DatasetGrid per ADR-012)
+
+      Also investigate: Does the grid support infinite scroll with a custom data provider?
+      The spec requires up to 1000 results via infinite scroll (NFR-03).
+
+      Also check: ViewSelector integration — does it work with headless/custom data?
+      (ViewSelector is used by saved searches feature in Phase 5)
+
+      Block on: Task 030 (Phase 4 grid integration) cannot start until this is answered.
+    </notes>
+  </context>
+
+  <steps>
+    <step order="1" name="Read UniversalDatasetGrid.tsx">
+      Read src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/UniversalDatasetGrid.tsx
+      in full. Document the complete props interface, focusing on:
+      - headlessConfig prop (if it exists)
+      - dataSource or data prop
+      - Any custom data provider interface
+      - Column definition types
+      - Event handlers (onRowClick, onSelectionChange, onSort)
+      - Pagination / infinite scroll props
+    </step>
+    <step order="2" name="Read GridView.tsx and VirtualizedGridView.tsx">
+      Read GridView.tsx and VirtualizedGridView.tsx to understand how data flows
+      into the grid internally. Are there any points where a custom data source
+      could be injected?
+    </step>
+    <step order="3" name="Read universal-dataset-grid-architecture.md">
+      Read docs/architecture/universal-dataset-grid-architecture.md to understand
+      the intended extensibility model. Look for any documentation of headless mode,
+      custom data adapters, or planned features.
+    </step>
+    <step order="4" name="Read ViewService.ts">
+      Read src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts
+      to understand how saved views/column configs are managed. Determine if ViewService
+      can work independently of the Dataverse FetchXML data pathway.
+    </step>
+    <step order="5" name="Assess headless data support">
+      Based on reading, determine which scenario applies (A, B, or C from notes above).
+      If headlessConfig prop exists, read its full TypeScript type definition.
+      Draft the TypeScript adapter code that would map BFF search results to the grid.
+    </step>
+    <step order="6" name="Assess infinite scroll capability">
+      Determine if the grid supports load-more / infinite scroll with custom data.
+      Document how to implement paginated loading (offset-based) for 1000+ results.
+    </step>
+    <step order="7" name="Write spike report">
+      Write the investigation report to:
+      projects/ai-semantic-search-ui-r3/notes/spikes/grid-headless-adapter.md
+      Include: Summary, headlessConfig API documentation (or absence), concrete TypeScript
+      code snippet for the adapter, infinite scroll approach, ViewSelector compatibility,
+      fallback plan (Fluent v9 DataGrid), recommendation for Task 030 implementer.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read component source files and architecture documentation</tool>
+    <tool name="Grep">Search for headlessConfig, dataSource, and adapter patterns in shared library</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/ai-semantic-search-ui-r3/notes/spikes/grid-headless-adapter.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Spike report exists at projects/ai-semantic-search-ui-r3/notes/spikes/grid-headless-adapter.md</criterion>
+    <criterion testable="true">Report documents the complete headlessConfig prop API (or clearly states it does not exist)</criterion>
+    <criterion testable="true">Report includes a concrete TypeScript code snippet showing how to pass BFF search results to the grid</criterion>
+    <criterion testable="true">Report documents infinite scroll / load-more capability with custom data</criterion>
+    <criterion testable="true">Report documents ViewSelector compatibility with headless/custom data</criterion>
+    <criterion testable="true">Report includes clear recommendation for Task 030: use headlessConfig / use adapter / fall back to Fluent v9 DataGrid</criterion>
+    <criterion testable="false">No code changes made — this is investigation only</criterion>
+  </acceptance-criteria>
+</task>

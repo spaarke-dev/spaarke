@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-031" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Define Domain-Specific Grid Column Configurations</title>
+    <phase>4 — Grid &amp; Graph Views</phase>
+    <tags>code-page, fluent-ui</tags>
+    <status>pending</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>030, 002</dependencies>
+    <blocks>R3-047</blocks>
+    <parallel-group>phase4-grid</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Define grid column configurations for all four search domains. Column definitions specify
+    which fields to display, their labels, widths, sort behavior, and custom cell renderers
+    (e.g., file icon + name, similarity percentage badge, currency formatting).
+
+    Column sets per domain (from spec.md Section 6.4):
+    - Documents: checkbox, Document (file icon + name), Similarity (%), Type, File Type, Parent Entity, Modified
+    - Matters: checkbox, Matter Name, Similarity, Matter Number, Matter Type, Practice Area, Organizations, Modified
+    - Projects: checkbox, Project Name, Similarity, Status, Parent Matter, Modified
+    - Invoices: checkbox, Invoice (number + vendor), Similarity, Amount (currency), Vendor, Parent Matter, Date
+
+    Also verify column field names against spike task 002 (records index coverage report).
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer familiar with data grid column configuration patterns
+    and Fluent UI v9 rendering.
+  </role>
+
+  <goal>
+    A domainColumns.ts file exports a getColumnsForDomain(domain: SearchDomain) function
+    returning the GridColumnDef[] for that domain. Custom cell renderers are implemented
+    for complex columns (similarity badge, file icon, currency). Column widths match spec.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">Column widths from spec.md Section 6.4</constraint>
+    <constraint source="spec">Similarity column shows percentage badge (0-100%)</constraint>
+    <constraint source="task-002">Field availability may be constrained by records index coverage — check spike report 002</constraint>
+    <constraint source="ADR-021">Custom cell renderers use Fluent v9 tokens for styling</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>projects/ai-semantic-search-ui-r3/notes/spikes/02-records-index-coverage.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Spike task 002 investigated which fields are available in the spaarke-records-index.
+      Read that spike report to verify each column field is actually available in the index.
+      If a field is missing, either omit the column or note it as "field TBD" with a comment.
+
+      Column definitions need to match the GridColumnDef type from types/index.ts plus any
+      additional renderer props required by UniversalDatasetGrid.
+
+      Custom renderers needed:
+      - Document column: DocumentRegular icon + name link
+      - Similarity column: colored badge (green/yellow/red based on score)
+      - Amount column: currency formatted string
+      - Organizations column: comma-joined array
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read spike reports">
+      Read notes/spikes/02-records-index-coverage.md to check which fields are available per domain.
+      Note any fields missing from the index that affect column definitions.
+    </step>
+    <step order="2" name="Define base column structure">
+      Create src/client/code-pages/SemanticSearch/src/config/domainColumns.ts:
+      - Define GridColumnDef for each column type needed
+      - Implement getColumnsForDomain(domain: SearchDomain): GridColumnDef[]
+    </step>
+    <step order="3" name="Implement Documents columns">
+      Document (file icon + name, link to recordUrl), Similarity (% badge), Type (documentType),
+      File Type (fileType), Parent Entity (parentEntityName), Modified (updatedAt formatted date).
+      Mark similarity and Modified as sortable.
+    </step>
+    <step order="4" name="Implement Matters columns">
+      Matter Name (link to recordUrl), Similarity (% badge), Matter Number (referenceNumber),
+      Matter Type, Practice Area, Organizations (comma-joined array), Modified (modifiedAt).
+      Mark all sortable columns.
+    </step>
+    <step order="5" name="Implement Projects columns">
+      Project Name (link), Similarity (% badge), Status, Parent Matter, Modified.
+    </step>
+    <step order="6" name="Implement Invoices columns">
+      Invoice (number + vendor in one cell), Similarity (% badge), Amount (currency formatted),
+      Vendor, Parent Matter, Date (createdAt formatted).
+    </step>
+    <step order="7" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spike reports for field availability</tool>
+    <tool name="Write">Create domainColumns.ts</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/config/domainColumns.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">getColumnsForDomain() returns correct columns for all 4 domains</criterion>
+    <criterion testable="true">Documents domain has 7 columns matching spec: Document, Similarity, Type, File Type, Parent Entity, Modified (+ checkbox)</criterion>
+    <criterion testable="true">Matters domain has 8 columns matching spec</criterion>
+    <criterion testable="true">Projects domain has 6 columns matching spec</criterion>
+    <criterion testable="true">Invoices domain has 7 columns matching spec</criterion>
+    <criterion testable="true">Fields not available in index (per spike report 002) are noted with comments</criterion>
+    <criterion testable="true">Similarity column formatter produces percentage display</criterion>
+  </acceptance-criteria>
+</task>

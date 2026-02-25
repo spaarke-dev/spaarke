@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-037" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create View Toggle Toolbar — Graph/Grid Toggle with Cluster-By Dropdown</title>
+    <phase>4 — Grid &amp; Graph Views</phase>
+    <tags>code-page, fluent-ui</tags>
+    <status>pending</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>030, 032</dependencies>
+    <blocks>R3-047</blocks>
+    <parallel-group>phase4-graph</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the view toggle toolbar component positioned below the command bar and above the
+    domain tabs. Contains:
+    - Graph/Grid toggle buttons (ToggleButton group)
+    - When Graph view active: cluster-by dropdown showing 5 clustering mode options
+    - The cluster-by dropdown is only visible when Graph mode is active
+
+    The toolbar also has the placeholder areas for SavedSearchSelector (task 041) and
+    the filter panel toggle button (handled by SearchFilterPane).
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer with Fluent UI v9 expertise.
+  </role>
+
+  <goal>
+    ViewToggleToolbar renders Graph/Grid toggle buttons. Switching to Graph shows the cluster-by
+    dropdown. Switching to Grid hides it. viewMode and clusterBy state are reported via callbacks.
+    The toolbar is properly positioned in App.tsx layout.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9 ToggleButton and Dropdown — no custom toggle implementations</constraint>
+    <constraint source="ADR-021">No hard-coded colors — tokens only</constraint>
+    <constraint source="spec">Cluster-by options: Matter Type, Practice Area, Document Type, Organization, Person/Contact</constraint>
+    <constraint source="spec">Cluster-by dropdown only visible when Graph view is active</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Layout from spec.md Section 6.1:
+      "[Saved Searches v]  [Graph] [Grid]  [Filter icon]"
+
+      The toolbar row sits below the command bar and above the domain tabs.
+      It contains: SavedSearchSelector (left), view toggle buttons (center/right), filter toggle.
+
+      This task creates the view toggle portion. SavedSearchSelector is task 041 — leave a
+      placeholder div for it.
+
+      Props interface:
+      - viewMode: ViewMode ("grid" | "graph")
+      - onViewModeChange: (mode: ViewMode) =&gt; void
+      - clusterBy: GraphClusterBy
+      - onClusterByChange: (clusterBy: GraphClusterBy) =&gt; void
+
+      Fluent v9 ToggleButton: use checked={viewMode === "graph"} pattern.
+      For the Graph/Grid toggle, use two ToggleButton components styled to look like a button group.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Define cluster-by options">
+      const CLUSTER_BY_OPTIONS: { value: GraphClusterBy; label: string }[] = [
+        { value: "MatterType", label: "Matter Type" },
+        { value: "PracticeArea", label: "Practice Area" },
+        { value: "DocumentType", label: "Document Type" },
+        { value: "Organization", label: "Organization" },
+        { value: "PersonContact", label: "Person/Contact" },
+      ]
+    </step>
+    <step order="2" name="Create ViewToggleToolbar.tsx">
+      Create src/client/code-pages/SemanticSearch/src/components/ViewToggleToolbar.tsx:
+      - Props: viewMode, onViewModeChange, clusterBy, onClusterByChange
+      - Layout: horizontal flex row with space-between
+      - Left: placeholder div with text "Saved Searches area" (replaced by task 041)
+      - Center-right: ToggleButton for Graph (GridRegular icon), ToggleButton for Grid (TableSimpleRegular icon)
+      - When viewMode === "graph": show Dropdown for clusterBy options
+      - When viewMode === "grid": hide clusterBy dropdown
+      - makeStyles for toolbar row height and layout
+    </step>
+    <step order="3" name="Connect to App.tsx">
+      Update App.tsx:
+      - Add viewMode state: useState&lt;ViewMode&gt;("grid")
+      - Add clusterBy state: useState&lt;GraphClusterBy&gt;("MatterType")
+      - Render ViewToggleToolbar in the toolbar row placeholder
+      - Pass state and handlers
+    </step>
+    <step order="4" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create ViewToggleToolbar.tsx</tool>
+    <tool name="Edit">Update App.tsx to include toolbar</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/ViewToggleToolbar.tsx</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/App.tsx (toolbar wired)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">Graph and Grid toggle buttons render in toolbar area</criterion>
+    <criterion testable="true">Cluster-by dropdown visible when viewMode is "graph"</criterion>
+    <criterion testable="true">Cluster-by dropdown hidden when viewMode is "grid"</criterion>
+    <criterion testable="true">Cluster-by dropdown shows all 5 options: Matter Type, Practice Area, Document Type, Organization, Person/Contact</criterion>
+    <criterion testable="true">onViewModeChange called on toggle button click</criterion>
+    <criterion testable="true">onClusterByChange called when cluster-by dropdown selection changes</criterion>
+    <criterion testable="true">No hard-coded colors — tokens only</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R3-060" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Unit Tests — Search Hooks</title>
+    <phase>7</phase>
+    <phase-name>Testing and Quality</phase-name>
+    <tags>testing, code-page</tags>
+    <estimate>5 hours</estimate>
+    <dependencies>028, 029, 035, 042, 044, 038</dependencies>
+    <parallel-group>phase7-unit-tests</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>
+      You are a senior frontend test engineer writing comprehensive unit tests for React hooks. You use React Testing Library and jest, mock external dependencies precisely, and ensure edge cases and error paths are covered to achieve 80%+ coverage.
+    </role>
+    <goal>
+      Write unit tests for all search hooks in the SemanticSearch code page: useSemanticSearch, useRecordSearch, useClusterLayout, useSavedSearches, useDocumentActions, and useFilterOptions. Achieve 80%+ branch and line coverage on each hook.
+    </goal>
+    <context>
+      The SemanticSearch code page is at:
+        src/client/code-pages/SemanticSearch/
+
+      Hooks to test (located in src/client/code-pages/SemanticSearch/src/hooks/):
+        - useSemanticSearch — manages document search state, executes API calls, handles pagination
+        - useRecordSearch — manages entity record search state, executes API calls, handles pagination
+        - useClusterLayout — computes d3-force cluster layout from search results
+        - useSavedSearches — CRUD operations for saved searches in sprk_gridconfiguration
+        - useDocumentActions — delete, email, reindex, open document actions
+        - useFilterOptions — fetches filter option lists from Dataverse metadata
+
+      Test framework: React Testing Library (@testing-library/react-hooks or renderHook from @testing-library/react), jest, jest-environment-jsdom.
+
+      Key test scenarios for each hook:
+        useSemanticSearch:
+          - Initial state (empty results, not loading)
+          - Execute search: fires API call with correct params, sets loading state
+          - Success: populates results, clears loading, sets totalCount
+          - Error 400: sets error state, clears loading
+          - Error 401/403: sets authError state
+          - Error 429 (rate limit): sets rateLimitError state
+          - Error 5xx: sets generic error state
+          - Load more (infinite scroll): appends results, does not clear existing
+          - Tab switch: clears results, re-executes with new domain
+          - Cancel previous search on new search execution
+
+        useRecordSearch:
+          - Same error path coverage as useSemanticSearch
+          - Record type filtering: entityTypes param passed correctly to API
+          - Pagination offset increments correctly on load more
+
+        useClusterLayout:
+          - Empty results: returns empty nodes/edges
+          - Results with common category field: groups into clusters
+          - Cluster node count correct
+          - D3-force simulation runs without error
+          - Category change: re-clusters same results
+
+        useSavedSearches:
+          - Load saved searches from sprk_gridconfiguration API
+          - Save new search: calls create API with correct payload
+          - Load saved search: populates search state from saved config
+          - Delete saved search: calls delete API, removes from list
+          - Error on load: sets error state
+
+        useDocumentActions:
+          - Delete: calls delete API, removes from results
+          - Email a link: opens email client with document URL
+          - Reindex: calls reindex API endpoint
+          - Open in web: calls Xrm.Navigation or window.open with document URL
+          - Multiple selection: actions applied to all selected documents
+
+        useFilterOptions:
+          - Fetches matter type options from Dataverse
+          - Fetches document type options from Dataverse
+          - Caches options (second call does not re-fetch)
+          - Error: sets error state, returns empty options
+
+      Mock strategy:
+        - Mock API service modules (SemanticSearchApiService, RecordSearchApiService)
+        - Mock fetch via jest.fn() or MSW (Mock Service Worker) if available
+        - Mock Xrm global for Dataverse navigation/action APIs
+        - Mock d3-force if needed to avoid JSDOM incompatibilities
+    </context>
+    <constraints>
+      - Test files go in src/client/code-pages/SemanticSearch/src/hooks/__tests__/ directory
+      - Use React Testing Library renderHook for all hook tests
+      - Do NOT test implementation details — test observable state changes
+      - Mock all HTTP calls — tests must not make real network requests
+      - Achieve 80%+ line and branch coverage on each hook
+      - All tests must pass in the existing jest configuration
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <inputs>
+    <input>src/client/code-pages/SemanticSearch/src/hooks/useSemanticSearch.ts</input>
+    <input>src/client/code-pages/SemanticSearch/src/hooks/useRecordSearch.ts</input>
+    <input>src/client/code-pages/SemanticSearch/src/hooks/useClusterLayout.ts</input>
+    <input>src/client/code-pages/SemanticSearch/src/hooks/useSavedSearches.ts</input>
+    <input>src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts</input>
+    <input>src/client/code-pages/SemanticSearch/src/hooks/useFilterOptions.ts</input>
+    <input>src/client/code-pages/SemanticSearch/package.json (jest config)</input>
+  </inputs>
+
+  <steps>
+    <step order="1">Read all six hook source files to understand their state shape and external dependencies</step>
+    <step order="2">Read package.json and jest.config (if separate) to understand test runner configuration</step>
+    <step order="3">Create src/client/code-pages/SemanticSearch/src/hooks/__tests__/ directory</step>
+    <step order="4">Write useSemanticSearch.test.ts covering all scenarios listed in context</step>
+    <step order="5">Write useRecordSearch.test.ts covering all scenarios listed in context</step>
+    <step order="6">Write useClusterLayout.test.ts covering all scenarios listed in context</step>
+    <step order="7">Write useSavedSearches.test.ts covering all scenarios listed in context</step>
+    <step order="8">Write useDocumentActions.test.ts covering all scenarios listed in context</step>
+    <step order="9">Write useFilterOptions.test.ts covering all scenarios listed in context</step>
+    <step order="10">Run jest from the SemanticSearch code page directory and fix any test failures</step>
+    <step order="11">Run jest with --coverage flag and verify 80%+ line and branch coverage per hook file</step>
+    <step order="12">Fix any coverage gaps by adding additional test cases</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Read hook source files and jest config</tool>
+    <tool>Write - Create test files in __tests__/hooks/</tool>
+    <tool>Bash - Run jest and jest --coverage inside SemanticSearch directory</tool>
+    <tool>Edit - Fix test files based on jest output</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/SemanticSearch/src/hooks/__tests__/useSemanticSearch.test.ts</output>
+    <output>src/client/code-pages/SemanticSearch/src/hooks/__tests__/useRecordSearch.test.ts</output>
+    <output>src/client/code-pages/SemanticSearch/src/hooks/__tests__/useClusterLayout.test.ts</output>
+    <output>src/client/code-pages/SemanticSearch/src/hooks/__tests__/useSavedSearches.test.ts</output>
+    <output>src/client/code-pages/SemanticSearch/src/hooks/__tests__/useDocumentActions.test.ts</output>
+    <output>src/client/code-pages/SemanticSearch/src/hooks/__tests__/useFilterOptions.test.ts</output>
+    <output>All tests passing, 80%+ coverage per hook</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All six hook test files created and located in __tests__/hooks/</criterion>
+    <criterion>All tests pass (jest exits with code 0)</criterion>
+    <criterion>80%+ line coverage on each hook file</criterion>
+    <criterion>80%+ branch coverage on each hook file</criterion>
+    <criterion>Error paths tested for 400, 401/403, 429, and 5xx status codes</criterion>
+    <criterion>No real HTTP requests made during tests (all mocked)</criterion>
+    <criterion>useClusterLayout tested with empty, single-cluster, and multi-cluster scenarios</criterion>
+    <criterion>useSavedSearches CRUD operations all tested</criterion>
+  </acceptance-criteria>
+</task>

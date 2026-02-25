@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-044" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create useDocumentActions Hook — Open, Delete, Email, Reindex Document Actions</title>
+    <phase>5 — Interactive Features</phase>
+    <tags>code-page, hooks</tags>
+    <status>pending</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>022, 023</dependencies>
+    <blocks>R3-047</blocks>
+    <parallel-group>phase5-features</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create useDocumentActions.ts — the hook implementing document-specific actions for the
+    command bar. These actions are only available when the Documents domain is active.
+
+    Actions:
+    1. Open in Web: GET /api/documents/{id}/open-links → extract webUrl → window.open
+    2. Open in Desktop: GET /api/documents/{id}/open-links → extract desktopUrl → window.open
+    3. Download: GET /api/documents/{id}/open-links → extract downloadUrl → window.open with download
+    4. Delete: confirm dialog → Dataverse WebAPI delete → refresh search results
+    5. Email a Link: compose mailto: with document link (webUrl from open-links)
+    6. Send to Index: POST /api/documents/{id}/analyze → triggers AI re-indexing
+  </prompt>
+
+  <role>
+    Senior TypeScript developer familiar with BFF API patterns, Dataverse WebAPI, and the
+    existing open-links/preview-url BFF API endpoints.
+  </role>
+
+  <goal>
+    useDocumentActions returns action handler functions ready for command bar wiring.
+    Open in Web/Desktop/Download open correct URLs. Delete shows confirmation and removes
+    the record. Email composes a mailto link. Send to Index calls the analyze endpoint.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">All document URL actions use GET /api/documents/{id}/open-links — do not construct SPE URLs directly</constraint>
+    <constraint source="spec">Delete: require confirmation dialog before Dataverse delete</constraint>
+    <constraint source="spec">Send to Index: POST /api/documents/{id}/analyze</constraint>
+    <constraint source="ADR-013">No direct Azure AI calls — only BFF API endpoints</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Documents/</file>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+      <file>src/client/code-pages/SemanticSearch/src/services/SemanticSearchApiService.ts</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The BFF API has existing document endpoints. Check the Api/Documents/ folder to find
+      the open-links and analyze endpoints. Use the same auth header pattern as SemanticSearchApiService.
+
+      Open-links response shape (example from existing implementations):
+      { webUrl: string; desktopUrl: string; downloadUrl: string; }
+
+      For delete confirmation: use window.confirm() as a simple fallback, or Fluent v9 Dialog.
+      Use window.confirm for simplicity in this task — a more polished dialog can be added later.
+
+      Email a Link: mailto:{recipient}?subject=Document Link&amp;body={webUrl}
+      Subject and body pre-populated but empty recipient (user fills in).
+
+      Hook return shape:
+      {
+        openInWeb: (documentId: string) =&gt; Promise&lt;void&gt;;
+        openInDesktop: (documentId: string) =&gt; Promise&lt;void&gt;;
+        download: (documentId: string) =&gt; Promise&lt;void&gt;;
+        deleteDocuments: (documentIds: string[], onSuccess: () =&gt; void) =&gt; Promise&lt;void&gt;;
+        emailLink: (documentId: string) =&gt; void;
+        sendToIndex: (documentIds: string[]) =&gt; Promise&lt;void&gt;;
+        isActing: boolean;
+        actionError: string | null;
+      }
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Discover open-links endpoint">
+      Read src/server/api/Sprk.Bff.Api/Api/Documents/ to find the exact endpoint path for
+      open-links and analyze. Note the HTTP method and response shape.
+    </step>
+    <step order="2" name="Create document URL helper">
+      Internal helper: getDocumentLinks(documentId): Promise&lt;{ webUrl, desktopUrl, downloadUrl }&gt;
+      Calls GET /api/documents/{id}/open-links with auth header.
+    </step>
+    <step order="3" name="Create useDocumentActions.ts">
+      Create src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts:
+      - openInWeb(id): getDocumentLinks(id) then window.open(webUrl, "_blank")
+      - openInDesktop(id): getDocumentLinks(id) then window.open(desktopUrl)
+      - download(id): getDocumentLinks(id) then window.open(downloadUrl)
+      - deleteDocuments(ids, onSuccess): window.confirm → if yes, Dataverse WebAPI DELETE for each id → onSuccess()
+      - emailLink(id): getDocumentLinks(id) then window.location.href = "mailto:?subject=...&amp;body=..."
+      - sendToIndex(ids): POST /api/documents/{id}/analyze for each id
+      - State: isActing, actionError
+    </step>
+    <step order="4" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read BFF API document endpoints</tool>
+    <tool name="Write">Create useDocumentActions.ts</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">openInWeb calls GET /api/documents/{id}/open-links and opens webUrl</criterion>
+    <criterion testable="true">deleteDocuments shows confirmation before making Dataverse delete call</criterion>
+    <criterion testable="true">emailLink opens mailto: with pre-populated subject and document URL in body</criterion>
+    <criterion testable="true">sendToIndex calls POST /api/documents/{id}/analyze for each ID</criterion>
+    <criterion testable="true">All API calls use Authorization header from MsalAuthProvider</criterion>
+    <criterion testable="true">isActing is true while any async action is in progress</criterion>
+  </acceptance-criteria>
+</task>

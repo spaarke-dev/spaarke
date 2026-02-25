@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-030" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create SearchResultsGrid — Grid View Using Universal DatasetGrid</title>
+    <phase>4 — Grid &amp; Graph Views</phase>
+    <tags>code-page, shared-library</tags>
+    <status>pending</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>003, 023</dependencies>
+    <blocks>R3-031, R3-037</blocks>
+    <parallel-group>phase4-grid</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create SearchResultsGrid.tsx — the grid view wrapper component using the Universal DatasetGrid
+    from @spaarke/ui-components. Feeds BFF API search results into the grid via a headless data
+    adapter (approach determined by spike task 003).
+
+    The grid must support:
+    - Domain-specific column configurations (defined in task 031)
+    - Sorting (ascending/descending on sortable columns)
+    - Row selection (checkboxes, multi-select)
+    - Infinite scroll (triggers loadMore() when user scrolls near bottom)
+    - 44px row height (standard Spaarke grid row)
+    - Loading overlay during search and loadMore operations
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer familiar with Universal DatasetGrid, @spaarke/ui-components,
+    and the headless data adapter pattern identified in spike task 003.
+  </role>
+
+  <goal>
+    SearchResultsGrid renders search results in a sortable, selectable grid. Infinite scroll
+    triggers loadMore() correctly. Loading states are shown. Domain-specific column configs
+    are applied. The component integrates with Universal DatasetGrid from shared library.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">MUST import UniversalDatasetGrid from @spaarke/ui-components — do not reimplement</constraint>
+    <constraint source="ADR-021">No hard-coded colors — tokens only</constraint>
+    <constraint source="spec">Row height: 44px (standard Spaarke grid)</constraint>
+    <constraint source="spec">Infinite scroll: trigger loadMore when user is within 200px of bottom</constraint>
+    <constraint source="spec">Selection: multi-select with checkboxes; report selectedIds to parent</constraint>
+    <constraint source="task-003">Use headless adapter approach identified in spike task 003 — check notes/spikes/03-grid-headless-adapter.md for implementation decision</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/</file>
+      <file>docs/architecture/universal-dataset-grid-architecture.md</file>
+      <file>projects/ai-semantic-search-ui-r3/notes/spikes/03-grid-headless-adapter.md</file>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Spike task 003 investigated whether UniversalDatasetGrid supports headless data (non-FetchXML).
+      Read the spike report (notes/spikes/03-grid-headless-adapter.md) first to determine the
+      correct integration approach. The spike will have identified either:
+      (a) headlessConfig prop exists and supports custom data sources directly, OR
+      (b) a data adapter wrapper component needs to be built.
+
+      Follow the approach documented in the spike report. If the spike found that a custom
+      Fluent DataGrid is needed as fallback, implement that instead.
+
+      Props interface for SearchResultsGrid:
+      - results: (DocumentSearchResult | RecordSearchResult)[]
+      - totalCount: number
+      - isLoading: boolean
+      - isLoadingMore: boolean
+      - hasMore: boolean
+      - activeDomain: SearchDomain
+      - columns: GridColumnDef[]
+      - onLoadMore: () =&gt; void
+      - onSelectionChange: (selectedIds: string[]) =&gt; void
+      - onSort: (columnKey: string, direction: "asc" | "desc") =&gt; void
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read spike report">
+      Read projects/ai-semantic-search-ui-r3/notes/spikes/03-grid-headless-adapter.md to
+      understand the integration approach determined by the spike investigation.
+    </step>
+    <step order="2" name="Read UniversalDatasetGrid API">
+      Read src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/ to understand
+      the component's props, headlessConfig API, and expected data format.
+    </step>
+    <step order="3" name="Create data adapter or mapper">
+      Based on spike findings, create a function or component that maps search results to the
+      format expected by UniversalDatasetGrid. This might be:
+      (a) A headlessConfig object passed to UniversalDatasetGrid, OR
+      (b) A custom Fluent DataGrid with manual column rendering
+    </step>
+    <step order="4" name="Create SearchResultsGrid.tsx">
+      Create src/client/code-pages/SemanticSearch/src/components/SearchResultsGrid.tsx:
+      - Implement the data adapter from step 3
+      - Wire infinite scroll via IntersectionObserver or scroll event on grid container
+      - Show loading skeleton/spinner overlay during loading
+      - Report selection changes via onSelectionChange callback
+      - Apply domain-specific columns (passed as props from task 031)
+    </step>
+    <step order="5" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spike report and UniversalDatasetGrid API</tool>
+    <tool name="Write">Create SearchResultsGrid.tsx and data adapter</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/SearchResultsGrid.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">Grid renders search results with domain-specific columns</criterion>
+    <criterion testable="true">Infinite scroll triggers onLoadMore when near bottom</criterion>
+    <criterion testable="true">Loading overlay shown when isLoading or isLoadingMore is true</criterion>
+    <criterion testable="true">Multi-row selection with checkboxes; onSelectionChange fires with selected IDs</criterion>
+    <criterion testable="true">Sorting triggers onSort callback with column key and direction</criterion>
+    <criterion testable="true">Uses UniversalDatasetGrid from @spaarke/ui-components (or documented fallback)</criterion>
+  </acceptance-criteria>
+</task>

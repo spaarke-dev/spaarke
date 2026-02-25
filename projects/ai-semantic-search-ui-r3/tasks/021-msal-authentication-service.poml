@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-021" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Copy and Configure MSAL Authentication Service</title>
+    <phase>3 — Code Page Core</phase>
+    <tags>code-page, auth</tags>
+    <status>pending</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>020</dependencies>
+    <blocks>R3-022</blocks>
+    <parallel-group>phase3-services</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Copy and adapt the MSAL authentication service from DocumentRelationshipViewer to the SemanticSearch
+    code page. The MSAL singleton pattern provides Bearer tokens for all BFF API calls.
+
+    Deliverables:
+    1. MsalAuthProvider.ts — Singleton MSAL instance managing token acquisition for BFF API scope.
+       Handles InteractionRequired errors via popup fallback.
+    2. msalConfig.ts — App registration configuration with correct client ID, authority, and scope.
+       Uses sessionStorage for cache (MUST NOT use localStorage per project constraints).
+  </prompt>
+
+  <role>
+    Senior TypeScript developer familiar with MSAL browser v3, Azure AD app registrations,
+    and the Spaarke MSAL singleton pattern used in code pages.
+  </role>
+
+  <goal>
+    MsalAuthProvider singleton is initialized, can acquire tokens silently for the BFF API scope
+    (api://{client-id}/user_impersonation), falls back to popup on InteractionRequired, and returns
+    a valid Authorization header string for use in fetch() calls.
+  </goal>
+
+  <constraints>
+    <constraint source="project">MUST use sessionStorage for MSAL cache — MUST NOT use localStorage</constraint>
+    <constraint source="constraints/auth.md">Use existing app registration — do not create a new one</constraint>
+    <constraint source="project">Singleton pattern: export a single MsalAuthProvider instance, not a class</constraint>
+    <constraint source="spec">BFF API scope: api://{client-id}/user_impersonation — verify exact scope from existing DocRelViewer config</constraint>
+    <constraint source="project">Handle InteractionRequiredAuthError with popup fallback (acquireTokenPopup)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/services/auth/MsalAuthProvider.ts</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/services/auth/msalConfig.ts</file>
+      <file>.claude/patterns/auth/msal-client.md</file>
+      <file>projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      DocumentRelationshipViewer already has a working MsalAuthProvider singleton. The SemanticSearch
+      code page needs the same pattern — copy the files and verify the config is correct for the
+      SemanticSearch scope. The BFF API scope is the same across all code pages (they all call the
+      same BFF API). Confirm the client-id and scope values match what DocumentRelationshipViewer uses.
+
+      The getAuthHeader() method should return a string like "Bearer eyJ..." suitable for setting
+      as the Authorization header in fetch requests.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read existing MSAL implementation">
+      Read DocumentRelationshipViewer/src/services/auth/MsalAuthProvider.ts and msalConfig.ts.
+      Note: client ID, tenant ID, scopes, cache config, and the acquireTokenSilent/acquireTokenPopup pattern.
+    </step>
+    <step order="2" name="Create auth directory">
+      Create directory: src/client/code-pages/SemanticSearch/src/services/auth/
+    </step>
+    <step order="3" name="Create msalConfig.ts">
+      Create src/client/code-pages/SemanticSearch/src/services/auth/msalConfig.ts.
+      Copy from DocumentRelationshipViewer — same app registration, same authority, same scope.
+      Cache location: sessionStorage (cacheLocation: "sessionStorage").
+      Verify scope value is correct for BFF API: api://{client-id}/user_impersonation.
+    </step>
+    <step order="4" name="Create MsalAuthProvider.ts">
+      Create src/client/code-pages/SemanticSearch/src/services/auth/MsalAuthProvider.ts.
+      Copy and adapt from DocumentRelationshipViewer pattern:
+      - Create PublicClientApplication singleton using msalConfig
+      - await msalInstance.initialize() before use
+      - getAuthHeader(): acquireTokenSilent first; on InteractionRequiredAuthError, fallback to acquireTokenPopup
+      - Return "Bearer " + accessToken string
+      - Export singleton instance (not class constructor)
+    </step>
+    <step order="5" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors. No TypeScript errors in auth files.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing MSAL implementation to copy</tool>
+    <tool name="Write">Create new auth service files</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/services/auth/msalConfig.ts</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/services/auth/MsalAuthProvider.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">msalConfig.ts uses cacheLocation: "sessionStorage" (not localStorage)</criterion>
+    <criterion testable="true">MsalAuthProvider is exported as singleton instance</criterion>
+    <criterion testable="true">getAuthHeader() attempts acquireTokenSilent before acquireTokenPopup</criterion>
+    <criterion testable="true">InteractionRequiredAuthError is caught and triggers popup fallback</criterion>
+    <criterion testable="true">Scope matches BFF API registration: api://{client-id}/user_impersonation</criterion>
+  </acceptance-criteria>
+</task>

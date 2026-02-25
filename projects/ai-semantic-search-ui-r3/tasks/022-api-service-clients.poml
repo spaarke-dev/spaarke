@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-022" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create BFF API Service Clients — SemanticSearchApiService and RecordSearchApiService</title>
+    <phase>3 — Code Page Core</phase>
+    <tags>code-page, api</tags>
+    <status>pending</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>021</dependencies>
+    <blocks>R3-028, R3-029</blocks>
+    <parallel-group>phase3-services</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create two BFF API client service classes for the SemanticSearch code page:
+
+    1. SemanticSearchApiService.ts — client for POST /api/ai/search (document search with scope=all).
+       Adapted from the existing PCF SemanticSearchControl service to remove PCF-specific dependencies
+       and use the MsalAuthProvider for Bearer tokens.
+
+    2. RecordSearchApiService.ts — client for POST /api/ai/search/records (entity records search).
+       New service following the same pattern as SemanticSearchApiService.
+
+    Both services handle structured error responses (400/401/403/429/5xx) and return typed results.
+  </prompt>
+
+  <role>
+    Senior TypeScript developer familiar with fetch API patterns, MSAL token acquisition,
+    and the Spaarke BFF API contracts.
+  </role>
+
+  <goal>
+    Both API service classes are implemented and return correctly typed results. Error responses
+    (4xx/5xx) throw typed errors with useful messages. Both services use MsalAuthProvider.getAuthHeader()
+    for authentication.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-013">MUST NOT call Azure AI services directly — all AI calls go through BFF API</constraint>
+    <constraint source="spec">SemanticSearchApiService: POST /api/ai/search with scope=all body parameter</constraint>
+    <constraint source="spec">RecordSearchApiService: POST /api/ai/search/records with recordTypes array</constraint>
+    <constraint source="spec">Handle 400 (bad request), 401 (auth), 403 (forbidden), 429 (rate limit), 5xx (server error)</constraint>
+    <constraint source="project">Base URL from environment: BFF API base URL — reference from existing services or config</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/SemanticSearchApiService.ts</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/services/auth/MsalAuthProvider.ts</file>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The PCF SemanticSearchControl has a working SemanticSearchApiService.ts but it depends on
+      PCF's ComponentFramework context for base URL configuration. The Code Page version must
+      remove that dependency and instead use a hard-coded or config-based BFF API base URL.
+
+      BFF API base URL (dev): https://spe-api-dev-67e2xz.azurewebsites.net
+
+      API contracts from spec.md Section 7:
+      - POST /api/ai/search: { query, scope, filters, options } → { results[], totalCount, searchTime }
+      - POST /api/ai/search/records: { query, recordTypes, filters, options } → { results[], totalCount, searchTime }
+
+      RecordSearchApiService is entirely new — no PCF equivalent exists.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read existing API service">
+      Read PCF SemanticSearchControl/services/SemanticSearchApiService.ts to understand the pattern.
+      Note request/response shapes, error handling, and authentication approach.
+    </step>
+    <step order="2" name="Create service base pattern">
+      Create src/client/code-pages/SemanticSearch/src/services/apiBase.ts (or inline in each service):
+      - BFF API base URL constant (dev: https://spe-api-dev-67e2xz.azurewebsites.net)
+      - Helper: buildAuthHeaders() using MsalAuthProvider.getAuthHeader()
+      - Helper: handleApiError(response) — throws typed ApiError for 4xx/5xx
+    </step>
+    <step order="3" name="Create SemanticSearchApiService.ts">
+      Create src/client/code-pages/SemanticSearch/src/services/SemanticSearchApiService.ts.
+      Adapt from PCF version — remove PCF context dependency:
+      - Method: search(request: DocumentSearchRequest): Promise&lt;DocumentSearchResponse&gt;
+      - POST /api/ai/search with Authorization header from MsalAuthProvider
+      - Body: { query, scope: "all", filters, options: { limit, offset, hybridMode } }
+      - Response mapped to DocumentSearchResponse type (from types/index.ts)
+      - Error handling: throw ApiError with status code and message
+    </step>
+    <step order="4" name="Create RecordSearchApiService.ts">
+      Create src/client/code-pages/SemanticSearch/src/services/RecordSearchApiService.ts.
+      New service following the same pattern:
+      - Method: search(request: RecordSearchRequest): Promise&lt;RecordSearchResponse&gt;
+      - POST /api/ai/search/records with Authorization header
+      - Body: { query, recordTypes, filters, options: { limit, offset, hybridMode } }
+      - Response mapped to RecordSearchResponse type
+      - Same error handling pattern as SemanticSearchApiService
+    </step>
+    <step order="5" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed. No TypeScript type errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read PCF service implementation as reference</tool>
+    <tool name="Write">Create new service files</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/services/SemanticSearchApiService.ts</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/services/RecordSearchApiService.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">SemanticSearchApiService.search() calls POST /api/ai/search with scope=all</criterion>
+    <criterion testable="true">RecordSearchApiService.search() calls POST /api/ai/search/records</criterion>
+    <criterion testable="true">Both services add Authorization: Bearer header from MsalAuthProvider</criterion>
+    <criterion testable="true">400/401/403/429/5xx responses throw typed errors with status code</criterion>
+    <criterion testable="true">No direct Azure AI or Azure OpenAI calls — only BFF API URLs</criterion>
+  </acceptance-criteria>
+</task>

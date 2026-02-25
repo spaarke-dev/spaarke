@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-013" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create RecordSearchService for spaarke-records-index</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>Claude Code</assigned>
+    <tags>bff-api, api, ai</tags>
+    <phase>2</phase>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Create the RecordSearchService that queries the spaarke-records-index Azure AI Search
+    index to return Matters, Projects, and Invoices based on natural language queries.
+    Follow the SemanticSearchService pattern: generate embeddings via IOpenAiClient,
+    build OData filters for recordType, execute hybrid search against the records index,
+    and map results to RecordSearchResponse. Register the service in DI using the existing
+    feature module pattern. Use Redis caching (ADR-009) with tenant-scoped keys (ADR-014).
+    Consume the RecordSearchRequest/RecordSearchResponse models from Task 012.
+  </prompt>
+
+  <role>
+    You are a senior .NET 8 backend developer who specialises in Azure AI Search, AI
+    embedding pipelines, and the Spaarke BFF API service patterns. You understand the
+    SemanticSearchService implementation in detail and can create a parallel service for
+    the records index following the same architecture.
+  </role>
+
+  <goal>
+    A fully implemented RecordSearchService class (and interface IRecordSearchService)
+    in src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/ that:
+    - Accepts RecordSearchRequest and returns RecordSearchResponse
+    - Queries spaarke-records-index using hybrid search (vector + keyword)
+    - Filters by recordType field for the specified RecordTypes
+    - Generates embeddings for the query via IOpenAiClient
+    - Applies optional filters (organizations, people, referenceNumbers)
+    - Uses Redis caching with tenant-scoped, versioned cache keys
+    - Maps Azure AI Search results to RecordSearchResult[]
+    - Is registered in DI following the existing feature module pattern
+    - Passes all unit tests
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-semantic-search-ui-r3/spec.md</file>
+    <file purpose="plan">projects/ai-semantic-search-ui-r3/plan.md</file>
+    <file purpose="project-context">projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    <file purpose="reference-service">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs</file>
+    <file purpose="reference-interface">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/ISemanticSearchService.cs</file>
+    <file purpose="reference-filter-builder">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs</file>
+    <file purpose="reference-extensions">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchExtensions.cs</file>
+    <file purpose="ai-architecture">docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+    <file purpose="spike-results">projects/ai-semantic-search-ui-r3/notes/spikes/records-index-coverage.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-009">Redis-first caching with IDistributedCache. Cache key must be tenant-scoped. Do NOT add hybrid L1 memory cache unless profiling proves need.</constraint>
+    <constraint source="ADR-010">DI minimalism: ≤15 non-framework registrations total. Add only IRecordSearchService → RecordSearchService. Do not register auxiliary classes separately if they can be instantiated inline.</constraint>
+    <constraint source="ADR-013">Do NOT call Azure AI Search or Azure OpenAI directly — use existing IOpenAiClient and SearchClient abstractions. Extend BFF; do not create a separate service.</constraint>
+    <constraint source="ADR-014">Cache keys must be tenant-scoped and versioned (e.g., "records-search:{tenantId}:{queryHash}:v1"). Follow the key pattern from existing AI caching.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/ISemanticSearchService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchExtensions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/IQueryPreprocessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/IResultPostprocessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchResponse.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchResult.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchMetadata.cs</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>projects/ai-semantic-search-ui-r3/notes/spikes/records-index-coverage.md</file>
+    </files>
+    <patterns>
+      <pattern name="SemanticSearchService pipeline" location="src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs">
+        The complete search pipeline to replicate:
+        1. Validate request
+        2. Check Redis cache (return cached if hit)
+        3. Preprocess query (IQueryPreprocessor)
+        4. Generate embeddings (IOpenAiClient)
+        5. Build OData filters (SearchFilterBuilder)
+        6. Execute hybrid search (SearchClient against index)
+        7. Map results to response model
+        8. Postprocess results (IResultPostprocessor)
+        9. Cache results (Redis, tenant-scoped key)
+        10. Return response
+        Apply same pipeline for RecordSearchService against spaarke-records-index.
+      </pattern>
+      <pattern name="Feature module DI registration" location="src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchExtensions.cs">
+        DI registration follows the extension method pattern in SemanticSearchExtensions.cs.
+        Create RecordSearchExtensions.cs with AddRecordSearch() extension method.
+        Register IRecordSearchService → RecordSearchService with appropriate lifetime.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <dependency task="R3-012" status="not-started">Models (RecordSearchRequest, RecordSearchResponse, etc.) must be created first</dependency>
+    </dependencies>
+    <notes>
+      IMPORTANT: Read the spike report from Task 002 (records-index-coverage.md) BEFORE
+      implementing the result mapping. The spike report documents which fields are available
+      in spaarke-records-index and how they map to RecordSearchResult fields.
+
+      If Task 002 report is not yet complete, make reasonable assumptions based on:
+      - The spec's RecordSearchResult model (recordId, recordType, recordName, etc.)
+      - The Azure AI Search index naming convention (camelCase field names)
+      - Document assumptions clearly in code comments for later verification.
+
+      Index name: "spaarke-records-index" (not "knowledge-index" — different index)
+      The existing SearchClient may be configured for "knowledge-index". Check if there is
+      already a SearchClient configured for "spaarke-records-index" or if a second
+      SearchClient instance needs to be configured.
+
+      RecordType filter — OData filter for recordType field:
+      When RecordTypes = ["sprk_matter", "sprk_project"]:
+      → search.in(recordType, 'sprk_matter,sprk_project', ',')
+
+      Organizations/People/ReferenceNumbers filters:
+      These are array fields in the index (or separate string fields).
+      Check the spike report for field types. If array fields, use Azure AI Search
+      "any()" lambda syntax: organizations/any(o: o eq 'Acme Corp')
+
+      Hybrid search mode:
+      - "rrf" = Reciprocal Rank Fusion (vector + keyword combined)
+      - "vectorOnly" = semantic vector search only
+      - "keywordOnly" = BM25 keyword only
+      Map these to Azure.Search.Documents SearchOptions accordingly.
+
+      Create files:
+      - src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/IRecordSearchService.cs
+      - src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/RecordSearchService.cs
+      - src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/RecordSearchExtensions.cs
+      Call AddRecordSearch() from the main service registration (follow existing pattern).
+    </notes>
+  </context>
+
+  <steps>
+    <step order="1" name="Read SemanticSearchService and related files">
+      Read SemanticSearchService.cs, ISemanticSearchService.cs, SearchFilterBuilder.cs,
+      and SemanticSearchExtensions.cs in full to understand the complete implementation
+      pattern before writing any code.
+    </step>
+    <step order="2" name="Read spike report">
+      Read projects/ai-semantic-search-ui-r3/notes/spikes/records-index-coverage.md
+      to understand the spaarke-records-index field schema. If not available,
+      proceed with spec.md schema and document assumptions.
+    </step>
+    <step order="3" name="Read AI architecture documentation">
+      Read docs/guides/SPAARKE-AI-ARCHITECTURE.md for the AI pipeline architecture,
+      specifically how IOpenAiClient, SearchClient, and IDistributedCache are used.
+    </step>
+    <step order="4" name="Create Services/Ai/RecordSearch/ directory">
+      Create the directory by writing the first file (IRecordSearchService.cs).
+    </step>
+    <step order="5" name="Create IRecordSearchService.cs">
+      Define the interface:
+        Task&lt;RecordSearchResponse&gt; SearchAsync(RecordSearchRequest request, CancellationToken ct);
+      Follow the ISemanticSearchService.cs interface pattern exactly.
+    </step>
+    <step order="6" name="Create RecordSearchService.cs">
+      Implement RecordSearchService following the SemanticSearchService pipeline:
+      1. Validate request (query not empty, recordTypes not empty)
+      2. Generate cache key (tenant-scoped, query + recordTypes + filters hash)
+      3. Check Redis cache (IDistributedCache)
+      4. Generate embedding via IOpenAiClient
+      5. Build OData filter for recordType IN request.RecordTypes
+      6. Build optional filters: organizations, people, referenceNumbers
+      7. Configure SearchOptions for hybrid/vector/keyword mode
+      8. Execute search against spaarke-records-index
+      9. Map Azure Search results to RecordSearchResult[]
+      10. Populate RecordSearchMetadata (totalCount, searchTime, hybridMode)
+      11. Cache response in Redis with versioned key
+      12. Return RecordSearchResponse
+    </step>
+    <step order="7" name="Create RecordSearchExtensions.cs">
+      Create DI extension method:
+        public static IServiceCollection AddRecordSearch(this IServiceCollection services)
+      Register IRecordSearchService → RecordSearchService.
+      Call this from the main API service registration.
+    </step>
+    <step order="8" name="Register in main API startup">
+      Find where AddSemanticSearch() is called in program startup.
+      Add AddRecordSearch() call in the same location.
+    </step>
+    <step order="9" name="Build and verify">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Fix all compilation errors. No new warnings.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build API to verify compilation</tool>
+    <tool name="Read">Read reference implementations and spike report</tool>
+    <tool name="Grep">Search for SearchClient and IOpenAiClient usage patterns</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/IRecordSearchService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/RecordSearchService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/RecordSearchExtensions.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">IRecordSearchService interface defines SearchAsync(RecordSearchRequest, CancellationToken) method</criterion>
+    <criterion testable="true">RecordSearchService implements IRecordSearchService</criterion>
+    <criterion testable="true">Service generates embeddings via IOpenAiClient (not hard-coded vectors)</criterion>
+    <criterion testable="true">Service queries spaarke-records-index (not knowledge-index)</criterion>
+    <criterion testable="true">OData filter includes recordType IN [requested types] condition</criterion>
+    <criterion testable="true">Redis caching applied with tenant-scoped, versioned cache key</criterion>
+    <criterion testable="true">RecordSearchResponse returned with Results[] and Metadata populated</criterion>
+    <criterion testable="true">RecordSearchExtensions.cs registers IRecordSearchService in DI</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ succeeds with no errors</criterion>
+    <criterion testable="true">DI registration count does not push total beyond ≤15 non-framework registrations (ADR-010)</criterion>
+  </acceptance-criteria>
+</task>

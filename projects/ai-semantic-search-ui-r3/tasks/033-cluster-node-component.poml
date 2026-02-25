@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-033" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create ClusterNode — Cluster Visualization Node for ReactFlow</title>
+    <phase>4 — Grid &amp; Graph Views</phase>
+    <tags>code-page, graph, fluent-ui</tags>
+    <status>pending</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>032, 023</dependencies>
+    <blocks>R3-036</blocks>
+    <parallel-group>phase4-graph-nodes</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create ClusterNode.tsx — the ReactFlow custom node component for cluster visualization.
+    Replaces the placeholder from task 032.
+
+    A cluster node represents a group of search results sharing the same category value
+    (e.g., "Litigation" as Matter Type). It displays:
+    - Category icon + label (cluster name)
+    - Record count
+    - Average similarity bar (colored progress bar)
+    - Top 3 results preview (truncated names)
+    - Node size is proportional to record count
+    - Color-coded by cluster category value using Fluent UI v9 palette (dark-mode safe)
+    - Click handler for drill-down expand (calls onClusterExpand with cluster ID)
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer with @xyflow/react v12 custom node experience
+    and Fluent UI v9 design token expertise.
+  </role>
+
+  <goal>
+    ClusterNode renders within a ReactFlow canvas. Size is proportional to record count.
+    Color is derived from cluster category using Fluent v9 tokens. Average similarity bar
+    displays correctly. Click triggers expand/drill-down. Dark mode renders correctly.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Color MUST use Fluent v9 design tokens — no hex/rgb/named colors</constraint>
+    <constraint source="ADR-021">Use makeStyles with Griffel for custom styles</constraint>
+    <constraint source="spec">Node size proportional to record count (cluster with more records = larger node)</constraint>
+    <constraint source="spec">Color-coded by cluster category value — use Fluent v9 semantic color tokens</constraint>
+    <constraint source="spec">Show top 3 results preview (truncated to ~30 chars each)</constraint>
+    <constraint source="project">ReactFlow custom node: receive data via NodeProps&lt;ClusterNodeData&gt; from @xyflow/react</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/components/DocumentNode.tsx</file>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      DocumentRelationshipViewer/src/components/DocumentNode.tsx is the reference for ReactFlow
+      custom node implementation pattern — NodeProps interface, Handle placement, makeStyles.
+
+      ClusterNodeData interface (extends ClusterNode from types/index.ts):
+      - clusterKey: string (category value, e.g., "Litigation")
+      - clusterLabel: string (display name)
+      - recordCount: number
+      - avgSimilarity: number (0-100)
+      - topResults: { name: string }[]
+      - category: GraphClusterBy
+      - isExpanded: boolean
+      - onExpand: () =&gt; void
+
+      Color palette strategy: Fluent v9 has colorBrandBackground, colorPaletteBerryBackground,
+      colorPaletteGoldBackground, colorPaletteTealBackground, etc. Map cluster index modulo
+      the available palette colors. This ensures dark-mode compatibility via token inheritance.
+
+      Node sizing: use CSS width/minHeight computed from recordCount:
+      const nodeSize = Math.max(120, Math.min(200, 80 + recordCount * 4)) + "px";
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read DocumentNode reference">
+      Read DocumentRelationshipViewer/src/components/DocumentNode.tsx for the NodeProps pattern,
+      Handle placement, and makeStyles usage in a ReactFlow custom node.
+    </step>
+    <step order="2" name="Define ClusterNodeData interface">
+      In types/index.ts (or locally): define ClusterNodeData with all required display fields.
+      Extend or reference ClusterNode type from types/index.ts.
+    </step>
+    <step order="3" name="Create ClusterNode.tsx">
+      Create src/client/code-pages/SemanticSearch/src/components/ClusterNode.tsx:
+      - Props: NodeProps&lt;ClusterNodeData&gt; from @xyflow/react
+      - Node size computed from data.recordCount (min 120px, max 200px)
+      - Color computed from category index (Fluent v9 palette tokens)
+      - Render: icon + label (top), record count (middle), similarity bar (colored ProgressBar),
+        top 3 result names (truncated, bottom)
+      - Fluent v9 ProgressBar for similarity (0-100 value prop)
+      - onClick calls data.onExpand
+      - Handles: Source and Target handles from @xyflow/react (position: Position.Bottom, Top)
+      - makeStyles for all styling — no inline styles except dynamic size
+    </step>
+    <step order="4" name="Update SearchResultsGraph.tsx">
+      Replace placeholder ClusterNode import with the real implementation.
+      Verify nodeTypes registration still works.
+    </step>
+    <step order="5" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read DocumentNode.tsx as reference for ReactFlow custom node pattern</tool>
+    <tool name="Write">Create ClusterNode.tsx</tool>
+    <tool name="Edit">Update SearchResultsGraph.tsx to use real ClusterNode</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/ClusterNode.tsx</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/SearchResultsGraph.tsx (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">ClusterNode uses NodeProps&lt;ClusterNodeData&gt; from @xyflow/react</criterion>
+    <criterion testable="true">Node width/height computed from recordCount — larger clusters are larger nodes</criterion>
+    <criterion testable="true">Color derived from Fluent v9 palette tokens — no hex/rgb hard-coding</criterion>
+    <criterion testable="true">Average similarity bar displays using Fluent v9 ProgressBar</criterion>
+    <criterion testable="true">Top 3 result names shown truncated in node body</criterion>
+    <criterion testable="true">onClick calls data.onExpand for drill-down</criterion>
+  </acceptance-criteria>
+</task>

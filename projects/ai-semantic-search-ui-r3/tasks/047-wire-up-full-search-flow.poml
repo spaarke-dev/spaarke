@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-047" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Wire Up Full Search Flow — End-to-End Integration in App.tsx</title>
+    <phase>5 — Interactive Features</phase>
+    <tags>code-page, integration</tags>
+    <status>pending</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>024, 025, 026, 027, 028, 029, 030, 031, 032, 033, 034, 035, 036, 037, 038, 040, 041, 042, 043, 044, 045, 046</dependencies>
+    <blocks>none</blocks>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Wire up the complete end-to-end search flow in App.tsx, connecting all components and hooks
+    created in Phases 3-5 into a working, integrated application.
+
+    Integration points to wire:
+    1. SearchFilterPane → domain tabs → search hooks → grid/graph views
+    2. Command bar → selection state → document actions
+    3. Saved search selector → filter state restoration
+    4. URL params → initial state
+    5. ViewToggle → switch between SearchResultsGrid and SearchResultsGraph
+    6. Domain tabs → route to correct search hook (useSemanticSearch vs useRecordSearch)
+    7. FilterOptions hook → SearchFilterPane filter dropdowns
+    8. StatusBar ← totalCount and searchTime from active search hook
+
+    This is the integration task — all components exist; this task connects them.
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer familiar with complex state orchestration
+    and the full SemanticSearch component architecture.
+  </role>
+
+  <goal>
+    The Semantic Search code page functions end-to-end: user can type a query, select domain tab,
+    apply filters, click Search, see results in grid or graph, switch views, open records,
+    save searches, and execute command bar actions. All components communicate through shared state
+    in App.tsx. Dark mode works. Build succeeds.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">State lifted to App.tsx — all shared state at App level to avoid prop drilling issues</constraint>
+    <constraint source="spec">Active search hook determined by activeDomain: Documents → useSemanticSearch; others → useRecordSearch</constraint>
+    <constraint source="spec">Selection state cleared on new search (selectedIds reset to [])</constraint>
+    <constraint source="spec">Query text preserved across domain tab switches (FR-12)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+      <file>src/client/code-pages/SemanticSearch/src/App.tsx</file>
+      <file>src/client/code-pages/SemanticSearch/src/hooks/useSemanticSearch.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/hooks/useRecordSearch.ts</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      App.tsx currently has placeholder areas and dummy handlers. This task replaces all
+      placeholders with real wired components and connects all state.
+
+      Complete App.tsx state inventory:
+      - activeDomain: SearchDomain (default "Documents")
+      - viewMode: ViewMode (default "grid")
+      - clusterBy: GraphClusterBy (default "MatterType")
+      - query: string (search query, preserved across domain switches)
+      - filters: SearchFilters (domain-specific, reset on domain switch? TBD per spec)
+      - selectedIds: string[] (selected grid rows, cleared on new search)
+      - currentSavedSearch: SavedSearch | null
+
+      Hook instances at App level:
+      - useSemanticSearch() — for Documents domain
+      - useRecordSearch() — for Matters, Projects, Invoices domains
+      - useFilterOptions() — provides options for dropdowns
+      - useSavedSearches() — CRUD for personal saved searches
+      - useDocumentActions() — document-specific command bar actions
+
+      Active results derived: activeDomain === "Documents" ? documentSearch.results : recordSearch.results
+      Active totalCount: activeDomain === "Documents" ? documentSearch.totalCount : recordSearch.totalCount
+      Active searchTime: same pattern
+
+      handleSearch(query, filters): route to correct hook based on activeDomain.
+      handleDomainChange(domain): set activeDomain; reset selectedIds; re-search with current query.
+      handleLoadMore(): call correct hook's loadMore() based on activeDomain.
+
+      Saved search restoration: when savedSearch selected → set query, activeDomain, filters, viewMode,
+      clusterBy from the SavedSearch object, then trigger search.
+
+      Command bar wiring:
+      - onDelete: documentActions.deleteDocuments(selectedIds, () =&gt; handleSearch(query, filters))
+      - onRefresh: handleSearch(query, filters)
+      - onEmailLink: documentActions.emailLink(selectedIds[0])
+      - onOpenInWeb: documentActions.openInWeb(selectedIds[0])
+      - onOpenInDesktop: documentActions.openInDesktop(selectedIds[0])
+      - onDownload: documentActions.download(selectedIds[0])
+      - onSendToIndex: documentActions.sendToIndex(selectedIds)
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Audit current App.tsx placeholders">
+      Read App.tsx to catalog all existing placeholder areas and dummy handlers.
+      Create a checklist of all wiring points to complete.
+    </step>
+    <step order="2" name="Wire search hooks at App level">
+      Instantiate useSemanticSearch and useRecordSearch at App component root.
+      Create handleSearch(query, filters) dispatcher that calls correct hook.
+      Derive activeResults, activeTotalCount, activeSearchTime from activeDomain.
+    </step>
+    <step order="3" name="Wire SearchFilterPane">
+      Pass real onSearch handler, filterOptions, and filters state.
+      Ensure filters reset correctly on domain change.
+    </step>
+    <step order="4" name="Wire SearchDomainTabs">
+      Pass activeDomain, onDomainChange handler, and onSearch.
+      handleDomainChange: setActiveDomain + clearSelection + re-search.
+    </step>
+    <step order="5" name="Wire ViewToggleToolbar">
+      Pass viewMode, onViewModeChange, clusterBy, onClusterByChange.
+      Wire SavedSearchSelector: pass savedSearches, onSelectSavedSearch (restores state), onSaveCurrentSearch.
+    </step>
+    <step order="6" name="Wire results display">
+      Conditional render: viewMode === "grid" ? SearchResultsGrid : SearchResultsGraph.
+      Pass activeResults, columns (from getColumnsForDomain), loading states, onLoadMore, onSelectionChange.
+      For graph: pass useClusterLayout result (nodes, edges), clusterBy, onNodeClick.
+    </step>
+    <step order="7" name="Wire command bar">
+      Pass selectedIds, activeDomain, and all action handlers from useDocumentActions.
+    </step>
+    <step order="8" name="Wire StatusBar and URL params">
+      Pass activeTotalCount, activeSearchTime to StatusBar.
+      Verify URL param auto-search useEffect correctly triggers handleSearch.
+    </step>
+    <step order="9" name="Wire EntityRecordDialog">
+      Wire openEntityRecord into RecordNode onOpenRecord and grid row click handler.
+    </step>
+    <step order="10" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+      If any TypeScript errors: fix them — do not suppress with any-casting.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read current App.tsx to understand placeholder state</tool>
+    <tool name="Edit">Update App.tsx with all wiring</tool>
+    <tool name="Bash">npm run build to verify end-to-end</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/App.tsx (fully wired)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 TypeScript errors</criterion>
+    <criterion testable="true">Searching Documents domain calls useSemanticSearch hook</criterion>
+    <criterion testable="true">Searching Matters/Projects/Invoices domains calls useRecordSearch hook</criterion>
+    <criterion testable="true">Query text preserved when switching domain tabs</criterion>
+    <criterion testable="true">selectedIds cleared when new search executes</criterion>
+    <criterion testable="true">viewMode toggle switches between SearchResultsGrid and SearchResultsGraph</criterion>
+    <criterion testable="true">Selecting saved search restores query, filters, domain, viewMode, and clusterBy</criterion>
+    <criterion testable="true">Command bar Delete calls deleteDocuments and refreshes results on success</criterion>
+    <criterion testable="true">StatusBar shows totalCount and searchTime from active search hook</criterion>
+    <criterion testable="true">URL params auto-search executes on page load when query param present</criterion>
+  </acceptance-criteria>
+</task>

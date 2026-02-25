@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-016" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Integration Tests for Enhanced Document Search and Records Search Endpoints</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>Claude Code</assigned>
+    <tags>testing, integration-test, bff-api</tags>
+    <phase>2</phase>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Write integration tests for the enhanced POST /api/ai/search endpoint (scope=all,
+    entityTypes filter) and the new POST /api/ai/search/records endpoint. Use the existing
+    WebApplicationFactory-based test infrastructure in tests/integration/Spe.Integration.Tests/
+    to test authentication, authorization, error handling, and basic request/response
+    contract. Follow the exact patterns from SemanticSearchIntegrationTests.cs and
+    SemanticSearchAuthorizationTests.cs.
+  </prompt>
+
+  <role>
+    You are a senior .NET 8 test engineer who writes integration tests using
+    WebApplicationFactory. You understand the Spaarke integration test infrastructure
+    (IntegrationTestFixture, mock auth, test DI overrides) and write tests that verify
+    the full HTTP request/response cycle without hitting real external services.
+  </role>
+
+  <goal>
+    Integration test files covering:
+    - POST /api/ai/search with scope=all: authenticated request returns 200 (not 400/500)
+    - POST /api/ai/search with entityTypes filter: request accepted and routed correctly
+    - POST /api/ai/search/records: authenticated request returns 200 with correct response shape
+    - POST /api/ai/search/records: unauthenticated request returns 401
+    - POST /api/ai/search/records: invalid request body returns 400 ProblemDetails
+    - POST /api/ai/search/records: response body matches RecordSearchResponse contract
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-semantic-search-ui-r3/spec.md</file>
+    <file purpose="project-context">projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    <file purpose="reference-integration-tests">tests/integration/Spe.Integration.Tests/SemanticSearch/SemanticSearchIntegrationTests.cs</file>
+    <file purpose="reference-auth-tests">tests/integration/Spe.Integration.Tests/SemanticSearch/SemanticSearchAuthorizationTests.cs</file>
+    <file purpose="test-fixture">tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs</file>
+    <file purpose="endpoint">src/server/api/Sprk.Bff.Api/Api/Ai/RecordSearchEndpoints.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="constraints/testing.md">Integration tests use WebApplicationFactory with IntegrationTestFixture. External services (Azure AI Search, Azure OpenAI, Redis) are mocked/replaced in test DI. Do NOT make real calls to dev environment from integration tests.</constraint>
+    <constraint source="constraints/testing.md">Follow existing SemanticSearch integration test patterns exactly. Same class structure, same fixture usage, same test helper methods.</constraint>
+    <constraint source="constraints/testing.md">Integration tests must be runnable in CI without external environment access (all dependencies stubbed).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>tests/integration/Spe.Integration.Tests/SemanticSearch/SemanticSearchIntegrationTests.cs</file>
+      <file>tests/integration/Spe.Integration.Tests/SemanticSearch/SemanticSearchAuthorizationTests.cs</file>
+      <file>tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs</file>
+      <file>tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/RecordSearchEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchResponse.cs</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern name="Integration test structure" location="tests/integration/Spe.Integration.Tests/SemanticSearch/SemanticSearchIntegrationTests.cs">
+        Read the full file to understand: WebApplicationFactory setup, authentication
+        injection, request building (HttpClient, JSON body), response assertion patterns,
+        and how external AI services are stubbed in integration tests.
+        Replicate the exact class and test method structure.
+      </pattern>
+      <pattern name="Authorization integration tests" location="tests/integration/Spe.Integration.Tests/SemanticSearch/SemanticSearchAuthorizationTests.cs">
+        Read to understand how auth is tested: authenticated vs unauthenticated requests,
+        how test users are constructed, and expected 401/403 response handling.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <dependency task="R3-010" status="not-started">scope=all implementation must exist</dependency>
+      <dependency task="R3-011" status="not-started">entityTypes filter implementation must exist</dependency>
+      <dependency task="R3-014" status="not-started">POST /api/ai/search/records endpoint must exist</dependency>
+    </dependencies>
+    <notes>
+      Integration tests are harder to write than unit tests but test the FULL request path.
+      Key differences from unit tests:
+      - Use real HTTP (via WebApplicationFactory's HttpClient)
+      - Test real routing, middleware, endpoint filters, serialization
+      - Mock only external services (Azure AI Search, OpenAI, Redis) via DI overrides
+
+      Read IntegrationTestFixture.cs carefully to understand:
+      - How WebApplicationFactory is configured
+      - Which services are replaced with test doubles
+      - How authentication headers are constructed for test requests
+      - Whether IRecordSearchService needs to be registered as a stub in the test factory
+
+      Test file to create:
+      tests/integration/Spe.Integration.Tests/SemanticSearch/RecordSearchIntegrationTests.cs
+
+      Tests for scope=all can be ADDED to the existing SemanticSearchIntegrationTests.cs
+      if appropriate, or placed in a new SemanticSearchScopeAllTests.cs file.
+
+      Test scenarios for RecordSearchIntegrationTests.cs:
+
+      Authentication tests:
+      - PostRecordSearch_WithValidAuth_Returns200
+      - PostRecordSearch_WithNoAuth_Returns401
+      - PostRecordSearch_WithInvalidAuth_Returns401
+
+      Request validation tests (these don't need real AI services):
+      - PostRecordSearch_WithEmptyQuery_Returns400ProblemDetails
+      - PostRecordSearch_WithEmptyRecordTypes_Returns400ProblemDetails
+      - PostRecordSearch_WithInvalidRecordType_Returns400ProblemDetails
+
+      Contract tests (with mocked AI service):
+      - PostRecordSearch_WithValidRequest_ReturnsRecordSearchResponse
+      - PostRecordSearch_ResponseContainsResultsAndMetadata
+      - PostRecordSearch_ResponseResultsHaveExpectedShape (recordId, recordType, recordName)
+
+      Rate limiting tests (if testable in integration):
+      - PostRecordSearch_WhenRateLimitExceeded_Returns429 (if rate limiting is testable)
+
+      For the scope=all tests (add to existing SemanticSearchIntegrationTests.cs):
+      - PostDocumentSearch_WithScopeAll_Returns200 (not SCOPE_NOT_SUPPORTED)
+      - PostDocumentSearch_WithEntityTypes_Returns200WithFilteredResults
+
+      Implementation note: In integration tests, the IRecordSearchService will likely
+      need to be replaced with a stub that returns pre-defined test data. Follow the
+      existing pattern for how ISemanticSearchService is stubbed.
+    </notes>
+  </context>
+
+  <steps>
+    <step order="1" name="Read existing integration test infrastructure">
+      Read SemanticSearchIntegrationTests.cs, SemanticSearchAuthorizationTests.cs,
+      and IntegrationTestFixture.cs in full to understand the test infrastructure.
+      Document: how auth is set up, how services are stubbed, how requests are made.
+    </step>
+    <step order="2" name="Read test project .csproj">
+      Read Spe.Integration.Tests.csproj to understand what test helpers and NuGet
+      packages are available. Ensure RecordSearch types are accessible in the test project.
+    </step>
+    <step order="3" name="Create stub for IRecordSearchService (if needed)">
+      If the test infrastructure pattern requires a stub implementation, create a
+      RecordSearchServiceStub in the test project's Mocks/ or Infrastructure/ directory.
+      The stub should return a pre-defined RecordSearchResponse with sample data.
+    </step>
+    <step order="4" name="Register stub in test WebApplicationFactory">
+      Register the stub or NSubstitute substitute for IRecordSearchService in the
+      WebApplicationFactory configuration (IntegrationTestFixture or local override).
+    </step>
+    <step order="5" name="Write scope=all integration tests">
+      Add tests to SemanticSearchIntegrationTests.cs (or create SemanticSearchScopeAllTests.cs):
+      - PostDocumentSearch_WithScopeAll_Returns200
+      - PostDocumentSearch_WithEntityTypesFilter_Returns200
+    </step>
+    <step order="6" name="Create RecordSearchIntegrationTests.cs">
+      Create tests/integration/Spe.Integration.Tests/SemanticSearch/RecordSearchIntegrationTests.cs
+      with all test scenarios listed in the notes.
+    </step>
+    <step order="7" name="Run integration tests">
+      Run: dotnet test tests/integration/Spe.Integration.Tests/
+      All new tests must pass. Existing tests must continue to pass.
+      Fix any failures.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run integration tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Spe.Integration.Tests/SemanticSearch/RecordSearchIntegrationTests.cs</output>
+    <output type="test">tests/integration/Spe.Integration.Tests/SemanticSearch/SemanticSearchIntegrationTests.cs (updated for scope=all)</output>
+    <output type="test">tests/integration/Spe.Integration.Tests/ stub/mock files (if needed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All new integration test files compile without errors</criterion>
+    <criterion testable="true">dotnet test tests/integration/Spe.Integration.Tests/ passes with 0 failures</criterion>
+    <criterion testable="true">POST /api/ai/search with scope=all returns HTTP 200 (not 400/500) in integration test</criterion>
+    <criterion testable="true">POST /api/ai/search/records with valid auth returns HTTP 200 in integration test</criterion>
+    <criterion testable="true">POST /api/ai/search/records without auth returns HTTP 401 in integration test</criterion>
+    <criterion testable="true">POST /api/ai/search/records with empty query returns HTTP 400 ProblemDetails in integration test</criterion>
+    <criterion testable="true">POST /api/ai/search/records response body deserialises to RecordSearchResponse shape</criterion>
+    <criterion testable="true">All pre-existing integration tests continue to pass</criterion>
+  </acceptance-criteria>
+</task>

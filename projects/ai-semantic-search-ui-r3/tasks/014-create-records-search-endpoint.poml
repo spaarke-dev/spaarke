@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-014" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create POST /api/ai/search/records Endpoint</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>Claude Code</assigned>
+    <tags>bff-api, api, ai</tags>
+    <phase>2</phase>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Create the POST /api/ai/search/records Minimal API endpoint that wires up
+    RecordSearchService to an HTTP endpoint. Follow the SemanticSearchEndpoints.cs
+    pattern exactly: use an endpoint filter for authorization, apply the ai-batch rate
+    limiting policy, validate the request body, delegate to IRecordSearchService, and
+    return either a typed result (RecordSearchResponse) or ProblemDetails on error.
+    Add the new endpoint registration to the existing AI endpoint group.
+  </prompt>
+
+  <role>
+    You are a senior .NET 8 backend developer who follows the Spaarke Minimal API endpoint
+    pattern rigorously. You understand endpoint filters, rate limiting, request validation,
+    and ProblemDetails error responses. You do not create controllers or use MVC patterns.
+  </role>
+
+  <goal>
+    POST /api/ai/search/records endpoint that:
+    - Is registered in the existing AI endpoint group (not a new group)
+    - Accepts RecordSearchRequest from the POST body
+    - Validates the request and returns ProblemDetails for invalid input
+    - Applies SemanticSearchAuthorizationFilter (or new equivalent) as endpoint filter
+    - Applies ai-batch rate limiting policy
+    - Delegates to IRecordSearchService.SearchAsync()
+    - Returns RecordSearchResponse on success (HTTP 200)
+    - Returns ProblemDetails on failure (HTTP 400, 401, 403, 429, 500 as appropriate)
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-semantic-search-ui-r3/spec.md</file>
+    <file purpose="plan">projects/ai-semantic-search-ui-r3/plan.md</file>
+    <file purpose="project-context">projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    <file purpose="reference-endpoint">src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</file>
+    <file purpose="service-interface">src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/IRecordSearchService.cs</file>
+    <file purpose="request-model">src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchRequest.cs</file>
+    <file purpose="response-model">src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchResponse.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API pattern ONLY. No controllers. No MVC attributes. Endpoint delegate must be a static method or lambda. Endpoint registered via extension method (e.g., MapRecordSearchEndpoints()).</constraint>
+    <constraint source="ADR-008">Authorization via endpoint filter ONLY. No global middleware. Reuse SemanticSearchAuthorizationFilter if it checks general AI access, or create a lean RecordSearchAuthorizationFilter if specific permissions are needed.</constraint>
+    <constraint source="ADR-016">Apply ai-batch rate limiting policy: .RequireRateLimiting("ai-batch"). Do not change the policy configuration.</constraint>
+    <constraint source="ADR-019">All error responses MUST use ProblemDetails (RFC 7807). Use TypedResults.Problem() or Results.Problem() with appropriate status codes. Include error codes consistent with SearchErrorCodes.cs pattern.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/IRecordSearchService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchResponse.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchErrorCodes.cs</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+    </files>
+    <patterns>
+      <pattern name="Minimal API Endpoint pattern" location="src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs">
+        Read the existing SemanticSearchEndpoints.cs in full. The new endpoint follows
+        the identical pattern: extension method MapXxxEndpoints(), MapPost() with route,
+        endpoint filter chain, rate limiting, typed result returns, and error handling.
+      </pattern>
+      <pattern name="Endpoint filter application" location=".claude/patterns/api/endpoint-filters.md">
+        .AddEndpointFilter&lt;SemanticSearchAuthorizationFilter&gt;() applied to the route.
+        Authorization filter checks that the caller has appropriate permissions.
+        If a new filter is needed, create it in the Api/Ai/Filters/ directory.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <dependency task="R3-012" status="not-started">RecordSearchRequest and RecordSearchResponse models must exist</dependency>
+      <dependency task="R3-013" status="not-started">IRecordSearchService must exist and be registered in DI</dependency>
+    </dependencies>
+    <notes>
+      Route: POST /api/ai/search/records
+      This is a sub-route under the existing /api/ai/ prefix.
+      Check how SemanticSearchEndpoints.cs is registered in the API route group
+      and add the new endpoint to the same group pattern.
+
+      Where to add the new endpoint:
+      Option A: Add to SemanticSearchEndpoints.cs as a new route in the same extension method
+      Option B: Create a new RecordSearchEndpoints.cs file with its own extension method
+
+      RECOMMENDATION: Create RecordSearchEndpoints.cs as a new file for separation of
+      concerns. Wire it into the same API group as SemanticSearchEndpoints.cs.
+      Check Program.cs or the API registration to see how to add it.
+
+      Authorization:
+      - Check if SemanticSearchAuthorizationFilter is general enough (checks "can use AI search")
+      - If yes, reuse it for the records endpoint
+      - If it checks document-specific permissions, create RecordSearchAuthorizationFilter
+      - In either case, the filter MUST be applied as an endpoint filter, not middleware
+
+      Request validation:
+      - Query: must not be null or empty
+      - RecordTypes: must not be null or empty; values must be valid Dataverse entity names
+      - Options.Limit: 1-100 range (reasonable pagination limit)
+      - Options.Offset: non-negative
+
+      OpenAPI / Swagger:
+      Add .WithName("PostRecordSearch").WithTags("AI") if the existing endpoints use these
+      Produces/Accepts annotations for OpenAPI documentation.
+
+      Error codes to add to SearchErrorCodes.cs (or equivalent):
+      - INVALID_RECORD_TYPES: when unknown record type values provided
+      - RECORD_SEARCH_FAILED: for service-level failures
+    </notes>
+  </context>
+
+  <steps>
+    <step order="1" name="Read SemanticSearchEndpoints.cs">
+      Read the complete SemanticSearchEndpoints.cs file to understand the exact
+      endpoint registration pattern, filter chain, rate limiting, error handling,
+      and how the endpoint integrates with the API group.
+    </step>
+    <step order="2" name="Read endpoint-definition.md and endpoint-filters.md patterns">
+      Read .claude/patterns/api/endpoint-definition.md and endpoint-filters.md to
+      confirm the canonical pattern for new endpoints in this codebase.
+    </step>
+    <step order="3" name="Read Program.cs for API route registration">
+      Find the file that registers the AI endpoint group (Program.cs or a route
+      extension) to understand where to add MapRecordSearchEndpoints() call.
+    </step>
+    <step order="4" name="Decide on authorization filter">
+      Read SemanticSearchAuthorizationFilter to determine if it is general enough
+      for the records endpoint. If yes, reuse. If not, plan RecordSearchAuthorizationFilter.
+    </step>
+    <step order="5" name="Create RecordSearchEndpoints.cs">
+      Create src/server/api/Sprk.Bff.Api/Api/Ai/RecordSearchEndpoints.cs with:
+      - Static extension method MapRecordSearchEndpoints(this IEndpointRouteBuilder app)
+      - MapPost("/api/ai/search/records", PostRecordSearch)
+      - .AddEndpointFilter&lt;...AuthorizationFilter&gt;()
+      - .RequireRateLimiting("ai-batch")
+      - .WithName("PostRecordSearch").WithTags("AI")
+      - Private static async Task&lt;IResult&gt; PostRecordSearch delegate
+    </step>
+    <step order="6" name="Implement PostRecordSearch delegate">
+      Implement the endpoint delegate:
+      1. Receive [FromBody] RecordSearchRequest request and IRecordSearchService service
+      2. Validate request (Query not empty, RecordTypes not empty)
+         Return TypedResults.Problem(...) with 400 for invalid input
+      3. Call await service.SearchAsync(request, cancellationToken)
+      4. Return TypedResults.Ok(response) on success
+      5. Catch service exceptions, return TypedResults.Problem(...) with appropriate status
+    </step>
+    <step order="7" name="Create authorization filter if needed">
+      If a new RecordSearchAuthorizationFilter is needed, create it in
+      src/server/api/Sprk.Bff.Api/Api/Ai/Filters/ following the existing filter pattern.
+    </step>
+    <step order="8" name="Register endpoint in API route group">
+      Add app.MapRecordSearchEndpoints() call to Program.cs or the API route extension,
+      adjacent to where MapSemanticSearchEndpoints() is called.
+    </step>
+    <step order="9" name="Add error codes if needed">
+      Add INVALID_RECORD_TYPES and RECORD_SEARCH_FAILED error codes to SearchErrorCodes.cs
+      (or create RecordSearchErrorCodes.cs following the same pattern).
+    </step>
+    <step order="10" name="Build and verify">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Fix all compilation errors. No new warnings.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build API to verify compilation</tool>
+    <tool name="Read">Read reference implementations</tool>
+    <tool name="Grep">Search for endpoint registration patterns</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/RecordSearchEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/Filters/RecordSearchAuthorizationFilter.cs (if new filter needed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/ai/search/records endpoint is registered in the application route group</criterion>
+    <criterion testable="true">Endpoint accepts application/json body matching RecordSearchRequest</criterion>
+    <criterion testable="true">Endpoint returns HTTP 200 with RecordSearchResponse on success</criterion>
+    <criterion testable="true">Endpoint returns HTTP 400 ProblemDetails when Query is empty</criterion>
+    <criterion testable="true">Endpoint returns HTTP 400 ProblemDetails when RecordTypes is empty</criterion>
+    <criterion testable="true">Endpoint returns HTTP 429 when ai-batch rate limit is exceeded</criterion>
+    <criterion testable="true">Authorization endpoint filter is applied (not global middleware)</criterion>
+    <criterion testable="true">ai-batch rate limiting policy is applied via .RequireRateLimiting("ai-batch")</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ succeeds with no errors</criterion>
+    <criterion testable="true">All error responses use ProblemDetails format (not raw exception messages)</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-043" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create EntityRecordDialog — Multi-Entity Xrm.Navigation Record Opener</title>
+    <phase>5 — Interactive Features</phase>
+    <tags>code-page, dataverse</tags>
+    <status>pending</status>
+    <estimated-effort>1.5 hours</estimated-effort>
+    <dependencies>020</dependencies>
+    <blocks>R3-047</blocks>
+    <parallel-group>phase5-features</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create EntityRecordDialog.tsx — a utility component/function that opens the appropriate
+    Dataverse entity record form in a dialog using Xrm.Navigation.navigateTo. Maps each
+    search domain to its entity logical name and opens at the correct size.
+
+    Domain to entity mapping:
+    - Documents → sprk_document
+    - Matters → sprk_matter
+    - Projects → sprk_project
+    - Invoices → sprk_invoice
+
+    Search results persist after the dialog closes — the code page does not re-search.
+  </prompt>
+
+  <role>
+    Senior TypeScript developer familiar with Xrm.Navigation.navigateTo patterns for
+    Dataverse model-driven app dialogs.
+  </role>
+
+  <goal>
+    openEntityRecord(recordId, domain) opens the correct Dataverse entity form as a dialog
+    (70% width, 80% height). Dialog closes without affecting the search results state.
+    TypeScript compiles without errors.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-006">Use Xrm.Navigation.navigateTo for record dialogs — not custom modal</constraint>
+    <constraint source="spec">target: 2 (dialog), width: 70%, height: 80% (FR-10)</constraint>
+    <constraint source="spec">Search results persist after dialog close — no re-search triggered</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Xrm.Navigation.navigateTo pattern for opening entity records in dialogs:
+
+      Xrm.Navigation.navigateTo(
+        {
+          pageType: "entityrecord",
+          entityName: entityLogicalName,
+          entityId: recordId,
+        },
+        {
+          target: 2,
+          width: { value: 70, unit: "%" },
+          height: { value: 80, unit: "%" },
+        }
+      );
+
+      This function is available in Dataverse web resource context (window.Xrm is provided
+      by the Dataverse host frame).
+
+      Create this as a simple utility function (not a React component) since it has no UI —
+      it just triggers the Xrm navigation. Export a hook or utility function that takes
+      recordId and domain as parameters.
+
+      TypeScript: Xrm types are available if @types/xrm is in package.json.
+      If not available, cast window.Xrm as any for the navigation call.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Create entity mapping">
+      Define const DOMAIN_TO_ENTITY: Record&lt;SearchDomain, string&gt; = {
+        Documents: "sprk_document",
+        Matters: "sprk_matter",
+        Projects: "sprk_project",
+        Invoices: "sprk_invoice",
+      };
+    </step>
+    <step order="2" name="Create EntityRecordDialog.ts">
+      Create src/client/code-pages/SemanticSearch/src/components/EntityRecordDialog.ts
+      (TypeScript module, not .tsx since no JSX needed):
+      - Export function: openEntityRecord(recordId: string, domain: SearchDomain): void
+      - Map domain to entity logical name using DOMAIN_TO_ENTITY
+      - Call Xrm.Navigation.navigateTo with entityrecord pageType
+      - Options: target: 2 (dialog), width 70%, height 80%
+      - Wrap in try/catch — log error if Xrm is not available (non-Dataverse context)
+    </step>
+    <step order="3" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create EntityRecordDialog.ts utility</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/EntityRecordDialog.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">openEntityRecord maps all 4 domains to correct entity logical names</criterion>
+    <criterion testable="true">Uses Xrm.Navigation.navigateTo with target: 2 (dialog mode)</criterion>
+    <criterion testable="true">Dialog dimensions: 70% width, 80% height</criterion>
+    <criterion testable="true">Error handled gracefully when Xrm is not available</criterion>
+    <criterion testable="true">TypeScript compiles without any errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-012" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create Request/Response Models for POST /api/ai/search/records</title>
+    <status>not-started</status>
+    <estimated-effort>1.5 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>Claude Code</assigned>
+    <tags>bff-api, api, ai</tags>
+    <phase>2</phase>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Create the C# request and response model classes for the new POST /api/ai/search/records
+    endpoint. This endpoint searches the spaarke-records-index for entity records (Matters,
+    Projects, Invoices). Place all models in
+    src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/. Follow the exact schemas defined
+    in spec.md Section 7.3 and the existing SemanticSearch model conventions (record types,
+    naming, XML doc comments, immutable init-only properties).
+  </prompt>
+
+  <role>
+    You are a senior .NET 8 backend developer who follows the Spaarke API model conventions.
+    You create clean, well-documented C# model classes with init-only properties, required
+    annotations, and XML doc comments. You understand how these models will be serialised
+    to JSON for the API contract.
+  </role>
+
+  <goal>
+    Complete set of C# model files in src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/:
+    - RecordSearchRequest.cs — the POST body model
+    - RecordSearchResponse.cs — the response model
+    - RecordSearchResult.cs — individual result item
+    - RecordSearchMetadata.cs — response metadata (totalCount, searchTime, hybridMode)
+    - RecordSearchFilters.cs — the filters sub-object
+    - RecordSearchOptions.cs — the options sub-object
+    All models follow existing SemanticSearch model conventions exactly.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-semantic-search-ui-r3/spec.md</file>
+    <file purpose="plan">projects/ai-semantic-search-ui-r3/plan.md</file>
+    <file purpose="project-context">projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    <file purpose="reference-request">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SemanticSearchRequest.cs</file>
+    <file purpose="reference-response">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SemanticSearchResponse.cs</file>
+    <file purpose="reference-result">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchResult.cs</file>
+    <file purpose="reference-options">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchOptions.cs</file>
+    <file purpose="reference-metadata">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchMetadata.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Models must be serialisable to JSON. Use System.Text.Json conventions. Property names should follow camelCase JSON naming (handled by .NET minimal API serialiser settings).</constraint>
+    <constraint source="ADR-019">Error responses use ProblemDetails — error model classes are NOT needed here (use existing ProblemDetails infrastructure).</constraint>
+    <constraint source="spec.md Section 7.3">The request/response schemas are FIXED as defined in spec.md. Do not deviate from the specified field names and types.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SemanticSearchRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SemanticSearchResponse.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchResult.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchMetadata.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchFilters.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Model conventions" location="src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/">
+        Use init-only properties (public string Property { get; init; }).
+        Use [Required] for mandatory fields.
+        Use XML doc comments (/// summary) on all public properties.
+        Use record or class — follow whichever pattern exists in SemanticSearch models.
+        Namespace: Sprk.Bff.Api.Models.Ai.RecordSearch
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <!-- No hard dependencies — this task can run in parallel with 010 and 011 -->
+      <!-- Task 013 (RecordSearchService) depends on these models being created first -->
+    </dependencies>
+    <notes>
+      This task creates MODEL FILES ONLY — no service or endpoint code.
+      Task 013 (service) depends on these models. Task 014 (endpoint) depends on both.
+
+      Schema from spec.md (exact field mapping for C# models):
+
+      RecordSearchRequest:
+        string Query (required)
+        string[] RecordTypes (required, e.g. ["sprk_matter", "sprk_project", "sprk_invoice"])
+        RecordSearchFilters? Filters (optional)
+        RecordSearchOptions? Options (optional)
+
+      RecordSearchFilters:
+        string[] Organizations (optional)
+        string[] People (optional)
+        string[] ReferenceNumbers (optional)
+
+      RecordSearchOptions:
+        int Limit (default: 20)
+        int Offset (default: 0)
+        string HybridMode ("rrf" | "vectorOnly" | "keywordOnly", default: "rrf")
+
+      RecordSearchResult (individual item in results array):
+        string RecordId
+        string RecordType  (e.g. "sprk_matter")
+        string RecordName
+        string? RecordDescription
+        double ConfidenceScore  (0.0-1.0)
+        string[]? MatchReasons  (AI-generated explanation strings)
+        string[]? Organizations
+        string[]? People
+        string[]? Keywords
+        DateTimeOffset? CreatedAt
+        DateTimeOffset? ModifiedAt
+
+      RecordSearchMetadata:
+        int TotalCount
+        double SearchTime  (in milliseconds or seconds — match existing SearchMetadata convention)
+        string HybridMode  (echo back the mode used)
+
+      RecordSearchResponse:
+        RecordSearchResult[] Results
+        RecordSearchMetadata Metadata
+
+      Note on RecordTypes: The spec uses Dataverse entity logical names ("sprk_matter",
+      "sprk_project", "sprk_invoice"). These map to the recordType field in the index.
+      Validate that only known values are accepted — add a constant class or enum if
+      the existing pattern uses one (check SemanticSearch models for precedent).
+
+      Create the Models/Ai/RecordSearch/ directory — it does not exist yet.
+    </notes>
+  </context>
+
+  <steps>
+    <step order="1" name="Read reference models">
+      Read SemanticSearchRequest.cs, SemanticSearchResponse.cs, SearchResult.cs,
+      SearchOptions.cs, SearchMetadata.cs, and SearchFilters.cs to understand
+      the exact conventions used: class vs record, property syntax, attributes,
+      doc comments, namespace, and file organisation.
+    </step>
+    <step order="2" name="Create Models/Ai/RecordSearch/ directory">
+      Create the directory src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/
+      (write the first file to establish the directory).
+    </step>
+    <step order="3" name="Create RecordSearchFilters.cs">
+      Create RecordSearchFilters.cs with Organizations, People, and ReferenceNumbers
+      string array properties (all optional/nullable).
+      Namespace: Sprk.Bff.Api.Models.Ai.RecordSearch
+    </step>
+    <step order="4" name="Create RecordSearchOptions.cs">
+      Create RecordSearchOptions.cs with Limit (default 20), Offset (default 0),
+      and HybridMode (string, default "rrf").
+      Add range validation attributes if the existing pattern uses them.
+    </step>
+    <step order="5" name="Create RecordSearchRequest.cs">
+      Create RecordSearchRequest.cs with Query (required), RecordTypes (required string[]),
+      Filters (optional RecordSearchFilters), Options (optional RecordSearchOptions).
+      Add [Required] attribute to mandatory fields. Add XML doc comments.
+    </step>
+    <step order="6" name="Create RecordSearchResult.cs">
+      Create RecordSearchResult.cs with all result fields as specified above.
+      Use appropriate nullability annotations for optional fields.
+      Add XML doc comments describing each field.
+    </step>
+    <step order="7" name="Create RecordSearchMetadata.cs">
+      Create RecordSearchMetadata.cs with TotalCount (int), SearchTime (double),
+      HybridMode (string). Match naming convention from existing SearchMetadata.cs.
+    </step>
+    <step order="8" name="Create RecordSearchResponse.cs">
+      Create RecordSearchResponse.cs with Results (RecordSearchResult[]) and
+      Metadata (RecordSearchMetadata). Match convention from SemanticSearchResponse.cs.
+    </step>
+    <step order="9" name="Build to verify compilation">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      All new model files must compile without errors or warnings.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build to verify model compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchFilters.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchOptions.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchResult.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchMetadata.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchResponse.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 model files exist in src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/</criterion>
+    <criterion testable="true">RecordSearchRequest has Query (required string) and RecordTypes (required string[])</criterion>
+    <criterion testable="true">RecordSearchResult has all fields from spec.md Section 7.3 with correct types</criterion>
+    <criterion testable="true">All optional fields use nullable types (string? or collection?)</criterion>
+    <criterion testable="true">All classes use init-only properties matching existing SemanticSearch model conventions</criterion>
+    <criterion testable="true">Namespace is Sprk.Bff.Api.Models.Ai.RecordSearch</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ succeeds with no errors</criterion>
+    <criterion testable="true">XML doc comments present on all public properties</criterion>
+  </acceptance-criteria>
+</task>

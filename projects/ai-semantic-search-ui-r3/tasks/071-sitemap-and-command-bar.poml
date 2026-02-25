@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R3-071" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Sitemap Entry and Command Bar Button</title>
+    <phase>8</phase>
+    <phase-name>Deployment and Wrap-up</phase-name>
+    <tags>deploy, dataverse, ribbon</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>070</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>
+      You are a Dataverse platform engineer adding navigation entry points for a new HTML web resource. You add a sitemap SubArea entry for the code page and optionally a command bar button using the ribbon-edit skill. You follow spec.md Section 9 for the exact configuration.
+    </role>
+    <goal>
+      Add a sitemap entry for the SemanticSearch code page under the AI/Search area group so users can navigate to it from the Dataverse left navigation. Optionally add a command bar button on relevant entity forms for quick access. Use the ribbon-edit skill for any command bar customization. Follow spec.md Section 9 for configuration details.
+    </goal>
+    <context>
+      The SemanticSearch code page is deployed at:
+        /WebResources/sprk_semanticsearch (from task 070)
+
+      Full URL: https://spaarkedev1.crm.dynamics.com/WebResources/sprk_semanticsearch
+
+      Sitemap configuration:
+        - Area: The existing AI or Search area group in the Dataverse sitemap
+          (Check existing sitemap for the correct area ID — look for AI Tools, Search, or similar)
+        - Group: Create or reuse "Search" group under the AI area
+        - SubArea type: URL
+        - SubArea URL: /WebResources/sprk_semanticsearch
+          (Note: Dataverse sitemap URL for web resources — verify the correct format for the environment)
+        - SubArea title: "Semantic Search"
+        - SubArea icon: Use an appropriate icon from Fluent UI system icons available in Dataverse
+          (e.g., /WebResources/sprk_semanticsearch-icon.svg or a built-in Dataverse icon)
+        - SubArea ID: nav_semanticsearch (or per naming convention)
+
+      Sitemap editing approach:
+        - Export the SpaarkeCore solution (or the sitemap solution) using pac solution export
+        - Locate the sitemap XML in the exported solution
+        - Add the SubArea entry to the correct Area/Group
+        - Import the solution back
+        - Publish customizations
+
+      Command bar button (optional, per spec.md Section 9):
+        - Target entities: sprk_document entity form (and/or global command bar)
+        - Button label: "Semantic Search"
+        - Button action: navigateTo /WebResources/sprk_semanticsearch (or via JavaScript action)
+        - Button icon: Same icon as sitemap entry
+        - Use ribbon-edit skill for the exact command bar edit procedure
+
+      IMPORTANT: Read spec.md Section 9 before starting for the exact navigation requirements.
+      If spec.md does not have a Section 9, read the navigation-related requirements in spec.md and plan.md.
+    </context>
+    <constraints>
+      - Use ribbon-edit skill for ANY ribbon/command bar modifications — do not hand-edit RibbonDiffXml
+      - Export and import via pac solution commands only — do not use Power Apps Maker portal for sitemap editing (not scriptable)
+      - Deploy to dev environment only
+      - If the sitemap area/group structure is unclear, read the existing sitemap XML first and place the SubArea in the most logical location
+      - Publish customizations after all changes are imported
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <inputs>
+    <input>projects/ai-semantic-search-ui-r3/spec.md (Section 9 navigation requirements)</input>
+    <input>Existing Dataverse sitemap (exported from SpaarkeCore or navigation solution)</input>
+  </inputs>
+
+  <steps>
+    <step order="1">Read spec.md for navigation requirements (sitemap area, group, entry point details)</step>
+    <step order="2">Read ribbon-edit skill to understand the solution export/edit/import approach</step>
+    <step order="3">Export the relevant solution containing the sitemap (pac solution export)</step>
+    <step order="4">Locate the sitemap XML in the exported solution files</step>
+    <step order="5">Identify the correct Area and Group in the sitemap for the Semantic Search entry</step>
+    <step order="6">Add the SubArea element for sprk_semanticsearch web resource with correct title and URL</step>
+    <step order="7">If spec requires a command bar button: follow ribbon-edit skill to add the button to relevant entity forms</step>
+    <step order="8">Import the modified solution back to Dataverse dev (pac solution import)</step>
+    <step order="9">Publish all customizations</step>
+    <step order="10">Navigate to the Dataverse left navigation and verify "Semantic Search" appears in the expected location</step>
+    <step order="11">Click the sitemap entry and verify it navigates to the SemanticSearch code page</step>
+    <step order="12">If command bar button was added: navigate to a relevant entity form and verify the button appears</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Read spec.md and ribbon-edit skill</tool>
+    <tool>Skill - ribbon-edit (for command bar button customization)</tool>
+    <tool>Bash - pac solution export and pac solution import</tool>
+    <tool>Edit - Modify sitemap XML in exported solution</tool>
+    <tool>Bash - pac customizations publish</tool>
+  </tools>
+
+  <outputs>
+    <output>Sitemap entry "Semantic Search" under AI/Search area in Dataverse dev navigation</output>
+    <output>Command bar button on relevant entity forms (if required by spec)</output>
+    <output>Customizations published to Dataverse dev</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>"Semantic Search" appears in the Dataverse left navigation under the correct area/group</criterion>
+    <criterion>Clicking the sitemap entry navigates to /WebResources/sprk_semanticsearch</criterion>
+    <criterion>The SemanticSearch code page loads correctly when accessed via sitemap</criterion>
+    <criterion>Command bar button appears on relevant entity forms (if added per spec)</criterion>
+    <criterion>No customization import errors</criterion>
+    <criterion>All customizations published successfully</criterion>
+  </acceptance-criteria>
+</task>

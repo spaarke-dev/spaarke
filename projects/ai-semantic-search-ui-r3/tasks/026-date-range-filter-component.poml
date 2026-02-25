@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-026" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create DateRangeFilter — Date Range Component with Quick Presets</title>
+    <phase>3 — Code Page Core</phase>
+    <tags>code-page, fluent-ui</tags>
+    <status>pending</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>023</dependencies>
+    <blocks>R3-024</blocks>
+    <parallel-group>phase3-components</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create DateRangeFilter.tsx — a from/to date input component with quick-select preset options.
+    Adapted from the PCF SemanticSearchControl DateRangeFilter (React 16 to React 19, Fluent v8 to v9).
+
+    Features:
+    - From date input and To date input (ISO date strings)
+    - Quick presets via Fluent v9 Menu: Last 30 Days, Last 90 Days, This Year, Last Year
+    - Validation: from date must be before or equal to to date
+    - Null/empty means "no filter" for that bound
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer with Fluent UI v9 expertise.
+  </role>
+
+  <goal>
+    DateRangeFilter renders two date inputs with quick-preset menu button. Validation prevents
+    invalid ranges. onChange callback fires with DateRange { from, to } where either can be null.
+    Dark mode works correctly.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9: Input (type="date"), Menu, MenuButton from @fluentui/react-components</constraint>
+    <constraint source="ADR-021">No hard-coded colors — tokens only</constraint>
+    <constraint source="spec">Presets: Last 30 Days, Last 90 Days, This Year, Last Year</constraint>
+    <constraint source="spec">Validation: from must be &lt;= to; show inline error if invalid</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/DateRangeFilter.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The PCF SemanticSearchControl/components/DateRangeFilter.tsx implements this component with
+      Fluent v8 APIs. The adaptation to React 19 + Fluent v9 is the main work.
+
+      Quick preset date calculations:
+      - Last 30 Days: from = today - 30 days, to = null
+      - Last 90 Days: from = today - 90 days, to = null
+      - This Year: from = Jan 1 current year, to = null
+      - Last Year: from = Jan 1 last year, to = Dec 31 last year
+
+      Preset dates formatted as YYYY-MM-DD ISO strings for HTML date input compatibility.
+
+      Props interface:
+      - label?: string (defaults to "Date Range")
+      - value: DateRange ({ from: string | null, to: string | null })
+      - onChange: (value: DateRange) =&gt; void
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read PCF DateRangeFilter">
+      Read SemanticSearchControl/components/DateRangeFilter.tsx. Note the preset calculations,
+      validation logic, and props/state structure.
+    </step>
+    <step order="2" name="Create DateRangeFilter.tsx">
+      Create src/client/code-pages/SemanticSearch/src/components/DateRangeFilter.tsx:
+      - Props: label?, value: DateRange, onChange: (value: DateRange) =&gt; void
+      - Local state for validation error message
+      - Fluent v9 Input type="date" for from and to dates
+      - Validation on change: if from &gt; to, set error state and display message
+      - Quick presets: Fluent v9 MenuButton with Menu containing 4 MenuItems
+      - Each preset calculates dates and calls onChange
+      - Layout: label, from input, to input, preset button in a compact vertical stack
+    </step>
+    <step order="3" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read PCF DateRangeFilter as reference</tool>
+    <tool name="Write">Create DateRangeFilter.tsx</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/DateRangeFilter.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">From and To date inputs render and accept ISO date strings</criterion>
+    <criterion testable="true">Validation error shown when from date is after to date</criterion>
+    <criterion testable="true">Quick presets (Last 30d, 90d, This Year, Last Year) set date range correctly</criterion>
+    <criterion testable="true">onChange fires with DateRange on every change</criterion>
+    <criterion testable="true">Uses Fluent v9 components — not Fluent v8</criterion>
+    <criterion testable="true">No hard-coded colors — tokens only</criterion>
+  </acceptance-criteria>
+</task>

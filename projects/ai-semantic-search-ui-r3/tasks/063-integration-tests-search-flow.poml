@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R3-063" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Integration Tests — End-to-End Search Flow</title>
+    <phase>7</phase>
+    <phase-name>Testing and Quality</phase-name>
+    <tags>testing, integration-test, code-page</tags>
+    <estimate>4 hours</estimate>
+    <dependencies>047</dependencies>
+    <parallel-group>phase7-integration-tests</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>
+      You are a senior frontend test engineer writing integration tests for a full-page React application. You render the complete App component tree with mocked API services, and test end-to-end user flows: search execution, domain switching, result selection, and entity dialog navigation.
+    </role>
+    <goal>
+      Write integration tests for the end-to-end search flow in the SemanticSearch code page. Render the full App component tree (not individual components) with mocked API services and Xrm. Test: entering a query and executing search, switching domain tabs and seeing results update, selecting results and seeing command bar update, and clicking a result row to open an entity dialog.
+    </goal>
+    <context>
+      The SemanticSearch code page is at:
+        src/client/code-pages/SemanticSearch/
+
+      Integration tests render the complete App.tsx component tree with:
+        - FluentProvider with webLightTheme
+        - Mocked SemanticSearchApiService (returns fixture data)
+        - Mocked RecordSearchApiService (returns fixture data)
+        - Mocked MsalAuthProvider (returns fake token immediately)
+        - Mocked Xrm global (window.Xrm.Navigation.navigateTo)
+
+      Test flows to cover:
+
+        Flow 1: Basic Document Search
+          - User types query "commercial lease" in search input
+          - User clicks Search button
+          - Loading indicator appears
+          - Results appear in grid with correct columns (title, score, document type, matter)
+          - Total results count displayed in status bar
+          - Loading indicator disappears
+
+        Flow 2: Domain Tab Switch
+          - After document search results display, user clicks "Matters" tab
+          - Previous document results are cleared
+          - Loading indicator appears
+          - Matter-specific results appear with matter-specific columns (Matter Number, Matter Type, Status)
+          - Switching back to "Documents" restores document columns
+
+        Flow 3: Selection and Command Bar
+          - User clicks a result row checkbox (or row itself if single-select)
+          - Command bar Delete button becomes enabled
+          - Command bar "Reindex" button visible only for Documents domain
+          - User clicks Delete → onDelete callback fires with the selected item ID
+
+        Flow 4: Open Entity Record Dialog
+          - User clicks on a result row title / open action
+          - Xrm.Navigation.navigateTo is called with entityName and entityId from the result
+          - Dialog opens (mock Xrm confirms the call)
+
+        Flow 5: Filter and Search
+          - User expands filter pane (if collapsed by default)
+          - User selects a Document Type filter value
+          - User executes search
+          - API call includes the selected filter value in request body
+
+      Test fixture data:
+        - Create fixture files in __tests__/fixtures/ for mock API responses
+        - Document search response: 3 results with title, score, documentType, matterName
+        - Record search response: 3 matter results with matterNumber, matterType, status
+    </context>
+    <constraints>
+      - Test files go in src/client/code-pages/SemanticSearch/src/__tests__/ (integration level)
+      - Render the full App component tree — do not test individual components in isolation
+      - All API calls must be mocked — no real HTTP requests
+      - Xrm global must be mocked (window.Xrm = { Navigation: { navigateTo: jest.fn() } })
+      - MSAL token acquisition must be mocked to return immediately
+      - Tests must be deterministic — no time-dependent behavior without jest fake timers
+      - Use waitFor / findBy queries from React Testing Library for async state updates
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <inputs>
+    <input>src/client/code-pages/SemanticSearch/src/App.tsx</input>
+    <input>src/client/code-pages/SemanticSearch/src/index.tsx</input>
+    <input>src/client/code-pages/SemanticSearch/src/services/ (to understand mock interfaces)</input>
+    <input>src/client/code-pages/SemanticSearch/src/types/ (to build fixture data)</input>
+    <input>src/client/code-pages/SemanticSearch/package.json (jest config)</input>
+  </inputs>
+
+  <steps>
+    <step order="1">Read App.tsx and index.tsx to understand the component tree root and context providers</step>
+    <step order="2">Read service interfaces and type definitions to build accurate fixture data</step>
+    <step order="3">Create src/client/code-pages/SemanticSearch/src/__tests__/ directory</step>
+    <step order="4">Create src/client/code-pages/SemanticSearch/src/__tests__/fixtures/ directory with fixture data files</step>
+    <step order="5">Create __tests__/fixtures/documentSearchResponse.ts — 3 document search results</step>
+    <step order="6">Create __tests__/fixtures/recordSearchResponse.ts — 3 matter record results</step>
+    <step order="7">Write __tests__/searchFlow.integration.test.tsx:
+      - Set up global mocks (Xrm, MSAL, API services)
+      - Write Flow 1: Basic document search
+      - Write Flow 2: Domain tab switch
+      - Write Flow 3: Selection and command bar
+      - Write Flow 4: Open entity record dialog
+      - Write Flow 5: Filter and search</step>
+    <step order="8">Run jest targeting the integration test file and fix any failures</step>
+    <step order="9">Fix async test issues: replace fireEvent with userEvent, add appropriate waitFor/findBy</step>
+    <step order="10">Verify all 5 flows pass and document test run results</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Read App.tsx, services, types</tool>
+    <tool>Write - Create integration test file and fixture files</tool>
+    <tool>Bash - Run jest targeting integration tests</tool>
+    <tool>Edit - Fix test failures</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/SemanticSearch/src/__tests__/fixtures/documentSearchResponse.ts</output>
+    <output>src/client/code-pages/SemanticSearch/src/__tests__/fixtures/recordSearchResponse.ts</output>
+    <output>src/client/code-pages/SemanticSearch/src/__tests__/searchFlow.integration.test.tsx</output>
+    <output>All 5 integration test flows passing</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Integration test file created at src/__tests__/searchFlow.integration.test.tsx</criterion>
+    <criterion>Fixture files created for document and record search responses</criterion>
+    <criterion>All 5 test flows pass</criterion>
+    <criterion>Flow 1: grid renders with results after search button click</criterion>
+    <criterion>Flow 2: grid columns change when domain tab is switched</criterion>
+    <criterion>Flow 3: command bar Delete button is enabled only after row selection</criterion>
+    <criterion>Flow 4: Xrm.Navigation.navigateTo called with correct entity data on row click</criterion>
+    <criterion>Flow 5: filter values included in API request body</criterion>
+    <criterion>No real HTTP requests made during tests</criterion>
+    <criterion>No test flakiness — all async state changes handled with waitFor/findBy</criterion>
+  </acceptance-criteria>
+</task>

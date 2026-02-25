@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R3-073" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>End-to-End Validation in Dataverse</title>
+    <phase>8</phase>
+    <phase-name>Deployment and Wrap-up</phase-name>
+    <tags>testing, e2e, deploy</tags>
+    <estimate>3 hours</estimate>
+    <dependencies>070, 071, 072</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>
+      You are a QA engineer performing end-to-end validation of a complete feature in the Dataverse dev environment. You execute a structured validation checklist, document results, and resolve any failures before marking validation complete.
+    </role>
+    <goal>
+      Perform complete end-to-end validation of the SemanticSearch feature in the Dataverse dev environment (https://spaarkedev1.crm.dynamics.com). Execute the structured validation checklist covering all major feature areas: navigation, search across all 4 domains, grid and graph views, saved searches, command bar actions, entity record dialogs, dark mode, and URL deep-linking. Document all results in notes/debug/e2e-validation.md. Resolve any failures found before marking this task complete.
+    </goal>
+    <context>
+      Dataverse dev environment: https://spaarkedev1.crm.dynamics.com
+      SemanticSearch code page URL: https://spaarkedev1.crm.dynamics.com/WebResources/sprk_semanticsearch
+      BFF API: https://spe-api-dev-67e2xz.azurewebsites.net
+
+      All three deployments must be complete before starting:
+        - Task 070: Code page deployed as sprk_semanticsearch
+        - Task 071: Sitemap entry and command bar button added
+        - Task 072: BFF API deployed with new endpoints
+
+      Validation checklist:
+
+        Section 1: Navigation
+          1.1 Navigate to Semantic Search via sitemap left navigation entry
+          1.2 Navigate to Semantic Search via command bar button (if added)
+          1.3 Verify URL parameter: /WebResources/sprk_semanticsearch?query=lease&domain=documents loads with correct state
+
+        Section 2: Document Search (default domain)
+          2.1 Enter query "commercial lease" — click Search — results appear in grid
+          2.2 Results show Document-specific columns: Title, Document Type, File Type, Matter, Score
+          2.3 Total results count and search time displayed in status bar
+          2.4 Filter by Document Type: select "Contract" → re-search → results filtered
+          2.5 Filter by Date Range: set From date → re-search → results filtered by date
+          2.6 Clear filters → re-search → full results return
+          2.7 Load more (scroll to bottom) → additional results load (infinite scroll)
+
+        Section 3: Domain Tab Switching
+          3.1 Switch to "Matters" tab — query preserved — Matter results appear
+          3.2 Matter results show Matter-specific columns: Matter Number, Matter Type, Status, Score
+          3.3 Switch to "Projects" tab — Project results appear with Project columns
+          3.4 Switch to "Invoices" tab — Invoice results appear with Invoice columns
+          3.5 Switch back to "Documents" — Document results and columns return
+          3.6 File Type filter hidden on Matters/Projects/Invoices tabs (domain-adaptive)
+
+        Section 4: Graph View
+          4.1 Switch to graph view using view toggle button
+          4.2 Graph renders with cluster nodes and record nodes
+          4.3 Cluster nodes display category label and item count
+          4.4 Expand cluster: click cluster node — individual record nodes appear as sub-layout
+          4.5 Change cluster category dropdown (Matter Type → Practice Area) — graph re-clusters
+          4.6 Switch back to grid view using view toggle — grid still shows same results
+
+        Section 5: Saved Search Favorites
+          5.1 Execute a search with filters applied
+          5.2 Save the search: click Save, enter name "Test Search 1" — search saved
+          5.3 Clear the search state (refresh or re-navigate)
+          5.4 Load saved search from dropdown: select "Test Search 1" — query + filters restored
+          5.5 Delete saved search: click Delete on "Test Search 1" — removed from dropdown
+
+        Section 6: Command Bar Actions
+          6.1 Select one document result row — Delete button becomes enabled
+          6.2 Select multiple document result rows — Delete button shows multi-select state
+          6.3 Click Email a Link — email client opens with document URL (or verify action fires)
+          6.4 Click Reindex (Documents domain only) — reindex action triggered
+          6.5 Click Refresh — results re-fetched from API
+
+        Section 7: Entity Record Dialog
+          7.1 Click on a document result title/row — Dataverse entity dialog opens
+          7.2 Dialog shows the correct entity form (sprk_document form)
+          7.3 Close dialog — search results remain visible (results preserved)
+          7.4 Click on a matter result — sprk_matter form opens in dialog
+
+        Section 8: Dark Mode
+          8.1 Append ?theme=dark to URL — page reloads in dark mode
+          8.2 All text is legible (no white-on-white or black-on-black)
+          8.3 Filter pane, tabs, command bar, grid, and graph all render in dark mode
+          8.4 Switch to graph view in dark mode — graph nodes use dark-appropriate colors
+
+        Section 9: DocumentRelationshipViewer Regression Check
+          9.1 Navigate to a document entity record that uses DocumentRelationshipViewer
+          9.2 Verify the relationship grid renders with correct columns
+          9.3 Verify column sorting works
+          9.4 Verify row click works as expected
+    </context>
+    <constraints>
+      - This is MANUAL testing — it requires browser access to the Dataverse dev environment
+      - Document each test item result: PASS, FAIL, or SKIP (with reason) in notes/debug/e2e-validation.md
+      - If any test FAILS: investigate, fix, redeploy, and retest before marking this task complete
+      - Do not mark this task complete if any Section 1-8 items have unresolved FAILures
+      - Section 9 failures must also be resolved (no regressions allowed)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>notes/debug/deployment-log.md</file>
+    </files>
+  </knowledge>
+
+  <inputs>
+    <input>Deployed SemanticSearch code page at https://spaarkedev1.crm.dynamics.com/WebResources/sprk_semanticsearch</input>
+    <input>Deployed BFF API at https://spe-api-dev-67e2xz.azurewebsites.net</input>
+    <input>Dataverse dev environment with existing test data</input>
+  </inputs>
+
+  <steps>
+    <step order="1">Verify all three pre-requisite deployments are complete (code page, sitemap, BFF API)</step>
+    <step order="2">Create notes/debug/e2e-validation.md with the full checklist template</step>
+    <step order="3">Execute Section 1: Navigation (items 1.1-1.3) and record results</step>
+    <step order="4">Execute Section 2: Document Search (items 2.1-2.7) and record results</step>
+    <step order="5">Execute Section 3: Domain Tab Switching (items 3.1-3.6) and record results</step>
+    <step order="6">Execute Section 4: Graph View (items 4.1-4.6) and record results</step>
+    <step order="7">Execute Section 5: Saved Search Favorites (items 5.1-5.5) and record results</step>
+    <step order="8">Execute Section 6: Command Bar Actions (items 6.1-6.5) and record results</step>
+    <step order="9">Execute Section 7: Entity Record Dialog (items 7.1-7.4) and record results</step>
+    <step order="10">Execute Section 8: Dark Mode (items 8.1-8.4) and record results</step>
+    <step order="11">Execute Section 9: DocRelViewer Regression (items 9.1-9.3) and record results</step>
+    <step order="12">Tally PASS/FAIL/SKIP counts in e2e-validation.md</step>
+    <step order="13">For each FAIL: investigate root cause, apply fix, redeploy affected component, retest the failed item</step>
+    <step order="14">Update e2e-validation.md with fix notes and retest results</step>
+    <step order="15">Confirm all items in Sections 1-9 are PASS before marking task complete</step>
+  </steps>
+
+  <tools>
+    <tool>Write - Create notes/debug/e2e-validation.md with checklist template</tool>
+    <tool>Edit - Update e2e-validation.md with test results</tool>
+    <tool>Edit - Fix any source code failures found during testing</tool>
+    <tool>Bash - Rebuild and redeploy if fixes required (per deployment tasks 070-072 procedures)</tool>
+    <tool>Bash - Check API logs or browser console for error investigation</tool>
+  </tools>
+
+  <outputs>
+    <output>notes/debug/e2e-validation.md — complete validation report with all test results</output>
+    <output>All identified failures fixed and verified</output>
+    <output>All 9 validation sections passing</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>notes/debug/e2e-validation.md exists with results for all 38 checklist items</criterion>
+    <criterion>Section 1 Navigation: all items PASS</criterion>
+    <criterion>Section 2 Document Search: all items PASS (grid renders, filters work, infinite scroll works)</criterion>
+    <criterion>Section 3 Domain Switching: all items PASS (all 4 tabs work, domain-specific columns)</criterion>
+    <criterion>Section 4 Graph View: all items PASS (renders, drill-down, category change)</criterion>
+    <criterion>Section 5 Saved Searches: all items PASS (save, load, delete)</criterion>
+    <criterion>Section 6 Command Bar: all items PASS (selection-aware actions, delete, refresh)</criterion>
+    <criterion>Section 7 Entity Dialogs: all items PASS (dialog opens, results preserved on close)</criterion>
+    <criterion>Section 8 Dark Mode: all items PASS (legible text, all components themed)</criterion>
+    <criterion>Section 9 DocRelViewer Regression: all items PASS (grid renders, sort, click)</criterion>
+    <criterion>Zero unresolved FAIL items in the validation report</criterion>
+  </acceptance-criteria>
+</task>

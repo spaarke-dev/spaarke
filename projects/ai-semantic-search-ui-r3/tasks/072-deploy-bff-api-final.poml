@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R3-072" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Final BFF API Deployment</title>
+    <phase>8</phase>
+    <phase-name>Deployment and Wrap-up</phase-name>
+    <tags>deploy, bff-api</tags>
+    <estimate>1 hour</estimate>
+    <dependencies>070</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>
+      You are a DevOps engineer performing a final deployment of the BFF API to the Azure App Service. You follow the bff-deploy skill procedure, verify API health after deployment, and confirm that the new search endpoints respond correctly.
+    </role>
+    <goal>
+      Perform the final deployment of the BFF API with all changes from this project (enhanced document search with scope=all, new records search endpoint, and all related service changes). Use the bff-deploy skill. Verify all new search endpoints respond correctly after deployment and run the API health check.
+    </goal>
+    <context>
+      The BFF API is at:
+        src/server/api/Sprk.Bff.Api/
+
+      Azure App Service: spe-api-dev-67e2xz
+      API base URL: https://spe-api-dev-67e2xz.azurewebsites.net
+
+      New/changed endpoints from this project:
+        - POST /api/ai/search — enhanced with scope=all and entityTypes filter (from Phase 2)
+        - POST /api/ai/search/records — new endpoint for entity record search (from Phase 2)
+        - GET /api/ai/search/count — if added in Phase 2
+        - GET /healthz — health check (existing, verify still returns 200)
+        - GET /ping — liveness check (existing, verify still returns 200)
+
+      Deployment procedure: Follow bff-deploy skill exactly.
+      The skill covers: dotnet publish, Az CLI deployment, health check verification.
+
+      Post-deployment verification:
+        - GET /healthz → 200 OK
+        - GET /ping → 200 OK
+        - POST /api/ai/search with scope=all → returns results (test with a simple query)
+        - POST /api/ai/search/records → returns matter/project/invoice results
+
+      Verification script: scripts/Test-SdapBffApi.ps1
+        - Run this script against the dev environment to verify endpoints
+        - Review output for any 4xx or 5xx responses
+
+      If deployment fails:
+        - Check Azure App Service deployment logs
+        - Check Application Insights for startup errors
+        - Resolve and redeploy before marking task complete
+    </context>
+    <constraints>
+      - Deploy to dev environment only (spe-api-dev-67e2xz)
+      - Use bff-deploy skill — do not use ad-hoc az webapp deploy commands without following the skill
+      - Run scripts/Test-SdapBffApi.ps1 after deployment to verify endpoints
+      - Document deployment in notes/debug/deployment-log.md (append to existing file from task 070)
+      - If any endpoint returns unexpected errors post-deployment, investigate and fix before marking complete
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>scripts/Test-SdapBffApi.ps1</file>
+    </files>
+  </knowledge>
+
+  <inputs>
+    <input>src/server/api/Sprk.Bff.Api/ (all Phase 2 changes: enhanced search, new records endpoint)</input>
+    <input>scripts/Deploy-BffApi.ps1</input>
+    <input>scripts/Test-SdapBffApi.ps1</input>
+  </inputs>
+
+  <steps>
+    <step order="1">Read bff-deploy skill to load the exact deployment procedure</step>
+    <step order="2">Run dotnet build on Sprk.Bff.Api to verify no compilation errors before deployment</step>
+    <step order="3">Run dotnet test to verify all BFF API tests pass before deployment</step>
+    <step order="4">Follow bff-deploy skill procedure to build and deploy to spe-api-dev-67e2xz</step>
+    <step order="5">Wait for deployment to complete and App Service to restart</step>
+    <step order="6">Verify GET /healthz returns 200 OK</step>
+    <step order="7">Verify GET /ping returns 200 OK</step>
+    <step order="8">Run scripts/Test-SdapBffApi.ps1 to test all endpoints</step>
+    <step order="9">Verify POST /api/ai/search with scope=all parameter returns results</step>
+    <step order="10">Verify POST /api/ai/search/records returns entity record results</step>
+    <step order="11">Check Application Insights for any error spikes after deployment</step>
+    <step order="12">Append deployment record to notes/debug/deployment-log.md (API deployment, timestamp, version)</step>
+  </steps>
+
+  <tools>
+    <tool>Skill - bff-deploy (load deployment procedure)</tool>
+    <tool>Bash - dotnet build and dotnet test</tool>
+    <tool>Bash - Deploy-BffApi.ps1 and az CLI commands per skill</tool>
+    <tool>Bash - Test-SdapBffApi.ps1 to verify endpoints</tool>
+    <tool>Edit - Append to notes/debug/deployment-log.md</tool>
+  </tools>
+
+  <outputs>
+    <output>BFF API deployed to spe-api-dev-67e2xz with all Phase 2 changes</output>
+    <output>All endpoints verified: /healthz, /ping, /api/ai/search (scope=all), /api/ai/search/records</output>
+    <output>notes/debug/deployment-log.md updated with API deployment record</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>dotnet build completes without errors</criterion>
+    <criterion>dotnet test passes with no failures</criterion>
+    <criterion>Deployment to spe-api-dev-67e2xz completes successfully</criterion>
+    <criterion>GET /healthz returns 200 OK</criterion>
+    <criterion>GET /ping returns 200 OK</criterion>
+    <criterion>POST /api/ai/search with scope=all returns 200 with search results</criterion>
+    <criterion>POST /api/ai/search/records returns 200 with entity record results</criterion>
+    <criterion>Test-SdapBffApi.ps1 reports no endpoint failures</criterion>
+    <criterion>No error spikes in Application Insights immediately after deployment</criterion>
+    <criterion>Deployment appended to notes/debug/deployment-log.md</criterion>
+  </acceptance-criteria>
+</task>

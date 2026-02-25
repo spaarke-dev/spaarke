@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-040" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create SearchCommandBar — Selection-Aware and Entity-Type-Aware Command Bar</title>
+    <phase>5 — Interactive Features</phase>
+    <tags>code-page, fluent-ui</tags>
+    <status>pending</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>020, 023</dependencies>
+    <blocks>R3-047</blocks>
+    <parallel-group>phase5-features</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create SearchCommandBar.tsx — the selection-aware, entity-type-aware command bar at the
+    top of the page. Command availability changes based on:
+    1. Number of selected rows (0, 1, or multiple)
+    2. Active search domain (Documents vs Matters/Projects/Invoices)
+
+    Command states per selection and domain (from spec.md Section 6.6 / FR-09):
+    - No selection: Delete (disabled), Refresh, Email a Link (disabled)
+    - Single selection: Delete, Email a Link, + Open in Web/Desktop/Download/Send to Index (Documents only)
+    - Multi-selection: Delete, Email a Link, Send to Index (Documents only)
+    - Entity-type-aware: document-only commands hidden for Matters/Projects/Invoices
+
+    Uses Fluent v9 Toolbar with ToolbarButton and ToolbarDivider components.
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer with Fluent UI v9 Toolbar expertise.
+  </role>
+
+  <goal>
+    SearchCommandBar renders correct commands based on selection count and active domain.
+    Document-only commands are hidden for non-Document domains. Disabled commands show tooltip
+    explaining why they're disabled. Each button has an appropriate icon.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9 Toolbar, ToolbarButton, ToolbarDivider from @fluentui/react-components</constraint>
+    <constraint source="ADR-021">Icons from @fluentui/react-icons only</constraint>
+    <constraint source="ADR-021">No hard-coded colors — tokens only</constraint>
+    <constraint source="spec">Delete: available with any selection; disabled when nothing selected</constraint>
+    <constraint source="spec">Open in Web, Open in Desktop, Download, Send to Index: Documents domain only</constraint>
+    <constraint source="spec">Email a Link: single selection only (multi-select disabled)</constraint>
+    <constraint source="spec">Refresh: always enabled regardless of selection</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Props interface for SearchCommandBar:
+      - selectedIds: string[] (currently selected row IDs)
+      - activeDomain: SearchDomain
+      - onDelete: (ids: string[]) =&gt; void
+      - onRefresh: () =&gt; void
+      - onEmailLink: (id: string) =&gt; void
+      - onOpenInWeb: (id: string) =&gt; void (Documents only)
+      - onOpenInDesktop: (id: string) =&gt; void (Documents only)
+      - onDownload: (id: string) =&gt; void (Documents only)
+      - onSendToIndex: (ids: string[]) =&gt; void (Documents only)
+
+      Icon assignments:
+      - Delete: DeleteRegular
+      - Refresh: ArrowClockwiseRegular
+      - Email a Link: MailRegular
+      - Open in Web: OpenRegular
+      - Open in Desktop: DesktopRegular
+      - Download: ArrowDownloadRegular
+      - Send to Index: BrainCircuitRegular or DatabaseSearchRegular
+
+      Fluent v9 Toolbar: use Toolbar as container with ToolbarButton children.
+      For dividers between command groups: ToolbarDivider.
+      Disabled buttons: use disabled={true} prop (Fluent v9 Toolbar handles styling automatically).
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Define command visibility logic">
+      Plan conditional rendering rules:
+      - showDocumentCommands: activeDomain === "Documents"
+      - isDeleteEnabled: selectedIds.length &gt; 0
+      - isEmailEnabled: selectedIds.length === 1
+      - isSingleSelected: selectedIds.length === 1
+    </step>
+    <step order="2" name="Create SearchCommandBar.tsx">
+      Create src/client/code-pages/SemanticSearch/src/components/SearchCommandBar.tsx:
+      - Fluent v9 Toolbar container (full-width, bordered bottom)
+      - ToolbarButton: Delete (disabled when nothing selected)
+      - ToolbarButton: Refresh (always enabled, calls onRefresh)
+      - ToolbarDivider
+      - ToolbarButton: Email a Link (disabled when no single selection)
+      - Conditional (showDocumentCommands):
+        - ToolbarDivider
+        - ToolbarButton: Open in Web (single selection only)
+        - ToolbarButton: Open in Desktop (single selection only)
+        - ToolbarButton: Download (single selection only)
+        - ToolbarDivider
+        - ToolbarButton: Send to Index (any selection)
+      - makeStyles for toolbar height and border
+    </step>
+    <step order="3" name="Connect to App.tsx">
+      Update App.tsx to render SearchCommandBar in the top command bar area.
+      Pass dummy handlers for now — full wiring in task 047.
+    </step>
+    <step order="4" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create SearchCommandBar.tsx</tool>
+    <tool name="Edit">Update App.tsx to render command bar</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/SearchCommandBar.tsx</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/App.tsx (command bar wired)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">Delete button disabled when selectedIds.length === 0</criterion>
+    <criterion testable="true">Email a Link disabled when selectedIds.length !== 1</criterion>
+    <criterion testable="true">Document-only commands (Open in Web, Open in Desktop, Download, Send to Index) hidden when domain is not "Documents"</criterion>
+    <criterion testable="true">Refresh button always enabled</criterion>
+    <criterion testable="true">All buttons have icons from @fluentui/react-icons</criterion>
+    <criterion testable="true">Uses Fluent v9 Toolbar — not a custom implementation</criterion>
+    <criterion testable="true">No hard-coded colors — tokens only</criterion>
+  </acceptance-criteria>
+</task>

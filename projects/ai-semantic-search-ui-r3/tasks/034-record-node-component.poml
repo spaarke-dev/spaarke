@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-034" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create RecordNode — Individual Record Node for ReactFlow Drill-Down</title>
+    <phase>4 — Grid &amp; Graph Views</phase>
+    <tags>code-page, graph, fluent-ui</tags>
+    <status>pending</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>032, 023</dependencies>
+    <blocks>R3-036</blocks>
+    <parallel-group>phase4-graph-nodes</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create RecordNode.tsx — the ReactFlow custom node component for individual search result
+    records shown during cluster drill-down expansion. Replaces the placeholder from task 032.
+
+    A record node represents a single search result (document, matter, project, or invoice).
+    It displays:
+    - Entity type icon (file icon for documents, briefcase for matters, etc.)
+    - Record name (truncated)
+    - Similarity score badge (colored, percentage)
+    - Parent entity name (if available)
+    - Click handler opens the entity record dialog (Xrm.Navigation.navigateTo)
+
+    Similar to DocumentRelationshipViewer's DocumentNode but extended for multi-entity.
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer with @xyflow/react v12 custom node experience
+    and Fluent UI v9 design token expertise.
+  </role>
+
+  <goal>
+    RecordNode renders within a ReactFlow canvas during cluster drill-down. Entity icon matches
+    domain type. Similarity badge is color-coded (green/amber/red). Click triggers entity record
+    dialog. Dark mode renders correctly.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Color for similarity badge MUST use Fluent v9 semantic tokens (colorPaletteGreen, colorPaletteRed, etc.)</constraint>
+    <constraint source="ADR-021">No hard-coded colors — tokens only</constraint>
+    <constraint source="project">ReactFlow custom node: receive data via NodeProps&lt;RecordNodeData&gt; from @xyflow/react</constraint>
+    <constraint source="spec">Record node compact — fits within expanded cluster sub-layout</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/components/DocumentNode.tsx</file>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      DocumentRelationshipViewer/src/components/DocumentNode.tsx is the direct reference —
+      RecordNode extends this pattern to support multiple entity types.
+
+      RecordNodeData interface:
+      - recordId: string
+      - recordName: string
+      - recordType: string (sprk_document, sprk_matter, etc.)
+      - similarity: number (0-100)
+      - parentEntityName?: string
+      - domain: SearchDomain
+      - onOpenRecord: (recordId: string, domain: SearchDomain) =&gt; void
+
+      Entity type icon mapping:
+      - sprk_document / Documents: DocumentRegular
+      - sprk_matter / Matters: BriefcaseRegular
+      - sprk_project / Projects: TaskListSquareRegular
+      - sprk_invoice / Invoices: ReceiptRegular
+
+      Similarity badge colors (Fluent v9 palette):
+      - 75-100: tokens.colorPaletteGreenBackground2 (green)
+      - 50-74: tokens.colorPaletteMarigoldBackground2 (amber)
+      - 0-49: tokens.colorPaletteRedBackground2 (red)
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read DocumentNode reference">
+      Read DocumentRelationshipViewer/src/components/DocumentNode.tsx to understand the exact
+      NodeProps interface, Handle placement, and styling approach.
+    </step>
+    <step order="2" name="Create RecordNode.tsx">
+      Create src/client/code-pages/SemanticSearch/src/components/RecordNode.tsx:
+      - Props: NodeProps&lt;RecordNodeData&gt; from @xyflow/react
+      - Compact card layout (fixed width ~160px)
+      - Entity icon (top left) + record name (truncated to 2 lines)
+      - Similarity badge (right side): percentage text with background color from palette tokens
+      - Parent entity name (small text, bottom) if available
+      - onClick calls data.onOpenRecord(data.recordId, data.domain)
+      - Handles: Source and Target for edge connections
+      - makeStyles for all styling
+    </step>
+    <step order="3" name="Update SearchResultsGraph.tsx">
+      Replace placeholder RecordNode import with the real implementation.
+    </step>
+    <step order="4" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read DocumentNode.tsx as reference</tool>
+    <tool name="Write">Create RecordNode.tsx</tool>
+    <tool name="Edit">Update SearchResultsGraph.tsx to use real RecordNode</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/RecordNode.tsx</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/SearchResultsGraph.tsx (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">RecordNode uses NodeProps&lt;RecordNodeData&gt; from @xyflow/react</criterion>
+    <criterion testable="true">Entity icon matches domain type (document/matter/project/invoice icons)</criterion>
+    <criterion testable="true">Similarity badge color uses Fluent v9 palette tokens (green/amber/red)</criterion>
+    <criterion testable="true">onClick calls data.onOpenRecord to open entity record dialog</criterion>
+    <criterion testable="true">No hard-coded colors — Fluent v9 tokens only</criterion>
+  </acceptance-criteria>
+</task>

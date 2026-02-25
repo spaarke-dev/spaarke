@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-023" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Define All TypeScript Type Definitions</title>
+    <phase>3 — Code Page Core</phase>
+    <tags>code-page, types</tags>
+    <status>pending</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>001</dependencies>
+    <blocks>R3-022, R3-024, R3-025, R3-026, R3-027, R3-028, R3-029</blocks>
+    <parallel-group>phase3-foundation</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the single types/index.ts file containing all TypeScript type definitions used across
+    the SemanticSearch code page. Defining types centrally (before implementation) prevents circular
+    imports and ensures all components agree on the data shapes.
+
+    Types to define:
+    - SearchDomain union type
+    - Document search request/response types matching BFF API contracts
+    - Entity record search request/response types
+    - Filter types (SearchFilters, DateRange, FilterOption)
+    - Grid column definition types per domain
+    - Saved search schema type
+    - Graph node/edge types (ClusterNode, RecordNode, ClusterEdge)
+    - API error type
+    - URL params type
+  </prompt>
+
+  <role>
+    Senior TypeScript developer familiar with the Spaarke BFF API contracts and the
+    domain model (Documents, Matters, Projects, Invoices).
+  </role>
+
+  <goal>
+    A comprehensive types/index.ts file exists with all required types, matching the BFF API
+    contracts documented in spec.md Sections 7-8. No any types used. All types are exported.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">Types must match BFF API request/response contracts exactly (spec.md Section 7)</constraint>
+    <constraint source="spec">SearchDomain: "Documents" | "Matters" | "Projects" | "Invoices"</constraint>
+    <constraint source="spec">Graph cluster categories: "MatterType" | "PracticeArea" | "DocumentType" | "Organization" | "PersonContact"</constraint>
+    <constraint source="spec">Saved search schema must include all fields: name, searchDomain, query, filters, viewMode, columns, sortColumn, sortDirection, graphClusterBy</constraint>
+    <constraint source="project">No any types — use unknown if type is truly unknown, then narrow</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/types/index.ts</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The spec.md Sections 7-8 define the BFF API contracts. The PCF SemanticSearchControl has
+      types for the document search that can be referenced but need extension for the multi-domain
+      scenario.
+
+      Key type shapes from spec.md:
+      - DocumentSearchResult: documentId, name, fileType, documentType, combinedScore, highlights[],
+        parentEntityType, parentEntityId, parentEntityName, fileUrl, recordUrl, createdAt, updatedAt,
+        summary, tldr
+      - RecordSearchResult: recordId, recordType, recordName, recordDescription, confidenceScore,
+        matchReasons[], organizations[], people[], keywords[], createdAt, modifiedAt
+      - SavedSearch schema as JSON stored in sprk_gridconfiguration
+
+      Graph types are inspired by DocumentRelationshipViewer node types but extended for multi-entity.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Review spec API contracts">
+      Read spec.md Sections 7-8 carefully to capture exact field names and types for all API
+      request/response shapes. Note: camelCase field names, nullable fields, arrays vs single values.
+    </step>
+    <step order="2" name="Review PCF types for reuse">
+      Read SemanticSearchControl/types/index.ts to identify types that can be extended or reused
+      for the document search domain.
+    </step>
+    <step order="3" name="Create types/index.ts">
+      Create src/client/code-pages/SemanticSearch/src/types/index.ts with sections:
+
+      // --- Domain ---
+      export type SearchDomain = "Documents" | "Matters" | "Projects" | "Invoices";
+      export type ViewMode = "grid" | "graph";
+      export type GraphClusterBy = "MatterType" | "PracticeArea" | "DocumentType" | "Organization" | "PersonContact";
+      export type HybridMode = "rrf" | "vectorOnly" | "keywordOnly";
+
+      // --- Filters ---
+      export interface FilterOption { value: string; label: string; count?: number; }
+      export interface DateRange { from: string | null; to: string | null; }
+      export interface SearchFilters { documentTypes: string[]; fileTypes: string[]; matterTypes: string[];
+        dateRange: DateRange; threshold: number; searchMode: HybridMode; }
+
+      // --- Document Search (POST /api/ai/search) ---
+      export interface DocumentSearchRequest { ... }
+      export interface DocumentSearchResult { ... } (all fields from spec)
+      export interface DocumentSearchResponse { results: DocumentSearchResult[]; totalCount: number; searchTime: number; }
+
+      // --- Record Search (POST /api/ai/search/records) ---
+      export interface RecordSearchRequest { ... }
+      export interface RecordSearchResult { ... } (all fields from spec)
+      export interface RecordSearchResponse { results: RecordSearchResult[]; totalCount: number; searchTime: number; }
+
+      // --- Grid ---
+      export interface GridColumnDef { key: string; label: string; width?: number; sortable?: boolean; }
+
+      // --- Saved Searches ---
+      export interface SavedSearch { id?: string; name: string; searchDomain: SearchDomain;
+        query: string; filters: SearchFilters; viewMode: ViewMode; columns: string[];
+        sortColumn: string; sortDirection: "asc" | "desc"; graphClusterBy: GraphClusterBy; }
+
+      // --- Graph ---
+      export interface ClusterNode { id: string; clusterKey: string; clusterLabel: string;
+        recordCount: number; avgSimilarity: number; topResults: (DocumentSearchResult | RecordSearchResult)[];
+        category: GraphClusterBy; }
+      export interface RecordNode { id: string; recordId: string; recordName: string;
+        similarity: number; parentEntityName?: string; domain: SearchDomain; }
+      export interface ClusterEdge { id: string; source: string; target: string; weight: number; }
+
+      // --- App ---
+      export interface AppUrlParams { theme?: string; query?: string; domain?: SearchDomain;
+        scope?: string; entityId?: string; savedSearchId?: string; }
+      export interface ApiError { status: number; message: string; detail?: string; }
+    </step>
+    <step order="4" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed. No TypeScript errors from the types file.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spec and PCF types for reference</tool>
+    <tool name="Write">Create types/index.ts</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/types/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">SearchDomain union type defined: "Documents" | "Matters" | "Projects" | "Invoices"</criterion>
+    <criterion testable="true">DocumentSearchResult includes all fields from spec.md Section 7 response</criterion>
+    <criterion testable="true">RecordSearchResult includes all fields from spec.md Section 7 records response</criterion>
+    <criterion testable="true">SavedSearch interface matches saved search schema from spec.md</criterion>
+    <criterion testable="true">ClusterNode, RecordNode, ClusterEdge types defined for graph visualization</criterion>
+    <criterion testable="true">No any types used — all fields are typed</criterion>
+    <criterion testable="true">All types are exported</criterion>
+  </acceptance-criteria>
+</task>

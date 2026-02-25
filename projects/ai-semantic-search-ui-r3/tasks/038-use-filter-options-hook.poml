@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-038" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create useFilterOptions Hook — Fetch Filter Dropdown Options from Dataverse</title>
+    <phase>4 — Grid &amp; Graph Views</phase>
+    <tags>code-page, hooks, dataverse</tags>
+    <status>pending</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>023</dependencies>
+    <blocks>R3-047</blocks>
+    <parallel-group>phase4-independent</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create useFilterOptions.ts — a hook that fetches filter dropdown options from Dataverse for
+    the Document Type, File Type, and Matter Type filter dropdowns. Options are cached per
+    session (singleton service pattern) to avoid re-fetching on every search.
+
+    Adapted from the PCF SemanticSearchControl useFilterOptions and DataverseMetadataService.
+    The Code Page version uses direct Dataverse WebAPI calls (not PCF context.webAPI).
+
+    Provides:
+    - documentTypes: FilterOption[] — from sprk_document optionset or distinct values
+    - fileTypes: FilterOption[] — from sprk_document fileType distinct values
+    - matterTypes: FilterOption[] — from sprk_matter optionset or distinct values
+    - isLoading: boolean
+    - refresh(): void — clears cache and re-fetches
+  </prompt>
+
+  <role>
+    Senior TypeScript developer familiar with Dataverse WebAPI, OData queries, and React
+    hook patterns for async data fetching with caching.
+  </role>
+
+  <goal>
+    useFilterOptions returns populated filter option arrays within 2 seconds of first use.
+    Options are cached for the session (no re-fetch on component re-mount). Refresh clears
+    cache and re-fetches all options.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Use Dataverse WebAPI directly (fetch to /api/data/v9.2/) — PCF context.webAPI is not available in Code Pages</constraint>
+    <constraint source="project">Cache at module level (singleton) — not per-component-instance</constraint>
+    <constraint source="project">Use Xrm.Utility.getGlobalContext().getClientUrl() for base URL in Dataverse context</constraint>
+    <constraint source="spec">Options must load within 2 seconds (NFR-04 derived)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/hooks/useFilterOptions.ts</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/DataverseMetadataService.ts</file>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The PCF SemanticSearchControl uses context.webAPI for Dataverse queries. In the Code Page,
+      we use the Dataverse OData WebAPI directly via fetch:
+        const orgUrl = (window.Xrm as any)?.Utility?.getGlobalContext()?.getClientUrl?.() ?? "";
+        const url = `${orgUrl}/api/data/v9.2/...`;
+
+      For filter options, either:
+      (a) Fetch optionset metadata: /api/data/v9.2/EntityDefinitions(LogicalName='sprk_document')/Attributes(LogicalName='sprk_documenttype')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=OptionSet
+      (b) Fetch distinct values via aggregation query
+
+      Option (a) is preferred — gives labels and values without needing data records.
+
+      Cache pattern: module-level Map&lt;string, FilterOption[]&gt; keyed by optionset name.
+      If cache has entry, return it. Otherwise fetch and cache.
+
+      Hook returns same shape as PCF version for compatibility with FilterDropdown props.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read PCF implementation">
+      Read SemanticSearchControl/hooks/useFilterOptions.ts and DataverseMetadataService.ts.
+      Note query patterns for optionset metadata and the cache approach.
+    </step>
+    <step order="2" name="Create DataverseWebApiService.ts">
+      Create src/client/code-pages/SemanticSearch/src/services/DataverseWebApiService.ts:
+      - Helper: getOrgUrl() — get Dataverse org URL from Xrm context
+      - Helper: fetchOptionsetValues(entityName, attributeName): Promise&lt;FilterOption[]&gt;
+        — queries EntityDefinitions optionset metadata API
+      - Module-level cache: Map&lt;string, FilterOption[]&gt;
+    </step>
+    <step order="3" name="Create useFilterOptions.ts">
+      Create src/client/code-pages/SemanticSearch/src/hooks/useFilterOptions.ts:
+      - Fetch documentTypes on mount (sprk_document / sprk_documenttype)
+      - Fetch fileTypes on mount (file type distinct values or separate optionset)
+      - Fetch matterTypes on mount (sprk_matter / sprk_mattertype)
+      - All fetches in parallel (Promise.all)
+      - isLoading true while any fetch in progress
+      - refresh(): clear cache entries, re-fetch
+      - Return { documentTypes, fileTypes, matterTypes, isLoading, refresh }
+    </step>
+    <step order="4" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read PCF hook and service as reference</tool>
+    <tool name="Write">Create DataverseWebApiService.ts and useFilterOptions.ts</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/services/DataverseWebApiService.ts</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/hooks/useFilterOptions.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">useFilterOptions returns documentTypes, fileTypes, matterTypes arrays</criterion>
+    <criterion testable="true">isLoading is true during fetch, false when complete</criterion>
+    <criterion testable="true">Options are cached at module level — second call returns cached values without fetch</criterion>
+    <criterion testable="true">refresh() clears cache and triggers re-fetch</criterion>
+    <criterion testable="true">All three optionset fetches run in parallel (Promise.all)</criterion>
+    <criterion testable="true">Uses Dataverse WebAPI fetch (not PCF context.webAPI)</criterion>
+  </acceptance-criteria>
+</task>
