@@ -91,22 +91,12 @@ const useStyles = makeStyles({
         fontSize: tokens.fontSizeBase200,
     },
     controlWrapper: {
+        position: "relative" as const,
         width: "100%",
         maxWidth: "100%",
         minWidth: 0,
         overflow: "hidden",
         boxSizing: "border-box" as const,
-        "& > *": {
-            width: "100%",
-            maxWidth: "100%",
-            minWidth: 0,
-            boxSizing: "border-box" as const,
-        },
-        "& button": {
-            maxWidth: "100%",
-            minWidth: 0,
-            boxSizing: "border-box" as const,
-        },
     },
 });
 
@@ -338,6 +328,8 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
                 </div>
                 <div className={styles.controlWrapper}>
                     <Slider
+                        style={{ width: "100%" }}
+                        input={{ style: { maxWidth: "100%" } }}
                         min={0}
                         max={100}
                         step={10}
@@ -356,6 +348,8 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
                 </Label>
                 <div className={styles.controlWrapper}>
                     <Dropdown
+                        style={{ width: "100%" }}
+                        button={{ style: { width: "100%", minWidth: 0, boxSizing: "border-box" } }}
                         size="small"
                         value={currentModeLabel}
                         selectedOptions={[filters.searchMode]}

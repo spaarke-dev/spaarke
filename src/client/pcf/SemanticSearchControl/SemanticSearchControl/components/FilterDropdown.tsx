@@ -26,6 +26,8 @@ const useStyles = makeStyles({
         flexDirection: "column",
         gap: tokens.spacingVerticalXS,
         width: "100%",
+        minWidth: 0,
+        overflow: "hidden",
     },
     label: {
         fontWeight: tokens.fontWeightSemibold,
@@ -119,6 +121,7 @@ export const FilterDropdown: React.FC<IFilterDropdownProps> = ({
             <Dropdown
                 id={dropdownId}
                 className={styles.dropdown}
+                button={{ style: { width: "100%", minWidth: 0, boxSizing: "border-box" } }}
                 placeholder="All"
                 value={selectedValue}
                 selectedOptions={selectedKeys}
