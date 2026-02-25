@@ -2,7 +2,7 @@
  * FilterPanel component
  *
  * Container for filter controls: Document Type, File Type, Date Range,
- * Threshold slider, and Search Mode selector.
+ * Threshold, and Search Mode — all using consistent FilterDropdown components.
  * Filters are applied when the user clicks Search or presses Enter.
  *
  * @see ADR-021 for Fluent UI v9 requirements
@@ -14,13 +14,8 @@ import { useCallback } from "react";
 import {
     makeStyles,
     tokens,
-    Text,
     Button,
     Divider,
-    Slider,
-    Label,
-    Dropdown,
-    Option,
 } from "@fluentui/react-components";
 import {
     Dismiss20Regular,
@@ -59,45 +54,6 @@ const useStyles = makeStyles({
         paddingBottom: tokens.spacingVerticalS,
         minWidth: 0,
     },
-    sliderSection: {
-        display: "flex",
-        flexDirection: "column",
-        gap: tokens.spacingVerticalXXS,
-        paddingBottom: tokens.spacingVerticalS,
-    },
-    sliderHeader: {
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-    },
-    sliderLabel: {
-        fontWeight: tokens.fontWeightSemibold,
-        fontSize: tokens.fontSizeBase200,
-    },
-    sliderValue: {
-        fontSize: tokens.fontSizeBase200,
-        color: tokens.colorNeutralForeground2,
-        minWidth: "32px",
-        textAlign: "right" as const,
-    },
-    modeSection: {
-        display: "flex",
-        flexDirection: "column",
-        gap: tokens.spacingVerticalS,
-        paddingBottom: tokens.spacingVerticalS,
-    },
-    modeLabel: {
-        fontWeight: tokens.fontWeightSemibold,
-        fontSize: tokens.fontSizeBase200,
-    },
-    controlWrapper: {
-        position: "relative" as const,
-        width: "100%",
-        maxWidth: "100%",
-        minWidth: 0,
-        overflow: "hidden",
-        boxSizing: "border-box" as const,
-    },
 });
 
 // Default empty filters
@@ -110,11 +66,20 @@ const emptyFilters: SearchFilters = {
     searchMode: "hybrid",
 };
 
-// Search mode options for dropdown
-const SEARCH_MODE_OPTIONS: { value: SearchMode; label: string }[] = [
-    { value: "hybrid", label: "Hybrid" },
-    { value: "vectorOnly", label: "Concept Only" },
-    { value: "keywordOnly", label: "Keyword Only" },
+// Threshold options (replaces Slider — 5 preset values)
+const THRESHOLD_OPTIONS = [
+    { key: "0", label: "Off" },
+    { key: "25", label: "25%" },
+    { key: "50", label: "50%" },
+    { key: "75", label: "75%" },
+    { key: "100", label: "100%" },
+];
+
+// Search mode options
+const MODE_OPTIONS = [
+    { key: "hybrid", label: "Hybrid" },
+    { key: "vectorOnly", label: "Concept Only" },
+    { key: "keywordOnly", label: "Keyword Only" },
 ];
 
 /**
@@ -202,24 +167,25 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
         [filters, onFiltersChange]
     );
 
-    // Handle threshold change
+    // Handle threshold change (single-select dropdown, string[] → number)
     const handleThresholdChange = useCallback(
-        (_ev: unknown, data: { value: number }) => {
+        (keys: string[]) => {
+            const value = keys.length > 0 ? parseInt(keys[0], 10) : 0;
             onFiltersChange({
                 ...filters,
-                threshold: data.value,
+                threshold: isNaN(value) ? 0 : value,
             });
         },
         [filters, onFiltersChange]
     );
 
-    // Handle search mode change
+    // Handle search mode change (single-select dropdown, string[] → SearchMode)
     const handleSearchModeChange = useCallback(
-        (_ev: unknown, data: { optionValue?: string }) => {
-            if (data.optionValue) {
+        (keys: string[]) => {
+            if (keys.length > 0) {
                 onFiltersChange({
                     ...filters,
-                    searchMode: data.optionValue as SearchMode,
+                    searchMode: keys[0] as SearchMode,
                 });
             }
         },
@@ -228,11 +194,6 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
 
     // Scope-aware visibility: hide Matter Type when scope is "matter"
     const showMatterTypeFilter = searchScope !== "matter";
-
-    // Get display label for current search mode
-    const currentModeLabel = SEARCH_MODE_OPTIONS.find(
-        (o) => o.value === filters.searchMode
-    )?.label ?? "Hybrid";
 
     return (
         <div className={styles.container}>
@@ -316,53 +277,28 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
 
             <Divider />
 
-            {/* Threshold Slider */}
-            <div className={styles.sliderSection}>
-                <div className={styles.sliderHeader}>
-                    <Label className={styles.sliderLabel} size="small">
-                        Threshold
-                    </Label>
-                    <Text className={styles.sliderValue}>
-                        {filters.threshold}%
-                    </Text>
-                </div>
-                <div className={styles.controlWrapper}>
-                    <Slider
-                        style={{ width: "100%" }}
-                        input={{ style: { maxWidth: "100%" } }}
-                        min={0}
-                        max={100}
-                        step={10}
-                        value={filters.threshold}
-                        onChange={handleThresholdChange}
-                        disabled={disabled}
-                        size="small"
-                    />
-                </div>
+            {/* Threshold Filter */}
+            <div className={styles.filterSection}>
+                <FilterDropdown
+                    label="Threshold"
+                    options={THRESHOLD_OPTIONS}
+                    selectedKeys={[String(filters.threshold)]}
+                    onSelectionChange={handleThresholdChange}
+                    disabled={disabled}
+                    multiSelect={false}
+                />
             </div>
 
-            {/* Search Mode Dropdown */}
-            <div className={styles.modeSection}>
-                <Label className={styles.modeLabel} size="small">
-                    Mode
-                </Label>
-                <div className={styles.controlWrapper}>
-                    <Dropdown
-                        style={{ width: "100%" }}
-                        button={{ style: { width: "100%", minWidth: 0, boxSizing: "border-box" } }}
-                        size="small"
-                        value={currentModeLabel}
-                        selectedOptions={[filters.searchMode]}
-                        onOptionSelect={handleSearchModeChange}
-                        disabled={disabled}
-                    >
-                        {SEARCH_MODE_OPTIONS.map((option) => (
-                            <Option key={option.value} value={option.value}>
-                                {option.label}
-                            </Option>
-                        ))}
-                    </Dropdown>
-                </div>
+            {/* Search Mode Filter */}
+            <div className={styles.filterSection}>
+                <FilterDropdown
+                    label="Mode"
+                    options={MODE_OPTIONS}
+                    selectedKeys={[filters.searchMode]}
+                    onSelectionChange={handleSearchModeChange}
+                    disabled={disabled}
+                    multiSelect={false}
+                />
             </div>
         </div>
     );

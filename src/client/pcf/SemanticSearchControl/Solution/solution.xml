@@ -11,7 +11,7 @@
     <Descriptions>
       <Description description="PCF control for semantic document search with natural language queries, infinite scroll, and filtering" languagecode="1033" />
     </Descriptions>
-    <Version>1.0.45</Version>
+    <Version>1.0.46</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>
