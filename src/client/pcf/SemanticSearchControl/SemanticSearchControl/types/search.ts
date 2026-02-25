@@ -8,10 +8,19 @@
 /**
  * Search scope modes
  * - "all": Search across all documents (standalone search page)
- * - "matter", "project", "invoice", "account", "contact": Entity-scoped search
+ * - "entity": Auto-detect entity type from form context (resolves to matter/project/invoice/etc.)
+ * - "matter", "project", "invoice", "account", "contact": Explicit entity-scoped search
  * - "custom": Custom scope using documentIds (future)
  */
-export type SearchScope = "all" | "matter" | "project" | "invoice" | "account" | "contact" | "custom";
+export type SearchScope = "all" | "entity" | "matter" | "project" | "invoice" | "account" | "contact" | "custom";
+
+/**
+ * Search mode for controlling how vector and keyword search are combined.
+ * - "hybrid": Reciprocal Rank Fusion of vector + keyword (default)
+ * - "vectorOnly": Pure semantic/concept search
+ * - "keywordOnly": Pure BM25 keyword search
+ */
+export type SearchMode = "hybrid" | "vectorOnly" | "keywordOnly";
 
 /**
  * Date range filter
@@ -29,6 +38,10 @@ export interface SearchFilters {
     matterTypes: string[];
     dateRange: DateRange | null;
     fileTypes: string[];
+    /** Minimum relevance score threshold (0-100). 0 = show all results. */
+    threshold: number;
+    /** Search mode: hybrid (default), vectorOnly, or keywordOnly */
+    searchMode: SearchMode;
 }
 
 /**

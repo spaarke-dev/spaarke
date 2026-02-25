@@ -38,6 +38,7 @@ export interface IFilterPanelProps {
     searchScope: SearchScope;
     scopeId: string | null;
     onFiltersChange: (filters: SearchFilters) => void;
+    onApply?: () => void;
     disabled: boolean;
     onCollapse?: () => void;
 }
@@ -81,14 +82,25 @@ export interface IResultsListProps {
     isLoadingMore: boolean;
     hasMore: boolean;
     totalCount: number;
+    /** Minimum score threshold (0-100). Results below this are hidden. */
+    threshold: number;
     onLoadMore: () => void;
     onResultClick: (result: SearchResult) => void;
     onOpenFile: (result: SearchResult, mode: "web" | "desktop") => void;
     onOpenRecord: (result: SearchResult, inModal: boolean) => void;
     onFindSimilar: (result: SearchResult) => void;
     onPreview: (result: SearchResult) => Promise<string | null>;
+    onSummary: (result: SearchResult) => Promise<SummaryData>;
     onViewAll: () => void;
     compactMode: boolean;
+}
+
+/**
+ * Summary data fetched from Dataverse
+ */
+export interface SummaryData {
+    summary: string | null;
+    tldr: string | null;
 }
 
 /**
@@ -101,6 +113,7 @@ export interface IResultCardProps {
     onOpenRecord: (inModal: boolean) => void;
     onFindSimilar: () => void;
     onPreview: () => Promise<string | null>;
+    onSummary: () => Promise<SummaryData>;
     compactMode: boolean;
 }
 
