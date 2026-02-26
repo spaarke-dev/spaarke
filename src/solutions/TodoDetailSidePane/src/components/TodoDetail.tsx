@@ -2,12 +2,14 @@
  * TodoDetail — Main content component for the To Do Detail side pane.
  *
  * Layout (top to bottom):
- *   1. Description (editable, fully expanded textarea)
+ *   1. Description (editable, fully expanded textarea — no scroll)
  *   2. Details: Due Date, Assigned To
- *   3. Priority Score slider
- *   4. Effort Score slider
- *   5. To Do Score breakdown (live preview from current values)
- *   6. Sticky footer Save button
+ *   3. To Do Score section:
+ *      - Priority Score slider (editable)
+ *      - Effort Score slider (editable)
+ *      - Urgency Score slider (read-only, computed from due date)
+ *      - Total score circle
+ *   4. Sticky footer Save button
  *
  * All colours from Fluent UI v9 semantic tokens (ADR-021).
  */
@@ -49,6 +51,7 @@ function computeScore(
   todoScore: number;
   priorityComponent: number;
   effortComponent: number;
+  urgencyRaw: number;
   urgencyComponent: number;
 } {
   const invertedEffort = 100 - effort;
@@ -73,7 +76,7 @@ function computeScore(
     Math.min(100, priorityComponent + effortComponent + urgencyComponent)
   );
 
-  return { todoScore, priorityComponent, effortComponent, urgencyComponent };
+  return { todoScore, priorityComponent, effortComponent, urgencyRaw, urgencyComponent };
 }
 
 /** Convert ISO date string to YYYY-MM-DD for input[type="date"]. */
@@ -104,12 +107,12 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalL,
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalM,
+    gap: tokens.spacingVerticalL,
   },
   section: {
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalXS,
+    gap: tokens.spacingVerticalS,
   },
   sectionTitle: {
     fontWeight: tokens.fontWeightSemibold,
@@ -129,7 +132,6 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     gap: "2px",
-    maxWidth: "200px",
   },
   sliderLabelRow: {
     display: "flex",
@@ -144,25 +146,29 @@ const useStyles = makeStyles({
     minWidth: "24px",
     textAlign: "right" as const,
   },
-  scoreRow: {
+  totalRow: {
     display: "flex",
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    paddingTop: "2px",
-    paddingBottom: "2px",
+    gap: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalXS,
   },
-  scoreLabel: {
+  totalCircle: {
+    width: "48px",
+    height: "48px",
+    borderRadius: "50%",
+    backgroundColor: tokens.colorBrandBackground,
+    color: tokens.colorNeutralForegroundOnBrand,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontWeight: tokens.fontWeightBold,
+    fontSize: tokens.fontSizeBase400,
+    flexShrink: 0,
+  },
+  totalLabel: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
-  },
-  scoreValue: {
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase200,
-  },
-  scoreTotal: {
-    fontWeight: tokens.fontWeightBold,
-    color: tokens.colorBrandForeground1,
   },
   footer: {
     display: "flex",
@@ -445,7 +451,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               onChange={handleDescriptionChange}
               placeholder="Add a description..."
               resize="vertical"
-              style={{ minHeight: "120px" }}
+              textarea={{ rows: 6 }}
             />
           </div>
 
@@ -497,11 +503,15 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
           <Divider />
 
-          {/* ── Priority + Effort sliders ─────────────────────────────── */}
+          {/* ── To Do Score: sliders + urgency + total ────────────────── */}
           <div className={styles.section}>
+            <Text className={styles.sectionTitle} size={300}>
+              To Do Score
+            </Text>
+
             <div className={styles.sliderRow}>
               <div className={styles.sliderLabelRow}>
-                <label className={styles.fieldLabel}>Priority Score</label>
+                <label className={styles.fieldLabel}>Priority (50%)</label>
                 <span className={styles.sliderValue}>{priority}</span>
               </div>
               <Slider
@@ -515,7 +525,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
             <div className={styles.sliderRow}>
               <div className={styles.sliderLabelRow}>
-                <label className={styles.fieldLabel}>Effort Score</label>
+                <label className={styles.fieldLabel}>Effort (20%)</label>
                 <span className={styles.sliderValue}>{effort}</span>
               </div>
               <Slider
@@ -526,38 +536,25 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                 step={5}
               />
             </div>
-          </div>
 
-          <Divider />
+            <div className={styles.sliderRow}>
+              <div className={styles.sliderLabelRow}>
+                <label className={styles.fieldLabel}>Urgency (30%)</label>
+                <span className={styles.sliderValue}>{score.urgencyRaw}</span>
+              </div>
+              <Slider
+                value={score.urgencyRaw}
+                min={0}
+                max={100}
+                disabled
+              />
+            </div>
 
-          {/* ── To Do Score breakdown ──────────────────────────────────── */}
-          <div className={styles.section}>
-            <Text className={styles.sectionTitle} size={300}>
-              To Do Score
-            </Text>
-            <div className={styles.scoreRow}>
-              <span className={styles.scoreLabel}>Priority (50%)</span>
-              <span className={styles.scoreValue}>
-                {score.priorityComponent.toFixed(1)}
-              </span>
-            </div>
-            <div className={styles.scoreRow}>
-              <span className={styles.scoreLabel}>Effort (20%)</span>
-              <span className={styles.scoreValue}>
-                {score.effortComponent.toFixed(1)}
-              </span>
-            </div>
-            <div className={styles.scoreRow}>
-              <span className={styles.scoreLabel}>Urgency (30%)</span>
-              <span className={styles.scoreValue}>
-                {score.urgencyComponent.toFixed(1)}
-              </span>
-            </div>
-            <div className={styles.scoreRow}>
-              <span className={styles.scoreLabel}>Total</span>
-              <span className={`${styles.scoreValue} ${styles.scoreTotal}`}>
+            <div className={styles.totalRow}>
+              <div className={styles.totalCircle}>
                 {Math.round(score.todoScore)}
-              </span>
+              </div>
+              <Text className={styles.totalLabel}>Total Score</Text>
             </div>
           </div>
         </div>

@@ -201,7 +201,7 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
         // Close the To Do detail side pane when navigating away
         try {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const xrm = (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
+          const xrm = (window.top as any)?.Xrm ?? (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
           const pane = xrm?.App?.sidePanes?.getPane("todoDetailPane");
           if (pane) pane.close();
         } catch {

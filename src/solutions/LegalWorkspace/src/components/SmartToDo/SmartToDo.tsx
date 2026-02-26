@@ -529,31 +529,49 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // Card click handler: open Xrm.App.sidePanes detail pane
   // -------------------------------------------------------------------------
 
+  // -------------------------------------------------------------------------
+  // Xrm resolution — try all frame levels (matches EventsPage getXrm pattern)
+  // -------------------------------------------------------------------------
+
+  const getXrm = React.useCallback((): any | null => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (typeof Xrm !== "undefined" && (Xrm as any)?.App?.sidePanes) return Xrm;
+    try {
+      const p = (window.parent as any)?.Xrm;
+      if (p?.App?.sidePanes) return p;
+    } catch { /* cross-origin */ }
+    try {
+      const t = (window.top as any)?.Xrm;
+      if (t?.App?.sidePanes) return t;
+    } catch { /* cross-origin */ }
+    return null;
+  }, []);
+
+  const TODO_PANE_ID = "todoDetailPane";
+
   const handleCardClick = React.useCallback(async (eventId: string) => {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
+      const xrm = getXrm();
       const sidePanes = xrm?.App?.sidePanes;
       if (!sidePanes) {
         console.warn("[SmartToDo] Xrm.App.sidePanes not available");
         return;
       }
 
-      const PANE_ID = "todoDetailPane";
       const pageInput = {
         pageType: "webresource",
         webresourceName: "sprk_tododetailsidepane",
         data: `eventId=${eventId}`,
       };
 
-      const existingPane = sidePanes.getPane(PANE_ID);
+      const existingPane = sidePanes.getPane(TODO_PANE_ID);
       if (existingPane) {
         await existingPane.navigate(pageInput);
         existingPane.select();
       } else {
         const pane = await sidePanes.createPane({
           title: "To Do Details",
-          paneId: PANE_ID,
+          paneId: TODO_PANE_ID,
           canClose: true,
           width: 400,
           isSelected: true,
@@ -563,7 +581,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     } catch (err) {
       console.warn("[SmartToDo] Side pane unavailable", err);
     }
-  }, []);
+  }, [getXrm]);
 
   // -------------------------------------------------------------------------
   // BroadcastChannel: listen for saves from TodoDetailSidePane → refetch
@@ -587,28 +605,60 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   }, [refetch]);
 
   // -------------------------------------------------------------------------
-  // Close side pane on page navigation / unmount.
-  // React cleanup effects may not fire when an iframe is torn down, so we
-  // also use beforeunload which fires reliably before iframe destruction.
+  // Close side pane on navigation away.
+  // Matches EventsPage pattern: beforeunload + pagehide + parent hashchange/
+  // popstate + 200ms URL polling (Dataverse SPA navigation doesn't fire
+  // unload events). React cleanup for component unmount.
   // -------------------------------------------------------------------------
 
   React.useEffect(() => {
     const closeTodoPane = () => {
       try {
-        const xrm = (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
-        const pane = xrm?.App?.sidePanes?.getPane("todoDetailPane");
+        const xrm = getXrm();
+        const pane = xrm?.App?.sidePanes?.getPane(TODO_PANE_ID);
         if (pane) pane.close();
       } catch {
         // Side pane API unavailable — ignore
       }
     };
 
+    // Capture initial parent URL for SPA navigation detection
+    let lastParentHref = "";
+    try { lastParentHref = window.parent?.location?.href ?? ""; } catch { /* cross-origin */ }
+
+    // Poll for Dataverse SPA navigation (URL changes without unload events)
+    const navCheckInterval = setInterval(() => {
+      try {
+        const currentHref = window.parent?.location?.href ?? "";
+        if (lastParentHref && currentHref && currentHref !== lastParentHref) {
+          closeTodoPane();
+          lastParentHref = currentHref;
+        }
+      } catch { /* cross-origin — ignore */ }
+    }, 200);
+
+    // Standard browser events
     window.addEventListener("beforeunload", closeTodoPane);
+    window.addEventListener("pagehide", closeTodoPane);
+
+    // Parent frame navigation events
+    const handleParentNav = () => closeTodoPane();
+    try {
+      window.parent?.addEventListener("hashchange", handleParentNav);
+      window.parent?.addEventListener("popstate", handleParentNav);
+    } catch { /* cross-origin — ignore */ }
+
     return () => {
+      clearInterval(navCheckInterval);
       window.removeEventListener("beforeunload", closeTodoPane);
+      window.removeEventListener("pagehide", closeTodoPane);
+      try {
+        window.parent?.removeEventListener("hashchange", handleParentNav);
+        window.parent?.removeEventListener("popstate", handleParentNav);
+      } catch { /* cross-origin — ignore */ }
       closeTodoPane();
     };
-  }, []);
+  }, [getXrm]);
 
   // -------------------------------------------------------------------------
   // Settings: save thresholds

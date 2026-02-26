@@ -26,34 +26,45 @@ import type { ITodoRecord } from "./types/TodoRecord";
 // Theme resolution (matches EventDetailSidePane pattern)
 // ---------------------------------------------------------------------------
 
+/**
+ * Theme resolution — matches EventDetailSidePane ThemeProvider pattern.
+ * Priority: localStorage > navbar detection > default light.
+ *
+ * NOTE: System preference (prefers-color-scheme) is intentionally NOT used
+ * as a fallback because side pane iframes cannot detect the Power Apps theme.
+ * OS dark mode + Power Apps light mode would show dark incorrectly.
+ */
 function resolveTheme(): typeof webLightTheme {
-  // Try to find the Power Apps navbar in parent frames (authoritative theme indicator).
-  // Side pane iframes may be nested several levels deep, so check window.top first,
-  // then window.parent, to find the shell frame that hosts the navbar.
-  const framesToCheck = [
-    typeof window !== "undefined" ? window.top : null,
-    typeof window !== "undefined" ? window.parent : null,
-  ];
+  // 1. Check localStorage (shared across all Spaarke web resources)
+  try {
+    const pref = localStorage.getItem("spaarke-theme");
+    if (pref === "dark") return webDarkTheme;
+    if (pref === "light") return webLightTheme;
+  } catch {
+    // localStorage unavailable
+  }
+
+  // 2. Try to detect Power Apps navbar (works when same-origin)
+  const framesToCheck: Array<Window | null> = [];
+  try { framesToCheck.push(window.top); } catch { /* cross-origin */ }
+  try { framesToCheck.push(window.parent); } catch { /* cross-origin */ }
   for (const frame of framesToCheck) {
     if (!frame || frame === window) continue;
     try {
-      const navBar = frame.document?.querySelector?.("[data-id='navbar']") as HTMLElement | null;
+      const navBar = frame.document?.querySelector?.(
+        '[data-id="navbar-container"]'
+      ) as HTMLElement | null;
       if (navBar) {
         const bg = window.getComputedStyle(navBar).backgroundColor;
-        if (bg && bg !== "rgb(255, 255, 255)" && bg !== "rgba(0, 0, 0, 0)") {
-          const [r, g, b] = bg.match(/\d+/g)?.map(Number) ?? [255, 255, 255];
-          if ((r + g + b) / 3 < 128) return webDarkTheme;
-        }
+        if (bg === "rgb(10, 10, 10)") return webDarkTheme;
         return webLightTheme;
       }
     } catch {
       // Cross-origin — try next frame
     }
   }
-  // Fallback: system preference (only when navbar is inaccessible)
-  if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
-    return webDarkTheme;
-  }
+
+  // 3. Default to light theme (safe default for Power Apps)
   return webLightTheme;
 }
 
