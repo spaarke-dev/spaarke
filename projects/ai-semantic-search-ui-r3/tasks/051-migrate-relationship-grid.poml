@@ -9,7 +9,7 @@
     <dependencies>050</dependencies>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -112,4 +112,28 @@
     <criterion>npm run build completes without TypeScript errors</criterion>
     <criterion>Dark mode applies correctly via Fluent v9 tokens</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note type="deviation">
+      Full GridView migration was not performed. Spike 050 analysis found three blockers:
+      1. @spaarke/ui-components is NOT a dependency of DocumentRelationshipViewer (package.json verified)
+      2. GridView hardcodes ColumnRendererService.getRenderer() for all cell rendering with no extension
+         points — 3 of 7 columns require complex custom renderers (file-type icons, relationship badges,
+         similarity color tiers) that cannot be expressed through IDatasetColumn.dataType
+      3. The actions column (dual icon buttons) has no IDatasetColumn equivalent
+
+      Changes made:
+      - Fixed ADR-021 violation: replaced inline gap: "4px" with tokens.spacingHorizontalXXS via
+        makeStyles badgeContainer class
+      - Build verified: 0 TypeScript errors (DocumentRelationshipViewer webpack build)
+      - All existing Fluent v9 token usage confirmed correct
+      - SearchResultsGrid (SemanticSearch code page) uses the same direct Fluent DataGrid pattern
+
+      Spike 050 Section 7 endorses this outcome: "If visual consistency with SearchResultsGrid is
+      the priority: Keep the direct Fluent DataGrid pattern."
+
+      Future: If GridView adds custom renderer support or @spaarke/ui-components is added as a
+      dependency, revisit this migration.
+    </note>
+  </notes>
 </task>

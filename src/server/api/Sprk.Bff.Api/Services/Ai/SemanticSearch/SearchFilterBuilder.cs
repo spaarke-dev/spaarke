@@ -22,7 +22,7 @@ public static class SearchFilterBuilder
     /// Builds a complete OData filter expression for semantic search.
     /// </summary>
     /// <param name="tenantId">Required tenant ID for tenant isolation.</param>
-    /// <param name="scope">Search scope: "entity" or "documentIds".</param>
+    /// <param name="scope">Search scope: "all", "entity", or "documentIds".</param>
     /// <param name="entityType">Entity type when scope is "entity".</param>
     /// <param name="entityId">Entity ID when scope is "entity".</param>
     /// <param name="documentIds">Document IDs when scope is "documentIds".</param>
@@ -45,8 +45,12 @@ public static class SearchFilterBuilder
         // 1. Tenant isolation filter (ALWAYS required)
         filterParts.Add(BuildTenantFilter(tenantId));
 
-        // 2. Scope-specific filter
-        filterParts.Add(BuildScopeFilter(scope, entityType, entityId, documentIds));
+        // 2. Scope-specific filter (scope=all has no additional scope filter)
+        var scopeFilter = BuildScopeFilter(scope, entityType, entityId, documentIds);
+        if (scopeFilter is not null)
+        {
+            filterParts.Add(scopeFilter);
+        }
 
         // 3. Optional filters
         if (filters is not null)
@@ -70,13 +74,13 @@ public static class SearchFilterBuilder
     /// <summary>
     /// Builds the scope-specific filter based on search scope.
     /// </summary>
-    /// <param name="scope">Search scope: "entity" or "documentIds".</param>
+    /// <param name="scope">Search scope: "all", "entity", or "documentIds".</param>
     /// <param name="entityType">Entity type when scope is "entity".</param>
     /// <param name="entityId">Entity ID when scope is "entity".</param>
     /// <param name="documentIds">Document IDs when scope is "documentIds".</param>
-    /// <returns>OData filter clause for the specified scope.</returns>
+    /// <returns>OData filter clause for the specified scope, or null for scope=all (tenant filter only).</returns>
     /// <exception cref="ArgumentException">Thrown when required parameters are missing for the specified scope.</exception>
-    public static string BuildScopeFilter(
+    public static string? BuildScopeFilter(
         string scope,
         string? entityType,
         string? entityId,
@@ -84,9 +88,10 @@ public static class SearchFilterBuilder
     {
         return scope.ToLowerInvariant() switch
         {
+            "all" => null, // No entity type filter — tenant isolation only
             "entity" => BuildEntityScopeFilter(entityType, entityId),
             "documentids" => BuildDocumentIdsScopeFilter(documentIds),
-            _ => throw new ArgumentException($"Invalid scope: {scope}. Must be 'entity' or 'documentIds'.", nameof(scope))
+            _ => throw new ArgumentException($"Invalid scope: {scope}. Must be 'all', 'entity', or 'documentIds'.", nameof(scope))
         };
     }
 
@@ -129,6 +134,24 @@ public static class SearchFilterBuilder
         var escapedIds = documentIds.Select(id => EscapeODataValue(id));
         var idList = string.Join(",", escapedIds);
         return $"search.in(documentId, '{idList}', ',')";
+    }
+
+    /// <summary>
+    /// Builds filter for parent entity types using search.in().
+    /// Used with scope=all to restrict results to specific entity types.
+    /// </summary>
+    /// <param name="entityTypes">List of entity types to filter by (e.g., "matter", "project").</param>
+    /// <returns>OData filter clause, or null if no entity types specified.</returns>
+    public static string? BuildEntityTypesFilter(IReadOnlyList<string>? entityTypes)
+    {
+        if (entityTypes is null || entityTypes.Count == 0)
+        {
+            return null;
+        }
+
+        var escapedTypes = entityTypes.Select(t => EscapeODataValue(t.ToLowerInvariant()));
+        var typeList = string.Join(",", escapedTypes);
+        return $"search.in(parentEntityType, '{typeList}', ',')";
     }
 
     /// <summary>
@@ -239,6 +262,12 @@ public static class SearchFilterBuilder
     /// </summary>
     private static void AddOptionalFilters(List<string> filterParts, SearchFilters filters)
     {
+        var entityTypesFilter = BuildEntityTypesFilter(filters.EntityTypes);
+        if (entityTypesFilter is not null)
+        {
+            filterParts.Add(entityTypesFilter);
+        }
+
         var documentTypesFilter = BuildDocumentTypesFilter(filters.DocumentTypes);
         if (documentTypesFilter is not null)
         {

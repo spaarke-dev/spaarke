@@ -4,7 +4,7 @@
     <title>Create SearchResultsGrid — Grid View Using Universal DatasetGrid</title>
     <phase>4 — Grid &amp; Graph Views</phase>
     <tags>code-page, shared-library</tags>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>003, 023</dependencies>
     <blocks>R3-031, R3-037</blocks>

@@ -8,6 +8,13 @@ namespace Sprk.Bff.Api.Models.Ai.SemanticSearch;
 public sealed record SearchFilters
 {
     /// <summary>
+    /// Filter by parent entity types (e.g., "matter", "project", "invoice", "account", "contact").
+    /// When provided, restricts results to documents whose parentEntityType matches one of the specified values.
+    /// </summary>
+    [JsonPropertyName("entityTypes")]
+    public IReadOnlyList<string>? EntityTypes { get; init; }
+
+    /// <summary>
     /// Filter by document types (e.g., "Contract", "Agreement", "Invoice").
     /// </summary>
     [JsonPropertyName("documentTypes")]
@@ -30,6 +37,34 @@ public sealed record SearchFilters
     /// </summary>
     [JsonPropertyName("dateRange")]
     public DateRangeFilter? DateRange { get; init; }
+}
+
+/// <summary>
+/// Valid parent entity type values for entity type filtering.
+/// </summary>
+public static class ValidEntityTypes
+{
+    /// <summary>Legal matter entity.</summary>
+    public const string Matter = "matter";
+
+    /// <summary>Project entity.</summary>
+    public const string Project = "project";
+
+    /// <summary>Invoice entity.</summary>
+    public const string Invoice = "invoice";
+
+    /// <summary>Account entity.</summary>
+    public const string Account = "account";
+
+    /// <summary>Contact entity.</summary>
+    public const string Contact = "contact";
+
+    /// <summary>All valid entity type values.</summary>
+    public static readonly string[] All = [Matter, Project, Invoice, Account, Contact];
+
+    /// <summary>Checks if the entity type is valid.</summary>
+    public static bool IsValid(string? entityType) =>
+        !string.IsNullOrWhiteSpace(entityType) && All.Contains(entityType, StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -72,5 +107,5 @@ public static class DateRangeField
 
     /// <summary>Checks if the field is valid.</summary>
     public static bool IsValid(string? field) =>
-        !string.IsNullOrWhiteSpace(field) && ValidFields.Contains(field.ToLowerInvariant());
+        !string.IsNullOrWhiteSpace(field) && ValidFields.Contains(field, StringComparer.OrdinalIgnoreCase);
 }

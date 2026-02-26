@@ -161,10 +161,77 @@ public class SearchFilterBuilderTests
 
     #endregion
 
+    #region BuildFilter - All Scope Tests
+
+    [Fact]
+    public void BuildFilter_AllScope_IncludesTenantFilter()
+    {
+        var filter = SearchFilterBuilder.BuildFilter(
+            TestTenantId, "all", null, null, null, null);
+
+        Assert.Contains($"tenantId eq '{TestTenantId}'", filter);
+    }
+
+    [Fact]
+    public void BuildFilter_AllScope_DoesNotIncludeParentEntityTypeFilter()
+    {
+        var filter = SearchFilterBuilder.BuildFilter(
+            TestTenantId, "all", null, null, null, null);
+
+        Assert.DoesNotContain("parentEntityType", filter);
+        Assert.DoesNotContain("parentEntityId", filter);
+    }
+
+    [Fact]
+    public void BuildFilter_AllScope_OnlyContainsTenantFilter()
+    {
+        var filter = SearchFilterBuilder.BuildFilter(
+            TestTenantId, "all", null, null, null, null);
+
+        Assert.Equal($"tenantId eq '{TestTenantId}'", filter);
+    }
+
+    [Fact]
+    public void BuildFilter_AllScope_CaseInsensitive()
+    {
+        var filter1 = SearchFilterBuilder.BuildFilter(TestTenantId, "all", null, null, null, null);
+        var filter2 = SearchFilterBuilder.BuildFilter(TestTenantId, "ALL", null, null, null, null);
+        var filter3 = SearchFilterBuilder.BuildFilter(TestTenantId, "All", null, null, null, null);
+
+        Assert.Equal(filter1, filter2);
+        Assert.Equal(filter1, filter3);
+    }
+
+    [Fact]
+    public void BuildFilter_AllScope_WithOptionalFilters()
+    {
+        var filters = new SearchFilters
+        {
+            DocumentTypes = new List<string> { "contract" },
+            FileTypes = new List<string> { "pdf" }
+        };
+
+        var filter = SearchFilterBuilder.BuildFilter(
+            TestTenantId, "all", null, null, null, filters);
+
+        Assert.Contains($"tenantId eq '{TestTenantId}'", filter);
+        Assert.Contains("search.in(documentType,", filter);
+        Assert.Contains("search.in(fileType,", filter);
+        Assert.DoesNotContain("parentEntityType", filter);
+    }
+
+    [Fact]
+    public void BuildScopeFilter_AllScope_ReturnsNull()
+    {
+        var result = SearchFilterBuilder.BuildScopeFilter("all", null, null, null);
+        Assert.Null(result);
+    }
+
+    #endregion
+
     #region BuildFilter - Invalid Scope Tests
 
     [Theory]
-    [InlineData("all")]
     [InlineData("invalid")]
     [InlineData("")]
     public void BuildFilter_ThrowsOnInvalidScope(string scope)
@@ -401,6 +468,101 @@ public class SearchFilterBuilderTests
 
         // The single quotes should be escaped as double quotes
         Assert.Contains("tag'')", filter);
+    }
+
+    #endregion
+
+    #region BuildFilter - EntityTypes Filter Tests
+
+    [Fact]
+    public void BuildEntityTypesFilter_SingleValue_GeneratesSearchIn()
+    {
+        var result = SearchFilterBuilder.BuildEntityTypesFilter(new List<string> { "matter" });
+        Assert.Equal("search.in(parentEntityType, 'matter', ',')", result);
+    }
+
+    [Fact]
+    public void BuildEntityTypesFilter_MultipleValues_GeneratesSearchIn()
+    {
+        var result = SearchFilterBuilder.BuildEntityTypesFilter(new List<string> { "matter", "project", "invoice" });
+        Assert.Equal("search.in(parentEntityType, 'matter,project,invoice', ',')", result);
+    }
+
+    [Fact]
+    public void BuildEntityTypesFilter_NormalizesToLowercase()
+    {
+        var result = SearchFilterBuilder.BuildEntityTypesFilter(new List<string> { "Matter", "PROJECT" });
+        Assert.Equal("search.in(parentEntityType, 'matter,project', ',')", result);
+    }
+
+    [Fact]
+    public void BuildEntityTypesFilter_ReturnsNullForNull()
+    {
+        var result = SearchFilterBuilder.BuildEntityTypesFilter(null);
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void BuildEntityTypesFilter_ReturnsNullForEmptyList()
+    {
+        var result = SearchFilterBuilder.BuildEntityTypesFilter(new List<string>());
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void BuildFilter_AllScope_WithEntityTypesFilter()
+    {
+        var filters = new SearchFilters
+        {
+            EntityTypes = new List<string> { "matter", "project" }
+        };
+
+        var filter = SearchFilterBuilder.BuildFilter(
+            TestTenantId, "all", null, null, null, filters);
+
+        Assert.Contains($"tenantId eq '{TestTenantId}'", filter);
+        Assert.Contains("search.in(parentEntityType, 'matter,project', ',')", filter);
+        // Should not have parentEntityId since it's scope=all
+        Assert.DoesNotContain("parentEntityId", filter);
+    }
+
+    [Fact]
+    public void BuildFilter_AllScope_WithEntityTypesAndOtherFilters()
+    {
+        var filters = new SearchFilters
+        {
+            EntityTypes = new List<string> { "matter" },
+            DocumentTypes = new List<string> { "contract" },
+            FileTypes = new List<string> { "pdf" }
+        };
+
+        var filter = SearchFilterBuilder.BuildFilter(
+            TestTenantId, "all", null, null, null, filters);
+
+        Assert.Contains($"tenantId eq '{TestTenantId}'", filter);
+        Assert.Contains("search.in(parentEntityType, 'matter', ',')", filter);
+        Assert.Contains("search.in(documentType,", filter);
+        Assert.Contains("search.in(fileType,", filter);
+    }
+
+    [Fact]
+    public void BuildFilter_EntityScope_WithEntityTypesFilter_BothApplied()
+    {
+        // When scope=entity AND entityTypes filter provided, both apply
+        // The scope filter gives parentEntityType eq 'matter' AND parentEntityId eq 'id'
+        // The entityTypes filter gives search.in(parentEntityType, 'matter,project', ',')
+        // Both are included in the filter
+        var filters = new SearchFilters
+        {
+            EntityTypes = new List<string> { "matter", "project" }
+        };
+
+        var filter = SearchFilterBuilder.BuildFilter(
+            TestTenantId, "entity", TestEntityType, TestEntityId, null, filters);
+
+        Assert.Contains("parentEntityType eq 'matter'", filter);
+        Assert.Contains("parentEntityId eq", filter);
+        Assert.Contains("search.in(parentEntityType, 'matter,project', ',')", filter);
     }
 
     #endregion

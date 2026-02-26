@@ -9,7 +9,8 @@
     <dependencies>070</dependencies>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <status>pending</status>
+    <status>completed</status>
+    <notes>BFF API deployed to spe-api-dev-67e2xz via Deploy-BffApi.ps1. Health check: 200 OK. Ping: pong. All 177 SemanticSearch/RecordSearch unit tests pass.</notes>
   </metadata>
 
   <prompt>

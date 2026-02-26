@@ -72,6 +72,11 @@ public static class SearchErrorCodes
     public const string InvalidDateRangeField = "INVALID_DATE_RANGE_FIELD";
 
     /// <summary>
+    /// Invalid entityTypes filter value.
+    /// </summary>
+    public const string InvalidEntityTypes = "INVALID_ENTITY_TYPES";
+
+    /// <summary>
     /// User does not have access to the requested entity.
     /// </summary>
     public const string EntityAccessDenied = "ENTITY_ACCESS_DENIED";
@@ -80,4 +85,18 @@ public static class SearchErrorCodes
     /// User does not have access to one or more requested documents.
     /// </summary>
     public const string DocumentAccessDenied = "DOCUMENT_ACCESS_DENIED";
+
+    // ========================================================================
+    // Record Search error codes (POST /api/ai/search/records)
+    // ========================================================================
+
+    /// <summary>
+    /// Invalid or unrecognized record type(s) in recordTypes.
+    /// </summary>
+    public const string InvalidRecordTypes = "INVALID_RECORD_TYPES";
+
+    /// <summary>
+    /// Record search operation failed due to a service error.
+    /// </summary>
+    public const string RecordSearchFailed = "RECORD_SEARCH_FAILED";
 }

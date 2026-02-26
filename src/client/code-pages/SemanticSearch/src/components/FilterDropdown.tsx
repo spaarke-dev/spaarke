@@ -1,0 +1,145 @@
+/**
+ * FilterDropdown component
+ *
+ * Reusable multi-select dropdown for filter options.
+ * Supports Document Type, Matter Type, and File Type filters.
+ * Adapted from PCF SemanticSearchControl FilterDropdown for React 18 Code Page.
+ *
+ * @see ADR-021 for Fluent UI v9 requirements
+ */
+
+import { useMemo, useCallback } from "react";
+import {
+    makeStyles,
+    tokens,
+    Dropdown,
+    Option,
+    Label,
+    Spinner,
+    useId,
+} from "@fluentui/react-components";
+import type { FilterOption } from "../types";
+
+export interface FilterDropdownProps {
+    /** Label text for the dropdown */
+    label: string;
+    /** Available filter options */
+    options: FilterOption[];
+    /** Currently selected option values */
+    selectedValues: string[];
+    /** Callback when selection changes */
+    onChange: (selected: string[]) => void;
+    /** Whether options are currently loading */
+    isLoading?: boolean;
+}
+
+const useStyles = makeStyles({
+    container: {
+        display: "flex",
+        flexDirection: "column",
+        gap: tokens.spacingVerticalXS,
+        width: "100%",
+    },
+    label: {
+        fontWeight: tokens.fontWeightSemibold,
+        fontSize: tokens.fontSizeBase200,
+    },
+    dropdown: {
+        width: "100%",
+    },
+    loading: {
+        display: "flex",
+        alignItems: "center",
+        gap: tokens.spacingHorizontalS,
+        fontSize: tokens.fontSizeBase200,
+        color: tokens.colorNeutralForeground3,
+    },
+});
+
+/**
+ * Multi-select dropdown for filter selection.
+ *
+ * Renders a Fluent v9 Dropdown with multiselect behavior.
+ * Shows "All" when nothing is selected, "{N} selected" when multiple are selected.
+ * Shows a loading spinner when isLoading is true and no options are available.
+ */
+export const FilterDropdown: React.FC<FilterDropdownProps> = ({
+    label,
+    options,
+    selectedValues,
+    onChange,
+    isLoading,
+}) => {
+    const styles = useStyles();
+    const dropdownId = useId("filter-dropdown");
+
+    // Handle selection change
+    const handleOptionSelect = useCallback(
+        (
+            _ev: React.SyntheticEvent,
+            data: { optionValue?: string; selectedOptions: string[] }
+        ) => {
+            onChange(data.selectedOptions);
+        },
+        [onChange]
+    );
+
+    // Format the summary button label
+    const selectedValue = useMemo(() => {
+        if (selectedValues.length === 0) {
+            return "All";
+        }
+        if (selectedValues.length === 1) {
+            const selectedOption = options.find(
+                (o) => o.value === selectedValues[0]
+            );
+            return selectedOption?.label ?? selectedValues[0];
+        }
+        return `${selectedValues.length} selected`;
+    }, [selectedValues, options]);
+
+    // Show loading state when isLoading and no options available
+    if (isLoading && options.length === 0) {
+        return (
+            <div className={styles.container}>
+                <Label className={styles.label} htmlFor={dropdownId}>
+                    {label}
+                </Label>
+                <div className={styles.loading}>
+                    <Spinner size="tiny" />
+                    <span>Loading...</span>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className={styles.container}>
+            <Label className={styles.label} htmlFor={dropdownId}>
+                {label}
+            </Label>
+            <Dropdown
+                id={dropdownId}
+                className={styles.dropdown}
+                placeholder="All"
+                value={selectedValue}
+                selectedOptions={selectedValues}
+                onOptionSelect={handleOptionSelect}
+                multiselect
+            >
+                {options.map((option) => (
+                    <Option
+                        key={option.value}
+                        value={option.value}
+                        text={option.label}
+                    >
+                        {option.label}
+                        {option.count !== undefined ? ` (${option.count})` : ""}
+                    </Option>
+                ))}
+            </Dropdown>
+        </div>
+    );
+};
+
+export default FilterDropdown;

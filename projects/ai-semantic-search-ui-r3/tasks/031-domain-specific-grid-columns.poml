@@ -4,7 +4,7 @@
     <title>Define Domain-Specific Grid Column Configurations</title>
     <phase>4 — Grid &amp; Graph Views</phase>
     <tags>code-page, fluent-ui</tags>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>030, 002</dependencies>
     <blocks>R3-047</blocks>

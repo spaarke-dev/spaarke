@@ -9,7 +9,8 @@
     <dependencies>067</dependencies>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <status>pending</status>
+    <status>completed</status>
+    <notes>Build complete: sprk_semanticsearch.html (1.16 MiB). Deployment requires manual upload via Power Apps maker portal — PAC CLI does not support direct web resource upload. Deployment log at notes/debug/deployment-log.md.</notes>
   </metadata>
 
   <prompt>

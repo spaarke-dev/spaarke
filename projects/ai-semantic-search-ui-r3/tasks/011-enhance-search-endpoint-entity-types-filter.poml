@@ -2,14 +2,14 @@
 <task id="R3-011" project="AI Semantic Search UI R3">
   <metadata>
     <title>Add entityTypes Filter to POST /api/ai/search Endpoint</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
-    <actual-effort></actual-effort>
+    <actual-effort>0.5 hours</actual-effort>
     <assigned>Claude Code</assigned>
     <tags>bff-api, api, ai</tags>
     <phase>2</phase>
-    <started></started>
-    <completed></completed>
+    <started>2026-02-24</started>
+    <completed>2026-02-24</completed>
   </metadata>
 
   <prompt>

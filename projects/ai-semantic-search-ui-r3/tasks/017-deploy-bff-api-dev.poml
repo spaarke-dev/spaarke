@@ -2,7 +2,7 @@
 <task id="R3-017" project="AI Semantic Search UI R3">
   <metadata>
     <title>Deploy Enhanced BFF API to Dev Environment</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <actual-effort></actual-effort>
     <assigned>Claude Code</assigned>

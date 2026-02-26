@@ -80,6 +80,12 @@ public sealed record AppliedFilters
     public int? DocumentIdCount { get; init; }
 
     /// <summary>
+    /// Entity types that were filtered.
+    /// </summary>
+    [JsonPropertyName("entityTypes")]
+    public IReadOnlyList<string>? EntityTypes { get; init; }
+
+    /// <summary>
     /// Document types that were filtered.
     /// </summary>
     [JsonPropertyName("documentTypes")]

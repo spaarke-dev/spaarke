@@ -569,6 +569,241 @@ public class SemanticSearchServiceTests
 
     #endregion
 
+    #region SearchAsync - Scope=All Tests
+
+    [Fact]
+    public async Task SearchAsync_AllScope_ReturnsSuccessResponse()
+    {
+        // Arrange
+        var service = CreateService();
+        var request = new SemanticSearchRequest
+        {
+            Query = "test query",
+            Scope = SearchScope.All
+        };
+
+        SetupMockEmbedding();
+        SetupMockSearchClient();
+
+        // Act
+        var result = await service.SearchAsync(request, TestTenantId);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Metadata.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task SearchAsync_AllScope_AppliedFiltersScopeIsAll()
+    {
+        // Arrange
+        var service = CreateService();
+        var request = new SemanticSearchRequest
+        {
+            Query = "test query",
+            Scope = SearchScope.All
+        };
+
+        SetupMockEmbedding();
+        SetupMockSearchClient();
+
+        // Act
+        var result = await service.SearchAsync(request, TestTenantId);
+
+        // Assert
+        result.Metadata.AppliedFilters.Should().NotBeNull();
+        result.Metadata.AppliedFilters!.Scope.Should().Be(SearchScope.All);
+        result.Metadata.AppliedFilters.EntityType.Should().BeNull();
+        result.Metadata.AppliedFilters.EntityId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SearchAsync_AllScope_WithOptionalFilters_Works()
+    {
+        // Arrange
+        var service = CreateService();
+        var request = new SemanticSearchRequest
+        {
+            Query = "test query",
+            Scope = SearchScope.All,
+            Filters = new SearchFilters
+            {
+                DocumentTypes = new List<string> { "contract" },
+                FileTypes = new List<string> { "pdf" }
+            }
+        };
+
+        SetupMockEmbedding();
+        SetupMockSearchClient();
+
+        // Act
+        var result = await service.SearchAsync(request, TestTenantId);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Metadata.AppliedFilters!.DocumentTypes.Should().Contain("contract");
+        result.Metadata.AppliedFilters.FileTypes.Should().Contain("pdf");
+    }
+
+    [Fact]
+    public async Task CountAsync_AllScope_ReturnsCount()
+    {
+        // Arrange
+        var service = CreateService();
+        var request = new SemanticSearchRequest
+        {
+            Query = "test query",
+            Scope = SearchScope.All
+        };
+
+        SetupMockSearchClientForCount(15);
+
+        // Act
+        var result = await service.CountAsync(request, TestTenantId);
+
+        // Assert
+        result.Count.Should().Be(15);
+        result.AppliedFilters!.Scope.Should().Be(SearchScope.All);
+    }
+
+    #endregion
+
+    #region SearchAsync - EntityTypes Filter Tests
+
+    [Fact]
+    public async Task SearchAsync_AllScope_WithEntityTypesFilter_ReturnsSuccess()
+    {
+        // Arrange
+        var service = CreateService();
+        var request = new SemanticSearchRequest
+        {
+            Query = "test query",
+            Scope = SearchScope.All,
+            Filters = new SearchFilters
+            {
+                EntityTypes = new List<string> { "matter", "project" }
+            }
+        };
+
+        SetupMockEmbedding();
+        SetupMockSearchClient();
+
+        // Act
+        var result = await service.SearchAsync(request, TestTenantId);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Metadata.AppliedFilters!.Scope.Should().Be(SearchScope.All);
+        result.Metadata.AppliedFilters.EntityTypes.Should().NotBeNull();
+        result.Metadata.AppliedFilters.EntityTypes.Should().Contain("matter");
+        result.Metadata.AppliedFilters.EntityTypes.Should().Contain("project");
+    }
+
+    [Fact]
+    public async Task SearchAsync_AllScope_WithSingleEntityType_ReturnsAppliedFilter()
+    {
+        // Arrange
+        var service = CreateService();
+        var request = new SemanticSearchRequest
+        {
+            Query = "test query",
+            Scope = SearchScope.All,
+            Filters = new SearchFilters
+            {
+                EntityTypes = new List<string> { "invoice" }
+            }
+        };
+
+        SetupMockEmbedding();
+        SetupMockSearchClient();
+
+        // Act
+        var result = await service.SearchAsync(request, TestTenantId);
+
+        // Assert
+        result.Metadata.AppliedFilters!.EntityTypes.Should().HaveCount(1);
+        result.Metadata.AppliedFilters.EntityTypes.Should().Contain("invoice");
+    }
+
+    [Fact]
+    public async Task SearchAsync_AllScope_WithNullEntityTypes_NoEntityTypeFilter()
+    {
+        // Arrange
+        var service = CreateService();
+        var request = new SemanticSearchRequest
+        {
+            Query = "test query",
+            Scope = SearchScope.All,
+            Filters = new SearchFilters
+            {
+                EntityTypes = null
+            }
+        };
+
+        SetupMockEmbedding();
+        SetupMockSearchClient();
+
+        // Act
+        var result = await service.SearchAsync(request, TestTenantId);
+
+        // Assert
+        result.Metadata.AppliedFilters!.EntityTypes.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SearchAsync_AllScope_WithEmptyEntityTypes_NoEntityTypeFilter()
+    {
+        // Arrange
+        var service = CreateService();
+        var request = new SemanticSearchRequest
+        {
+            Query = "test query",
+            Scope = SearchScope.All,
+            Filters = new SearchFilters
+            {
+                EntityTypes = new List<string>()
+            }
+        };
+
+        SetupMockEmbedding();
+        SetupMockSearchClient();
+
+        // Act
+        var result = await service.SearchAsync(request, TestTenantId);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Metadata.AppliedFilters!.EntityTypes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CountAsync_AllScope_WithEntityTypesFilter_ReturnsCount()
+    {
+        // Arrange
+        var service = CreateService();
+        var request = new SemanticSearchRequest
+        {
+            Query = "test query",
+            Scope = SearchScope.All,
+            Filters = new SearchFilters
+            {
+                EntityTypes = new List<string> { "matter", "contact" }
+            }
+        };
+
+        SetupMockSearchClientForCount(7);
+
+        // Act
+        var result = await service.CountAsync(request, TestTenantId);
+
+        // Assert
+        result.Count.Should().Be(7);
+        result.AppliedFilters!.EntityTypes.Should().Contain("matter");
+        result.AppliedFilters.EntityTypes.Should().Contain("contact");
+    }
+
+    #endregion
+
     #region SearchAsync - Applied Filters Tests
 
     [Fact]

@@ -9,7 +9,8 @@
     <dependencies>074</dependencies>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <status>pending</status>
+    <status>completed</status>
+    <notes>Wrap-up complete: README updated to Complete, graduation criteria checked, current-task.md reset, lessons-learned.md created, notes archived. Tasks 071 (sitemap) and 073 (E2E) pending manual Dataverse deployment by user.</notes>
   </metadata>
 
   <prompt>

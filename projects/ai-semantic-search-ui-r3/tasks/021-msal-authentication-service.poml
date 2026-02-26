@@ -4,7 +4,7 @@
     <title>Copy and Configure MSAL Authentication Service</title>
     <phase>3 — Code Page Core</phase>
     <tags>code-page, auth</tags>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>020</dependencies>
     <blocks>R3-022</blocks>

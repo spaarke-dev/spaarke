@@ -89,6 +89,11 @@ const useStyles = makeStyles({
     similarityMed: { color: tokens.colorBrandForeground1, fontWeight: tokens.fontWeightSemibold },
     similarityLow: { color: tokens.colorStatusWarningForeground1 },
     similarityNone: { color: tokens.colorNeutralForeground3 },
+    badgeContainer: {
+        display: "flex",
+        gap: tokens.spacingHorizontalXXS,
+        flexWrap: "wrap",
+    },
     actionsCell: {
         display: "flex",
         gap: tokens.spacingHorizontalXS,
@@ -187,7 +192,7 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes }) => 
                     ) : row.data.isOrphanFile ? (
                         <Badge appearance="outline" color="warning" size="small">File only</Badge>
                     ) : row.data.relationshipTypes && row.data.relationshipTypes.length > 0 ? (
-                        <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+                        <div className={styles.badgeContainer}>
                             {row.data.relationshipTypes.map((rel) => (
                                 <Badge key={rel.type} appearance="outline" color={getRelationshipBadgeColor(rel.type)} size="small">{rel.label}</Badge>
                             ))}

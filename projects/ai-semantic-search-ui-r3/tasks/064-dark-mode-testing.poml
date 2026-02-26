@@ -9,7 +9,9 @@
     <dependencies>047</dependencies>
     <parallel-group>phase7-quality-tests</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <status>pending</status>
+    <status>completed</status>
+    <completed-date>2026-02-25</completed-date>
+    <completion-notes>Static analysis found 5 ADR-021 violations (2 hex colors in DocumentGraph.tsx, 2 rgba values in DocumentGraph.tsx MiniMap, 1 transparent keyword in DateRangeFilter.tsx, 1 hard-coded fontSize in DocumentNode.tsx, 1 hard-coded fontSize+borderRadius in DocumentEdge.tsx). All fixed with Fluent v9 tokens. Post-fix re-scan confirms zero violations. Validation report at notes/debug/dark-mode-validation.md.</completion-notes>
   </metadata>
 
   <prompt>

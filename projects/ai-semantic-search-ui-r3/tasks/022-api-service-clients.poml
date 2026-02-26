@@ -4,7 +4,7 @@
     <title>Create BFF API Service Clients — SemanticSearchApiService and RecordSearchApiService</title>
     <phase>3 — Code Page Core</phase>
     <tags>code-page, api</tags>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>021</dependencies>
     <blocks>R3-028, R3-029</blocks>

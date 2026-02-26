@@ -4,7 +4,7 @@
     <title>Create EntityRecordDialog — Multi-Entity Xrm.Navigation Record Opener</title>
     <phase>5 — Interactive Features</phase>
     <tags>code-page, dataverse</tags>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>1.5 hours</estimated-effort>
     <dependencies>020</dependencies>
     <blocks>R3-047</blocks>

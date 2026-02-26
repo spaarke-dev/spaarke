@@ -32,15 +32,16 @@ public static class SemanticSearchAuthorizationFilterExtensions
 /// Follows ADR-016: AI Security - Ensure tenant data isolation.
 /// </para>
 /// <para>
-/// R1 Authorization rules:
+/// Authorization rules:
 /// <list type="bullet">
 /// <item>Validates user's tenant membership via Azure AD 'tid' claim</item>
 /// <item>Logs scope-based access requests for audit trail</item>
 /// <item>Tenant isolation enforced at query time via SearchFilterBuilder</item>
+/// <item>scope=all allowed (R3) — tenant isolation via tenantId filter in SearchFilterBuilder</item>
 /// </list>
 /// </para>
 /// <para>
-/// Future enhancements (R2):
+/// Future enhancements:
 /// <list type="bullet">
 /// <item>Entity-level authorization (validate user has read access to parent entity)</item>
 /// <item>Document-level authorization (validate user has access to specific documents)</item>
@@ -125,7 +126,7 @@ public class SemanticSearchAuthorizationFilter : IEndpointFilter
 
     /// <summary>
     /// Validate scope-based authorization.
-    /// R1: Validates scope format, tenant isolation enforced at query time.
+    /// All scopes (entity, documentIds, all) are permitted; tenant isolation enforced at query time.
     /// </summary>
     private AuthorizationResult ValidateScopeAuthorization(
         SemanticSearchRequest request,
@@ -146,8 +147,9 @@ public class SemanticSearchAuthorizationFilter : IEndpointFilter
                 return new AuthorizationResult(true, null);
 
             case SearchScope.All:
-                // R1: scope=all is not supported - return 403 for defense in depth
-                return new AuthorizationResult(false, "scope=all is not supported in R1");
+                // R3: scope=all is now supported for system-wide document search
+                // Tenant isolation enforced by SearchFilterBuilder (tenantId filter applied)
+                return new AuthorizationResult(true, null);
 
             default:
                 // Empty or unknown scope - let endpoint handle validation
@@ -174,6 +176,12 @@ public class SemanticSearchAuthorizationFilter : IEndpointFilter
                 _logger?.LogInformation(
                     "Semantic search authorization granted: tenant={TenantId}, scope=documentIds, count={DocumentCount}",
                     tenantId, request.DocumentIds?.Count ?? 0);
+                break;
+
+            case SearchScope.All:
+                _logger?.LogInformation(
+                    "Semantic search authorization granted: tenant={TenantId}, scope=all (system-wide)",
+                    tenantId);
                 break;
 
             default:

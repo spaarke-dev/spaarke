@@ -2,7 +2,7 @@
 <task id="R3-016" project="AI Semantic Search UI R3">
   <metadata>
     <title>Integration Tests for Enhanced Document Search and Records Search Endpoints</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <actual-effort></actual-effort>
     <assigned>Claude Code</assigned>

@@ -27,6 +27,7 @@ using Sprk.Bff.Api.Infrastructure.Startup;
 using Sprk.Bff.Api.Infrastructure.Validation;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 using Sprk.Bff.Api.Workers.Office;
 
@@ -553,6 +554,10 @@ if (analysisEnabled && documentIntelligenceEnabled)
     // Semantic Search - Hybrid search for AI knowledge base (ADR-013)
     builder.Services.AddSemanticSearch();
     Console.WriteLine("✓ Semantic search enabled");
+
+    // Record Search - Hybrid search for Dataverse entity records (Matters, Projects, Invoices)
+    builder.Services.AddRecordSearch();
+    Console.WriteLine("✓ Record search enabled (index: spaarke-records-index)");
 
     // AI Platform Foundation — DocumentParserRouter, LlamaParseClient, SemanticDocumentChunker, RagQueryBuilder
     // (AIPL-010, AIPL-011, AIPL-012 — Workstream A: Retrieval Foundation)
@@ -1747,6 +1752,7 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
     app.Configuration.GetValue<bool>("Analysis:Enabled", true))
 {
     app.MapSemanticSearchEndpoints();
+    app.MapRecordSearchEndpoints();
 }
 
 // Visualization endpoints for document relationship discovery

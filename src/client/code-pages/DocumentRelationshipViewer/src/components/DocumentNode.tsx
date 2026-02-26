@@ -192,7 +192,7 @@ const buildTooltipContent = (data: DocumentNodeData, styles: ReturnType<typeof u
             {data.parentEntityName && <div className={styles.tooltipRow}><span className={styles.tooltipLabel}>Parent:</span><span className={styles.tooltipValue}>{data.parentEntityName}</span></div>}
             {formatDate(data.createdOn) && <div className={styles.tooltipRow}><span className={styles.tooltipLabel}>Created:</span><span className={styles.tooltipValue}>{formatDate(data.createdOn)}</span></div>}
             {formatDate(data.modifiedOn) && <div className={styles.tooltipRow}><span className={styles.tooltipLabel}>Modified:</span><span className={styles.tooltipValue}>{formatDate(data.modifiedOn)}</span></div>}
-            {(data.documentId ?? data.speFileId) && <div className={styles.tooltipRow}><span className={styles.tooltipLabel}>ID:</span><span className={styles.tooltipValue} style={{ fontSize: "9px" }}>{(data.documentId ?? data.speFileId)?.substring(0, 8)}...</span></div>}
+            {(data.documentId ?? data.speFileId) && <div className={styles.tooltipRow}><span className={styles.tooltipLabel}>ID:</span><span className={styles.tooltipValue} style={{ fontSize: tokens.fontSizeBase100 }}>{(data.documentId ?? data.speFileId)?.substring(0, 8)}...</span></div>}
             {data.sharedKeywords && data.sharedKeywords.length > 0 && <div className={styles.tooltipRow}><span className={styles.tooltipLabel}>Keywords:</span><span className={styles.tooltipValue}>{data.sharedKeywords.slice(0, 3).join(", ")}{data.sharedKeywords.length > 3 && "..."}</span></div>}
         </div>
     );

@@ -4,7 +4,7 @@
     <title>Create StatusBar — Bottom Bar Showing Search Metadata</title>
     <phase>5 — Interactive Features</phase>
     <tags>code-page, fluent-ui</tags>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <dependencies>020</dependencies>
     <blocks>R3-047</blocks>

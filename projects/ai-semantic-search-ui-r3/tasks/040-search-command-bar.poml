@@ -4,7 +4,7 @@
     <title>Create SearchCommandBar — Selection-Aware and Entity-Type-Aware Command Bar</title>
     <phase>5 — Interactive Features</phase>
     <tags>code-page, fluent-ui</tags>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>020, 023</dependencies>
     <blocks>R3-047</blocks>

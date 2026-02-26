@@ -9,7 +9,7 @@
     <dependencies>047</dependencies>
     <parallel-group>phase7-integration-tests</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
