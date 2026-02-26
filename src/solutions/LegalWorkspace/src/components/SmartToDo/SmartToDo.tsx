@@ -587,11 +587,13 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   }, [refetch]);
 
   // -------------------------------------------------------------------------
-  // Close side pane on unmount (navigating away from workspace/page)
+  // Close side pane on page navigation / unmount.
+  // React cleanup effects may not fire when an iframe is torn down, so we
+  // also use beforeunload which fires reliably before iframe destruction.
   // -------------------------------------------------------------------------
 
   React.useEffect(() => {
-    return () => {
+    const closeTodoPane = () => {
       try {
         const xrm = (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
         const pane = xrm?.App?.sidePanes?.getPane("todoDetailPane");
@@ -599,6 +601,12 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       } catch {
         // Side pane API unavailable — ignore
       }
+    };
+
+    window.addEventListener("beforeunload", closeTodoPane);
+    return () => {
+      window.removeEventListener("beforeunload", closeTodoPane);
+      closeTodoPane();
     };
   }, []);
 

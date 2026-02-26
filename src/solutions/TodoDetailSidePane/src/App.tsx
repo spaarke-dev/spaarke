@@ -27,22 +27,30 @@ import type { ITodoRecord } from "./types/TodoRecord";
 // ---------------------------------------------------------------------------
 
 function resolveTheme(): typeof webLightTheme {
-  // 1. Check Power Apps navbar first (authoritative indicator of app theme)
-  try {
-    const navBar = window.parent?.document?.querySelector?.("[data-id='navbar']") as HTMLElement | null;
-    if (navBar) {
-      const bg = window.getComputedStyle(navBar).backgroundColor;
-      if (bg && bg !== "rgb(255, 255, 255)" && bg !== "rgba(0, 0, 0, 0)") {
-        const [r, g, b] = bg.match(/\d+/g)?.map(Number) ?? [255, 255, 255];
-        if ((r + g + b) / 3 < 128) return webDarkTheme;
+  // Try to find the Power Apps navbar in parent frames (authoritative theme indicator).
+  // Side pane iframes may be nested several levels deep, so check window.top first,
+  // then window.parent, to find the shell frame that hosts the navbar.
+  const framesToCheck = [
+    typeof window !== "undefined" ? window.top : null,
+    typeof window !== "undefined" ? window.parent : null,
+  ];
+  for (const frame of framesToCheck) {
+    if (!frame || frame === window) continue;
+    try {
+      const navBar = frame.document?.querySelector?.("[data-id='navbar']") as HTMLElement | null;
+      if (navBar) {
+        const bg = window.getComputedStyle(navBar).backgroundColor;
+        if (bg && bg !== "rgb(255, 255, 255)" && bg !== "rgba(0, 0, 0, 0)") {
+          const [r, g, b] = bg.match(/\d+/g)?.map(Number) ?? [255, 255, 255];
+          if ((r + g + b) / 3 < 128) return webDarkTheme;
+        }
+        return webLightTheme;
       }
-      // Navbar found and is light — return light theme
-      return webLightTheme;
+    } catch {
+      // Cross-origin — try next frame
     }
-  } catch {
-    // Cross-origin — fall through to system preference
   }
-  // 2. Fallback: system preference (only when navbar is inaccessible)
+  // Fallback: system preference (only when navbar is inaccessible)
   if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
     return webDarkTheme;
   }

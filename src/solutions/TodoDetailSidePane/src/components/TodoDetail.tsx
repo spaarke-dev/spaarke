@@ -2,10 +2,12 @@
  * TodoDetail — Main content component for the To Do Detail side pane.
  *
  * Layout (top to bottom):
- *   1. Details: Due Date, Priority, Effort, Assigned To (editable)
- *   2. Description (editable, fully expanded textarea)
- *   3. To Do Score breakdown (live preview from current values)
- *   4. Sticky footer Save button
+ *   1. Description (editable, fully expanded textarea)
+ *   2. Details: Due Date, Assigned To
+ *   3. Priority Score slider
+ *   4. Effort Score slider
+ *   5. To Do Score breakdown (live preview from current values)
+ *   6. Sticky footer Save button
  *
  * All colours from Fluent UI v9 semantic tokens (ADR-021).
  */
@@ -96,13 +98,13 @@ const useStyles = makeStyles({
   content: {
     flex: "1 1 0",
     overflowY: "auto",
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalS,
+    gap: tokens.spacingVerticalM,
   },
   section: {
     display: "flex",
@@ -112,7 +114,6 @@ const useStyles = makeStyles({
   sectionTitle: {
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    marginBottom: tokens.spacingVerticalXXS,
   },
   fieldRow: {
     display: "flex",
@@ -123,6 +124,12 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
+  },
+  sliderRow: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+    maxWidth: "200px",
   },
   sliderLabelRow: {
     display: "flex",
@@ -428,7 +435,23 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
             </MessageBar>
           )}
 
-          {/* ── Details (top) ──────────────────────────────────────────── */}
+          {/* ── Description (top) ──────────────────────────────────────── */}
+          <div className={styles.section}>
+            <Text className={styles.sectionTitle} size={300}>
+              Description
+            </Text>
+            <Textarea
+              value={description}
+              onChange={handleDescriptionChange}
+              placeholder="Add a description..."
+              resize="vertical"
+              style={{ minHeight: "120px" }}
+            />
+          </div>
+
+          <Divider />
+
+          {/* ── Details: Due Date + Assigned To ────────────────────────── */}
           <div className={styles.section}>
             <Text className={styles.sectionTitle} size={300}>
               Details
@@ -440,34 +463,6 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                 type="date"
                 value={dueDate}
                 onChange={handleDueDateChange}
-              />
-            </div>
-
-            <div className={styles.fieldRow}>
-              <div className={styles.sliderLabelRow}>
-                <label className={styles.fieldLabel}>Priority Score</label>
-                <span className={styles.sliderValue}>{priority}</span>
-              </div>
-              <Slider
-                value={priority}
-                onChange={handlePriorityChange}
-                min={0}
-                max={100}
-                step={5}
-              />
-            </div>
-
-            <div className={styles.fieldRow}>
-              <div className={styles.sliderLabelRow}>
-                <label className={styles.fieldLabel}>Effort Score</label>
-                <span className={styles.sliderValue}>{effort}</span>
-              </div>
-              <Slider
-                value={effort}
-                onChange={handleEffortChange}
-                min={0}
-                max={100}
-                step={5}
               />
             </div>
 
@@ -502,18 +497,35 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
           <Divider />
 
-          {/* ── Description ────────────────────────────────────────────── */}
+          {/* ── Priority + Effort sliders ─────────────────────────────── */}
           <div className={styles.section}>
-            <Text className={styles.sectionTitle} size={300}>
-              Description
-            </Text>
-            <Textarea
-              value={description}
-              onChange={handleDescriptionChange}
-              placeholder="Add a description..."
-              resize="vertical"
-              style={{ minHeight: "120px" }}
-            />
+            <div className={styles.sliderRow}>
+              <div className={styles.sliderLabelRow}>
+                <label className={styles.fieldLabel}>Priority Score</label>
+                <span className={styles.sliderValue}>{priority}</span>
+              </div>
+              <Slider
+                value={priority}
+                onChange={handlePriorityChange}
+                min={0}
+                max={100}
+                step={5}
+              />
+            </div>
+
+            <div className={styles.sliderRow}>
+              <div className={styles.sliderLabelRow}>
+                <label className={styles.fieldLabel}>Effort Score</label>
+                <span className={styles.sliderValue}>{effort}</span>
+              </div>
+              <Slider
+                value={effort}
+                onChange={handleEffortChange}
+                min={0}
+                max={100}
+                step={5}
+              />
+            </div>
           </div>
 
           <Divider />
