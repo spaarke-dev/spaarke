@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-042" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create useSavedSearches Hook — CRUD for Saved Search Configurations</title>
+    <phase>5 — Interactive Features</phase>
+    <tags>code-page, hooks, dataverse</tags>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>004, 023</dependencies>
+    <blocks>R3-041, R3-047</blocks>
+    <parallel-group>phase5-features</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create useSavedSearches.ts — the hook managing CRUD operations for saved search configurations
+    stored in sprk_gridconfiguration. Personal saved searches are user-scoped (current user only).
+
+    Operations:
+    - Load: query sprk_gridconfiguration for current user's saved searches of type "SemanticSearch"
+    - Save: create new sprk_gridconfiguration record with combined SavedSearch schema JSON
+    - Update: update existing record (for rename or overwrite)
+    - Delete: deactivate sprk_gridconfiguration record (soft delete)
+
+    The SavedSearch JSON schema includes: name, searchDomain, query, filters, viewMode, columns,
+    sortColumn, sortDirection, graphClusterBy — stored as the configuration JSON field.
+  </prompt>
+
+  <role>
+    Senior TypeScript developer familiar with Dataverse WebAPI OData patterns and the
+    sprk_gridconfiguration entity schema.
+  </role>
+
+  <goal>
+    useSavedSearches hook provides loaded personal saved searches and CRUD methods. Save creates
+    a new Dataverse record. Delete deactivates. Load is called on mount. All operations handle
+    errors gracefully. The Dataverse WebAPI is used directly (not PCF context.webAPI).
+  </goal>
+
+  <constraints>
+    <constraint source="spec">Saved search schema must match spec.md Section on Saved Search Schema</constraint>
+    <constraint source="project">Use Dataverse WebAPI directly: fetch to orgUrl/api/data/v9.2/sprk_gridconfigurations</constraint>
+    <constraint source="project">Filter by ownerid = current user AND configtype = "SemanticSearch" (or similar discriminator)</constraint>
+    <constraint source="task-004">Schema details from spike task 004 — check notes/spikes/04-gridconfiguration-schema.md for exact field names</constraint>
+    <constraint source="project">Soft delete only: set statecode=1 (inactive), not hard delete</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/SpaarkeCore/entities/sprk_gridconfiguration/entity-schema.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts</file>
+      <file>projects/ai-semantic-search-ui-r3/notes/spikes/04-gridconfiguration-schema.md</file>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>src/client/code-pages/SemanticSearch/src/services/DataverseWebApiService.ts</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      sprk_gridconfiguration stores view/search configurations as JSON. The entity has fields
+      for name, configuration JSON, owner, and entity type (to discriminate between grid views
+      and saved searches). Check entity-schema.md for exact field names.
+
+      Spike task 004 may have identified whether additional fields are needed or if the schema
+      supports the SavedSearch JSON blob. Read that report first.
+
+      The hook uses the DataverseWebApiService helper created in task 038 for org URL resolution.
+      ViewService.ts from shared library may have patterns to reference for OData queries.
+
+      Hook return shape:
+      {
+        savedSearches: SavedSearch[];
+        isLoading: boolean;
+        isSaving: boolean;
+        error: string | null;
+        saveSearch: (search: SavedSearch) =&gt; Promise&lt;void&gt;;
+        updateSearch: (id: string, search: SavedSearch) =&gt; Promise&lt;void&gt;;
+        deleteSearch: (id: string) =&gt; Promise&lt;void&gt;;
+        refresh: () =&gt; Promise&lt;void&gt;;
+      }
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read spike report and entity schema">
+      Read notes/spikes/04-gridconfiguration-schema.md and entity-schema.md for sprk_gridconfiguration.
+      Confirm exact field names for: name, configuration JSON, entity discriminator, owner lookup.
+    </step>
+    <step order="2" name="Plan OData queries">
+      Load query: GET /api/data/v9.2/sprk_gridconfigurations?$filter=...&amp;$select=...
+      Filter: ownerid eq current-user-id AND sprk_configtype eq 'SemanticSearch' AND statecode eq 0
+      How to get current user ID: Xrm.Utility.getGlobalContext().getUserId()
+    </step>
+    <step order="3" name="Create useSavedSearches.ts">
+      Create src/client/code-pages/SemanticSearch/src/hooks/useSavedSearches.ts:
+      - loadSavedSearches(): fetch from Dataverse, parse JSON config, map to SavedSearch[]
+      - saveSearch(search): POST to /api/data/v9.2/sprk_gridconfigurations with JSON body
+      - updateSearch(id, search): PATCH to /api/data/v9.2/sprk_gridconfigurations(id)
+      - deleteSearch(id): PATCH statecode=1 to deactivate
+      - State: savedSearches[], isLoading, isSaving, error
+      - On mount: call loadSavedSearches()
+    </step>
+    <step order="4" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spike report and entity schema</tool>
+    <tool name="Write">Create useSavedSearches.ts</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/hooks/useSavedSearches.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">savedSearches loaded from sprk_gridconfiguration on mount</criterion>
+    <criterion testable="true">saveSearch() creates new Dataverse record with SavedSearch JSON</criterion>
+    <criterion testable="true">deleteSearch() sets statecode=1 (soft delete only)</criterion>
+    <criterion testable="true">refresh() reloads from Dataverse</criterion>
+    <criterion testable="true">isLoading true during initial load, isSaving true during save/delete</criterion>
+    <criterion testable="true">Only current user's saved searches loaded (owner filter applied)</criterion>
+  </acceptance-criteria>
+</task>

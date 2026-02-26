@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-024" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create SearchFilterPane — Left Sidebar with Domain-Adaptive Filters</title>
+    <phase>3 — Code Page Core</phase>
+    <tags>code-page, fluent-ui, react-19</tags>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>020, 023</dependencies>
+    <blocks>R3-047</blocks>
+    <parallel-group>phase3-components</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create SearchFilterPane.tsx — the left sidebar component containing the search text input,
+    domain-adaptive filter controls, and the Search button. The pane is collapsible via a toggle
+    button (matching the PCF SemanticSearchControl panel pattern).
+
+    The pane shows/hides filter sections based on the active search domain:
+    - Documents: Document Type, File Type, Matter Type, Date Range, Threshold, Mode
+    - Matters: Matter Type, Date Range, Threshold, Mode
+    - Projects: Date Range, Threshold, Mode
+    - Invoices: Date Range, Threshold, Mode
+
+    When the Search button is clicked, the pane calls the onSearch callback with current filter state.
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer with Fluent UI v9 expertise and familiarity with
+    the PCF SemanticSearchControl filter panel UX patterns.
+  </role>
+
+  <goal>
+    SearchFilterPane renders as a collapsible left sidebar. All filter controls render with
+    domain-correct visibility. The Search button triggers onSearch with the current filter values.
+    Dark mode works correctly via Fluent v9 tokens.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9 exclusively: Input, Button, Slider, Select — no Fluent v8</constraint>
+    <constraint source="ADR-021">Use tokens for all colors and spacing — no hard-coded values</constraint>
+    <constraint source="ADR-021">Use makeStyles with Griffel for custom styles</constraint>
+    <constraint source="spec">Domain filter visibility: Documents=all filters; Matters=MatterType+Date+Threshold+Mode; Projects/Invoices=Date+Threshold+Mode</constraint>
+    <constraint source="spec">Threshold filter: slider or spinner, 0-100 range, default 50</constraint>
+    <constraint source="spec">Mode filter: dropdown with "hybrid", "vectorOnly", "keywordOnly" options</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/FilterPanel.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The PCF SemanticSearchControl has a working FilterPanel.tsx with collapse/expand behavior
+      and domain-visibility logic. The Code Page version must be adapted from React 16 to React 19
+      (minimal changes — hooks API is compatible). The main difference is using Fluent v9 components
+      instead of the PCF's Fluent v8 imports.
+
+      Filter components (FilterDropdown, DateRangeFilter) are created in tasks 025-026 and imported
+      here as child components. This task creates the pane wrapper and orchestrates them.
+
+      The collapsible pane uses a button (ChevronLeft/ChevronRight icon) to toggle width between
+      expanded (e.g., 240px) and collapsed (40px showing only the toggle button).
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read PCF filter panel">
+      Read SemanticSearchControl/components/FilterPanel.tsx to understand the filter pane structure,
+      collapse/expand logic, and domain-visibility pattern.
+    </step>
+    <step order="2" name="Define SearchFilterPaneProps interface">
+      Props:
+      - activeDomain: SearchDomain
+      - filters: SearchFilters
+      - onFiltersChange: (filters: SearchFilters) =&gt; void
+      - onSearch: (query: string, filters: SearchFilters) =&gt; void
+      - filterOptions: { documentTypes: FilterOption[]; fileTypes: FilterOption[]; matterTypes: FilterOption[]; }
+      - isLoading: boolean
+    </step>
+    <step order="3" name="Create SearchFilterPane.tsx">
+      Create src/client/code-pages/SemanticSearch/src/components/SearchFilterPane.tsx:
+      - Collapsed state managed with useState
+      - Fluent v9 Input for search text (query state)
+      - Placeholder sections for FilterDropdown components (tasks 025-026 will implement these)
+      - Threshold: Fluent v9 Slider (0-100) with label showing current value
+      - Mode: Fluent v9 Dropdown (hybrid/vectorOnly/keywordOnly)
+      - Domain visibility: hide/show filter sections based on activeDomain prop
+      - Collapse toggle: button with ChevronDoubleLeft/Right icon from @fluentui/react-icons
+      - Search button: Fluent v9 Button (appearance="primary") — calls onSearch(query, filters)
+      - makeStyles for pane width, transition animation, and layout
+    </step>
+    <step order="4" name="Connect to App.tsx">
+      Update App.tsx to render SearchFilterPane in the left pane placeholder area.
+      Pass dummy handlers (no-op callbacks) for now — full wiring in task 047.
+    </step>
+    <step order="5" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read PCF filter panel as reference</tool>
+    <tool name="Write">Create SearchFilterPane.tsx</tool>
+    <tool name="Edit">Update App.tsx to include pane</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/SearchFilterPane.tsx</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/App.tsx (updated to render SearchFilterPane)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">Filter sections visible/hidden correctly per active domain</criterion>
+    <criterion testable="true">Collapse/expand toggle changes pane width</criterion>
+    <criterion testable="true">Search button calls onSearch callback with current query and filters</criterion>
+    <criterion testable="true">Threshold slider ranges 0-100, default 50</criterion>
+    <criterion testable="true">Mode dropdown shows hybrid/vectorOnly/keywordOnly options</criterion>
+    <criterion testable="true">No hard-coded colors — Fluent v9 tokens only</criterion>
+  </acceptance-criteria>
+</task>

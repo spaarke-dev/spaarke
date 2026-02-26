@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R3-066" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Bundle Size Analysis</title>
+    <phase>7</phase>
+    <phase-name>Testing and Quality</phase-name>
+    <tags>code-page, optimization</tags>
+    <estimate>1.5 hours</estimate>
+    <dependencies>047</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>
+      You are a performance engineer analyzing webpack bundle composition to identify optimization opportunities. You run webpack-bundle-analyzer, interpret treemap output, and produce actionable recommendations for reducing bundle size to meet the NFR-05 target of sub-3-second first load.
+    </role>
+    <goal>
+      Analyze the webpack bundle size of the SemanticSearch code page. Identify the largest dependencies (React, Fluent UI v9, @xyflow/react, d3-force). Generate a webpack-bundle-analyzer report. Identify tree-shaking opportunities and modules being imported in full when only a subset is needed. Document findings and recommendations in notes/spikes/bundle-size-analysis.md.
+    </goal>
+    <context>
+      The SemanticSearch code page is at:
+        src/client/code-pages/SemanticSearch/
+
+      Build output: after npm run build, the webpack output is in out/ directory.
+      Final web resource: a single self-contained HTML file (via build-webresource.ps1).
+
+      NFR-05: Page must load within 3 seconds as a single HTML file in Dataverse.
+      A single HTML file inlines all JS and CSS. Target uncompressed JS bundle: under ~2MB.
+
+      Dependencies to analyze for size contribution:
+        - react + react-dom — bundled (not platform-provided in Code Pages per ADR-022)
+        - @fluentui/react-components — Fluent UI v9 full package
+        - @xyflow/react — graph visualization library
+        - d3-force — physics simulation for graph layout
+        - @azure/msal-browser — MSAL authentication
+        - @spaarke/ui-components — shared component library
+
+      Webpack Bundle Analyzer:
+        Install (if not already in devDependencies): npm install --save-dev webpack-bundle-analyzer
+        Run: npx webpack --profile --json > stats.json
+             npx webpack-bundle-analyzer stats.json
+        OR add a temporary npm script: "analyze": "webpack --profile --json | webpack-bundle-analyzer --mode static --report bundle-report.html"
+
+      Analysis output to document in notes/spikes/bundle-size-analysis.md:
+        - Total uncompressed bundle size (bytes)
+        - Top 10 largest modules by size
+        - Percentage of bundle from React ecosystem
+        - Percentage of bundle from Fluent UI v9
+        - Percentage from @xyflow/react
+        - Percentage from d3-force (check if full d3 or d3-force only)
+        - Percentage from @azure/msal-browser
+        - Specific tree-shaking opportunities found
+        - Specific lazy-loading candidates (graph view is the primary candidate)
+        - Estimated savings from each optimization (rough estimate)
+        - Recommended action items for task 067
+    </context>
+    <constraints>
+      - This is an ANALYSIS task only — do not apply optimizations in this task (that is task 067)
+      - If webpack-bundle-analyzer is not already in devDependencies, add it and remove it after analysis (or mark it as devDependency to keep)
+      - The stats.json file should NOT be committed to the repository (add to .gitignore if needed)
+      - The bundle-report.html file should NOT be committed — it is ephemeral
+      - Document findings objectively — include actual sizes, not estimates
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-026.md</file>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+    </files>
+  </knowledge>
+
+  <inputs>
+    <input>src/client/code-pages/SemanticSearch/package.json</input>
+    <input>src/client/code-pages/SemanticSearch/webpack.config.js</input>
+    <input>src/client/code-pages/SemanticSearch/out/ (build output directory, after npm run build)</input>
+  </inputs>
+
+  <steps>
+    <step order="1">Read package.json to check if webpack-bundle-analyzer is already a devDependency</step>
+    <step order="2">Read webpack.config.js to understand the current build configuration</step>
+    <step order="3">Run npm run build inside SemanticSearch directory to produce fresh build output</step>
+    <step order="4">Install webpack-bundle-analyzer if not present (npm install --save-dev webpack-bundle-analyzer)</step>
+    <step order="5">Generate webpack stats: npx webpack --profile --json > stats.json</step>
+    <step order="6">Run webpack-bundle-analyzer in static mode to generate bundle-report.html (for inspection)</step>
+    <step order="7">Record total bundle size from the report or from the out/ directory</step>
+    <step order="8">Identify top 10 largest modules by size from stats.json or report</step>
+    <step order="9">Calculate percentage contribution of each major dependency group</step>
+    <step order="10">Check d3 imports — verify only d3-force is imported, not full d3 library</step>
+    <step order="11">Check @fluentui/react-components imports — verify named imports are used (tree-shaking eligible)</step>
+    <step order="12">Check @xyflow/react — identify if the graph view is lazy-loaded or in the main bundle</step>
+    <step order="13">Identify all optimization opportunities with estimated savings</step>
+    <step order="14">Add stats.json and bundle-report.html to .gitignore if not already excluded</step>
+    <step order="15">Write notes/spikes/bundle-size-analysis.md with complete findings and action items for task 067</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Read package.json and webpack.config.js</tool>
+    <tool>Bash - npm run build, webpack --json, npx webpack-bundle-analyzer</tool>
+    <tool>Bash - Measure output file sizes (ls -la out/)</tool>
+    <tool>Write - Create notes/spikes/bundle-size-analysis.md</tool>
+    <tool>Edit - Add stats.json to .gitignore if needed</tool>
+  </tools>
+
+  <outputs>
+    <output>notes/spikes/bundle-size-analysis.md — complete bundle analysis with findings and optimization recommendations</output>
+    <output>stats.json (ephemeral, not committed) — webpack stats file</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>npm run build completes successfully</criterion>
+    <criterion>webpack stats.json generated</criterion>
+    <criterion>Total bundle size documented (actual bytes)</criterion>
+    <criterion>Top 10 largest modules documented with sizes</criterion>
+    <criterion>Percentage contribution of React, Fluent UI, @xyflow/react, d3-force, MSAL documented</criterion>
+    <criterion>Tree-shaking opportunities specifically identified (module names and estimated savings)</criterion>
+    <criterion>Lazy-loading candidates identified (graph view at minimum)</criterion>
+    <criterion>notes/spikes/bundle-size-analysis.md exists with all required sections</criterion>
+    <criterion>stats.json excluded from git (in .gitignore or already excluded)</criterion>
+    <criterion>No source code optimizations applied in this task (analysis only)</criterion>
+  </acceptance-criteria>
+</task>

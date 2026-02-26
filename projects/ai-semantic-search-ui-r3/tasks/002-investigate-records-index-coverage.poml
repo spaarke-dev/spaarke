@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-002" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Investigate spaarke-records-index Field Coverage</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>Claude Code</assigned>
+    <tags>investigation, spike, api</tags>
+    <phase>1</phase>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Investigate the spaarke-records-index Azure AI Search index to determine what fields
+    are available for each entity type (Matters, Projects, Invoices). This is a prerequisite
+    spike for the entity records search feature. We need to confirm which fields from the
+    planned grid columns (Matter Number, Practice Area, Organizations, Invoice Amount,
+    Vendor, Status, Parent Matter, etc.) are actually indexed and available in search
+    results. Document findings in a spike report so Phase 2 and Phase 3 tasks can be
+    accurately scoped.
+  </prompt>
+
+  <role>
+    You are a senior backend developer and Azure AI Search specialist. You understand
+    the Spaarke AI pipeline architecture, the spaarke-records-index schema, and the
+    RecordMatch/RAG pipeline that populates this index. You can query the index schema
+    via the BFF API, Azure CLI, or by reading source code to determine field availability.
+  </role>
+
+  <goal>
+    A comprehensive investigation report at
+    projects/ai-semantic-search-ui-r3/notes/spikes/records-index-coverage.md that:
+    - Lists all available fields in spaarke-records-index per entity type (matter, project, invoice)
+    - Maps each planned grid column (from spec.md FR-03) to its index field (or flags as MISSING)
+    - Documents the parentEntityType field values (matter, project, invoice, account, contact)
+    - Identifies any additional filters possible from the index (for domain-adaptive filters)
+    - Makes a go/no-go recommendation for records search implementation
+    - Documents any gaps that require indexing pipeline changes
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-semantic-search-ui-r3/spec.md</file>
+    <file purpose="plan">projects/ai-semantic-search-ui-r3/plan.md</file>
+    <file purpose="project-context">projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    <file purpose="ai-architecture">docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">Do NOT call Azure AI Search directly from the frontend. Investigate via BFF API or Azure CLI only.</constraint>
+    <constraint source="spec.md Section 7.3">RecordSearchResponse requires: recordId, recordType, recordName, recordDescription, confidenceScore, matchReasons, organizations, people, keywords, createdAt, modifiedAt.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SemanticSearchRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchResult.cs</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+    </files>
+    <patterns>
+      <pattern name="Azure AI Search field query" location="src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs">
+        SearchFilterBuilder constructs OData filters for knowledge-index. Use the same
+        pattern to understand how fields are accessed and what field names the index exposes.
+      </pattern>
+      <pattern name="Records index investigation" location="docs/guides/SPAARKE-AI-ARCHITECTURE.md">
+        The AI architecture guide documents the spaarke-records-index schema and the
+        RecordMatch pipeline that populates it. Read this first.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <!-- No dependencies — this investigation task can run in parallel with 003 and 004 -->
+    </dependencies>
+    <notes>
+      This is a SPIKE / INVESTIGATION task, not an implementation task.
+      The output is ONLY a markdown report — no code changes.
+
+      PARALLEL: This task can run in parallel with tasks 003 and 004.
+
+      Grid columns that MUST be verified per domain (from spec.md FR-03):
+      - Matters: Matter Name, Matter Number, Matter Type, Practice Area, Organizations, Modified
+      - Projects: Project Name, Status, Parent Matter, Modified
+      - Invoices: Invoice Number/Vendor, Amount, Vendor, Parent Matter, Date
+
+      RecordSearchResponse fields to verify availability:
+      - recordId, recordType, recordName, recordDescription
+      - confidenceScore (semantic search score)
+      - matchReasons (AI-generated match explanation)
+      - organizations (related org names)
+      - people (related contact names)
+      - keywords
+      - createdAt, modifiedAt
+
+      Investigation approaches (try in order):
+      1. Read SPAARKE-AI-ARCHITECTURE.md for the records index schema definition
+      2. Search codebase for "spaarke-records-index" to find indexing pipeline code
+      3. Read SearchFilterBuilder.cs to understand field names used in filters
+      4. If available: query the Azure AI Search index schema via az CLI:
+         az search index show --name spaarke-records-index --service-name spaarke-search-dev --resource-group spe-infrastructure-westus2
+
+      Decision impact: If critical fields (Matter Number, Invoice Amount) are MISSING
+      from the index, Task 013 (RecordSearchService) must account for this by either:
+      a) Fetching missing fields from Dataverse after search
+      b) Adjusting grid columns to match available fields
+      c) Flagging for indexing pipeline enhancement (separate project)
+    </notes>
+  </context>
+
+  <steps>
+    <step order="1" name="Read AI architecture documentation">
+      Read docs/guides/SPAARKE-AI-ARCHITECTURE.md in full. Find all mentions of
+      spaarke-records-index, its field schema, and the pipeline that populates it.
+      Note the entity types indexed and all field names documented.
+    </step>
+    <step order="2" name="Search codebase for records-index references">
+      Search the codebase for "spaarke-records-index", "records-index", and "recordType"
+      to find all code that reads from or writes to this index.
+      Focus on: src/server/api/, src/server/shared/, and any pipeline code.
+    </step>
+    <step order="3" name="Read SearchFilterBuilder.cs and SemanticSearchService.cs">
+      Read the knowledge-index filter builder to understand field naming conventions.
+      Identify if there is an equivalent for the records index or if it uses the same builder.
+      Document the OData field names used.
+    </step>
+    <step order="4" name="Read existing SearchResult.cs and models">
+      Read src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchResult.cs and
+      related model files to understand what fields are currently returned from the
+      knowledge-index. Map this to what would be equivalent in the records index.
+    </step>
+    <step order="5" name="Query index schema via Azure CLI (if accessible)">
+      Attempt to query the records index schema:
+        az search index show --name spaarke-records-index --service-name spaarke-search-dev --resource-group spe-infrastructure-westus2
+      Document the full field list if successful. If az CLI is not authenticated,
+      skip this step and rely on code analysis.
+    </step>
+    <step order="6" name="Map grid columns to index fields">
+      Create a field mapping table for each domain:
+      - For each planned grid column in spec.md FR-03, document:
+        * Index field name (exact)
+        * Field type (string, int, datetime, collection)
+        * Filterable? Sortable? Facetable?
+        * Status: AVAILABLE | MISSING | UNCERTAIN
+    </step>
+    <step order="7" name="Document RecordSearchResponse field availability">
+      For each field in the planned RecordSearchResponse (from spec.md Section 7.3),
+      confirm whether it is available in the index or must be derived/enriched post-search.
+      Note: matchReasons and keywords may be computed at index time by the AI pipeline.
+    </step>
+    <step order="8" name="Write spike report">
+      Write the investigation report to:
+      projects/ai-semantic-search-ui-r3/notes/spikes/records-index-coverage.md
+      Include: Summary, field coverage table per entity type, gap analysis,
+      recommended approach for missing fields, go/no-go for Phase 2 Task 013.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Search codebase for records-index references</tool>
+    <tool name="Read">Read source files and documentation</tool>
+    <tool name="Bash">Run az CLI to query index schema</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/ai-semantic-search-ui-r3/notes/spikes/records-index-coverage.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Spike report exists at projects/ai-semantic-search-ui-r3/notes/spikes/records-index-coverage.md</criterion>
+    <criterion testable="true">Report documents available fields for each entity type: matter, project, invoice</criterion>
+    <criterion testable="true">Report maps all planned grid columns from spec.md FR-03 to index fields (AVAILABLE / MISSING / UNCERTAIN)</criterion>
+    <criterion testable="true">Report documents all RecordSearchResponse fields from spec.md Section 7.3 with availability status</criterion>
+    <criterion testable="true">Report includes clear recommendation (go/no-go) for Task 013 RecordSearchService implementation</criterion>
+    <criterion testable="true">Report documents any gaps that require indexing pipeline changes (if any)</criterion>
+    <criterion testable="false">No code changes made — this is investigation only</criterion>
+  </acceptance-criteria>
+</task>

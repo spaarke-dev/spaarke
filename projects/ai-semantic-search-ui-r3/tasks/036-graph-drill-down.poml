@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-036" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Implement Graph Cluster Expand/Collapse Drill-Down</title>
+    <phase>4 — Grid &amp; Graph Views</phase>
+    <tags>code-page, graph</tags>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>032, 033, 034, 035</dependencies>
+    <blocks>R3-047</blocks>
+    <parallel-group>phase4-graph</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement the cluster expand/collapse drill-down behavior in the graph view. Clicking a
+    cluster node inline-expands it to show individual RecordNodes within the cluster sub-layout.
+    Clicking the same cluster again (or a collapse button) returns to the cluster-only view.
+
+    This is an inline sub-layout within the main graph canvas — not navigation to a new view.
+    Matches the DocumentRelationshipViewer expand/collapse pattern.
+
+    Behavior:
+    - Click cluster: set expandedClusterId → useClusterLayout generates RecordNodes within that cluster
+    - RecordNodes appear as an inline sub-graph within the cluster's position area
+    - Similarity edges shown between RecordNodes in expanded cluster
+    - Collapse button (X) on expanded cluster returns to cluster-only view
+    - Only one cluster can be expanded at a time
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer with @xyflow/react v12 state management experience
+    and familiarity with the DocRelViewer expand/collapse pattern.
+  </role>
+
+  <goal>
+    Clicking a ClusterNode expands it inline to show RecordNodes. RecordNodes appear within
+    the cluster's area in the canvas. Collapsing returns to cluster-only view. Only one cluster
+    is expanded at a time. Canvas re-fits on expand/collapse.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">Inline sub-layout — NOT navigation to a filtered view (FR-06)</constraint>
+    <constraint source="spec">Only one cluster expanded at a time</constraint>
+    <constraint source="spec">Click outside or collapse button to return to cluster view</constraint>
+    <constraint source="project">Use ReactFlow fitView() after expand/collapse for better UX</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/components/DocumentGraph.tsx</file>
+      <file>src/client/code-pages/SemanticSearch/src/hooks/useClusterLayout.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/components/SearchResultsGraph.tsx</file>
+      <file>src/client/code-pages/SemanticSearch/src/components/ClusterNode.tsx</file>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The DocumentRelationshipViewer uses a selectedDocumentId state in DocumentGraph.tsx
+      to manage expand/collapse. When a document node is clicked, related edges and nodes
+      are shown/hidden. The SemanticSearch graph uses a similar pattern with expandedClusterId.
+
+      Implementation approach:
+      1. SearchResultsGraph.tsx manages expandedClusterId state (useState)
+      2. Passes expandedClusterId to useClusterLayout (which generates RecordNodes for expanded cluster)
+      3. ClusterNode.tsx receives onExpand callback → sets expandedClusterId
+      4. Add collapse button to ClusterNode when isExpanded=true → sets expandedClusterId to null
+      5. onNodeClick on RecordNode → calls onOpenRecord → EntityRecordDialog
+
+      The ClusterNodeData must receive: isExpanded: boolean, onExpand: () =&gt; void, onCollapse: () =&gt; void
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Update SearchResultsGraph.tsx for expand state">
+      Add useState: const [expandedClusterId, setExpandedClusterId] = useState&lt;string | null&gt;(null).
+      Pass expandedClusterId to useClusterLayout.
+      Add onNodeClick handler: if clusterNode → setExpandedClusterId; if recordNode → call onOpenRecord.
+    </step>
+    <step order="2" name="Update useClusterLayout for expand behavior">
+      Verify useClusterLayout accepts expandedClusterId parameter (should be in place from task 035).
+      When expandedClusterId is set: generate RecordNodes positioned within/around the cluster node area.
+      Add similarity edges between RecordNodes in the expanded cluster.
+    </step>
+    <step order="3" name="Update ClusterNode for expand/collapse UI">
+      Add collapse button (DismissRegular icon) visible when isExpanded=true.
+      Collapse button onClick: call data.onCollapse() → clears expandedClusterId.
+      Visual: expanded cluster has a distinct border/glow using Fluent tokens.
+    </step>
+    <step order="4" name="Wire onOpenRecord for RecordNodes">
+      RecordNode onOpenRecord: passed through from SearchResultsGraph.tsx via node data.
+      SearchResultsGraph receives onRecordOpen prop and injects into RecordNode data.
+    </step>
+    <step order="5" name="Add fitView on expand/collapse">
+      After expandedClusterId changes, call reactFlowInstance.fitView() with animation.
+      Use useReactFlow() hook to access fitView.
+    </step>
+    <step order="6" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Update SearchResultsGraph.tsx, ClusterNode.tsx, useClusterLayout.ts</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/SearchResultsGraph.tsx (expand state added)</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/ClusterNode.tsx (collapse button added)</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/hooks/useClusterLayout.ts (expand behavior confirmed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">Clicking cluster node sets expandedClusterId and triggers RecordNode generation</criterion>
+    <criterion testable="true">RecordNodes appear inline within the expanded cluster's area</criterion>
+    <criterion testable="true">Only one cluster expanded at a time — expanding a second collapses the first</criterion>
+    <criterion testable="true">Collapse button on expanded cluster returns to cluster-only view</criterion>
+    <criterion testable="true">fitView called after expand/collapse for canvas repositioning</criterion>
+    <criterion testable="true">Clicking RecordNode triggers onOpenRecord callback</criterion>
+  </acceptance-criteria>
+</task>

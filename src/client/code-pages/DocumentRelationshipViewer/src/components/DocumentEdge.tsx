@@ -52,7 +52,7 @@ const getLabelColors = (type?: string): { bg: string; fg: string } => {
 const getLabelStyle = (type?: string): React.CSSProperties => {
     const { bg, fg } = getLabelColors(type);
     return {
-        fontSize: "9px", fontWeight: 600, padding: "2px 6px", borderRadius: "4px",
+        fontSize: tokens.fontSizeBase100, fontWeight: 600, padding: "2px 6px", borderRadius: tokens.borderRadiusSmall,
         pointerEvents: "all", whiteSpace: "nowrap",
         backgroundColor: bg, color: fg,
     };

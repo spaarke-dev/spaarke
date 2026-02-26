@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-020" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create Code Page Entry Point — index.tsx, App.tsx, ThemeProvider</title>
+    <phase>3 — Code Page Core</phase>
+    <tags>code-page, react-19, fluent-ui</tags>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>001</dependencies>
+    <blocks>R3-021, R3-024, R3-027</blocks>
+    <parallel-group>phase3-foundation</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the React 19 entry point and main application skeleton for the Semantic Search code page.
+    This task establishes the foundation that all other code page tasks build upon.
+
+    Deliverables:
+    1. index.tsx — React 19 createRoot, URL parameter parsing (data envelope unwrap), theme detection,
+       FluentProvider wrapping.
+    2. App.tsx — Main layout skeleton: command bar area + left filter pane + main content area + status bar.
+       Uses Fluent v9 layout primitives. All sub-areas are empty placeholders at this stage.
+    3. ThemeProvider.ts — 4-level priority theme detection (URL param → Xrm frame-walk → system preference
+       → default light). Copy and adapt from EventsPage ThemeProvider pattern.
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer familiar with Fluent UI v9, Dataverse web resources,
+    and the Spaarke Code Page architecture (ADR-006, ADR-021, ADR-026).
+  </role>
+
+  <goal>
+    The code page loads in a browser, shows a placeholder layout (command bar top, left pane, main area,
+    status bar bottom), and applies the correct Fluent v9 theme. FluentProvider wraps the entire app.
+    React 19 createRoot() is used. URL parameter theme selection works.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-006">Code Page web resource — single self-contained HTML file, not a custom page</constraint>
+    <constraint source="ADR-021">Use Fluent UI v9 exclusively: @fluentui/react-components; no Fluent v8; tokens for all colors</constraint>
+    <constraint source="ADR-022">React 19 bundled with createRoot() — NOT platform-provided; no ReactDOM.render()</constraint>
+    <constraint source="ADR-026">Theme detection 4-level priority: URL param → Xrm frame-walk → system preference → default light</constraint>
+    <constraint source="spec">URL parameters: theme, query, domain, scope, entityId, savedSearchId — parse all from URLSearchParams</constraint>
+    <constraint source="spec">Layout: full-height flex column — command bar (fixed top) + toolbar row + content row (left pane + main) + status bar (fixed bottom)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/index.tsx</file>
+      <file>src/solutions/EventsPage/src/providers/ThemeProvider.ts</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      DocumentRelationshipViewer (src/client/code-pages/DocumentRelationshipViewer/) is the primary
+      reference implementation. It uses React 19 createRoot, MSAL auth, @xyflow/react, and webpack.
+      The project scaffold (Task 001) created the package.json, webpack.config.js, tsconfig.json,
+      index.html, and build-webresource.ps1 in src/client/code-pages/SemanticSearch/.
+
+      The 4-level theme priority is: (1) ?theme=dark URL param, (2) Xrm parent frame walk to detect
+      Dataverse host theme, (3) prefers-color-scheme media query, (4) default light.
+      EventsPage/ThemeProvider.ts has the canonical implementation of this pattern.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read reference implementations">
+      Read DocumentRelationshipViewer/src/index.tsx and EventsPage ThemeProvider.ts to understand
+      the exact patterns to follow. Note React 19 createRoot usage, URL param parsing, and theme detection.
+    </step>
+    <step order="2" name="Create ThemeProvider.ts">
+      Create src/client/code-pages/SemanticSearch/src/providers/ThemeProvider.ts.
+      Copy and adapt from EventsPage ThemeProvider pattern:
+      - detectTheme() function implementing 4-level priority
+      - Returns: webLightTheme | webDarkTheme | webHighContrastTheme from @fluentui/react-components
+      - Xrm frame-walk: window.parent?.Xrm?.Utility?.getGlobalContext()?.getCurrentThemeId?.()
+      - URL param check: new URLSearchParams(window.location.search).get("theme")
+      - System: window.matchMedia("(prefers-color-scheme: dark)").matches
+    </step>
+    <step order="3" name="Create index.tsx">
+      Create src/client/code-pages/SemanticSearch/src/index.tsx:
+      - Import createRoot from "react-dom/client"
+      - Import FluentProvider from "@fluentui/react-components"
+      - Import App from "./App"
+      - Import detectTheme from "./providers/ThemeProvider"
+      - Parse all URL parameters: theme, query, domain, scope, entityId, savedSearchId
+      - Call detectTheme() to get the theme object
+      - Use createRoot(document.getElementById("root")!).render(...)
+      - Wrap App in FluentProvider with theme={detectedTheme}
+      - Pass parsed URL params as props to App
+    </step>
+    <step order="4" name="Create App.tsx">
+      Create src/client/code-pages/SemanticSearch/src/App.tsx:
+      - Define AppProps interface: initialQuery, initialDomain, initialEntityId, initialSavedSearchId
+      - Full-height flex column layout using makeStyles/tokens
+      - Top area: placeholder div for SearchCommandBar (renders null for now)
+      - Second row: placeholder div for toolbar (saved search selector + view toggle)
+      - Content row: flex row with left pane (placeholder for SearchFilterPane) and main area (placeholder)
+      - Bottom: placeholder div for StatusBar
+      - Use Fluent v9 tokens for sizing: tokens.spacingVerticalM, tokens.colorNeutralBackground1, etc.
+      - Export App as default
+    </step>
+    <step order="5" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      The build must succeed with 0 errors. Bundle.js is produced in out/.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read reference implementations before creating files</tool>
+    <tool name="Write">Create new files</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/providers/ThemeProvider.ts</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/index.tsx</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/App.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">index.tsx uses createRoot() from "react-dom/client" (not ReactDOM.render)</criterion>
+    <criterion testable="true">FluentProvider wraps the App with dynamically detected theme</criterion>
+    <criterion testable="true">detectTheme() implements 4-level priority: URL param, Xrm, system, default</criterion>
+    <criterion testable="true">All 6 URL parameters parsed from URLSearchParams</criterion>
+    <criterion testable="true">App.tsx renders a full-height layout skeleton with placeholder areas</criterion>
+    <criterion testable="true">No hard-coded colors (hex, rgb, named) — Fluent v9 tokens only</criterion>
+  </acceptance-criteria>
+</task>

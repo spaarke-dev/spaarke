@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-027" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create SearchDomainTabs — Horizontal Segmented Domain Selector</title>
+    <phase>3 — Code Page Core</phase>
+    <tags>code-page, fluent-ui</tags>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>020, 023</dependencies>
+    <blocks>R3-047</blocks>
+    <parallel-group>phase3-components</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create SearchDomainTabs.tsx — horizontal segmented pill buttons for selecting the active search
+    domain (Documents, Matters, Projects, Invoices). Uses Fluent v9 TabList with appearance="subtle".
+
+    Behavior on tab switch:
+    - Updates active domain (reported via onDomainChange callback)
+    - Triggers search re-execution for the new domain (called via onSearch callback)
+    - Query text is preserved across domain switches
+    - Filter visibility in SearchFilterPane updates automatically (driven by activeDomain prop)
+
+    Each tab has a domain-appropriate icon from @fluentui/react-icons.
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer with Fluent UI v9 expertise.
+  </role>
+
+  <goal>
+    SearchDomainTabs renders 4 horizontal pill tabs. Clicking a tab updates the active domain,
+    preserves query text, and triggers a new search. Tab icons display correctly. Selected tab is
+    visually highlighted via Fluent v9 TabList.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9 TabList with Tab from @fluentui/react-components; appearance="subtle"</constraint>
+    <constraint source="ADR-021">Icons from @fluentui/react-icons only — no external icon libraries</constraint>
+    <constraint source="ADR-021">No hard-coded colors — tokens only</constraint>
+    <constraint source="spec">Tabs: Documents (default), Matters, Projects, Invoices — single selection only</constraint>
+    <constraint source="spec">Query text MUST be preserved when switching domains (FR-12)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This component is new — no direct PCF equivalent (PCF is single-domain only). It lives in
+      the main content area above the results grid/graph, creating the horizontal tab bar.
+
+      Icons to use (from @fluentui/react-icons):
+      - Documents: DocumentRegular or DocumentMultipleRegular
+      - Matters: ScalesFilled or BriefcaseRegular
+      - Projects: TaskListSquareRegular or FolderRegular
+      - Invoices: ReceiptRegular or MoneyRegular
+
+      Props interface:
+      - activeDomain: SearchDomain
+      - onDomainChange: (domain: SearchDomain) =&gt; void
+      - query: string (current query — passed through to enable search trigger)
+      - onSearch: (query: string, domain: SearchDomain) =&gt; void (called on tab switch)
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Plan tab structure">
+      Define tab configuration array:
+      const DOMAIN_TABS = [
+        { id: "Documents", label: "Documents", icon: DocumentRegular },
+        { id: "Matters", label: "Matters", icon: BriefcaseRegular },
+        { id: "Projects", label: "Projects", icon: TaskListSquareRegular },
+        { id: "Invoices", label: "Invoices", icon: ReceiptRegular },
+      ]
+    </step>
+    <step order="2" name="Create SearchDomainTabs.tsx">
+      Create src/client/code-pages/SemanticSearch/src/components/SearchDomainTabs.tsx:
+      - Props: activeDomain, onDomainChange, query, onSearch
+      - Fluent v9 TabList with appearance="subtle"
+      - Map DOMAIN_TABS to Tab components with icon and label
+      - onTabSelect handler: call onDomainChange(newDomain) then onSearch(query, newDomain)
+      - selectedValue={activeDomain} on TabList
+    </step>
+    <step order="3" name="Connect to App.tsx">
+      Update App.tsx to render SearchDomainTabs in the toolbar row area (between toolbar and results).
+      Pass dummy handlers for now — full wiring in task 047.
+    </step>
+    <step order="4" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create SearchDomainTabs.tsx</tool>
+    <tool name="Edit">Update App.tsx to include tabs</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/SearchDomainTabs.tsx</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/App.tsx (updated to render tabs)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">4 tabs rendered: Documents, Matters, Projects, Invoices</criterion>
+    <criterion testable="true">Each tab has a domain-appropriate icon from @fluentui/react-icons</criterion>
+    <criterion testable="true">Clicking tab calls onDomainChange with new domain value</criterion>
+    <criterion testable="true">Clicking tab also calls onSearch to re-execute search for new domain</criterion>
+    <criterion testable="true">Uses Fluent v9 TabList — no custom tab implementation</criterion>
+    <criterion testable="true">No hard-coded colors — tokens only</criterion>
+  </acceptance-criteria>
+</task>

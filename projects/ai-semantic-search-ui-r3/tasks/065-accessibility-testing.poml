@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R3-065" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Accessibility Validation (WCAG 2.1 AA)</title>
+    <phase>7</phase>
+    <phase-name>Testing and Quality</phase-name>
+    <tags>testing, accessibility</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>047</dependencies>
+    <parallel-group>phase7-quality-tests</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <status>completed</status>
+    <completion-notes>
+      Audited all 15 component/source files. Found and fixed 14 critical WCAG 2.1 AA violations:
+      - Added aria-label to Toolbar, TabList, DataGrid, ReactFlow, Slider, Dropdowns, SavedSearch trigger, toggle buttons
+      - Added role="button" + tabIndex={0} + aria-label to ClusterNode and RecordNode (graph nodes)
+      - Added role="status" + aria-live="polite" to StatusBar
+      - Added role="region" + aria-label to SearchFilterPane
+      - Added role="main" + aria-label to App root
+      - All Fluent v9 native keyboard patterns verified (TabList, Dropdown, Menu, DataGrid, ToggleButton, Slider)
+      - Report: projects/ai-semantic-search-ui-r3/notes/065-accessibility-validation.md
+    </completion-notes>
+  </metadata>
+
+  <prompt>
+    <role>
+      You are a frontend accessibility engineer validating WCAG 2.1 AA compliance for a React application. You conduct static ARIA label analysis, keyboard navigation testing, and focus management verification. You fix violations and document results.
+    </role>
+    <goal>
+      Validate keyboard navigation and ARIA accessibility of the SemanticSearch code page. Verify ARIA labels on all interactive elements (command bar buttons, domain tabs, filter dropdowns, grid, graph nodes). Test focus management in the filter pane, domain tabs, and search results. Confirm Fluent UI v9 built-in accessibility is not broken by custom component additions. Fix any violations and document results in notes/debug/accessibility-validation.md.
+    </goal>
+    <context>
+      ADR-021 requires WCAG 2.1 AA compliance. Fluent UI v9 components provide built-in accessibility, but custom components and composition must not break it.
+
+      Keyboard navigation requirements:
+        - Tab key cycles through all interactive elements in logical order
+        - Search input, Search button, domain tabs, filter controls, grid rows, command bar buttons
+        - Arrow keys navigate within domain tabs (tab group pattern)
+        - Arrow keys navigate within filter dropdowns (listbox pattern)
+        - Enter/Space activates focused buttons and tabs
+        - Escape closes open dropdowns and dialogs
+        - Grid: arrow keys navigate between cells, Space selects rows, Enter activates row action
+
+      ARIA label requirements:
+        - Search input: aria-label="Search query" or labeled by visible label element
+        - Search button: aria-label or visible text "Search"
+        - Domain tabs: aria-label for tab container ("Search domain selector"), aria-selected on active tab
+        - Filter pane: aria-label or aria-labelledby on collapsible region
+        - FilterDropdown: aria-label with filter name (e.g., "Document Type filter")
+        - DateRangeFilter: aria-label on From and To date inputs
+        - Command bar: aria-label="Search actions" on toolbar, aria-label on each button
+        - Grid: aria-label="Search results", column headers with scope="col"
+        - Graph: aria-label="Search results graph" on the graph container
+        - Cluster nodes: aria-label="[category]: [count] results"
+        - Record nodes: aria-label="[title], similarity [score]%"
+        - SavedSearchSelector: aria-label="Saved searches"
+        - View toggle button: aria-label "Switch to graph view" / "Switch to grid view"
+
+      Focus management:
+        - After search executes: focus moves to first result or status bar (not left in search input)
+        - After tab switch: focus retained on the newly active tab
+        - After dialog close (entity record dialog): focus returns to the row that triggered the dialog
+        - After filter change: focus remains in the filter pane
+        - Filter pane collapse/expand: focus managed correctly
+
+      Static analysis:
+        - Grep for interactive elements (button, input, select, [role="tab"], [role="button"])
+          that lack aria-label, aria-labelledby, or visible text content
+
+      Manual keyboard test (if page accessible):
+        - Tab through entire page once without using mouse
+        - Verify every interactive element is reachable and clearly labeled
+        - Verify no keyboard traps (Escape always escapes)
+    </context>
+    <constraints>
+      - Fix ALL ARIA violations found — do not defer
+      - ARIA labels must use descriptive strings — do not use placeholder text as ARIA labels
+      - Do not add custom role attributes that contradict Fluent UI v9 built-in roles
+      - After fixes, re-verify each item in the checklist
+      - Document all findings (compliant and non-compliant) in notes/debug/accessibility-validation.md
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+
+  <inputs>
+    <input>src/client/code-pages/SemanticSearch/src/components/ (all component files)</input>
+    <input>src/client/code-pages/SemanticSearch/src/App.tsx</input>
+  </inputs>
+
+  <steps>
+    <step order="1">Read all component files to inventory interactive elements and their current ARIA attributes</step>
+    <step order="2">Grep for button, input, select, and custom role elements lacking aria-label or visible text</step>
+    <step order="3">Compare grep results against the ARIA label requirements list in context</step>
+    <step order="4">Compile complete list of ARIA violations (missing labels, incorrect roles, missing aria-selected)</step>
+    <step order="5">Fix all ARIA violations in component files (add aria-label, aria-labelledby, aria-selected as needed)</step>
+    <step order="6">Review domain tabs implementation — verify arrow key navigation works with Fluent v9 TabList (it should natively)</step>
+    <step order="7">Review filter dropdowns — verify Fluent v9 Dropdown handles listbox arrow key pattern natively</step>
+    <step order="8">Review focus management after search execution — verify focus.call() or useRef is used to move focus to results</step>
+    <step order="9">Review focus management after domain tab switch — verify focus is set to the newly active tab</step>
+    <step order="10">Review graph container — add aria-label and ensure keyboard users can navigate to and through it</step>
+    <step order="11">If page is accessible for keyboard testing: tab through the entire page and verify all elements reachable</step>
+    <step order="12">Re-run grep check to confirm no missing ARIA labels remain</step>
+    <step order="13">Create notes/debug/accessibility-validation.md with full checklist, violations found, and fixes applied</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Read component source files</tool>
+    <tool>Grep - Search for interactive elements without ARIA labels</tool>
+    <tool>Edit - Add ARIA attributes to components</tool>
+    <tool>Write - Create notes/debug/accessibility-validation.md</tool>
+  </tools>
+
+  <outputs>
+    <output>All interactive elements in SemanticSearch components have correct ARIA labels</output>
+    <output>Focus management implemented for search execution and tab switching</output>
+    <output>notes/debug/accessibility-validation.md — accessibility validation report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All command bar buttons have aria-label attributes</criterion>
+    <criterion>Domain tabs have correct aria-selected and arrow key navigation via Fluent v9 TabList</criterion>
+    <criterion>Filter dropdowns have aria-label attributes matching their filter names</criterion>
+    <criterion>Date range From and To inputs have aria-label attributes</criterion>
+    <criterion>Search results grid has aria-label="Search results"</criterion>
+    <criterion>Graph container has aria-label describing the graph view</criterion>
+    <criterion>Cluster nodes and record nodes have descriptive aria-label attributes</criterion>
+    <criterion>Focus moves to results area after search executes</criterion>
+    <criterion>Focus returns to triggering row after entity dialog closes</criterion>
+    <criterion>No keyboard traps in filter pane or dropdowns</criterion>
+    <criterion>accessibility-validation.md exists and documents all checklist items</criterion>
+  </acceptance-criteria>
+</task>

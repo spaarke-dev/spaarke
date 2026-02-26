@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R3-062" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Unit Tests — UI Components</title>
+    <phase>7</phase>
+    <phase-name>Testing and Quality</phase-name>
+    <tags>testing, code-page, fluent-ui</tags>
+    <estimate>5 hours</estimate>
+    <dependencies>025, 026, 027, 040, 041, 033, 034</dependencies>
+    <parallel-group>phase7-unit-tests</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>
+      You are a senior frontend test engineer writing React component unit tests using React Testing Library. You render components within the Fluent v9 FluentProvider, test user interactions with userEvent, and verify accessible roles and labels. You test observable DOM output, not implementation internals.
+    </role>
+    <goal>
+      Write unit tests for six UI components in the SemanticSearch code page: FilterDropdown, DateRangeFilter, SearchDomainTabs, SearchCommandBar, SavedSearchSelector, ClusterNode, and RecordNode. Use React Testing Library with Fluent UI v9 FluentProvider wrapper. Cover rendering, user interaction, and callback firing.
+    </goal>
+    <context>
+      The SemanticSearch code page is at:
+        src/client/code-pages/SemanticSearch/
+
+      Components to test (located in src/client/code-pages/SemanticSearch/src/components/):
+        - FilterDropdown — Fluent v9 Dropdown for selecting filter values; fires onChange with selected values
+        - DateRangeFilter — Date range picker with From/To fields; fires onChange with DateRange object
+        - SearchDomainTabs — Horizontal pill tab selector (Documents, Matters, Projects, Invoices); fires onDomainChange on tab click
+        - SearchCommandBar — Toolbar with context-sensitive action buttons; buttons disabled when no selection; fires action callbacks
+        - SavedSearchSelector — Dropdown to load saved searches + Save/Delete buttons; fires onLoad, onSave, onDelete
+        - ClusterNode — @xyflow/react custom node for cluster groups; renders category label and item count
+        - RecordNode — @xyflow/react custom node for individual search result records; renders title, score badge
+
+      Test scenarios per component:
+
+        FilterDropdown:
+          - Renders with label and placeholder text
+          - Renders options list from props
+          - Calls onChange with selected option(s) when user selects
+          - Renders with pre-selected values from value prop
+          - Renders in disabled state when disabled=true
+
+        DateRangeFilter:
+          - Renders "From" and "To" date inputs
+          - Calls onChange with correct DateRange when From date is entered
+          - Calls onChange with correct DateRange when To date is entered
+          - Clears both dates when clear button clicked (if exists)
+          - Does not call onChange with invalid date range (to before from)
+
+        SearchDomainTabs:
+          - Renders four tabs: Documents, Matters, Projects, Invoices
+          - Active tab is visually marked for current domain prop value
+          - Clicking a non-active tab fires onDomainChange with correct domain string
+          - Clicking the active tab does not fire onDomainChange
+
+        SearchCommandBar:
+          - Renders Refresh button always
+          - Delete, Email, Reindex buttons are disabled when selection is empty
+          - Delete, Email buttons are enabled when selection is non-empty
+          - Reindex button only visible/enabled for Documents domain
+          - Click on Delete fires onDelete with selected item IDs
+          - Click on Refresh fires onRefresh
+
+        SavedSearchSelector:
+          - Renders dropdown with saved search names
+          - Selecting a saved search fires onLoad with the saved search object
+          - Save button fires onSave when clicked
+          - Delete button fires onDelete with the current selection
+          - Renders empty state when no saved searches exist
+
+        ClusterNode:
+          - Renders the cluster category label from data prop
+          - Renders the item count badge
+          - Renders with correct background color token (no hard-coded hex)
+
+        RecordNode:
+          - Renders document/record title from data prop
+          - Renders similarity score badge
+          - Renders entity type indicator
+
+      All components must be wrapped in FluentProvider with webLightTheme for rendering tests.
+    </context>
+    <constraints>
+      - Test files go in src/client/code-pages/SemanticSearch/src/components/__tests__/ directory
+      - All renders MUST wrap component in FluentProvider from @fluentui/react-components
+      - Use @testing-library/user-event for user interaction simulation
+      - Test observable DOM output (getByRole, getByLabelText, getByText) not internal state
+      - Do NOT mock Fluent UI components — render them as-is with FluentProvider
+      - ClusterNode and RecordNode tests must provide the @xyflow/react NodeProps shape as props
+        (mock the @xyflow/react context if needed for these components to render)
+      - Achieve 80%+ coverage on each component file
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+
+  <inputs>
+    <input>src/client/code-pages/SemanticSearch/src/components/FilterDropdown.tsx</input>
+    <input>src/client/code-pages/SemanticSearch/src/components/DateRangeFilter.tsx</input>
+    <input>src/client/code-pages/SemanticSearch/src/components/SearchDomainTabs.tsx</input>
+    <input>src/client/code-pages/SemanticSearch/src/components/SearchCommandBar.tsx</input>
+    <input>src/client/code-pages/SemanticSearch/src/components/SavedSearchSelector.tsx</input>
+    <input>src/client/code-pages/SemanticSearch/src/components/ClusterNode.tsx</input>
+    <input>src/client/code-pages/SemanticSearch/src/components/RecordNode.tsx</input>
+    <input>src/client/code-pages/SemanticSearch/package.json (jest config)</input>
+  </inputs>
+
+  <steps>
+    <step order="1">Read all seven component source files in full to understand their props and rendering</step>
+    <step order="2">Read package.json and jest config to understand test environment setup</step>
+    <step order="3">Create src/client/code-pages/SemanticSearch/src/components/__tests__/ directory</step>
+    <step order="4">Create a shared test helper file (renderWithFluent.tsx) that wraps render with FluentProvider + webLightTheme</step>
+    <step order="5">Write FilterDropdown.test.tsx — rendering, option list, selection callback, disabled state</step>
+    <step order="6">Write DateRangeFilter.test.tsx — From/To inputs, onChange with DateRange, invalid range handling</step>
+    <step order="7">Write SearchDomainTabs.test.tsx — four tabs render, active state, onDomainChange firing</step>
+    <step order="8">Write SearchCommandBar.test.tsx — button states per selection, per domain, click callbacks</step>
+    <step order="9">Write SavedSearchSelector.test.tsx — dropdown options, onLoad, onSave, onDelete callbacks, empty state</step>
+    <step order="10">Write ClusterNode.test.tsx — category label, item count, color token usage</step>
+    <step order="11">Write RecordNode.test.tsx — title, score badge, entity type indicator</step>
+    <step order="12">Run jest inside SemanticSearch directory and fix any failures</step>
+    <step order="13">Run jest with --coverage and verify 80%+ coverage per component file</step>
+    <step order="14">Add additional test cases for coverage gaps</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Read component source files</tool>
+    <tool>Write - Create test files and renderWithFluent helper</tool>
+    <tool>Bash - Run jest and jest --coverage</tool>
+    <tool>Edit - Fix test files based on jest output</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/SemanticSearch/src/components/__tests__/renderWithFluent.tsx (shared test helper)</output>
+    <output>src/client/code-pages/SemanticSearch/src/components/__tests__/FilterDropdown.test.tsx</output>
+    <output>src/client/code-pages/SemanticSearch/src/components/__tests__/DateRangeFilter.test.tsx</output>
+    <output>src/client/code-pages/SemanticSearch/src/components/__tests__/SearchDomainTabs.test.tsx</output>
+    <output>src/client/code-pages/SemanticSearch/src/components/__tests__/SearchCommandBar.test.tsx</output>
+    <output>src/client/code-pages/SemanticSearch/src/components/__tests__/SavedSearchSelector.test.tsx</output>
+    <output>src/client/code-pages/SemanticSearch/src/components/__tests__/ClusterNode.test.tsx</output>
+    <output>src/client/code-pages/SemanticSearch/src/components/__tests__/RecordNode.test.tsx</output>
+    <output>All tests passing, 80%+ coverage per component file</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All seven component test files created in __tests__/ directory</criterion>
+    <criterion>Shared renderWithFluent helper created and used by all component tests</criterion>
+    <criterion>All tests pass (jest exits with code 0)</criterion>
+    <criterion>80%+ line coverage on each component file</criterion>
+    <criterion>80%+ branch coverage on each component file</criterion>
+    <criterion>User interaction tests use @testing-library/user-event (not fireEvent) for clicks and input</criterion>
+    <criterion>SearchCommandBar tests verify disabled/enabled state per selection size</criterion>
+    <criterion>SearchDomainTabs tests verify onDomainChange fires with correct domain string</criterion>
+    <criterion>ClusterNode and RecordNode tests render without @xyflow/react context errors</criterion>
+  </acceptance-criteria>
+</task>

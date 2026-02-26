@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R3-064" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Dark Mode Validation</title>
+    <phase>7</phase>
+    <phase-name>Testing and Quality</phase-name>
+    <tags>testing, fluent-ui, accessibility</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>047</dependencies>
+    <parallel-group>phase7-quality-tests</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <status>completed</status>
+    <completed-date>2026-02-25</completed-date>
+    <completion-notes>Static analysis found 5 ADR-021 violations (2 hex colors in DocumentGraph.tsx, 2 rgba values in DocumentGraph.tsx MiniMap, 1 transparent keyword in DateRangeFilter.tsx, 1 hard-coded fontSize in DocumentNode.tsx, 1 hard-coded fontSize+borderRadius in DocumentEdge.tsx). All fixed with Fluent v9 tokens. Post-fix re-scan confirms zero violations. Validation report at notes/debug/dark-mode-validation.md.</completion-notes>
+  </metadata>
+
+  <prompt>
+    <role>
+      You are a frontend QA engineer validating ADR-021 compliance across a React application. You use static code analysis to find hard-coded color violations and manual testing in a browser to verify visual correctness of light, dark, and high-contrast themes.
+    </role>
+    <goal>
+      Validate that the SemanticSearch code page and the migrated DocumentRelationshipViewer grid comply fully with ADR-021 (Fluent UI v9 design tokens for all colors, no hard-coded values). Run a grep-based static analysis for color violations, then perform manual testing of light, dark, and high-contrast themes. Verify graph nodes and grid rows respect Fluent v9 tokens. Document findings and fix any violations found.
+    </goal>
+    <context>
+      ADR-021 requires:
+        - All colors via Fluent UI v9 design tokens (colorNeutralBackground1, colorBrandBackground, etc.)
+        - No hard-coded hex values (#fff, #1a1a1a, #0078d4, etc.)
+        - No rgb() / rgba() / hsl() color values
+        - No CSS named colors (white, black, red, etc.) in component styling
+        - Dark mode: FluentProvider with webDarkTheme applies token-based dark mode
+        - High-contrast: FluentProvider with webHighContrastTheme must not break layout
+
+      Scope of validation:
+        - src/client/code-pages/SemanticSearch/src/ (all .tsx, .ts, .css files)
+        - src/client/code-pages/DocumentRelationshipViewer/src/components/RelationshipGrid.tsx (migrated)
+        - Graph nodes: ClusterNode.tsx and RecordNode.tsx — must use tokens for node background/border
+        - Grid: Universal DatasetGrid theming (inherited from FluentProvider — no custom colors)
+
+      Theme testing URLs (append to the deployed code page URL):
+        - Light mode: ?theme=light (or default)
+        - Dark mode: ?theme=dark
+        - High contrast: ?theme=highcontrast (if supported)
+
+      Manual testing checklist:
+        - Filter pane background and text are legible in dark mode
+        - Domain tab pills show active state using token colors in dark mode
+        - Command bar buttons use token colors in dark/high-contrast
+        - Grid rows alternate colors (if applicable) using tokens
+        - Graph cluster nodes use token background colors (not hard-coded)
+        - Graph record nodes use token colors for score badge
+        - Date range filter inputs are visible in dark mode
+        - All text meets contrast ratio requirements
+
+      Static analysis tool:
+        Use grep to search for patterns:
+          - #[0-9a-fA-F]{3,6}  (hex colors)
+          - rgb\(  (rgb() calls)
+          - rgba\(  (rgba() calls)
+          - :\s*(white|black|red|blue|green|gray|grey)\b  (CSS named colors)
+        Exclude: strings in comments, test files, third-party vendor code
+    </context>
+    <constraints>
+      - This task covers BOTH the SemanticSearch code page AND the migrated RelationshipGrid
+      - Fix ALL violations found — do not document and defer
+      - After fixes, re-run static analysis to confirm zero violations
+      - Document results in notes/debug/dark-mode-validation.md
+      - Manual testing requires the code page to be deployed to Dataverse dev (from task 070 or earlier)
+        If not yet deployed, note which steps require deployment and focus on static analysis + local browser testing
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+
+  <inputs>
+    <input>src/client/code-pages/SemanticSearch/src/ (all source files)</input>
+    <input>src/client/code-pages/DocumentRelationshipViewer/src/components/RelationshipGrid.tsx</input>
+  </inputs>
+
+  <steps>
+    <step order="1">Run grep for hex color patterns in SemanticSearch/src/ (exclude test files, node_modules)</step>
+    <step order="2">Run grep for rgb()/rgba() patterns in SemanticSearch/src/</step>
+    <step order="3">Run grep for CSS named colors in SemanticSearch/src/</step>
+    <step order="4">Run same grep patterns on RelationshipGrid.tsx</step>
+    <step order="5">Compile list of all color violations found across both codebases</step>
+    <step order="6">Fix each violation: replace hard-coded values with appropriate Fluent v9 tokens using makeStyles/useStyles</step>
+    <step order="7">Re-run all grep checks to confirm zero violations remain</step>
+    <step order="8">If code page is accessible (deployed or local dev server): test light mode — verify all text/background legibility</step>
+    <step order="9">If code page is accessible: test dark mode (?theme=dark) — verify all components render correctly</step>
+    <step order="10">If code page is accessible: test high-contrast theme — verify layout is not broken</step>
+    <step order="11">Verify graph nodes (ClusterNode, RecordNode) use token colors for all visual elements</step>
+    <step order="12">Verify grid inherits dark mode from FluentProvider (no grid-specific color overrides needed)</step>
+    <step order="13">Create notes/debug/dark-mode-validation.md with: static analysis results, violations found, violations fixed, manual test checklist results</step>
+  </steps>
+
+  <tools>
+    <tool>Grep - Search for hard-coded color patterns in source files</tool>
+    <tool>Edit - Fix color violations in component files</tool>
+    <tool>Read - Read component files to understand context for color replacements</tool>
+    <tool>Bash - Run grep with regex patterns for color detection</tool>
+    <tool>Write - Create notes/debug/dark-mode-validation.md</tool>
+  </tools>
+
+  <outputs>
+    <output>All hard-coded color violations fixed in SemanticSearch and RelationshipGrid</output>
+    <output>notes/debug/dark-mode-validation.md — validation report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Zero hex color values (#xxx or #xxxxxx) in SemanticSearch/src/ component files</criterion>
+    <criterion>Zero rgb() / rgba() values in component files</criterion>
+    <criterion>Zero CSS named color values in component styling</criterion>
+    <criterion>Zero color violations in RelationshipGrid.tsx</criterion>
+    <criterion>Dark mode (?theme=dark) renders all components correctly (no unreadable text, no layout breaks)</criterion>
+    <criterion>Graph nodes use Fluent v9 tokens for background and border colors</criterion>
+    <criterion>dark-mode-validation.md exists and documents findings and results</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-004" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Investigate sprk_gridconfiguration Schema for Saved Search Storage</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>Claude Code</assigned>
+    <tags>investigation, spike, dataverse</tags>
+    <phase>1</phase>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Investigate the sprk_gridconfiguration Dataverse entity schema to determine if
+    existing fields (sprk_configjson, sprk_fetchxml, etc.) can store the saved search
+    JSON structure defined in spec.md. The spec requires saving: query, filters
+    (documentTypes, fileTypes, matterTypes, dateRange, threshold, searchMode), viewMode,
+    columns, sortColumn, sortDirection, graphClusterBy, and searchDomain. Read the
+    entity-schema.md and ViewService.ts to understand the current schema and any
+    constraints on field types and sizes. Document whether the schema is compatible
+    as-is or needs extension.
+  </prompt>
+
+  <role>
+    You are a Dataverse developer who understands Spaarke entity schema conventions,
+    the ViewService pattern, and how the sprk_gridconfiguration entity is used across
+    the platform (Events page, existing grids). You can assess schema compatibility
+    and identify what changes, if any, are needed.
+  </role>
+
+  <goal>
+    A focused investigation report at
+    projects/ai-semantic-search-ui-r3/notes/spikes/gridconfiguration-schema.md that:
+    - Documents all existing sprk_gridconfiguration fields with types and purposes
+    - Maps the saved search JSON schema (from spec.md) to existing entity fields
+    - Identifies any fields that do NOT exist and would need to be added
+    - Documents the current ViewService.ts API for CRUD operations
+    - Makes a recommendation: use as-is / extend schema / or use alternative field
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-semantic-search-ui-r3/spec.md</file>
+    <file purpose="plan">projects/ai-semantic-search-ui-r3/plan.md</file>
+    <file purpose="project-context">projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md Owner Clarification">Use sprk_gridconfiguration (owner-confirmed decision). Do NOT evaluate alternative storage options — the decision is made.</constraint>
+    <constraint source="ADR-012">ViewService from @spaarke/ui-components must be used for CRUD operations on sprk_gridconfiguration if possible. Do not create a new service that duplicates ViewService.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/SpaarkeCore/entities/sprk_gridconfiguration/entity-schema.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/ViewSelector.tsx</file>
+    </files>
+    <patterns>
+      <pattern name="sprk_gridconfiguration schema" location="src/solutions/SpaarkeCore/entities/sprk_gridconfiguration/entity-schema.md">
+        Entity schema definition. Read ALL fields — particularly sprk_configjson,
+        sprk_fetchxml, and any free-text / JSON storage fields.
+      </pattern>
+      <pattern name="ViewService CRUD" location="src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts">
+        Read the full ViewService API: how it creates, reads, updates, and deletes
+        sprk_gridconfiguration records. Note the data shape it expects and returns.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <!-- No dependencies — this investigation task can run in parallel with 002 and 003 -->
+    </dependencies>
+    <notes>
+      This is a SPIKE / INVESTIGATION task. Output is ONLY a markdown report — no code changes.
+
+      PARALLEL: This task can run in parallel with tasks 002 and 003.
+
+      The saved search schema from spec.md (Section: Saved Search Schema) is:
+      {
+        "name": "Active Litigation Contracts",    -- display name
+        "searchDomain": "Documents",              -- which tab
+        "query": "contract amendments",           -- search text
+        "filters": {
+          "documentTypes": ["Contract"],
+          "fileTypes": ["pdf", "docx"],
+          "matterTypes": ["Litigation"],
+          "dateRange": { "from": "2025-01-01", "to": null },
+          "threshold": 50,
+          "searchMode": "hybrid"
+        },
+        "viewMode": "grid",                       -- grid or graph
+        "columns": ["name", "similarity", ...],
+        "sortColumn": "similarity",
+        "sortDirection": "desc",
+        "graphClusterBy": "matterType"
+      }
+
+      KEY questions:
+      1. Does sprk_gridconfiguration have a JSON blob field (e.g., sprk_configjson)
+         large enough to store this entire structure?
+      2. Does the entity have a sprk_name or sprk_displayname field for the saved search name?
+      3. Does ViewService.ts provide create/read/update/delete operations that could
+         be used for saved searches (or only for read-only view configs)?
+      4. Is there a sprk_entitytype or sprk_context field that could be used to
+         scope searches to "SemanticSearch" (separate from other grids using the same entity)?
+      5. Are there any field length limits that would restrict the JSON payload?
+
+      The ViewSelector already uses sprk_gridconfiguration for the Events page.
+      Check if the Events page implementation reveals the JSON storage pattern.
+
+      If schema extension IS needed: document exactly which fields to add
+      (logical name, display name, type, length). This flags work for a separate
+      Dataverse solution task (likely a quick schema change, not a blocker).
+    </notes>
+  </context>
+
+  <steps>
+    <step order="1" name="Read entity-schema.md">
+      Read src/solutions/SpaarkeCore/entities/sprk_gridconfiguration/entity-schema.md
+      in full. List every field with its logical name, display name, type, and max length.
+      Note which fields are currently used for what purpose.
+    </step>
+    <step order="2" name="Read ViewService.ts">
+      Read src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts in full.
+      Document the full TypeScript API: what methods exist, what data types they accept,
+      what they return, and how they query/write to sprk_gridconfiguration.
+    </step>
+    <step order="3" name="Read ViewSelector.tsx for usage context">
+      Read ViewSelector.tsx to understand how sprk_gridconfiguration records are displayed
+      and selected in the UI. Note how the name/display name field is used.
+    </step>
+    <step order="4" name="Search for Events page ViewService usage">
+      Search the codebase for existing ViewService.ts usages (particularly in events
+      or other code pages) to find concrete examples of how saved configs are stored.
+      This reveals the actual JSON structure currently used.
+    </step>
+    <step order="5" name="Map saved search schema to entity fields">
+      Create a mapping table:
+      Saved Search Field | Entity Field | Compatible? | Notes
+      ---------------------|-------------|-------------|------
+      name                 | sprk_name   | ?           | Check field exists and length
+      searchDomain         | ?           | ?           | New field needed?
+      query                | ?           | ?           | In sprk_configjson or separate?
+      filters (object)     | sprk_configjson? | ?     | Check JSON field capacity
+      viewMode             | ?           | ?           | In configjson or separate?
+      etc.
+    </step>
+    <step order="6" name="Assess compatibility and write report">
+      Write the investigation report to:
+      projects/ai-semantic-search-ui-r3/notes/spikes/gridconfiguration-schema.md
+      Include: field inventory, mapping table, compatibility assessment,
+      fields that need to be added (if any), ViewService API summary,
+      recommendation for Task 040 (saved search CRUD implementation).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read entity schema and ViewService source</tool>
+    <tool name="Grep">Search codebase for ViewService usages and sprk_gridconfiguration writes</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/ai-semantic-search-ui-r3/notes/spikes/gridconfiguration-schema.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Spike report exists at projects/ai-semantic-search-ui-r3/notes/spikes/gridconfiguration-schema.md</criterion>
+    <criterion testable="true">Report lists all sprk_gridconfiguration fields with logical names, types, and current usage</criterion>
+    <criterion testable="true">Report contains a mapping table of every saved search JSON field (from spec.md) to entity fields</criterion>
+    <criterion testable="true">Report documents ViewService.ts API methods (create, read, update, delete signatures)</criterion>
+    <criterion testable="true">Report clearly states: schema compatible AS-IS / needs extension / or alternative approach</criterion>
+    <criterion testable="true">If extension needed: report specifies exact fields to add (logical name, type, length)</criterion>
+    <criterion testable="false">No code changes made — this is investigation only</criterion>
+  </acceptance-criteria>
+</task>

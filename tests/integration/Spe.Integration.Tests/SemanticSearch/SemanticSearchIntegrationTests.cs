@@ -9,8 +9,13 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
+using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai.SemanticSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 using Xunit;
@@ -193,9 +198,9 @@ public class SemanticSearchIntegrationTests : IClassFixture<SemanticSearchTestFi
     #region POST /api/ai/search - Validation Tests (400)
 
     [Fact]
-    public async Task Search_ScopeAll_Returns_400()
+    public async Task Search_ScopeAll_Returns_200()
     {
-        // Arrange
+        // Arrange - scope=all enabled in R3 for system-wide document search
         var client = _fixture.CreateAuthenticatedClient(TestTenantId);
         var request = new SemanticSearchRequest
         {
@@ -206,11 +211,13 @@ public class SemanticSearchIntegrationTests : IClassFixture<SemanticSearchTestFi
         // Act
         var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
 
-        // Assert - scope=all is not supported in R1
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        // Assert - scope=all is now supported in R3
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var content = await response.Content.ReadAsStringAsync();
-        content.Should().Contain("not supported");
+        var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
+        content.Should().NotBeNull();
+        content!.Results.Should().NotBeNull();
+        content.Metadata.Should().NotBeNull();
     }
 
     [Fact]
@@ -377,6 +384,168 @@ public class SemanticSearchIntegrationTests : IClassFixture<SemanticSearchTestFi
     }
 
     #endregion
+
+    #region POST /api/ai/search - Scope=All Tests (R3)
+
+    [Fact]
+    public async Task Search_ScopeAll_ResponseIncludesMetadata()
+    {
+        // Arrange
+        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var request = new SemanticSearchRequest
+        {
+            Query = "find all documents across the system",
+            Scope = "all"
+        };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
+        content!.Metadata.Should().NotBeNull();
+        content.Metadata.TotalResults.Should().BeGreaterOrEqualTo(0);
+        content.Metadata.SearchDurationMs.Should().BeGreaterOrEqualTo(0);
+        content.Metadata.AppliedFilters.Should().NotBeNull();
+        content.Metadata.AppliedFilters!.Scope.Should().Be("all");
+    }
+
+    [Fact]
+    public async Task Search_ScopeAll_WithEntityTypesFilter_Returns200()
+    {
+        // Arrange - scope=all with entityTypes filter narrows results to specific entity types
+        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var request = new
+        {
+            query = "find documents",
+            scope = "all",
+            filters = new
+            {
+                entityTypes = new[] { "matter", "project" }
+            }
+        };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
+        content.Should().NotBeNull();
+        content!.Results.Should().NotBeNull();
+    }
+
+    #endregion
+
+    #region POST /api/ai/search - EntityTypes Filter Tests (R3)
+
+    [Fact]
+    public async Task Search_WithEntityTypesFilter_Returns200()
+    {
+        // Arrange - entityTypes filter restricts by parent entity type
+        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var request = new
+        {
+            query = "test query",
+            scope = "entity",
+            entityType = TestEntityType,
+            entityId = TestEntityId,
+            filters = new
+            {
+                entityTypes = new[] { "matter" }
+            }
+        };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
+        content.Should().NotBeNull();
+        content!.Results.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Search_WithMultipleEntityTypesFilter_Returns200()
+    {
+        // Arrange - multiple entity types in filter
+        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var request = new
+        {
+            query = "test query",
+            scope = "entity",
+            entityType = TestEntityType,
+            entityId = TestEntityId,
+            filters = new
+            {
+                entityTypes = new[] { "matter", "project", "invoice" }
+            }
+        };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Search_WithInvalidEntityTypesFilter_Returns400()
+    {
+        // Arrange - invalid entity type in filter
+        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var request = new
+        {
+            query = "test query",
+            scope = "entity",
+            entityType = TestEntityType,
+            entityId = TestEntityId,
+            filters = new
+            {
+                entityTypes = new[] { "invalid_type" }
+            }
+        };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        var content = await response.Content.ReadAsStringAsync();
+        content.Should().Contain("invalid_type");
+    }
+
+    [Fact]
+    public async Task Search_WithEmptyEntityTypesFilter_Returns200()
+    {
+        // Arrange - empty entityTypes filter should be treated as no filter
+        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var request = new
+        {
+            query = "test query",
+            scope = "entity",
+            entityType = TestEntityType,
+            entityId = TestEntityId,
+            filters = new
+            {
+                entityTypes = Array.Empty<string>()
+            }
+        };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
+
+        // Assert - empty entityTypes is valid (no filtering applied)
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    #endregion
 }
 
 /// <summary>
@@ -385,23 +554,30 @@ public class SemanticSearchIntegrationTests : IClassFixture<SemanticSearchTestFi
 /// </summary>
 public class SemanticSearchTestFixture : WebApplicationFactory<Program>
 {
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        TestHostConfiguration.ConfigureTestHost(builder);
+        return base.CreateHost(builder);
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.ConfigureServices(services =>
         {
-            // Remove the real semantic search service
-            var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(ISemanticSearchService));
-            if (descriptor != null)
-            {
-                services.Remove(descriptor);
-            }
-
-            // Register mock semantic search service
-            services.AddSingleton<ISemanticSearchService>(new MockSemanticSearchService());
-
             // Configure JWT authentication for testing
             services.AddAuthentication("Test")
                 .AddScheme<TestAuthSchemeOptions, TestAuthHandler>("Test", options => { });
+        });
+
+        // Use ConfigureTestServices to replace services AFTER the app's services are registered
+        builder.ConfigureTestServices(services =>
+        {
+            // Apply shared test service mocks (Dataverse, IChatClient, etc.)
+            TestHostConfiguration.ConfigureSharedTestServices(services);
+
+            // Replace the real semantic search service with mock
+            services.RemoveAll<ISemanticSearchService>();
+            services.AddSingleton<ISemanticSearchService>(new MockSemanticSearchService());
         });
 
         builder.UseEnvironment("Testing");

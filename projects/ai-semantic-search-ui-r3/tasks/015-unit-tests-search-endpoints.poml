@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-015" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Unit Tests for Enhanced Document Search and Records Search</title>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort>1.5 hours</actual-effort>
+    <assigned>Claude Code</assigned>
+    <tags>testing, bff-api</tags>
+    <phase>2</phase>
+    <started>2026-02-24</started>
+    <completed>2026-02-25</completed>
+  </metadata>
+
+  <prompt>
+    Write comprehensive unit tests for the Phase 2 BFF API changes: the enhanced
+    POST /api/ai/search endpoint (scope=all, entityTypes filter) and the new
+    RecordSearchService and POST /api/ai/search/records endpoint. Use xUnit, NSubstitute,
+    and the Arrange-Act-Assert pattern consistent with existing tests in
+    tests/unit/Sprk.Bff.Api.Tests/. Target 80%+ coverage on all new and modified code.
+  </prompt>
+
+  <role>
+    You are a senior .NET 8 test engineer who writes thorough unit tests using xUnit and
+    NSubstitute. You understand the existing Spaarke test patterns, know how to mock
+    Azure AI Search clients and Redis cache, and write tests that are maintainable,
+    readable, and cover both happy paths and failure scenarios.
+  </role>
+
+  <goal>
+    A complete set of unit tests covering:
+    - SearchFilterBuilder: scope=all omits entityType filter
+    - SearchFilterBuilder: entityTypes filter constructs correct OData expression
+    - SemanticSearchService: scope=all flows through without rejection
+    - RecordSearchService: successful search returns RecordSearchResponse
+    - RecordSearchService: Redis cache hit returns cached response
+    - RecordSearchService: filters (recordType, organizations, people) applied correctly
+    - RecordSearchEndpoints: HTTP 200 on valid request
+    - RecordSearchEndpoints: HTTP 400 on invalid request (empty query, empty recordTypes)
+    80%+ code coverage on all new and modified files.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-semantic-search-ui-r3/spec.md</file>
+    <file purpose="project-context">projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    <file purpose="service">src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/RecordSearchService.cs</file>
+    <file purpose="endpoint">src/server/api/Sprk.Bff.Api/Api/Ai/RecordSearchEndpoints.cs</file>
+    <file purpose="filter-builder">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs</file>
+    <file purpose="reference-tests">tests/unit/Sprk.Bff.Api.Tests/Api/Ai/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="constraints/testing.md">Use xUnit framework exclusively. Use NSubstitute for mocks. AAA pattern (Arrange-Act-Assert). Test file naming: {ClassName}Tests.cs. Method naming: {Method}_Given{Condition}_Should{ExpectedResult}.</constraint>
+    <constraint source="constraints/testing.md">No integration dependencies in unit tests. Azure AI Search SearchClient and IDistributedCache must be mocked. Do NOT make real HTTP calls or Redis connections.</constraint>
+    <constraint source="constraints/testing.md">80%+ code coverage target on new/modified code. Test both happy paths and error/edge cases.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Ai/AnalysisEndpointsTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Ai/HandlerEndpointsTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/RecordSearchService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/IRecordSearchService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/RecordSearchEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchResponse.cs</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing endpoint tests" location="tests/unit/Sprk.Bff.Api.Tests/Api/Ai/AnalysisEndpointsTests.cs">
+        Read existing endpoint tests for the exact NSubstitute mock patterns, test
+        method naming conventions, and how HTTP context is mocked for endpoint testing.
+        Replicate these patterns exactly for RecordSearchEndpointsTests.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <dependency task="R3-010" status="not-started">scope=all implementation must exist before tests can be written</dependency>
+      <dependency task="R3-011" status="not-started">entityTypes filter implementation must exist</dependency>
+      <dependency task="R3-012" status="not-started">RecordSearch models must exist</dependency>
+      <dependency task="R3-013" status="not-started">RecordSearchService must exist</dependency>
+      <dependency task="R3-014" status="not-started">RecordSearchEndpoints must exist</dependency>
+    </dependencies>
+    <notes>
+      Read the existing test files in tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ FIRST
+      to understand the exact NSubstitute setup, test class structure, and patterns.
+      Match them exactly — do not introduce new testing frameworks or patterns.
+
+      Test files to create:
+      1. tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RecordSearch/RecordSearchServiceTests.cs
+      2. tests/unit/Sprk.Bff.Api.Tests/Api/Ai/RecordSearchEndpointsTests.cs
+      3. tests/unit/Sprk.Bff.Api.Tests/Services/Ai/SemanticSearch/SearchFilterBuilderTests.cs
+         (new tests for scope=all and entityTypes — add to existing file if one exists)
+
+      Key test scenarios per file:
+
+      RecordSearchServiceTests.cs:
+      - SearchAsync_WithValidRequest_ReturnsResponse
+      - SearchAsync_WithCachedResult_ReturnsCachedResponseWithoutCallingSearch
+      - SearchAsync_WithRecordTypes_AppliesRecordTypeFilter
+      - SearchAsync_WithOrganizationsFilter_AppliesOrganizationsFilter
+      - SearchAsync_WithEmptyQuery_ThrowsArgumentException
+      - SearchAsync_WithEmptyRecordTypes_ThrowsArgumentException
+      - SearchAsync_WhenSearchFails_ThrowsAppropriateException
+      - SearchAsync_StoresResultInCache
+
+      RecordSearchEndpointsTests.cs:
+      - PostRecordSearch_WithValidRequest_Returns200WithResponse
+      - PostRecordSearch_WithEmptyQuery_Returns400ProblemDetails
+      - PostRecordSearch_WithEmptyRecordTypes_Returns400ProblemDetails
+      - PostRecordSearch_WhenServiceThrows_Returns500ProblemDetails
+      - PostRecordSearch_WhenUnauthorized_Returns401 (if filter tested at unit level)
+
+      SearchFilterBuilderTests.cs (additions):
+      - BuildFilter_WithScopeAll_OmitsEntityTypeFilter
+      - BuildFilter_WithEntityTypes_AddsSearchInFilter
+      - BuildFilter_WithMultipleEntityTypes_BuildsCorrectFilter
+      - BuildFilter_WithNullEntityTypes_DoesNotAddFilter
+      - BuildFilter_WithEmptyEntityTypes_DoesNotAddFilter
+
+      Mocking approach for RecordSearchService:
+      - Mock IOpenAiClient → returns float[] embedding
+      - Mock SearchClient (Azure.Search.Documents) → returns Response&lt;SearchResults&lt;T&gt;&gt;
+      - Mock IDistributedCache → returns null (cache miss) or serialized JSON (cache hit)
+      - Use NSubstitute.Returns() for all mock setups
+
+      NOTE: If SearchClient is difficult to mock (sealed class), check if the existing
+      tests use a wrapper interface or test double. Follow whatever approach is already
+      established in the test project.
+    </notes>
+  </context>
+
+  <steps>
+    <step order="1" name="Read existing test files">
+      Read tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ test files to understand the exact
+      NSubstitute patterns, class structure, and test naming conventions used.
+    </step>
+    <step order="2" name="Read constraints/testing.md">
+      Read .claude/constraints/testing.md for the mandatory test rules and patterns.
+    </step>
+    <step order="3" name="Create test directory structure">
+      Create tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RecordSearch/ directory
+      by writing RecordSearchServiceTests.cs.
+    </step>
+    <step order="4" name="Write SearchFilterBuilder tests (scope=all and entityTypes)">
+      In tests/unit/Sprk.Bff.Api.Tests/Services/Ai/SemanticSearch/SearchFilterBuilderTests.cs
+      (create if not exists, add to existing if already present), write tests for:
+      - scope=all filter construction
+      - entityTypes filter construction (single and multiple values)
+      - entityTypes null/empty = no filter
+    </step>
+    <step order="5" name="Write RecordSearchService tests">
+      Create tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RecordSearch/RecordSearchServiceTests.cs
+      with all service test scenarios listed in the notes.
+      Mock: IOpenAiClient, SearchClient, IDistributedCache.
+    </step>
+    <step order="6" name="Write RecordSearchEndpoints tests">
+      Create tests/unit/Sprk.Bff.Api.Tests/Api/Ai/RecordSearchEndpointsTests.cs
+      with all endpoint test scenarios listed in the notes.
+      Mock: IRecordSearchService.
+    </step>
+    <step order="7" name="Run all unit tests">
+      Run: dotnet test tests/unit/Sprk.Bff.Api.Tests/
+      All tests must pass. Fix any failures.
+    </step>
+    <step order="8" name="Check coverage">
+      Run: dotnet test tests/unit/Sprk.Bff.Api.Tests/ --collect:"XPlat Code Coverage"
+      Review coverage report for new files. Ensure 80%+ coverage on:
+      - RecordSearchService.cs
+      - RecordSearchEndpoints.cs
+      - SearchFilterBuilder.cs (new branches)
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run unit tests with code coverage</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RecordSearch/RecordSearchServiceTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/Ai/RecordSearchEndpointsTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/SemanticSearch/SearchFilterBuilderTests.cs (new or updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All new unit test files compile without errors</criterion>
+    <criterion testable="true">dotnet test tests/unit/Sprk.Bff.Api.Tests/ passes with 0 failures</criterion>
+    <criterion testable="true">RecordSearchService: SearchAsync with valid request returns RecordSearchResponse (happy path)</criterion>
+    <criterion testable="true">RecordSearchService: Cache hit returns cached result without executing search</criterion>
+    <criterion testable="true">RecordSearchService: RecordType filter is applied in the search query</criterion>
+    <criterion testable="true">RecordSearchEndpoints: Valid request returns HTTP 200 with RecordSearchResponse</criterion>
+    <criterion testable="true">RecordSearchEndpoints: Empty query returns HTTP 400 ProblemDetails</criterion>
+    <criterion testable="true">SearchFilterBuilder: scope=all does not add entityType filter</criterion>
+    <criterion testable="true">SearchFilterBuilder: entityTypes=["matter","project"] adds search.in() filter</criterion>
+    <criterion testable="true">80%+ code coverage on RecordSearchService.cs, RecordSearchEndpoints.cs, and new SearchFilterBuilder branches</criterion>
+    <criterion testable="true">All pre-existing unit tests continue to pass</criterion>
+  </acceptance-criteria>
+</task>

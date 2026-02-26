@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-028" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create useSemanticSearch Hook — Document Search State Management</title>
+    <phase>3 — Code Page Core</phase>
+    <tags>code-page, hooks</tags>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>022, 023</dependencies>
+    <blocks>R3-047</blocks>
+    <parallel-group>phase3-hooks</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create useSemanticSearch.ts — the React hook that manages document search state and execution
+    for the Documents domain. Adapted from the PCF SemanticSearchControl useSemanticSearch hook
+    (React 16 to React 19 — hooks API is identical).
+
+    State managed:
+    - results: DocumentSearchResult[] (accumulated across pages)
+    - totalCount: number
+    - searchState: "idle" | "loading" | "loadingMore" | "success" | "error"
+    - hasMore: boolean
+    - errorMessage: string | null
+    - searchTime: number | null
+
+    Methods:
+    - search(query: string, filters: SearchFilters): void — new search, clears previous results
+    - loadMore(): void — appends next page to results
+    - reset(): void — clears all state back to idle
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer familiar with pagination patterns and the
+    Spaarke BFF API search contracts.
+  </role>
+
+  <goal>
+    useSemanticSearch hook manages document search state. search() clears results and fetches
+    first page. loadMore() appends subsequent pages. hasMore is accurate. searchState tracks
+    the loading lifecycle. Adapted from PCF hook with no breaking changes to the state shape.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">Pagination: offset/limit based — offset = results.length, limit = 20</constraint>
+    <constraint source="spec">scope=all is always sent in the request body for Code Page (not matter-scoped)</constraint>
+    <constraint source="spec">Results cleared on new search (not accumulated across different queries)</constraint>
+    <constraint source="spec">loadMore() appends to existing results (same query, incremented offset)</constraint>
+    <constraint source="spec">hasMore: true when totalCount > results.length</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/hooks/useSemanticSearch.ts</file>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The PCF SemanticSearchControl/hooks/useSemanticSearch.ts has working pagination and state
+      management. The main adaptation points:
+      1. Remove PCF ComponentFramework context dependency (BFF URL hardcoded in service)
+      2. Accept SemanticSearchApiService instance or use the module-level singleton
+      3. searchState replaces separate isLoading/isLoadingMore booleans with a union type
+         for more precise state modeling
+
+      The hook does NOT manage graph or grid mode — it only manages the data layer.
+      The component layer decides how to render results.
+
+      Pagination constants: PAGE_SIZE = 20, MAX_RESULTS = 1000.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read PCF hook">
+      Read SemanticSearchControl/hooks/useSemanticSearch.ts. Note state management approach,
+      pagination logic, error handling, and AbortController usage for cancellation.
+    </step>
+    <step order="2" name="Define hook interface">
+      Plan the hook signature:
+      function useSemanticSearch(): {
+        results: DocumentSearchResult[];
+        totalCount: number;
+        searchState: SearchState;
+        hasMore: boolean;
+        errorMessage: string | null;
+        searchTime: number | null;
+        search: (query: string, filters: SearchFilters) =&gt; void;
+        loadMore: () =&gt; void;
+        reset: () =&gt; void;
+      }
+    </step>
+    <step order="3" name="Create useSemanticSearch.ts">
+      Create src/client/code-pages/SemanticSearch/src/hooks/useSemanticSearch.ts:
+      - Import SemanticSearchApiService singleton
+      - State: results[], totalCount, searchState, errorMessage, searchTime
+      - Track current query/filters in ref to support loadMore()
+      - search(): set searchState="loading", clear results, call API with offset=0
+      - On success: set results, totalCount, searchState="success", hasMore
+      - loadMore(): guard against concurrent calls; set searchState="loadingMore";
+        call API with offset=results.length; append new results
+      - reset(): clear all state to idle
+      - Use AbortController to cancel in-flight requests on new search
+      - Derived: hasMore = totalCount &gt; results.length
+    </step>
+    <step order="4" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 TypeScript errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read PCF hook as reference</tool>
+    <tool name="Write">Create useSemanticSearch.ts</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/hooks/useSemanticSearch.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">search() clears previous results and resets offset to 0</criterion>
+    <criterion testable="true">loadMore() appends results to existing array using results.length as offset</criterion>
+    <criterion testable="true">hasMore is true when totalCount &gt; results.length, false otherwise</criterion>
+    <criterion testable="true">searchState transitions: idle → loading → success/error; loadMore → loadingMore</criterion>
+    <criterion testable="true">In-flight requests cancelled via AbortController when new search starts</criterion>
+    <criterion testable="true">scope=all always included in search request body</criterion>
+  </acceptance-criteria>
+</task>

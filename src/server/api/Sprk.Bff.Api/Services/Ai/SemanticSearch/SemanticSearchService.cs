@@ -536,6 +536,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
             EntityType = request.EntityType,
             EntityId = request.EntityId,
             DocumentIdCount = request.DocumentIds?.Count,
+            EntityTypes = request.Filters?.EntityTypes,
             DocumentTypes = request.Filters?.DocumentTypes,
             FileTypes = request.Filters?.FileTypes,
             Tags = request.Filters?.Tags,

@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R3-061" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Unit Tests — API Services</title>
+    <phase>7</phase>
+    <phase-name>Testing and Quality</phase-name>
+    <tags>testing, code-page</tags>
+    <estimate>3 hours</estimate>
+    <dependencies>022, 021</dependencies>
+    <parallel-group>phase7-unit-tests</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>
+      You are a senior frontend test engineer writing unit tests for API service classes. You mock fetch/HTTP calls with jest, cover all response status codes and error paths, and verify request shape (URL, method, headers, body) without making real network calls.
+    </role>
+    <goal>
+      Write unit tests for the SemanticSearchApiService and RecordSearchApiService in the SemanticSearch code page, and for the MsalAuthProvider. Cover all HTTP error handling paths (400, 401, 403, 429, 5xx) and verify request shape. Achieve 80%+ coverage on each service class.
+    </goal>
+    <context>
+      The SemanticSearch code page is at:
+        src/client/code-pages/SemanticSearch/
+
+      Services to test (located in src/client/code-pages/SemanticSearch/src/services/):
+        - SemanticSearchApiService — wraps POST /api/ai/search, handles auth token injection, request serialization, response parsing
+        - RecordSearchApiService — wraps POST /api/ai/search/records, same auth/serialization pattern
+        - MsalAuthProvider — MSAL singleton, acquires tokens via acquireTokenSilent, handles token expiry
+
+      Test scenarios for SemanticSearchApiService:
+        - search() sends POST to correct URL with correct Content-Type header
+        - search() injects Bearer token from MsalAuthProvider in Authorization header
+        - search() serializes request body: query, filters, domain, scope, pagination params
+        - search() on HTTP 200: deserializes response to SearchResponse type
+        - search() on HTTP 400: throws ApiError with status 400 and response body
+        - search() on HTTP 401: throws AuthError (triggers re-auth)
+        - search() on HTTP 403: throws AuthError
+        - search() on HTTP 429: throws RateLimitError with Retry-After header value
+        - search() on HTTP 500/503: throws ServerError
+        - search() on network failure (fetch throws): throws NetworkError
+
+      Test scenarios for RecordSearchApiService:
+        - Same error path coverage as SemanticSearchApiService
+        - searchRecords() includes entityTypes array in request body
+        - searchRecords() URL is POST /api/ai/search/records (not /api/ai/search)
+
+      Test scenarios for MsalAuthProvider:
+        - getInstance() returns singleton (same instance on second call)
+        - getToken() calls acquireTokenSilent with correct scopes
+        - getToken() on InteractionRequiredAuthError: calls acquireTokenPopup as fallback
+        - getToken() on network error during token acquisition: throws AuthError
+
+      Mock strategy:
+        - Mock global fetch with jest.fn() — use jest.spyOn(global, 'fetch')
+        - Mock MSAL PublicClientApplication and its acquireTokenSilent method
+        - Use jest.resetAllMocks() in beforeEach to isolate test cases
+    </context>
+    <constraints>
+      - Test files go in src/client/code-pages/SemanticSearch/src/services/__tests__/ directory
+      - Do NOT make real HTTP calls — all fetch calls must be mocked
+      - Do NOT make real MSAL token requests — PublicClientApplication must be mocked
+      - Verify request shape (URL, method, headers, body) in tests, not just response handling
+      - Tests must pass in the existing jest configuration without new test infrastructure
+      - Achieve 80%+ line and branch coverage on each service file
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/auth/msal-client.md</file>
+    </files>
+  </knowledge>
+
+  <inputs>
+    <input>src/client/code-pages/SemanticSearch/src/services/SemanticSearchApiService.ts</input>
+    <input>src/client/code-pages/SemanticSearch/src/services/RecordSearchApiService.ts</input>
+    <input>src/client/code-pages/SemanticSearch/src/services/MsalAuthProvider.ts</input>
+    <input>src/client/code-pages/SemanticSearch/src/types/ (API request/response types)</input>
+    <input>src/client/code-pages/SemanticSearch/package.json (jest config)</input>
+  </inputs>
+
+  <steps>
+    <step order="1">Read SemanticSearchApiService.ts, RecordSearchApiService.ts, and MsalAuthProvider.ts in full</step>
+    <step order="2">Read the TypeScript request/response type definitions used by the services</step>
+    <step order="3">Read package.json jest configuration to understand test environment</step>
+    <step order="4">Create src/client/code-pages/SemanticSearch/src/services/__tests__/ directory</step>
+    <step order="5">Write SemanticSearchApiService.test.ts:
+      - Mock fetch globally
+      - Test all HTTP status codes (200, 400, 401, 403, 429, 500, 503)
+      - Verify request URL, method, headers, and body shape
+      - Test network failure path</step>
+    <step order="6">Write RecordSearchApiService.test.ts:
+      - Same error path coverage
+      - Verify entityTypes param in request body
+      - Verify correct URL endpoint</step>
+    <step order="7">Write MsalAuthProvider.test.ts:
+      - Mock PublicClientApplication
+      - Test singleton pattern
+      - Test acquireTokenSilent happy path
+      - Test InteractionRequiredAuthError fallback to popup
+      - Test network error during token acquisition</step>
+    <step order="8">Run jest inside SemanticSearch directory and fix any test failures</step>
+    <step order="9">Run jest with --coverage and verify 80%+ coverage per service file</step>
+    <step order="10">Add additional test cases to fill any coverage gaps</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Read service source files and type definitions</tool>
+    <tool>Write - Create test files in __tests__/</tool>
+    <tool>Bash - Run jest and jest --coverage</tool>
+    <tool>Edit - Fix test files based on jest output</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/SemanticSearch/src/services/__tests__/SemanticSearchApiService.test.ts</output>
+    <output>src/client/code-pages/SemanticSearch/src/services/__tests__/RecordSearchApiService.test.ts</output>
+    <output>src/client/code-pages/SemanticSearch/src/services/__tests__/MsalAuthProvider.test.ts</output>
+    <output>All tests passing, 80%+ coverage per service file</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All three service test files created in __tests__/ directory</criterion>
+    <criterion>All tests pass (jest exits with code 0)</criterion>
+    <criterion>80%+ line coverage on each service file</criterion>
+    <criterion>80%+ branch coverage on each service file</criterion>
+    <criterion>HTTP 400, 401, 403, 429, 500, 503, and network failure paths all tested</criterion>
+    <criterion>Request URL, method, Authorization header, and body shape verified in tests</criterion>
+    <criterion>MsalAuthProvider singleton pattern tested</criterion>
+    <criterion>MSAL InteractionRequiredAuthError fallback path tested</criterion>
+    <criterion>No real HTTP or MSAL network calls made during tests</criterion>
+  </acceptance-criteria>
+</task>

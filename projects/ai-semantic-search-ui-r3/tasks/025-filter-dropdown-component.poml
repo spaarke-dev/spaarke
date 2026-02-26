@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-025" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create FilterDropdown — Multi-Select Dropdown Component</title>
+    <phase>3 — Code Page Core</phase>
+    <tags>code-page, fluent-ui</tags>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>023</dependencies>
+    <blocks>R3-024</blocks>
+    <parallel-group>phase3-components</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create FilterDropdown.tsx — a reusable multi-select dropdown component for Document Type,
+    File Type, and Matter Type filters. Adapted from the PCF SemanticSearchControl FilterDropdown
+    (React 16 to React 19, Fluent v8 to Fluent v9).
+
+    Behavior:
+    - Shows "All" when nothing selected, "N selected" when multiple items selected
+    - Loading spinner shown when options array is empty and isLoading is true
+    - Each option is a checkbox item in the dropdown
+    - Uses Fluent v9 Dropdown or Combobox component
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer with Fluent UI v9 expertise.
+  </role>
+
+  <goal>
+    FilterDropdown renders a labeled multi-select dropdown. Selected values are reported via
+    onChange callback. Shows "All" or "N selected" summary. Loading state shown while options
+    load. Fully dark-mode compatible via Fluent v9 tokens.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9: Dropdown or Combobox from @fluentui/react-components — no Fluent v8 ComboBox</constraint>
+    <constraint source="ADR-021">No hard-coded colors — tokens only</constraint>
+    <constraint source="spec">Multi-select with checkbox items; "All" label when empty selection; "N selected" label for multiple</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/FilterDropdown.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The PCF SemanticSearchControl/components/FilterDropdown.tsx implements this component using
+      Fluent v8 APIs (ComboBox, IComboBoxOption). The adaptation to React 19 + Fluent v9 is
+      the main work — the UX logic (multi-select, summary label, loading state) remains the same.
+
+      Fluent v9 uses Dropdown with Option sub-components. For multi-select, use
+      Dropdown with multiselect prop. The selectedOptions state tracks selected values.
+
+      Props interface:
+      - label: string (e.g., "Document Type")
+      - options: FilterOption[] (value, label pairs)
+      - selectedValues: string[]
+      - onChange: (selected: string[]) =&gt; void
+      - isLoading?: boolean
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read PCF FilterDropdown">
+      Read SemanticSearchControl/components/FilterDropdown.tsx. Note the props interface,
+      state management, and rendering logic. Understand what needs to change for Fluent v9.
+    </step>
+    <step order="2" name="Create FilterDropdown.tsx">
+      Create src/client/code-pages/SemanticSearch/src/components/FilterDropdown.tsx:
+      - Props: label, options, selectedValues, onChange, isLoading?
+      - Use Fluent v9 Dropdown with multiselect={true}
+      - Render Option for each item from options array
+      - Summary button label: "All" when selectedValues.length === 0, "{N} selected" otherwise
+      - Loading state: show Spinner from @fluentui/react-components when isLoading &amp;&amp; options.length === 0
+      - Call onChange with updated selectedValues when selection changes
+    </step>
+    <step order="3" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read PCF FilterDropdown as reference</tool>
+    <tool name="Write">Create FilterDropdown.tsx</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/FilterDropdown.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">Shows "All" label when no values selected</criterion>
+    <criterion testable="true">Shows "N selected" label when N values are selected</criterion>
+    <criterion testable="true">Spinner shown when isLoading=true and options array is empty</criterion>
+    <criterion testable="true">onChange callback called with updated string[] when selection changes</criterion>
+    <criterion testable="true">Uses Fluent v9 Dropdown — not Fluent v8 ComboBox</criterion>
+    <criterion testable="true">No hard-coded colors — tokens only</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-046" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create StatusBar — Bottom Bar Showing Search Metadata</title>
+    <phase>5 — Interactive Features</phase>
+    <tags>code-page, fluent-ui</tags>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>020</dependencies>
+    <blocks>R3-047</blocks>
+    <parallel-group>phase5-features</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create StatusBar.tsx — a fixed bottom bar showing search result metadata and app version.
+
+    Displays:
+    - Result count: "X results found" (updates after each search)
+    - Search time: "search time: {ms}ms" (time for last search execution)
+    - Version: "v{version}" (from package.json or hard-coded constant)
+    - When no search has been run: "Ready" or empty state
+
+    Uses Fluent v9 design tokens for typography and background. Compact single-line bar.
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer with Fluent UI v9 expertise.
+  </role>
+
+  <goal>
+    StatusBar renders at the bottom of the layout. Updates after each search with count and
+    timing. Version string shown on the right. Dark mode renders correctly.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9 tokens for all colors, typography, spacing — no hard-coded values</constraint>
+    <constraint source="spec">Status bar layout from spec.md: "X results found · search time · version"</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The status bar sits in the bottom fixed area of App.tsx layout (below the main content area).
+      It has a subtle border-top and uses a muted typography style.
+
+      Props interface:
+      - totalCount: number | null (null = no search run yet)
+      - searchTime: number | null (milliseconds)
+      - version: string (e.g., "v1.0.0")
+
+      Display logic:
+      - totalCount is null: show "Ready"
+      - totalCount is 0: show "No results found"
+      - totalCount &gt; 0: show "{totalCount} results found · {searchTime}ms · {version}"
+
+      Version can be hardcoded or read from a constant defined during task 001 scaffold.
+      Check if package.json version is accessible (webpack DefinePlugin can inject it).
+      If not available, use a placeholder "v1.0.0" constant.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Create StatusBar.tsx">
+      Create src/client/code-pages/SemanticSearch/src/components/StatusBar.tsx:
+      - Props: totalCount: number | null, searchTime: number | null, version: string
+      - makeStyles for: height (28px), border-top (tokens.colorNeutralStroke1),
+        background (tokens.colorNeutralBackground2), padding, text style (caption1)
+      - Flex row: left text (count + search time), right text (version)
+      - Display logic per context above
+    </step>
+    <step order="2" name="Connect to App.tsx">
+      Update App.tsx to render StatusBar in the bottom status bar placeholder area.
+      Pass totalCount and searchTime from search hook state (dummy 0/null values for now).
+      Pass version constant.
+    </step>
+    <step order="3" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create StatusBar.tsx</tool>
+    <tool name="Edit">Update App.tsx to render StatusBar</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/StatusBar.tsx</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/App.tsx (StatusBar wired)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">Shows "Ready" when totalCount is null (no search run)</criterion>
+    <criterion testable="true">Shows "No results found" when totalCount is 0</criterion>
+    <criterion testable="true">Shows "{N} results found · {ms}ms · {version}" when totalCount &gt; 0</criterion>
+    <criterion testable="true">Version string displays on the right side of status bar</criterion>
+    <criterion testable="true">No hard-coded colors — Fluent v9 tokens only</criterion>
+    <criterion testable="true">StatusBar renders at the bottom of App.tsx layout</criterion>
+  </acceptance-criteria>
+</task>

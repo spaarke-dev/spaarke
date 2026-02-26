@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R3-074" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Code Review and ADR Compliance Check</title>
+    <phase>8</phase>
+    <phase-name>Deployment and Wrap-up</phase-name>
+    <tags>quality-gate</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>073</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <status>completed</status>
+    <notes>Code review + ADR check passed. Fixed 4 HIGH findings (hard-coded font sizes/spacing in ClusterNode, RecordNode, ViewToggleToolbar → replaced with tokens). All ADRs compliant. 12 LOW items documented. Build verified: 0 errors. Full report at notes/debug/quality-gate-results.md.</notes>
+  </metadata>
+
+  <prompt>
+    <role>
+      You are a senior engineer running final quality gates before project completion. You invoke the code-review and adr-check skills, address all findings, and confirm the codebase is clean and ADR-compliant before the wrap-up task.
+    </role>
+    <goal>
+      Run the code-review skill on all changes from this project and the adr-check skill to validate ADR compliance. Address all findings from both skills. Verify compliance with the most critical ADRs for this project: ADR-021 (Fluent v9, tokens, dark mode), ADR-006/026 (Code Page pattern, single HTML), ADR-001/008/013 (API patterns, endpoint filters, AI architecture), and ADR-012 (shared component library usage).
+    </goal>
+    <context>
+      This task runs final quality gates after end-to-end validation is complete (task 073).
+      All code changes from Phases 1-7 are in scope for review.
+
+      Primary areas of review:
+
+        Code Page (src/client/code-pages/SemanticSearch/):
+          - ADR-021: All colors via Fluent v9 tokens (no hard-coded colors — should be clean from task 064)
+          - ADR-022: React 19 bundled, createRoot() used, no platform library declarations
+          - ADR-026: Single self-contained HTML output from build pipeline
+          - ADR-012: UniversalDatasetGrid, ViewSelector imported from @spaarke/ui-components (not copied)
+          - Code quality: No unused imports, no console.log statements left in, TypeScript strict mode compliance
+          - MSAL pattern: Singleton, correct token scope, acquireTokenSilent with popup fallback
+
+        DocumentRelationshipViewer migration (src/client/code-pages/DocumentRelationshipViewer/):
+          - ADR-021: No hard-coded colors in RelationshipGrid.tsx
+          - ADR-012: UniversalDatasetGrid imported from @spaarke/ui-components
+          - No regression in graph view components
+
+        BFF API (src/server/api/Sprk.Bff.Api/):
+          - ADR-001: Minimal API pattern (MapPost/MapGet with extension methods, no MVC controllers)
+          - ADR-008: Endpoint filters for authorization (AddEndpointFilter, not global middleware)
+          - ADR-009: Redis-first caching with versioned tenant-scoped keys (if caching added)
+          - ADR-010: DI registration count (verify not exceeding 15 non-framework registrations)
+          - ADR-013: AI features extend BFF; no direct Azure AI calls from frontend
+          - Error responses: ProblemDetails format used consistently
+          - Input validation on new endpoints (scope, entityTypes, pagination params)
+          - No secrets hard-coded in source
+
+        Tests (all test files):
+          - No test code left in production source files
+          - Tests test behavior, not implementation internals
+          - All mock cleanup (jest.resetAllMocks) in beforeEach
+
+      Code-review skill findings to address:
+        - Any TODO comments left in production code → resolve or remove
+        - Any commented-out code blocks → remove
+        - Any magic numbers/strings → extract to named constants
+        - Any functions exceeding 50 lines → consider extracting
+        - Any missing null checks on API responses
+
+      ADR-check skill findings to address:
+        - Any pattern that violates an ADR → fix immediately
+        - Any new DI registration that pushes count over 15 → document and seek exception if justified
+    </context>
+    <constraints>
+      - Run BOTH the code-review skill AND the adr-check skill — not just one
+      - Address ALL findings from both skills before marking this task complete
+      - If an ADR violation cannot be fixed without major rework, escalate with a 🔔 Human Input Required block
+      - Document all findings and resolutions in notes/debug/quality-gate-results.md
+      - Do not mark this task complete if any CRITICAL or HIGH findings remain unresolved
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-006.md</file>
+      <file>.claude/adr/ADR-008.md</file>
+      <file>.claude/adr/ADR-009.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+      <file>.claude/adr/ADR-026.md</file>
+    </files>
+  </knowledge>
+
+  <inputs>
+    <input>src/client/code-pages/SemanticSearch/src/ (all source files)</input>
+    <input>src/client/code-pages/DocumentRelationshipViewer/src/components/RelationshipGrid.tsx</input>
+    <input>src/server/api/Sprk.Bff.Api/Api/Ai/ (new/modified endpoint files)</input>
+    <input>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/ (modified service files)</input>
+  </inputs>
+
+  <steps>
+    <step order="1">Read code-review skill and adr-check skill to load their checklists</step>
+    <step order="2">Run code-review skill on SemanticSearch code page source files</step>
+    <step order="3">Run code-review skill on DocumentRelationshipViewer/RelationshipGrid.tsx</step>
+    <step order="4">Run code-review skill on BFF API changes (endpoints + services)</step>
+    <step order="5">Compile all code review findings (severity: CRITICAL, HIGH, MEDIUM, LOW)</step>
+    <step order="6">Run adr-check skill — verify ADR-021 compliance (Fluent v9 tokens, dark mode)</step>
+    <step order="7">Run adr-check skill — verify ADR-006/026 compliance (Code Page single HTML)</step>
+    <step order="8">Run adr-check skill — verify ADR-001/008 compliance (Minimal API, endpoint filters)</step>
+    <step order="9">Run adr-check skill — verify ADR-012 compliance (shared component library usage)</step>
+    <step order="10">Run adr-check skill — verify ADR-013 compliance (AI extends BFF, not separate service)</step>
+    <step order="11">Run adr-check skill — verify ADR-010 compliance (DI registration count)</step>
+    <step order="12">Compile all ADR violations found</step>
+    <step order="13">Fix all CRITICAL and HIGH findings from code review</step>
+    <step order="14">Fix all ADR violations found</step>
+    <step order="15">Fix MEDIUM/LOW code review findings as time permits</step>
+    <step order="16">Run dotnet build and npm run build to verify fixes did not break compilation</step>
+    <step order="17">Create notes/debug/quality-gate-results.md with: all findings, severities, and resolutions</step>
+  </steps>
+
+  <tools>
+    <tool>Skill - code-review (run code review skill)</tool>
+    <tool>Skill - adr-check (run ADR compliance check)</tool>
+    <tool>Read - Read source files for review</tool>
+    <tool>Edit - Fix findings in source files</tool>
+    <tool>Bash - dotnet build and npm run build to verify fixes</tool>
+    <tool>Grep - Search for specific patterns (console.log, TODO, hard-coded values)</tool>
+    <tool>Write - Create notes/debug/quality-gate-results.md</tool>
+  </tools>
+
+  <outputs>
+    <output>All CRITICAL and HIGH code review findings resolved</output>
+    <output>All ADR violations resolved</output>
+    <output>dotnet build and npm run build pass after fixes</output>
+    <output>notes/debug/quality-gate-results.md — complete review findings and resolutions</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>code-review skill executed on all changed code areas</criterion>
+    <criterion>adr-check skill executed against all relevant ADRs (001, 006, 008, 010, 012, 013, 021, 022, 026)</criterion>
+    <criterion>Zero CRITICAL findings remaining unresolved</criterion>
+    <criterion>Zero HIGH findings remaining unresolved</criterion>
+    <criterion>Zero ADR violations remaining unresolved</criterion>
+    <criterion>No console.log statements in production code</criterion>
+    <criterion>No TODO comments in production code</criterion>
+    <criterion>No hard-coded color values in any component (confirmed by grep)</criterion>
+    <criterion>dotnet build passes after all fixes</criterion>
+    <criterion>npm run build passes after all fixes</criterion>
+    <criterion>notes/debug/quality-gate-results.md documents all findings and resolutions</criterion>
+  </acceptance-criteria>
+</task>

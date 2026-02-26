@@ -129,14 +129,14 @@ export const DocumentGraph: React.FC<DocumentGraphProps> = ({
                 attributionPosition="bottom-left"
                 style={{ width: "100%", height: "100%" }}
             >
-                <Background variant={BackgroundVariant.Dots} gap={20} size={1} color={isDarkMode ? "#444" : "#ddd"} />
+                <Background variant={BackgroundVariant.Dots} gap={20} size={1} color={isDarkMode ? tokens.colorNeutralStroke2 : tokens.colorNeutralStroke3} />
                 <Controls showZoom showFitView showInteractive={false} />
                 {showMinimap && (
                     <MiniMap
                         nodeColor={(node: Node<DocumentNodeData>) =>
                             node.data?.isSource ? tokens.colorBrandBackground : tokens.colorNeutralBackground3
                         }
-                        maskColor={isDarkMode ? "rgba(0,0,0,0.7)" : "rgba(255,255,255,0.7)"}
+                        maskColor={isDarkMode ? tokens.colorNeutralBackgroundAlpha2 : tokens.colorNeutralBackgroundAlpha}
                         style={{ backgroundColor: isDarkMode ? tokens.colorNeutralBackground2 : tokens.colorNeutralBackground1 }}
                     />
                 )}

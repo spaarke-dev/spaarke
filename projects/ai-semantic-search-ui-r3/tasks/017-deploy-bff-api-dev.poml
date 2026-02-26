@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-017" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Deploy Enhanced BFF API to Dev Environment</title>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>Claude Code</assigned>
+    <tags>deploy, bff-api</tags>
+    <phase>2</phase>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Deploy the Phase 2 BFF API changes to the dev environment (spe-api-dev-67e2xz.azurewebsites.net).
+    Use the bff-deploy skill and scripts/Deploy-BffApi.ps1 to build and deploy the updated
+    Sprk.Bff.Api to the Azure App Service. After deployment, verify the new and enhanced
+    endpoints respond correctly using scripts/Test-SdapBffApi.ps1 or direct curl/Invoke-RestMethod
+    calls. Run the API health check to confirm the deployment is healthy.
+  </prompt>
+
+  <role>
+    You are a DevOps engineer familiar with Azure App Service deployment via the Spaarke
+    deployment scripts. You follow the bff-deploy skill procedure, verify the deployment
+    is healthy, and perform basic smoke tests on the new endpoints before declaring
+    Phase 2 complete.
+  </role>
+
+  <goal>
+    Phase 2 BFF API changes are successfully deployed to dev:
+    - GET /healthz returns 200 (healthy)
+    - POST /api/ai/search with scope=all returns 200 (not SCOPE_NOT_SUPPORTED)
+    - POST /api/ai/search with entityTypes filter returns 200
+    - POST /api/ai/search/records returns 200 with RecordSearchResponse shape
+    - No regression: existing /api/ai/search endpoint continues to work
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-semantic-search-ui-r3/spec.md</file>
+    <file purpose="project-context">projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    <file purpose="deploy-script">scripts/Deploy-BffApi.ps1</file>
+    <file purpose="test-script">scripts/Test-SdapBffApi.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md">Always use bff-deploy skill for BFF API deployments. Do not run az webapp deploy manually without following the skill procedure.</constraint>
+    <constraint source="CLAUDE.md">Deploy to dev environment only (spe-api-dev-67e2xz.azurewebsites.net). Never deploy to staging or production without explicit instruction.</constraint>
+    <constraint source="ADR-001">Verify API health endpoint GET /healthz returns 200 after deployment.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>scripts/Test-SdapBffApi.ps1</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="BFF Deploy skill" location=".claude/skills/bff-deploy/SKILL.md">
+        Load and follow the bff-deploy skill procedure. This includes building the API,
+        running the deployment script, and verifying deployment health.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <dependency task="R3-015" status="not-started">All unit tests must pass before deployment</dependency>
+      <dependency task="R3-016" status="not-started">All integration tests must pass before deployment</dependency>
+    </dependencies>
+    <notes>
+      PREREQUISITE: Tasks 015 and 016 (all tests) must pass before this task is started.
+      Do NOT deploy if any tests are failing.
+
+      Dev environment details:
+      - App Service: spe-api-dev-67e2xz
+      - Resource Group: spe-infrastructure-westus2
+      - API URL: https://spe-api-dev-67e2xz.azurewebsites.net
+      - Health check: GET https://spe-api-dev-67e2xz.azurewebsites.net/healthz
+
+      Smoke test requests after deployment (use valid auth token from az CLI):
+      1. GET /healthz → expect 200
+      2. POST /api/ai/search with { "scope": "all", "query": "test" } → expect 200
+      3. POST /api/ai/search with { "scope": "all", "entityTypes": ["matter"], "query": "test" } → expect 200
+      4. POST /api/ai/search/records with { "query": "test", "recordTypes": ["sprk_matter"] } → expect 200
+
+      For auth token to smoke test (if scripts/Test-SdapBffApi.ps1 does not handle this):
+        az account get-access-token --resource api://[app-registration-id] --query accessToken -o tsv
+      (Check Test-SdapBffApi.ps1 for the correct resource URI used in tests)
+
+      If deployment fails:
+      - Check az deployment logs
+      - Check App Service startup logs
+      - Do NOT mark this task complete if deployment health check fails
+      - Document the failure and escalate (this blocks Phase 3)
+    </notes>
+  </context>
+
+  <steps>
+    <step order="1" name="Load bff-deploy skill">
+      Load .claude/skills/bff-deploy/SKILL.md and follow the full deployment procedure.
+    </step>
+    <step order="2" name="Confirm all tests pass">
+      Run: dotnet test
+      Confirm 0 failures. If any tests fail, STOP and fix before deploying.
+    </step>
+    <step order="3" name="Build release artifact">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/ --configuration Release
+      Verify build succeeds with 0 errors.
+    </step>
+    <step order="4" name="Run deployment script">
+      Run: pwsh scripts/Deploy-BffApi.ps1
+      (Or follow the bff-deploy skill procedure for the exact command)
+      Monitor output for successful deployment confirmation.
+    </step>
+    <step order="5" name="Verify health check">
+      Wait 30-60 seconds for the App Service to restart.
+      Run: Invoke-RestMethod -Uri "https://spe-api-dev-67e2xz.azurewebsites.net/healthz"
+      Verify HTTP 200 response.
+    </step>
+    <step order="6" name="Smoke test scope=all">
+      Make an authenticated POST to /api/ai/search with scope=all.
+      Use scripts/Test-SdapBffApi.ps1 or construct the request manually.
+      Verify: HTTP 200 (not 400 SCOPE_NOT_SUPPORTED).
+    </step>
+    <step order="7" name="Smoke test entityTypes filter">
+      Make an authenticated POST to /api/ai/search with entityTypes=["matter"].
+      Verify: HTTP 200 with results filtered to matter-related documents.
+    </step>
+    <step order="8" name="Smoke test POST /api/ai/search/records">
+      Make an authenticated POST to /api/ai/search/records with:
+      { "query": "acme litigation", "recordTypes": ["sprk_matter"] }
+      Verify: HTTP 200 with RecordSearchResponse body shape (results array, metadata object).
+    </step>
+    <step order="9" name="Verify no regression on existing endpoint">
+      Make an authenticated POST to /api/ai/search with existing valid parameters
+      (scope=matter or a specific matter ID).
+      Verify: HTTP 200, same results as before deployment.
+    </step>
+    <step order="10" name="Document deployment result">
+      Note the deployment timestamp, build version, and smoke test results.
+      Update current-task.md with deployment confirmation.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build release artifact and run tests</tool>
+    <tool name="pwsh">Run Deploy-BffApi.ps1 and smoke test scripts</tool>
+    <tool name="az">Azure CLI for auth token and deployment verification</tool>
+    <tool name="Skill">Load bff-deploy skill for deployment procedure</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">https://spe-api-dev-67e2xz.azurewebsites.net (deployed BFF API)</output>
+    <output type="report">Deployment confirmation with smoke test results (documented in current-task.md)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET https://spe-api-dev-67e2xz.azurewebsites.net/healthz returns HTTP 200</criterion>
+    <criterion testable="true">POST /api/ai/search with scope=all returns HTTP 200 (not 400 SCOPE_NOT_SUPPORTED)</criterion>
+    <criterion testable="true">POST /api/ai/search with entityTypes=["matter"] returns HTTP 200</criterion>
+    <criterion testable="true">POST /api/ai/search/records with valid request returns HTTP 200 with RecordSearchResponse shape</criterion>
+    <criterion testable="true">POST /api/ai/search with existing valid scope returns HTTP 200 (no regression)</criterion>
+    <criterion testable="true">All dotnet tests pass before deployment (0 failures)</criterion>
+    <criterion testable="true">No application errors in App Service logs immediately after deployment</criterion>
+  </acceptance-criteria>
+</task>

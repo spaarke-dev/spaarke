@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R3-070" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Build and Deploy SemanticSearch Code Page</title>
+    <phase>8</phase>
+    <phase-name>Deployment and Wrap-up</phase-name>
+    <tags>deploy, code-page</tags>
+    <estimate>1.5 hours</estimate>
+    <dependencies>067</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <status>completed</status>
+    <notes>Build complete: sprk_semanticsearch.html (1.16 MiB). Deployment requires manual upload via Power Apps maker portal — PAC CLI does not support direct web resource upload. Deployment log at notes/debug/deployment-log.md.</notes>
+  </metadata>
+
+  <prompt>
+    <role>
+      You are a DevOps engineer deploying a React code page to Dataverse as an HTML web resource. You follow the two-step build pipeline for code pages and use the code-page-deploy skill for the deployment procedure. You verify the deployment and confirm the web resource is accessible.
+    </role>
+    <goal>
+      Build the SemanticSearch code page using the two-step pipeline (npm run build + build-webresource.ps1), verify the output file out/sprk_semanticsearch.html exists and is a single self-contained HTML file, then deploy it to Dataverse as the sprk_semanticsearch HTML web resource.
+    </goal>
+    <context>
+      The SemanticSearch code page is at:
+        src/client/code-pages/SemanticSearch/
+
+      Two-step build pipeline per ADR-026 and code-page-deploy skill:
+        Step 1: npm run build — runs webpack in production mode, outputs to out/ directory
+        Step 2: scripts/build-webresource.ps1 (or the equivalent script in the SemanticSearch directory)
+                This script inlines all JS/CSS into a single self-contained HTML file.
+
+      Expected build output: out/sprk_semanticsearch.html
+        - Single HTML file, self-contained (no external resource dependencies)
+        - All JS and CSS inlined
+        - File size target: reasonable for a Dataverse web resource (typically under 5MB uncompressed)
+
+      Dataverse web resource registration:
+        - Web resource name: sprk_semanticsearch
+        - Display name: Semantic Search
+        - Type: HTML (Web Page)
+        - Target environment: https://spaarkedev1.crm.dynamics.com
+
+      Deployment approach: Use the code-page-deploy skill for the exact CLI commands.
+      The skill covers: pac auth, pac webresource upsert, pac solution publish.
+
+      After deployment:
+        - Navigate to https://spaarkedev1.crm.dynamics.com/WebResources/sprk_semanticsearch
+        - Verify the page loads without JavaScript errors in the browser console
+        - Verify the search input renders
+        - Verify domain tabs render (Documents, Matters, Projects, Invoices)
+    </context>
+    <constraints>
+      - Deploy to dev environment only (spaarkedev1.crm.dynamics.com)
+      - Use code-page-deploy skill — do not use ad-hoc pac commands without following the skill procedure
+      - Verify the HTML file is self-contained (no external .js or .css references) before deploying
+      - If the build fails, fix the build before proceeding — do not deploy a broken artifact
+      - Document deployment in notes/debug/deployment-log.md (timestamp, version, command output)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-026.md</file>
+    </files>
+  </knowledge>
+
+  <inputs>
+    <input>src/client/code-pages/SemanticSearch/ (fully implemented code page from Phase 3-5 + optimization from task 067)</input>
+    <input>scripts/build-webresource.ps1 (or equivalent in SemanticSearch directory)</input>
+  </inputs>
+
+  <steps>
+    <step order="1">Read code-page-deploy skill to load the exact build and deploy procedure</step>
+    <step order="2">Run npm run build inside src/client/code-pages/SemanticSearch/ directory</step>
+    <step order="3">Verify npm run build exits with code 0 and out/ directory contains output files</step>
+    <step order="4">Run build-webresource.ps1 (PowerShell) to produce single self-contained HTML file</step>
+    <step order="5">Verify out/sprk_semanticsearch.html exists</step>
+    <step order="6">Verify the HTML file is self-contained: check it has no src="..." or href="..." to external .js/.css files</step>
+    <step order="7">Record the file size of out/sprk_semanticsearch.html</step>
+    <step order="8">Follow code-page-deploy skill procedure to authenticate with Dataverse dev (pac auth)</step>
+    <step order="9">Deploy sprk_semanticsearch.html as web resource to Dataverse dev</step>
+    <step order="10">Publish customizations after web resource upload</step>
+    <step order="11">Navigate to https://spaarkedev1.crm.dynamics.com/WebResources/sprk_semanticsearch and verify page loads</step>
+    <step order="12">Verify search input and domain tabs render without JavaScript errors</step>
+    <step order="13">Create notes/debug/deployment-log.md with timestamp, file size, deployment commands, and verification result</step>
+  </steps>
+
+  <tools>
+    <tool>Skill - code-page-deploy (load deployment procedure)</tool>
+    <tool>Bash - npm run build</tool>
+    <tool>Bash - PowerShell build-webresource.ps1</tool>
+    <tool>Bash - pac auth and pac webresource commands (per skill procedure)</tool>
+    <tool>Bash - Check file size and content of out/sprk_semanticsearch.html</tool>
+    <tool>Write - Create notes/debug/deployment-log.md</tool>
+  </tools>
+
+  <outputs>
+    <output>out/sprk_semanticsearch.html — single self-contained HTML web resource</output>
+    <output>sprk_semanticsearch web resource deployed and published to Dataverse dev</output>
+    <output>notes/debug/deployment-log.md — deployment record</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>npm run build exits with code 0 (no errors)</criterion>
+    <criterion>build-webresource.ps1 exits successfully</criterion>
+    <criterion>out/sprk_semanticsearch.html exists and is self-contained (no external resource references)</criterion>
+    <criterion>Web resource uploaded to Dataverse dev as sprk_semanticsearch</criterion>
+    <criterion>Customizations published after upload</criterion>
+    <criterion>Page loads at /WebResources/sprk_semanticsearch without JavaScript console errors</criterion>
+    <criterion>Search input and domain tabs visible on page load</criterion>
+    <criterion>Deployment documented in notes/debug/deployment-log.md with file size and timestamp</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R3-050" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Analyze RelationshipGrid for Universal DatasetGrid Migration</title>
+    <phase>6</phase>
+    <phase-name>DocumentRelationshipViewer Migration</phase-name>
+    <tags>analysis, code-page, shared-library</tags>
+    <estimate>1.5 hours</estimate>
+    <dependencies>none</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>
+      You are a senior frontend architect analyzing an existing grid component to plan its migration to the Universal DatasetGrid shared component. Your output is a detailed migration analysis document that the implementation task will follow.
+    </role>
+    <goal>
+      Read and analyze the existing RelationshipGrid.tsx in the DocumentRelationshipViewer code page. Document its current features, identify what must change for the Universal DatasetGrid migration, and capture any custom rendering logic that must be preserved. Produce a migration analysis document at notes/drafts/docrelviewer-grid-migration.md.
+    </goal>
+    <context>
+      The DocumentRelationshipViewer is an existing code page at:
+        src/client/code-pages/DocumentRelationshipViewer/
+
+      It uses an inline Fluent DataGrid for the relationship list view. The new SemanticSearch code page uses Universal DatasetGrid from @spaarke/ui-components for its grid view. To maintain visual consistency, the DocRelViewer grid must be migrated to the same component.
+
+      Universal DatasetGrid is the shared component at:
+        src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/
+
+      The migration analysis must answer:
+      1. What columns does the current RelationshipGrid render? (names, widths, renderers)
+      2. What sorting behavior exists? (client-side or server-side, which columns)
+      3. What row selection behavior exists? (single, multi, none)
+      4. What row click behavior exists? (navigation, dialog, expand)
+      5. What dark mode / theming is applied?
+      6. What custom cell renderers exist that must be preserved?
+      7. What props does RelationshipGrid accept from its parent?
+      8. What data shape flows into the grid?
+      9. What Universal DatasetGrid props/APIs map to each of the above?
+      10. What gaps exist (features in current grid not in Universal DatasetGrid)?
+    </context>
+    <constraints>
+      - This is an ANALYSIS task only — do not modify any source files
+      - The output document must be thorough enough that task 051 can implement without re-reading source
+      - Note any hard-coded colors or non-token styles that violate ADR-021 Fluent v9 tokens
+      - If Universal DatasetGrid does not support a required feature, note it explicitly as a gap
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>projects/ai-semantic-search-ui-r3/plan.md</file>
+      <file>docs/architecture/universal-dataset-grid-architecture.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+    </files>
+  </knowledge>
+
+  <inputs>
+    <input>src/client/code-pages/DocumentRelationshipViewer/src/components/RelationshipGrid.tsx</input>
+    <input>src/client/code-pages/DocumentRelationshipViewer/src/components/ (all component files)</input>
+    <input>src/client/code-pages/DocumentRelationshipViewer/src/types/ (type definitions)</input>
+    <input>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/ (Universal DatasetGrid)</input>
+    <input>src/client/code-pages/SemanticSearch/src/components/SearchResultsGrid.tsx (if already created, for reference)</input>
+  </inputs>
+
+  <steps>
+    <step order="1">Read RelationshipGrid.tsx and all files it imports from the DocumentRelationshipViewer src/ directory</step>
+    <step order="2">Read the Universal DatasetGrid component source and its TypeScript interfaces/props</step>
+    <step order="3">Document current grid columns: name, width, sort enabled, custom cell renderer description</step>
+    <step order="4">Document current sorting behavior: which columns, client-side vs server-side, sort state management</step>
+    <step order="5">Document row selection: selection mode, callbacks, visual indicators</step>
+    <step order="6">Document row click behavior: what happens on row click, what data is passed to handlers</step>
+    <step order="7">Document dark mode implementation: Fluent tokens used vs hard-coded values</step>
+    <step order="8">Document all props accepted by RelationshipGrid from its parent components</step>
+    <step order="9">Document data shape: the TypeScript interface(s) for the grid row data</step>
+    <step order="10">Map each current feature to the Universal DatasetGrid API equivalent</step>
+    <step order="11">Identify gaps: features the current grid has that Universal DatasetGrid lacks</step>
+    <step order="12">Write notes/drafts/docrelviewer-grid-migration.md with all findings structured as: Current State, Target State, Column Mapping, Feature Mapping, Gaps, Implementation Notes</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Read RelationshipGrid.tsx and related source files</tool>
+    <tool>Read - Read Universal DatasetGrid component source and interfaces</tool>
+    <tool>Glob - Find all component files in DocumentRelationshipViewer/src/</tool>
+    <tool>Grep - Search for hard-coded color values, Fluent token usage</tool>
+    <tool>Write - Create notes/drafts/docrelviewer-grid-migration.md</tool>
+  </tools>
+
+  <outputs>
+    <output>notes/drafts/docrelviewer-grid-migration.md — complete migration analysis document</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>notes/drafts/docrelviewer-grid-migration.md exists and is populated</criterion>
+    <criterion>All current grid columns documented with types and renderers</criterion>
+    <criterion>Sorting and selection behavior documented</criterion>
+    <criterion>Row click behavior documented with data shape</criterion>
+    <criterion>Universal DatasetGrid API mapping documented for each feature</criterion>
+    <criterion>Gaps explicitly listed (even if empty — "No gaps found")</criterion>
+    <criterion>Any hard-coded color violations noted</criterion>
+    <criterion>No source files were modified during this task</criterion>
+  </acceptance-criteria>
+</task>

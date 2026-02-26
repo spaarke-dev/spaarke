@@ -89,6 +89,13 @@ public static class SemanticSearchEndpoints
             return scopeValidation;
         }
 
+        // Validate filters
+        var filtersValidation = ValidateFilters(request);
+        if (filtersValidation != null)
+        {
+            return filtersValidation;
+        }
+
         try
         {
             logger.LogDebug(
@@ -142,6 +149,13 @@ public static class SemanticSearchEndpoints
             return scopeValidation;
         }
 
+        // Validate filters
+        var filtersValidation = ValidateFilters(request);
+        if (filtersValidation != null)
+        {
+            return filtersValidation;
+        }
+
         try
         {
             logger.LogDebug(
@@ -179,31 +193,17 @@ public static class SemanticSearchEndpoints
     }
 
     /// <summary>
-    /// Validate request scope per R1 rules.
+    /// Validate request scope.
     /// </summary>
     private static IResult? ValidateScope(SemanticSearchRequest request)
     {
-        // R1: scope=all is not supported
-        if (string.Equals(request.Scope, SearchScope.All, StringComparison.OrdinalIgnoreCase))
-        {
-            return Results.BadRequest(new ProblemDetails
-            {
-                Title = "Scope Not Supported",
-                Detail = "scope=all is not supported in R1. Use scope=entity or scope=documentIds.",
-                Status = 400,
-                Extensions = { ["code"] = SearchErrorCodes.ScopeNotSupported }
-            });
-        }
-
         // Validate scope value
-        if (!string.IsNullOrEmpty(request.Scope) &&
-            !string.Equals(request.Scope, SearchScope.Entity, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(request.Scope, SearchScope.DocumentIds, StringComparison.OrdinalIgnoreCase))
+        if (!SearchScope.IsValid(request.Scope))
         {
             return Results.BadRequest(new ProblemDetails
             {
                 Title = "Invalid Scope",
-                Detail = $"Invalid scope value '{request.Scope}'. Valid values: entity, documentIds.",
+                Detail = $"Invalid scope value '{request.Scope}'. Valid values: all, entity, documentIds.",
                 Status = 400,
                 Extensions = { ["code"] = SearchErrorCodes.InvalidScope }
             });
@@ -246,6 +246,37 @@ public static class SemanticSearchEndpoints
                     Detail = "documentIds is required and must not be empty when scope=documentIds.",
                     Status = 400,
                     Extensions = { ["code"] = SearchErrorCodes.DocumentIdsRequired }
+                });
+            }
+        }
+
+        return null; // Validation passed
+    }
+
+    /// <summary>
+    /// Validate request filters (entityTypes values).
+    /// </summary>
+    private static IResult? ValidateFilters(SemanticSearchRequest request)
+    {
+        if (request.Filters?.EntityTypes is { Count: > 0 } entityTypes)
+        {
+            var invalidTypes = entityTypes
+                .Where(t => !ValidEntityTypes.IsValid(t))
+                .ToList();
+
+            if (invalidTypes.Count > 0)
+            {
+                return Results.BadRequest(new ProblemDetails
+                {
+                    Title = "Invalid Entity Types",
+                    Detail = $"Invalid entityTypes value(s): {string.Join(", ", invalidTypes.Select(t => $"'{t}'"))}. Valid values: {string.Join(", ", ValidEntityTypes.All)}.",
+                    Status = 400,
+                    Extensions =
+                    {
+                        ["code"] = SearchErrorCodes.InvalidEntityTypes,
+                        ["invalidValues"] = invalidTypes,
+                        ["validValues"] = ValidEntityTypes.All
+                    }
                 });
             }
         }

@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-010" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Enable scope=all in POST /api/ai/search Endpoint</title>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <actual-effort>0.5 hours</actual-effort>
+    <assigned>Claude Code</assigned>
+    <tags>bff-api, api, ai</tags>
+    <phase>2</phase>
+    <started>2026-02-24</started>
+    <completed>2026-02-24</completed>
+  </metadata>
+
+  <prompt>
+    The POST /api/ai/search endpoint currently returns SCOPE_NOT_SUPPORTED when
+    scope=all is requested. Update SemanticSearchEndpoints.cs and SemanticSearchService.cs
+    to accept and process scope=all — which means searching across all documents regardless
+    of parentEntityType filtering. Update the request validation and service logic to
+    skip entity-type filtering when scope=all is specified, allowing system-wide document
+    search from the new SemanticSearch code page.
+  </prompt>
+
+  <role>
+    You are a senior .NET 8 backend developer who specialises in Minimal API, Azure AI
+    Search, and the Spaarke BFF API patterns. You understand the SemanticSearchService
+    pipeline (query preprocessing, embedding generation, filter construction, search
+    execution, result postprocessing) and can modify it to support a new scope value
+    without breaking existing behaviour.
+  </role>
+
+  <goal>
+    POST /api/ai/search correctly handles scope=all by:
+    - Accepting scope=all in SemanticSearchRequest validation (not rejected)
+    - Skipping parentEntityType filtering in SearchFilterBuilder when scope=all
+    - Returning all matching documents across all parent entity types
+    - Not breaking any existing scope behaviour (matter, project, invoice, document)
+    - All existing unit tests still pass; new unit tests cover scope=all
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-semantic-search-ui-r3/spec.md</file>
+    <file purpose="plan">projects/ai-semantic-search-ui-r3/plan.md</file>
+    <file purpose="project-context">projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    <file purpose="endpoint">src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</file>
+    <file purpose="service">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs</file>
+    <file purpose="filter-builder">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs</file>
+    <file purpose="request-model">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SemanticSearchRequest.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Follow Minimal API pattern. No Azure Functions. Endpoint registered via MapPost in endpoint group extension method.</constraint>
+    <constraint source="ADR-008">Authorization via endpoint filter (existing SemanticSearchAuthorizationFilter). Do not add global middleware.</constraint>
+    <constraint source="ADR-013">All AI service calls go through BFF API. No direct Azure AI Search calls from client.</constraint>
+    <constraint source="ADR-019">Return ProblemDetails (RFC 7807) for all error responses. Use existing error code pattern (SearchErrorCodes.cs).</constraint>
+    <constraint source="ADR-016">Existing rate limiting policy (ai-batch) must remain applied. Do not remove rate limiting from the endpoint.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SemanticSearchRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SemanticSearchResponse.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchErrorCodes.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchFilters.cs</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+    <patterns>
+      <pattern name="Minimal API Endpoint" location=".claude/patterns/api/endpoint-definition.md">
+        Follow existing endpoint pattern: MapPost with typed delegate, endpoint filters,
+        rate limiting policy, and ProblemDetails error returns.
+      </pattern>
+      <pattern name="SearchFilterBuilder" location="src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs">
+        The filter builder constructs OData filter strings for Azure AI Search queries.
+        When scope=all, entity-type filters should be omitted from the OData filter.
+        Study how existing scope values map to filter conditions.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <!-- No dependencies — can run in parallel with task 011 -->
+    </dependencies>
+    <notes>
+      PARALLEL: This task can run in parallel with Task 011 (entityTypes filter).
+      They modify different aspects of the same endpoint — coordinate to avoid conflicts
+      if running simultaneously. If running sequentially, Task 011 should build on Task 010.
+
+      The current behaviour to understand before changing:
+      - scope values already supported: "matter", "project", "invoice", "document" (or similar)
+      - scope=all currently returns SCOPE_NOT_SUPPORTED error (SearchErrorCodes.cs)
+      - The SemanticSearchService uses the scope value to filter by parentEntityType field
+
+      What scope=all should do:
+      - Skip the parentEntityType filter entirely in the OData filter
+      - Return documents from ALL parent entity types
+      - Still apply other filters (documentType, fileType, dateRange, threshold)
+      - Still respect the existing authorization model (tenant isolation)
+
+      IMPORTANT: Do NOT remove the existing SCOPE_NOT_SUPPORTED check — only change the
+      condition so that "all" is treated as a valid scope value. Keep the error for
+      genuinely invalid scope values.
+
+      Tenant isolation: Verify that the existing tenant-scoped filter (likely tenantId or
+      similar field) remains applied when scope=all. Do NOT expose cross-tenant data.
+
+      The parentEntityType field in the knowledge-index already contains values like
+      "matter", "project", "invoice", "account", "contact" — scope=all simply means
+      do not filter on this field.
+    </notes>
+  </context>
+
+  <steps>
+    <step order="1" name="Read existing implementation">
+      Read SemanticSearchEndpoints.cs, SemanticSearchService.cs, SearchFilterBuilder.cs,
+      SemanticSearchRequest.cs, and SearchErrorCodes.cs in full.
+      Document exactly where scope is validated and where it maps to OData filter conditions.
+    </step>
+    <step order="2" name="Identify the SCOPE_NOT_SUPPORTED guard">
+      Find the exact code that returns SCOPE_NOT_SUPPORTED for scope=all.
+      Note: the line, the condition, and the error response format.
+    </step>
+    <step order="3" name="Update SemanticSearchRequest validation">
+      In SemanticSearchRequest.cs (or its validator), add "all" as a valid scope value.
+      Ensure the request model accepts scope=all without validation errors.
+    </step>
+    <step order="4" name="Update SearchFilterBuilder for scope=all">
+      In SearchFilterBuilder.cs, add a branch: when scope is "all", do NOT add the
+      parentEntityType filter condition to the OData filter string.
+      Verify the tenant isolation filter is NOT removed — only the entity-type filter.
+    </step>
+    <step order="5" name="Update SemanticSearchService for scope=all">
+      In SemanticSearchService.cs, remove or update the SCOPE_NOT_SUPPORTED guard
+      so that scope=all proceeds to the search execution path.
+      Verify no other service-level scope validation rejects "all".
+    </step>
+    <step order="6" name="Update SemanticSearchEndpoints.cs if needed">
+      If the endpoint itself has scope validation logic (not just the service),
+      update it to allow scope=all through to the service layer.
+    </step>
+    <step order="7" name="Build and verify">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Fix any compilation errors. Ensure no new compiler warnings are introduced.
+    </step>
+    <step order="8" name="Update existing unit tests">
+      In tests/unit/Sprk.Bff.Api.Tests/Api/Ai/, update any test that assumed scope=all
+      would return SCOPE_NOT_SUPPORTED — change to expect a successful search response.
+    </step>
+    <step order="9" name="Write new unit tests for scope=all">
+      Add unit tests covering:
+      - scope=all returns 200 with results (not SCOPE_NOT_SUPPORTED)
+      - scope=all OData filter does NOT contain parentEntityType filter
+      - scope=all still applies tenant isolation filter
+      - scope=all still applies documentType filter when provided
+      - Invalid scope value still returns appropriate error
+    </step>
+    <step order="10" name="Run unit tests">
+      Run: dotnet test tests/unit/Sprk.Bff.Api.Tests/
+      All tests must pass.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build API and run unit tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SemanticSearchRequest.cs (updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs (updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs (updated)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ (new/updated test files for scope=all)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/ai/search with scope=all does NOT return SCOPE_NOT_SUPPORTED error</criterion>
+    <criterion testable="true">POST /api/ai/search with scope=all returns HTTP 200 with search results from all entity types</criterion>
+    <criterion testable="true">The OData filter for scope=all does not include a parentEntityType condition</criterion>
+    <criterion testable="true">Tenant isolation filter is still applied when scope=all (cross-tenant data not exposed)</criterion>
+    <criterion testable="true">Other filters (documentType, fileType, dateRange, threshold) still work with scope=all</criterion>
+    <criterion testable="true">Invalid scope values (not "all", "matter", "project", etc.) still return an appropriate error</criterion>
+    <criterion testable="true">All existing unit tests continue to pass</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ succeeds with no errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-029" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create useRecordSearch Hook — Entity Record Search State Management</title>
+    <phase>3 — Code Page Core</phase>
+    <tags>code-page, hooks</tags>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>022, 023</dependencies>
+    <blocks>R3-047</blocks>
+    <parallel-group>phase3-hooks</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create useRecordSearch.ts — the React hook that manages entity record search state for
+    Matters, Projects, and Invoices domains. Follows the same API and state shape as
+    useSemanticSearch but calls RecordSearchApiService and accepts a recordTypes parameter.
+
+    State and methods mirror useSemanticSearch:
+    - results: RecordSearchResult[]
+    - totalCount, searchState, hasMore, errorMessage, searchTime
+    - search(query, recordTypes, filters), loadMore(), reset()
+
+    The hook is domain-agnostic — callers pass the recordTypes array matching the active domain.
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer familiar with pagination patterns and the
+    Spaarke BFF API records search contract.
+  </role>
+
+  <goal>
+    useRecordSearch hook manages entity record search state. State shape and lifecycle mirrors
+    useSemanticSearch. Callers pass recordTypes to filter by entity type. Pagination works
+    correctly for incremental loading of Matters, Projects, and Invoices.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">recordTypes array selects entity types: ["sprk_matter"], ["sprk_project"], ["sprk_invoice"]</constraint>
+    <constraint source="spec">Pagination: offset/limit based — offset = results.length, limit = 20</constraint>
+    <constraint source="spec">Results cleared on new search (new query OR new recordTypes)</constraint>
+    <constraint source="spec">loadMore() uses same recordTypes as original search</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/SemanticSearch/src/hooks/useSemanticSearch.ts</file>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This hook is new — no PCF equivalent. It mirrors useSemanticSearch exactly but:
+      1. Calls RecordSearchApiService instead of SemanticSearchApiService
+      2. Accepts recordTypes: string[] in search() instead of scope
+      3. Returns RecordSearchResult[] instead of DocumentSearchResult[]
+
+      The domain-to-recordTypes mapping is done by the caller (App.tsx / domain tab handler):
+      - Matters tab → useRecordSearch.search(query, ["sprk_matter"], filters)
+      - Projects tab → useRecordSearch.search(query, ["sprk_project"], filters)
+      - Invoices tab → useRecordSearch.search(query, ["sprk_invoice"], filters)
+
+      The hook stores recordTypes in a ref so loadMore() can use the same types.
+      Consider: should there be one shared hook instance that handles all non-Document domains,
+      or should each domain have its own hook instance? Use one instance that resets on domain
+      change — simpler state management.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Review useSemanticSearch pattern">
+      Read the just-created useSemanticSearch.ts to understand the exact pattern to mirror.
+      Note state shape, AbortController usage, and loadMore() ref tracking approach.
+    </step>
+    <step order="2" name="Create useRecordSearch.ts">
+      Create src/client/code-pages/SemanticSearch/src/hooks/useRecordSearch.ts:
+      - Import RecordSearchApiService singleton
+      - Same state shape as useSemanticSearch but with RecordSearchResult[]
+      - search(query: string, recordTypes: string[], filters: SearchFilters): void
+        - Clear results; set searchState="loading"; store recordTypes in ref
+        - Call RecordSearchApiService with offset=0
+        - On success: set results, totalCount, searchState="success"
+      - loadMore(): use stored recordTypes ref; append results
+      - reset(): clear all state
+      - AbortController for cancellation on new search
+      - Derived: hasMore = totalCount &gt; results.length
+    </step>
+    <step order="3" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 TypeScript errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read useSemanticSearch.ts as pattern reference</tool>
+    <tool name="Write">Create useRecordSearch.ts</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/hooks/useRecordSearch.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">search() accepts recordTypes: string[] parameter</criterion>
+    <criterion testable="true">search() clears previous results and stores recordTypes for loadMore()</criterion>
+    <criterion testable="true">loadMore() uses stored recordTypes from original search call</criterion>
+    <criterion testable="true">hasMore is true when totalCount &gt; results.length</criterion>
+    <criterion testable="true">searchState lifecycle mirrors useSemanticSearch</criterion>
+    <criterion testable="true">In-flight requests cancelled on new search</criterion>
+  </acceptance-criteria>
+</task>

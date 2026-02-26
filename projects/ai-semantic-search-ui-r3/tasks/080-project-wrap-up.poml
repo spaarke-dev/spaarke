@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R3-080" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <phase>8</phase>
+    <phase-name>Deployment and Wrap-up</phase-name>
+    <tags>wrap-up</tags>
+    <estimate>1 hour</estimate>
+    <dependencies>074</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <status>completed</status>
+    <notes>Wrap-up complete: README updated to Complete, graduation criteria checked, current-task.md reset, lessons-learned.md created, notes archived. Tasks 071 (sitemap) and 073 (E2E) pending manual Dataverse deployment by user.</notes>
+  </metadata>
+
+  <prompt>
+    <role>
+      You are a project engineer performing final project housekeeping. You update all project artifacts to reflect completion, document lessons learned, archive ephemeral notes, run the repo-cleanup skill to validate repository structure, and create the final commit ready for merge to master.
+    </role>
+    <goal>
+      Complete the project wrap-up for AI Semantic Search UI R3. Update README.md status to "Complete", update all task statuses in TASK-INDEX.md, create lessons-learned.md in the project root, archive ephemeral notes/ files, run /repo-cleanup for structure validation, and create the final commit with a conventional commit message.
+    </goal>
+    <context>
+      This is the final task of the project. All implementation, testing, deployment, and quality gate tasks are complete.
+
+      Project artifacts to update:
+        - projects/ai-semantic-search-ui-r3/README.md
+          → Change status badge from "In Progress" to "Complete"
+          → Check all acceptance criteria boxes in the README
+          → Update "Last Updated" date to today (2026-02-24 or actual completion date)
+
+        - projects/ai-semantic-search-ui-r3/tasks/TASK-INDEX.md
+          → Verify all tasks show ✅ (completed) status
+          → No tasks should remain as 🔲 (pending) or 🔄 (in progress)
+
+        - projects/ai-semantic-search-ui-r3/current-task.md
+          → Reset to "No active task" state
+          → Clear the active task fields
+          → Note project completion
+
+      New artifact to create:
+        - projects/ai-semantic-search-ui-r3/lessons-learned.md
+          Sections:
+            ## What Worked Well
+              - Items that went smoothly (e.g., code page pattern reuse from DocRelViewer)
+              - Tooling that proved effective
+            ## What Could Be Improved
+              - Friction points encountered during implementation
+              - Processes that slowed delivery
+            ## Technical Learnings
+              - Key technical discoveries from the project
+              - ADR interpretations clarified
+              - Patterns that emerged
+            ## Recommendations for Future Projects
+              - Specific suggestions for subsequent projects
+              - Template improvements
+              - Tooling additions
+
+      Ephemeral notes/ cleanup:
+        - notes/drafts/ — can be archived (create notes/archive/ and move drafts there)
+        - notes/spikes/ — can be archived (move to notes/archive/)
+        - notes/debug/ — validation and deployment logs: move to notes/archive/
+        - notes/archive/ stays in the project folder
+        - Do NOT delete notes — only archive (move) them
+
+      Repo cleanup:
+        - Run /repo-cleanup skill to validate repository structure
+        - Address any findings from repo-cleanup
+
+      Final commit:
+        - Stage all changed/new files from this project
+        - Use conventional commit format: feat(ai-semantic-search-r3): complete R3 implementation
+        - Include summary of changes in commit body
+        - Use push-to-github skill for the final commit and PR
+    </context>
+    <constraints>
+      - Do NOT delete any notes/ files — archive them to notes/archive/
+      - Lessons-learned.md should be honest and specific — not generic platitudes
+      - The final commit must include all project artifact updates (README, TASK-INDEX, current-task, lessons-learned)
+      - Use push-to-github skill for the final push — do not push directly without the skill
+      - The commit message must follow conventional commit format
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/push-to-github/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <inputs>
+    <input>projects/ai-semantic-search-ui-r3/README.md</input>
+    <input>projects/ai-semantic-search-ui-r3/tasks/TASK-INDEX.md</input>
+    <input>projects/ai-semantic-search-ui-r3/current-task.md</input>
+    <input>projects/ai-semantic-search-ui-r3/notes/ (all notes for archiving)</input>
+    <input>notes/debug/e2e-validation.md (for lessons learned content)</input>
+    <input>notes/debug/quality-gate-results.md (for lessons learned content)</input>
+  </inputs>
+
+  <steps>
+    <step order="1">Read README.md — identify status badge, acceptance criteria checkboxes, and Last Updated date</step>
+    <step order="2">Update README.md: set status to "Complete", check all acceptance criteria boxes, update Last Updated date</step>
+    <step order="3">Read TASK-INDEX.md — verify all task entries show ✅ status</step>
+    <step order="4">Update any tasks in TASK-INDEX.md that do not yet show ✅ (all should be complete at this point)</step>
+    <step order="5">Update current-task.md: set active task to "none", note project completion, clear step/file tracking</step>
+    <step order="6">Read e2e-validation.md, quality-gate-results.md, and bundle-size analysis to gather content for lessons learned</step>
+    <step order="7">Create projects/ai-semantic-search-ui-r3/lessons-learned.md with all four sections (What Worked, What Could Be Improved, Technical Learnings, Recommendations)</step>
+    <step order="8">Create notes/archive/ directory inside the project notes folder</step>
+    <step order="9">Move notes/drafts/, notes/spikes/, and notes/debug/ contents to notes/archive/</step>
+    <step order="10">Run /repo-cleanup skill to validate overall repository structure</step>
+    <step order="11">Address any findings from repo-cleanup</step>
+    <step order="12">Follow push-to-github skill to stage all project changes and create the final commit</step>
+    <step order="13">Commit message: "feat(ai-semantic-search-r3): complete R3 — full-page semantic search code page" with body summarizing all phases</step>
+    <step order="14">Push to the feature branch and confirm push succeeded</step>
+    <step order="15">Prompt the user to run /merge-to-master when ready to merge to master branch</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Read README.md, TASK-INDEX.md, current-task.md, notes files</tool>
+    <tool>Edit - Update README.md, TASK-INDEX.md, current-task.md</tool>
+    <tool>Write - Create lessons-learned.md</tool>
+    <tool>Bash - Move/archive notes files (mv command)</tool>
+    <tool>Skill - push-to-github (final commit and push)</tool>
+    <tool>Bash - git status, git add, git commit</tool>
+  </tools>
+
+  <outputs>
+    <output>projects/ai-semantic-search-ui-r3/README.md — status: Complete, all criteria checked</output>
+    <output>projects/ai-semantic-search-ui-r3/tasks/TASK-INDEX.md — all tasks ✅</output>
+    <output>projects/ai-semantic-search-ui-r3/current-task.md — reset to no active task</output>
+    <output>projects/ai-semantic-search-ui-r3/lessons-learned.md — project retrospective</output>
+    <output>projects/ai-semantic-search-ui-r3/notes/archive/ — all ephemeral notes archived</output>
+    <output>Final commit pushed to feature branch, ready for /merge-to-master</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README.md status = "Complete"</criterion>
+    <criterion>All acceptance criteria checkboxes in README.md are checked</criterion>
+    <criterion>TASK-INDEX.md shows ✅ for all tasks</criterion>
+    <criterion>current-task.md shows no active task</criterion>
+    <criterion>lessons-learned.md exists with all four sections populated (not generic/empty)</criterion>
+    <criterion>notes/archive/ directory contains archived drafts, spikes, and debug files</criterion>
+    <criterion>Final commit created with conventional commit message format</criterion>
+    <criterion>Changes pushed to feature branch successfully</criterion>
+    <criterion>User informed to run /merge-to-master when ready</criterion>
+  </acceptance-criteria>
+</task>

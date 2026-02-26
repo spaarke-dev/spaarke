@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-011" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Add entityTypes Filter to POST /api/ai/search Endpoint</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>0.5 hours</actual-effort>
+    <assigned>Claude Code</assigned>
+    <tags>bff-api, api, ai</tags>
+    <phase>2</phase>
+    <started>2026-02-24</started>
+    <completed>2026-02-24</completed>
+  </metadata>
+
+  <prompt>
+    Add an optional entityTypes filter to the POST /api/ai/search endpoint. This filter
+    accepts an array of entity type strings (e.g., ["matter", "project"]) and restricts
+    document search results to only those documents whose parentEntityType field matches
+    one of the specified values. Update SemanticSearchRequest to include the EntityTypes
+    property, update SearchFilterBuilder to add an OData filter for parentEntityType IN
+    the specified values, and ensure the filter interacts correctly with the existing
+    scope parameter.
+  </prompt>
+
+  <role>
+    You are a senior .NET 8 backend developer who specialises in Minimal API, Azure AI
+    Search OData filter syntax, and the Spaarke BFF API patterns. You understand how
+    SearchFilterBuilder constructs OData filters and can add a new filter condition
+    without breaking existing functionality.
+  </role>
+
+  <goal>
+    POST /api/ai/search supports an optional entityTypes string array in the request body.
+    When provided, results are filtered to documents whose parentEntityType matches one
+    of the specified values. When omitted, existing scope-based filtering continues
+    unchanged. The implementation follows the OData filter syntax used in the existing
+    SearchFilterBuilder.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-semantic-search-ui-r3/spec.md</file>
+    <file purpose="plan">projects/ai-semantic-search-ui-r3/plan.md</file>
+    <file purpose="project-context">projects/ai-semantic-search-ui-r3/CLAUDE.md</file>
+    <file purpose="endpoint">src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</file>
+    <file purpose="service">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs</file>
+    <file purpose="filter-builder">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs</file>
+    <file purpose="request-model">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SemanticSearchRequest.cs</file>
+    <file purpose="search-filters">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchFilters.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Follow Minimal API pattern. No breaking changes to existing request contract — entityTypes is OPTIONAL (nullable/empty = no filter applied).</constraint>
+    <constraint source="ADR-013">All AI Search calls remain server-side. Entity type filtering is applied in OData filter, not post-search in memory.</constraint>
+    <constraint source="ADR-019">Return ProblemDetails for invalid entityTypes values (e.g., unrecognised entity type strings).</constraint>
+    <constraint source="spec.md">Valid parentEntityType values in knowledge-index: "matter", "project", "invoice", "account", "contact". Only these values are valid for entityTypes filter.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SemanticSearchRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchFilters.cs</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+    <patterns>
+      <pattern name="OData IN filter" location="src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs">
+        The parentEntityType field in the knowledge-index is a string field.
+        OData filter for multiple values: search.in(parentEntityType, 'matter,project', ',')
+        or: parentEntityType eq 'matter' or parentEntityType eq 'project'
+        Use whichever pattern is consistent with existing SearchFilterBuilder.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <!-- No dependencies — can run in parallel with task 010 -->
+    </dependencies>
+    <notes>
+      PARALLEL: This task can run in parallel with Task 010 (scope=all).
+      Both tasks modify SemanticSearchRequest and SearchFilterBuilder.
+      If running in parallel, coordinate on which fields each task adds to avoid
+      merge conflicts. If running sequentially after 010, this task builds on top.
+
+      The spec shows the request body addition:
+      {
+        "scope": "all",
+        "entityTypes": ["matter", "project", "invoice"]
+      }
+
+      Interaction with scope parameter:
+      - scope=matter AND entityTypes=["matter"] → both filter to matter documents
+      - scope=all AND entityTypes=["matter", "invoice"] → filter to matter+invoice docs
+      - scope=all AND entityTypes=[] (empty) → no entity type filter (same as scope=all alone)
+      - scope=all AND entityTypes=null (omitted) → no entity type filter
+      - scope=matter AND entityTypes=["invoice"] → entityTypes takes precedence or combined?
+        RECOMMENDATION: Let entityTypes override scope's entity type filtering when provided.
+        Document this decision in code comments.
+
+      Valid entityTypes values (from spec.md / knowledge-index field):
+      - "matter", "project", "invoice", "account", "contact"
+      Validate that any provided values are in this allowed set. Return ProblemDetails
+      with INVALID_ENTITY_TYPE error code if unknown values are provided.
+
+      OData filter construction:
+      Azure AI Search supports: search.in(parentEntityType, 'matter,project', ',')
+      This is more efficient than multiple OR conditions for large lists.
+      Use the search.in() function if SearchFilterBuilder already uses it for similar
+      multi-value filters; otherwise use the existing pattern.
+    </notes>
+  </context>
+
+  <steps>
+    <step order="1" name="Read existing implementation">
+      Read SemanticSearchRequest.cs, SearchFilters.cs, SearchFilterBuilder.cs, and
+      SemanticSearchService.cs to understand the current filter model and where to
+      add the EntityTypes property.
+    </step>
+    <step order="2" name="Add EntityTypes to request model">
+      In SemanticSearchRequest.cs, add:
+        public string[]? EntityTypes { get; init; }
+      (nullable, optional — null means no entity type filter)
+      Add XML doc comment explaining the valid values and interaction with scope.
+    </step>
+    <step order="3" name="Add EntityTypes to SearchFilters if applicable">
+      If SearchFilters.cs is the canonical filter model (passed from endpoint to service),
+      add EntityTypes property there as well. Follow the existing pattern.
+    </step>
+    <step order="4" name="Add validation for EntityTypes">
+      In the validation logic (endpoint or service), validate that all provided EntityTypes
+      values are in the allowed set: ["matter", "project", "invoice", "account", "contact"].
+      Return appropriate ProblemDetails error for invalid values.
+    </step>
+    <step order="5" name="Update SearchFilterBuilder for entityTypes">
+      In SearchFilterBuilder.cs, add logic:
+      - If EntityTypes is non-null and non-empty, add OData filter for parentEntityType
+        using search.in(parentEntityType, 'matter,project', ',') syntax
+      - If EntityTypes is null or empty, do NOT add entity type filter (preserve existing behaviour)
+      - Ensure this filter is ANDed with other existing filters (tenant, document type, etc.)
+    </step>
+    <step order="6" name="Pass EntityTypes through service layer">
+      Ensure SemanticSearchService.cs correctly passes EntityTypes from the request
+      to SearchFilterBuilder. Trace the full data flow from endpoint to filter builder.
+    </step>
+    <step order="7" name="Build and verify">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Fix any compilation errors. No new compiler warnings.
+    </step>
+    <step order="8" name="Write unit tests for entityTypes filter">
+      Add unit tests in tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ covering:
+      - entityTypes=["matter"] adds parentEntityType filter to OData query
+      - entityTypes=["matter", "project"] adds search.in() filter with both values
+      - entityTypes=null/empty does NOT add parentEntityType filter
+      - Invalid entityTypes value returns ProblemDetails error
+      - entityTypes combined with scope=all works correctly
+    </step>
+    <step order="9" name="Run unit tests">
+      Run: dotnet test tests/unit/Sprk.Bff.Api.Tests/
+      All tests must pass, including pre-existing tests.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build API and run unit tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SemanticSearchRequest.cs (updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchFilters.cs (updated if applicable)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs (updated)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ (new test file or updated existing for entityTypes)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SemanticSearchRequest.EntityTypes property exists as optional string array</criterion>
+    <criterion testable="true">POST /api/ai/search with entityTypes=["matter"] returns only matter-related documents</criterion>
+    <criterion testable="true">POST /api/ai/search with entityTypes=["matter","project"] returns matter and project documents only</criterion>
+    <criterion testable="true">POST /api/ai/search without entityTypes returns results with same behaviour as before (no regression)</criterion>
+    <criterion testable="true">POST /api/ai/search with entityTypes=["invalid"] returns ProblemDetails error</criterion>
+    <criterion testable="true">The OData filter uses search.in() or equivalent for multiple entity type values</criterion>
+    <criterion testable="true">All existing unit tests continue to pass</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ succeeds with no errors</criterion>
+  </acceptance-criteria>
+</task>

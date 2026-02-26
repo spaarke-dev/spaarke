@@ -8,8 +8,13 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
+using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai.SemanticSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 using Xunit;
@@ -145,9 +150,9 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
     }
 
     [Fact]
-    public async Task Search_ScopeAll_Returns_Forbidden()
+    public async Task Search_ScopeAll_IsAllowed()
     {
-        // Arrange - scope=all should be blocked by authorization filter
+        // Arrange - scope=all is allowed in R3 for system-wide document search
         var client = _fixture.CreateAuthenticatedClient(TenantA);
         var request = new SemanticSearchRequest
         {
@@ -158,11 +163,8 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
         // Act
         var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
 
-        // Assert - Returns 400 from validation OR 403 from authorization
-        response.StatusCode.Should().BeOneOf(HttpStatusCode.BadRequest, HttpStatusCode.Forbidden);
-
-        var content = await response.Content.ReadAsStringAsync();
-        content.Should().Contain("not supported");
+        // Assert - scope=all is now authorized (R3)
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     #endregion
@@ -367,23 +369,30 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
 /// </summary>
 public class SemanticSearchAuthorizationTestFixture : WebApplicationFactory<Program>
 {
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        TestHostConfiguration.ConfigureTestHost(builder);
+        return base.CreateHost(builder);
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.ConfigureServices(services =>
         {
-            // Remove real search service
-            var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(ISemanticSearchService));
-            if (descriptor != null)
-            {
-                services.Remove(descriptor);
-            }
-
-            // Register mock search service
-            services.AddSingleton<ISemanticSearchService>(new MockAuthTestSearchService());
-
             // Configure JWT authentication for testing
             services.AddAuthentication("Test")
                 .AddScheme<TestAuthOptions, TestAuthorizationHandler>("Test", options => { });
+        });
+
+        // Use ConfigureTestServices to replace services AFTER the app's services are registered
+        builder.ConfigureTestServices(services =>
+        {
+            // Apply shared test service mocks (Dataverse, IChatClient, etc.)
+            TestHostConfiguration.ConfigureSharedTestServices(services);
+
+            // Replace the real semantic search service with mock
+            services.RemoveAll<ISemanticSearchService>();
+            services.AddSingleton<ISemanticSearchService>(new MockAuthTestSearchService());
         });
 
         builder.UseEnvironment("Testing");

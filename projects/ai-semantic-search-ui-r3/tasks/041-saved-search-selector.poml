@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-041" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create SavedSearchSelector — Favorites Dropdown Using ViewSelector Pattern</title>
+    <phase>5 — Interactive Features</phase>
+    <tags>code-page, fluent-ui, shared-library</tags>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>004, 023</dependencies>
+    <blocks>R3-047</blocks>
+    <parallel-group>phase5-features</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create SavedSearchSelector.tsx — the saved search favorites dropdown using the ViewSelector
+    pattern from @spaarke/ui-components (or a compatible custom dropdown if ViewSelector API
+    is incompatible, per spike task 004 findings).
+
+    The dropdown shows:
+    - Default system searches: "All Documents", "All Matters", "Recent Documents", "High Similarity"
+    - Personal saved searches loaded from sprk_gridconfiguration (via useSavedSearches hook, task 042)
+    - "Save Current Search" action at the bottom
+    - Current search name displayed as the dropdown button label
+
+    Selecting a saved search: restores filter state, query, domain, view mode, and columns.
+  </prompt>
+
+  <role>
+    Senior React 19 / TypeScript developer familiar with ViewSelector from @spaarke/ui-components,
+    ViewService, and the sprk_gridconfiguration entity.
+  </role>
+
+  <goal>
+    SavedSearchSelector renders a dropdown with default and personal saved searches. Selecting
+    a saved search calls onSelectSavedSearch with the full SavedSearch object. "Save Current
+    Search" action triggers the save flow. Integrates with shared ViewSelector if compatible.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">MUST use ViewSelector from @spaarke/ui-components if compatible per spike 004 — do not reimplement if ViewSelector works</constraint>
+    <constraint source="ADR-021">If custom dropdown needed: use Fluent v9 Menu — no Fluent v8</constraint>
+    <constraint source="ADR-021">No hard-coded colors — tokens only</constraint>
+    <constraint source="spec">Default searches visible to all users; personal searches visible to owning user only</constraint>
+    <constraint source="spec">Default searches: "All Documents", "All Matters", "Recent Documents", "High Similarity"</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/ViewSelector.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts</file>
+      <file>src/solutions/SpaarkeCore/entities/sprk_gridconfiguration/entity-schema.md</file>
+      <file>projects/ai-semantic-search-ui-r3/notes/spikes/04-gridconfiguration-schema.md</file>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Spike task 004 investigated sprk_gridconfiguration schema compatibility and whether
+      ViewSelector from @spaarke/ui-components works for this use case. Read the spike report
+      first: notes/spikes/04-gridconfiguration-schema.md.
+
+      Default saved searches are NOT stored in Dataverse — they are hardcoded constants:
+      const DEFAULT_SEARCHES: SavedSearch[] = [
+        { id: "default-all-documents", name: "All Documents", searchDomain: "Documents", query: "", ... },
+        { id: "default-all-matters", name: "All Matters", searchDomain: "Matters", query: "", ... },
+        { id: "default-recent", name: "Recent Documents", searchDomain: "Documents", query: "",
+          filters: { dateRange: { from: thirtyDaysAgo, to: null }, ... } },
+        { id: "default-high-similarity", name: "High Similarity", searchDomain: "Documents",
+          filters: { threshold: 75, ... }, query: "" },
+      ]
+
+      Props interface:
+      - savedSearches: SavedSearch[] (personal, from useSavedSearches hook)
+      - currentSearchName: string | null (active saved search name or null)
+      - onSelectSavedSearch: (search: SavedSearch) =&gt; void
+      - onSaveCurrentSearch: () =&gt; void
+      - isLoading: boolean
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read spike report">
+      Read notes/spikes/04-gridconfiguration-schema.md to understand:
+      (a) Whether ViewSelector from shared library is directly usable, OR
+      (b) Whether a custom dropdown is needed.
+    </step>
+    <step order="2" name="Implement based on spike finding">
+      If ViewSelector is compatible:
+        Import ViewSelector from @spaarke/ui-components
+        Adapt the saved search list to ViewSelector's expected data format
+        Use its onSelectView and onSaveView callbacks
+
+      If custom dropdown needed:
+        Create a Fluent v9 Menu-based dropdown component
+        Render default searches as a group
+        Render personal searches as a second group
+        Add "Save Current Search" as a footer MenuItem
+    </step>
+    <step order="3" name="Create SavedSearchSelector.tsx">
+      Create src/client/code-pages/SemanticSearch/src/components/SavedSearchSelector.tsx:
+      - Combine DEFAULT_SEARCHES + personal savedSearches into display list
+      - Current selection: highlight active search in dropdown
+      - Label: currentSearchName or "Search" when no saved search active
+      - "Save Current Search" option at bottom of list (separator before it)
+    </step>
+    <step order="4" name="Connect to ViewToggleToolbar">
+      Update ViewToggleToolbar.tsx to render SavedSearchSelector in the left placeholder area.
+      Pass dummy handlers for now — full wiring in task 047.
+    </step>
+    <step order="5" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spike report and ViewSelector source</tool>
+    <tool name="Write">Create SavedSearchSelector.tsx</tool>
+    <tool name="Edit">Update ViewToggleToolbar.tsx</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/SavedSearchSelector.tsx</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/ViewToggleToolbar.tsx (SavedSearchSelector wired)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">4 default searches listed: All Documents, All Matters, Recent Documents, High Similarity</criterion>
+    <criterion testable="true">Personal saved searches shown below defaults</criterion>
+    <criterion testable="true">"Save Current Search" action appears at bottom of dropdown</criterion>
+    <criterion testable="true">Selecting a search calls onSelectSavedSearch with SavedSearch object</criterion>
+    <criterion testable="true">"Save Current Search" action calls onSaveCurrentSearch callback</criterion>
+    <criterion testable="true">Active search name shown on dropdown button</criterion>
+  </acceptance-criteria>
+</task>

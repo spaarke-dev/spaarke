@@ -7,12 +7,12 @@ namespace Sprk.Bff.Api.Models.Ai.SemanticSearch;
 /// Request for semantic search API endpoint.
 /// </summary>
 /// <remarks>
-/// Supports two scopes:
+/// Supports three scopes:
 /// <list type="bullet">
+/// <item><c>all</c> - Search across all accessible documents for the tenant (no entity type filter)</item>
 /// <item><c>entity</c> - Search within a specific business entity (requires entityType and entityId)</item>
 /// <item><c>documentIds</c> - Search within a specific set of documents (requires documentIds list)</item>
 /// </list>
-/// <c>scope=all</c> is not supported in R1.
 /// </remarks>
 public sealed record SemanticSearchRequest
 {
@@ -25,8 +25,7 @@ public sealed record SemanticSearchRequest
     public string? Query { get; init; }
 
     /// <summary>
-    /// Search scope: "entity" or "documentIds".
-    /// <c>scope=all</c> returns 400 NotSupported in R1.
+    /// Search scope: "all", "entity", or "documentIds".
     /// </summary>
     [Required(ErrorMessage = "Scope is required")]
     [JsonPropertyName("scope")]
@@ -77,13 +76,13 @@ public static class SearchScope
     /// <summary>Search within a specific set of document IDs.</summary>
     public const string DocumentIds = "documentIds";
 
-    /// <summary>Search across all accessible documents (NOT SUPPORTED IN R1).</summary>
+    /// <summary>Search across all accessible documents for the tenant.</summary>
     public const string All = "all";
 
     /// <summary>All valid scope values.</summary>
-    public static readonly string[] ValidScopes = [Entity, DocumentIds];
+    public static readonly string[] ValidScopes = [All, Entity, DocumentIds];
 
-    /// <summary>Checks if the scope is valid for R1.</summary>
+    /// <summary>Checks if the scope is valid.</summary>
     public static bool IsValid(string? scope) =>
-        !string.IsNullOrWhiteSpace(scope) && ValidScopes.Contains(scope.ToLowerInvariant());
+        !string.IsNullOrWhiteSpace(scope) && ValidScopes.Contains(scope, StringComparer.OrdinalIgnoreCase);
 }

@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R3-067" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Bundle Size Optimization</title>
+    <phase>7</phase>
+    <phase-name>Testing and Quality</phase-name>
+    <tags>code-page, optimization</tags>
+    <estimate>3 hours</estimate>
+    <dependencies>066</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <role>
+      You are a performance engineer implementing webpack bundle optimizations for a React single-file web resource. You apply lazy loading, tree shaking, and import minimization while ensuring the build still produces a single self-contained HTML file compatible with the Dataverse code page deployment pattern.
+    </role>
+    <goal>
+      Apply the bundle size optimizations identified in the analysis (task 066) to the SemanticSearch code page. Target: first load under 3 seconds as a single self-contained HTML file. Primary optimizations: lazy-load the graph view with React.lazy + Suspense, tree-shake Fluent UI v9 imports (named imports only), and minimize d3 imports to d3-force only. Verify the build still produces a single self-contained HTML file after optimization.
+    </goal>
+    <context>
+      The SemanticSearch code page is at:
+        src/client/code-pages/SemanticSearch/
+
+      The bundle analysis is at:
+        notes/spikes/bundle-size-analysis.md
+
+      The final web resource must be a single self-contained HTML file (per ADR-026 / code-page-deploy skill).
+      This means React.lazy() chunks MUST be inlined in the final HTML, not separate .js chunk files.
+
+      IMPORTANT: The build-webresource.ps1 script inlines webpack chunk output into the HTML.
+      Verify this script handles code-split chunks correctly before applying lazy loading.
+      If chunks are not inlined, code splitting would break the single-file requirement.
+      Fallback: if code splitting cannot produce a single-file output, use bundle-size reduction
+      approaches that do not require code splitting (tree shaking, import minimization).
+
+      Optimization 1 — Lazy-load Graph View:
+        Current: GraphView component imported statically in App.tsx or view toggle component
+        Target: const GraphView = React.lazy(() => import('./components/GraphView'));
+        Wrap with: <Suspense fallback={<Spinner label="Loading graph view..." />}>
+        This defers @xyflow/react and d3-force loading until graph view is first activated.
+        ONLY apply if build-webresource.ps1 can inline split chunks.
+
+      Optimization 2 — Tree-shake Fluent UI v9:
+        Current: May have barrel imports like import { Button, Dropdown, ... } from '@fluentui/react-components'
+        Target: Same named imports from @fluentui/react-components ARE already tree-shakeable.
+        Verify webpack is configured for tree shaking: mode: 'production', optimization.usedExports: true
+        Ensure no: import * as Fluent from '@fluentui/react-components' (kills tree shaking)
+
+      Optimization 3 — Minimize d3 imports:
+        Current: May import from 'd3' (full library)
+        Target: Import ONLY from 'd3-force': import { forceSimulation, forceLink, forceManyBody, forceCenter } from 'd3-force'
+        Verify package.json has 'd3-force' as a direct dependency, not 'd3' full library.
+
+      Optimization 4 — Webpack production configuration:
+        Verify webpack.config.js has:
+          mode: 'production'
+          optimization.minimize: true
+          optimization.usedExports: true (for tree shaking)
+          TerserPlugin configured for minification
+
+      After all optimizations, measure:
+        - Final bundle size (compare to pre-optimization from task 066)
+        - Estimated first load time improvement
+        - Verify single HTML file is still produced (no separate .js chunk files)
+    </context>
+    <constraints>
+      - The build output MUST still be a single self-contained HTML file (ADR-026)
+      - If React.lazy code splitting results in separate chunk files that cannot be inlined, skip lazy loading and note the constraint
+      - Do NOT install new npm packages beyond what is needed (d3-force if not already present)
+      - Verify the complete build pipeline: npm run build + build-webresource.ps1 still succeeds after changes
+      - All unit tests from tasks 060-062 must still pass after optimizations
+      - Document before/after bundle sizes in notes/debug/bundle-optimization-results.md
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>notes/spikes/bundle-size-analysis.md</file>
+      <file>.claude/adr/ADR-026.md</file>
+    </files>
+  </knowledge>
+
+  <inputs>
+    <input>notes/spikes/bundle-size-analysis.md (MUST read first for specific recommendations)</input>
+    <input>src/client/code-pages/SemanticSearch/src/App.tsx</input>
+    <input>src/client/code-pages/SemanticSearch/webpack.config.js</input>
+    <input>src/client/code-pages/SemanticSearch/package.json</input>
+    <input>src/client/code-pages/SemanticSearch/src/components/ (GraphView and all components with Fluent imports)</input>
+    <input>scripts/build-webresource.ps1 (to understand chunk inlining behavior)</input>
+  </inputs>
+
+  <steps>
+    <step order="1">Read notes/spikes/bundle-size-analysis.md to get specific optimization recommendations</step>
+    <step order="2">Read build-webresource.ps1 to understand if it can inline code-split chunks (look for inline-source or similar)</step>
+    <step order="3">Read webpack.config.js and verify production mode, tree shaking, and TerserPlugin configuration</step>
+    <step order="4">If webpack is not in production mode: update to mode: 'production' with optimization.usedExports: true</step>
+    <step order="5">Check for any import * from '@fluentui/react-components' — replace with named imports</step>
+    <step order="6">Check d3 imports across all source files — replace any 'd3' imports with 'd3-force' specific imports</step>
+    <step order="7">If 'd3-force' is not in package.json dependencies (only 'd3'): add d3-force and remove d3 (verify @xyflow/react does not depend on full d3)</step>
+    <step order="8">If build-webresource.ps1 supports chunk inlining: apply React.lazy() to GraphView component in App.tsx or view toggle, add Suspense with Spinner fallback</step>
+    <step order="9">If build-webresource.ps1 does NOT support chunk inlining: skip React.lazy and document the constraint</step>
+    <step order="10">Run npm run build and verify it completes without errors</step>
+    <step order="11">Run build-webresource.ps1 and verify single HTML output file is produced</step>
+    <step order="12">Measure new bundle size and compare to pre-optimization baseline from task 066</step>
+    <step order="13">Run jest to verify all unit tests still pass after optimizations</step>
+    <step order="14">Write notes/debug/bundle-optimization-results.md with before/after sizes, optimizations applied, and tests passing</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Read bundle analysis, webpack config, package.json, and build scripts</tool>
+    <tool>Edit - Update webpack.config.js, App.tsx, and import statements</tool>
+    <tool>Bash - npm run build, PowerShell build-webresource.ps1, measure output sizes</tool>
+    <tool>Bash - Run jest to verify tests still pass</tool>
+    <tool>Write - Create notes/debug/bundle-optimization-results.md</tool>
+  </tools>
+
+  <outputs>
+    <output>webpack.config.js — production mode, tree shaking, TerserPlugin configured</output>
+    <output>src/client/code-pages/SemanticSearch/src/App.tsx — GraphView lazy-loaded (if supported)</output>
+    <output>Updated d3 imports to d3-force only across source files</output>
+    <output>Single self-contained HTML build output</output>
+    <output>notes/debug/bundle-optimization-results.md — before/after comparison</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>npm run build completes without errors after optimizations</criterion>
+    <criterion>build-webresource.ps1 produces a single self-contained HTML file (no separate .js chunks)</criterion>
+    <criterion>All unit tests from tasks 060-062 still pass</criterion>
+    <criterion>webpack.config.js has mode: 'production' and optimization.usedExports: true</criterion>
+    <criterion>No import * from '@fluentui/react-components' in any source file</criterion>
+    <criterion>No full 'd3' library import — only 'd3-force' or specific d3-force exports</criterion>
+    <criterion>Bundle size reduced from pre-optimization baseline (documented in results file)</criterion>
+    <criterion>notes/debug/bundle-optimization-results.md exists with before/after sizes</criterion>
+    <criterion>If React.lazy not applicable (chunk inlining not supported): documented in results file with rationale</criterion>
+  </acceptance-criteria>
+</task>

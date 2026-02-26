@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="R3-035" project="AI Semantic Search UI R3">
+  <metadata>
+    <title>Create useClusterLayout Hook — d3-force Layout with Cluster Gravity</title>
+    <phase>4 — Grid &amp; Graph Views</phase>
+    <tags>code-page, graph, d3-force</tags>
+    <status>completed</status>
+    <estimated-effort>5 hours</estimated-effort>
+    <dependencies>023</dependencies>
+    <blocks>R3-036</blocks>
+    <parallel-group>phase4-graph</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create useClusterLayout.ts — the d3-force based layout hook that transforms search results
+    into ReactFlow nodes and edges with physics-based cluster positioning.
+
+    The hook must:
+    1. Group search results by the selected cluster category (MatterType, PracticeArea, DocumentType, Organization, PersonContact)
+    2. Create ClusterNode data for each group (count, avg similarity, top 3)
+    3. Apply d3-force simulation with:
+       - Cluster gravity force (same-cluster nodes attract toward cluster centroid)
+       - Inter-cluster repulsion (cluster nodes repel each other)
+       - Collision detection (prevent node overlap)
+       - Center force (keep all nodes in view)
+    4. Return ReactFlow-compatible Node[] and Edge[] arrays
+    5. Limit to top 100 results before clustering
+    6. Support 5 clustering modes
+  </prompt>
+
+  <role>
+    Senior TypeScript developer with d3-force expertise and @xyflow/react integration experience.
+    Familiar with physics-based graph layouts and the DocumentRelationshipViewer useForceLayout pattern.
+  </role>
+
+  <goal>
+    useClusterLayout hook produces stable ReactFlow node/edge arrays from search results.
+    Cluster nodes are positioned with d3-force simulation. Position calculations are performant
+    for up to 100 nodes. Re-runs when results or clusterBy changes.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">Maximum 100 nodes — take top 100 by similarity score if results exceed 100</constraint>
+    <constraint source="spec">5 clustering modes: MatterType, PracticeArea, DocumentType, Organization, PersonContact</constraint>
+    <constraint source="spec">Cluster nodes: same cluster attracts; inter-cluster repulsion</constraint>
+    <constraint source="spec">Cross-cluster edges where results share relationships (thickness proportional to count)</constraint>
+    <constraint source="project">Use d3-force 3.x (already in package.json from task 001)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/hooks/useForceLayout.ts</file>
+      <file>projects/ai-semantic-search-ui-r3/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      DocumentRelationshipViewer/src/hooks/useForceLayout.ts is the base reference — it implements
+      a d3-force layout for document relationship graphs. The cluster layout extends this with:
+      1. Grouping logic (cluster by metadata field)
+      2. Cluster centroid forces (forceX/forceY targeting cluster center positions)
+      3. Two-level hierarchy: cluster nodes (always visible) + record nodes (visible when expanded)
+
+      Field extraction per clustering mode:
+      - MatterType → DocumentSearchResult.documentType or RecordSearchResult.matterType
+      - PracticeArea → RecordSearchResult.practiceArea (matters only)
+      - DocumentType → DocumentSearchResult.documentType
+      - Organization → RecordSearchResult.organizations[0] (first org)
+      - PersonContact → RecordSearchResult.people[0] (first person)
+
+      Null/undefined cluster values: group into "Uncategorized" cluster.
+
+      Hook signature:
+      function useClusterLayout(
+        results: (DocumentSearchResult | RecordSearchResult)[],
+        clusterBy: GraphClusterBy,
+        expandedClusterId: string | null
+      ): { nodes: Node[]; edges: Edge[]; isSimulating: boolean }
+
+      When expandedClusterId is set: show cluster node + individual RecordNodes within that cluster.
+      When null: show only ClusterNodes.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read useForceLayout reference">
+      Read DocumentRelationshipViewer/src/hooks/useForceLayout.ts. Note: d3-force import pattern,
+      simulation setup, useEffect dependencies, and how Node[] is produced from simulation state.
+    </step>
+    <step order="2" name="Design clustering algorithm">
+      Plan the grouping logic:
+      - extractClusterKey(result, clusterBy): string — returns category value or "Uncategorized"
+      - groupByCluster(results): Map&lt;string, results[]&gt;
+      - calculateClusterPositions(clusters): Map&lt;string, {x, y}&gt; — arrange clusters in circle/grid
+    </step>
+    <step order="3" name="Implement result preprocessing">
+      Function: preprocessResults(results, clusterBy):
+      - Take top 100 results by similarity/confidenceScore
+      - Group into clusters using extractClusterKey
+      - Calculate avgSimilarity and topResults for each cluster
+      - Return cluster groups
+    </step>
+    <step order="4" name="Implement d3-force simulation">
+      Set up d3-force simulation:
+      - forceLink for edges (between related clusters)
+      - forceManyBody for repulsion between cluster nodes
+      - forceCenter to keep simulation centered
+      - forceCollide with radius based on node size
+      - Custom cluster gravity force: attract nodes toward their cluster center
+      Run simulation for fixed iterations (not continuous animation) for performance.
+    </step>
+    <step order="5" name="Create useClusterLayout.ts">
+      Create src/client/code-pages/SemanticSearch/src/hooks/useClusterLayout.ts:
+      - Accept results, clusterBy, expandedClusterId
+      - When results/clusterBy change: re-group, re-run d3 simulation
+      - Build Node[] array: ClusterNodes (always) + RecordNodes (when cluster expanded)
+      - Build Edge[] array: edges between clusters with shared relationships
+      - Return { nodes, edges, isSimulating }
+      - Memoize with useMemo/useCallback to avoid unnecessary recalculations
+    </step>
+    <step order="6" name="Build and verify">
+      Run: cd src/client/code-pages/SemanticSearch &amp;&amp; npm run build
+      Build must succeed with 0 errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read useForceLayout.ts as reference</tool>
+    <tool name="Write">Create useClusterLayout.ts</tool>
+    <tool name="Bash">npm run build to verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/hooks/useClusterLayout.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with 0 errors</criterion>
+    <criterion testable="true">Results exceeding 100 are trimmed to top 100 by similarity before layout</criterion>
+    <criterion testable="true">All 5 clustering modes produce ClusterNode groupings</criterion>
+    <criterion testable="true">Null/undefined category values grouped into "Uncategorized" cluster</criterion>
+    <criterion testable="true">d3-force simulation runs and produces non-overlapping node positions</criterion>
+    <criterion testable="true">When expandedClusterId set: RecordNodes appear within expanded cluster</criterion>
+    <criterion testable="true">When expandedClusterId is null: only ClusterNodes rendered</criterion>
+    <criterion testable="true">Edges created between clusters that share record relationships</criterion>
+  </acceptance-criteria>
+</task>
