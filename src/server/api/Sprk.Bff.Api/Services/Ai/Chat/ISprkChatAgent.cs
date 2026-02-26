@@ -22,6 +22,14 @@ public interface ISprkChatAgent
     ChatContext Context { get; }
 
     /// <summary>
+    /// Citation metadata accumulated by search tools during the last message.
+    /// Reset before each new message. May be null when no search tools are registered.
+    /// Callers (e.g., SSE endpoints) can read citations after streaming completes
+    /// to render footnotes.
+    /// </summary>
+    CitationContext? Citations { get; }
+
+    /// <summary>
     /// Sends a user message and streams the agent's response.
     /// </summary>
     /// <param name="message">The user's chat message.</param>

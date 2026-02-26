@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>SprkChatPane Responsive Layout and Dark Mode</title>
+    <phase>1</phase>
+    <tags>frontend, fluent-ui, accessibility</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>012</dependencies>
+    <parallel-group>sprint1-track1</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Validate and refine the SprkChatPane side pane layout at various widths (300px, 400px, 500px, 600px), ensure all Fluent UI v9 components adapt correctly, and verify dark mode, light mode, and high-contrast theme rendering.
+    </goal>
+    <context>
+      The SprkChat side pane renders within a Dataverse side pane that users can resize between
+      approximately 300px and 600px wide. The SprkChat component and all its child components
+      (message list, input area, action menu, header) must adapt responsively to these widths
+      without horizontal scrolling, text overflow, or layout breakage.
+
+      Theme modes to validate:
+      - Light mode (webLightTheme) — default for most Dataverse environments
+      - Dark mode (webDarkTheme) — for users with dark mode enabled
+      - High-contrast (teamsHighContrastTheme) — for accessibility compliance
+
+      All colors MUST come from Fluent design tokens — no hard-coded hex, rgb, or named colors.
+      This ensures themes apply correctly without color conflicts.
+
+      The theme detection from task 012 provides the resolved theme. This task validates
+      that the theme is correctly applied throughout the component tree and identifies any
+      components that need responsive adjustments.
+    </context>
+    <constraints>
+      - Follow ADR-021: Fluent UI v9 exclusively; design tokens for all colors; dark mode required
+      - All styles MUST use makeStyles (Griffel) — no inline styles with hard-coded colors
+      - No horizontal scrollbar at any width between 300-600px
+      - All text must be readable (no truncation without tooltip, no overflow)
+      - Chat input area must remain usable at 300px (minimum viable width)
+      - High-contrast mode must meet WCAG 2.1 AA contrast ratios
+      - Follow .claude/patterns/pcf/theme-management.md for theme application patterns
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Audit existing SprkChat component styles:
+      - Identify all makeStyles definitions in SprkChat and child components
+      - Check for any hard-coded colors (hex, rgb, named)
+      - Check for any fixed-width elements that would break at 300px
+      - List components that need responsive adjustments
+    </step>
+    <step order="2">
+      Test at 300px width (minimum):
+      - Verify chat message bubbles don't overflow
+      - Verify input area is usable (text input + send button)
+      - Verify header elements (title, close button) fit
+      - Verify scroll behavior works correctly
+      - Document any layout issues
+    </step>
+    <step order="3">
+      Test at 400px width (default):
+      - Verify optimal layout at default side pane width
+      - Check spacing and padding look balanced
+      - Verify all interactive elements are accessible
+    </step>
+    <step order="4">
+      Test at 500px and 600px widths:
+      - Verify layout utilizes additional space appropriately
+      - Check that message bubbles don't become too wide (max-width constraint)
+      - Verify no wasted whitespace
+    </step>
+    <step order="5">
+      Fix responsive issues found in steps 2-4:
+      - Add CSS media queries or container queries via makeStyles
+      - Use Fluent tokens.spacingHorizontalM etc. for responsive spacing
+      - Set appropriate min-width and max-width on key containers
+      - Ensure flexible layouts (flex-grow, flex-shrink) work across range
+    </step>
+    <step order="6">
+      Test dark mode (webDarkTheme):
+      - Switch FluentProvider theme to webDarkTheme
+      - Verify all text is readable against dark backgrounds
+      - Verify all borders and dividers use design tokens
+      - Check that SprkChat message bubbles, input area, and header render correctly
+      - Document and fix any hard-coded colors that break in dark mode
+    </step>
+    <step order="7">
+      Test high-contrast mode (teamsHighContrastTheme):
+      - Switch FluentProvider theme to teamsHighContrastTheme
+      - Verify all interactive elements have visible focus indicators
+      - Verify all text meets WCAG 2.1 AA contrast ratios
+      - Check button and input borders are visible
+      - Document and fix any contrast issues
+    </step>
+    <step order="8">
+      Fix theme-specific issues:
+      - Replace any hard-coded colors with Fluent design tokens
+      - Add token-based color overrides where needed
+      - Ensure all component variants (hover, active, disabled) use tokens
+    </step>
+    <step order="9">
+      Build and verify all fixes:
+      - npm run build
+      - Run any visual regression tests if available
+      - Document final state of responsive and theme support
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Audit SprkChat component styles</tool>
+    <tool>Grep - Search for hard-coded colors across components</tool>
+    <tool>Edit - Fix responsive and theme issues</tool>
+    <tool>Bash - npm run build</tool>
+  </tools>
+
+  <outputs>
+    <output>Responsive layout fixes in SprkChat and SprkChatPane components</output>
+    <output>Dark mode and high-contrast theme fixes</output>
+    <output>Removal of any hard-coded colors replaced with design tokens</output>
+    <output>Documentation of responsive breakpoints and theme behavior</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No horizontal scrollbar at any width between 300-600px</criterion>
+    <criterion>Chat input area usable at 300px minimum width</criterion>
+    <criterion>Message bubbles adapt to available width without overflow</criterion>
+    <criterion>Layout looks balanced at default 400px width</criterion>
+    <criterion>Dark mode renders correctly: all text readable, all colors from tokens</criterion>
+    <criterion>High-contrast mode meets WCAG 2.1 AA contrast ratios</criterion>
+    <criterion>Zero hard-coded colors (hex, rgb, or named) in SprkChatPane or modified SprkChat styles</criterion>
+    <criterion>All styles use makeStyles (Griffel) with Fluent design tokens</criterion>
+    <criterion>Focus indicators visible on all interactive elements in high-contrast mode</criterion>
+    <criterion>npm run build succeeds without errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="093" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Multi-Document Context Tests</title>
+    <phase>2</phase>
+    <package>Package I: Web Search + Multi-Document</package>
+    <tags>testing, bff-api</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>090</dependencies>
+    <parallel-group>sprint2-track3</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Write unit tests for ChatKnowledgeScope with AdditionalDocumentIds, verifying the max 5
+      document limit, RAG service integration with multiple documents, and PATCH endpoint
+      validation.
+    </goal>
+    <context>
+      Task 090 added AdditionalDocumentIds to ChatKnowledgeScope and wired it into the RAG
+      pipeline. This task verifies the feature with focused unit tests:
+
+      - Model validation: max 5 documents enforced
+      - RAG service: additional documents fetched and included in context
+      - Endpoint: PATCH /sessions/{id}/context accepts and validates additionalDocumentIds
+      - Edge cases: empty list, duplicate IDs, invalid document IDs
+
+      These tests ensure the multi-document feature is robust before the UI (task 091) is built.
+    </context>
+    <constraints>
+      - Follow .claude/constraints/testing.md for test conventions
+      - Use xUnit + NSubstitute for mocking
+      - Test naming: {Method}_{Scenario}_{ExpectedResult}
+      - Mock SpeFileStore for document content retrieval
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Models/ChatKnowledgeScope.cs</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read existing ChatKnowledgeScope tests (if any) and RAG service tests to understand
+      the testing patterns for the knowledge/context pipeline.
+    </step>
+    <step order="2">
+      Create or extend test class for ChatKnowledgeScope validation:
+      - AdditionalDocumentIds_Default_IsEmptyList
+      - AdditionalDocumentIds_WithFiveDocuments_IsValid
+      - AdditionalDocumentIds_ExceedsFiveDocuments_ThrowsValidationError
+      - AdditionalDocumentIds_WithDuplicates_DeduplicatesOrRejects
+    </step>
+    <step order="3">
+      Write RAG service integration tests with additional documents:
+      - BuildContext_WithAdditionalDocuments_IncludesAllDocumentContent
+      - BuildContext_WithAdditionalDocuments_FetchesViaSpeFileStore
+      - BuildContext_WithAdditionalDocuments_RespectedTokenBudget
+      - BuildContext_WithInvalidDocumentId_HandlesGracefully
+    </step>
+    <step order="4">
+      Write PATCH endpoint validation tests:
+      - PatchContext_WithValidAdditionalDocuments_Returns200
+      - PatchContext_ExceedingFiveDocuments_Returns400ProblemDetails
+      - PatchContext_EmptyAdditionalDocuments_ClearsSelection
+    </step>
+    <step order="5">
+      Run tests: dotnet test targeting the new test files. Fix any failures.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine existing knowledge scope tests</tool>
+    <tool>Write - Create multi-document context tests</tool>
+    <tool>Bash - dotnet test execution</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Models/ChatKnowledgeScopeTests.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Models/ChatKnowledgeScope.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/RagService.cs</file>
+    <file action="reference">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this is a test-only task -->
+  </placeholders>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Models/ChatKnowledgeScopeTests.cs — Model validation tests</output>
+    <output>Additional RAG service and endpoint tests (in appropriate existing or new test files)</output>
+    <output>All tests pass with zero failures</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Tests verify ChatKnowledgeScope AdditionalDocumentIds defaults to empty list</criterion>
+    <criterion>Tests verify max 5 document limit is enforced with validation error</criterion>
+    <criterion>Tests verify RAG service includes additional document content in context</criterion>
+    <criterion>Tests verify additional documents fetched via SpeFileStore facade</criterion>
+    <criterion>Tests verify PATCH endpoint accepts and validates additionalDocumentIds</criterion>
+    <criterion>Tests verify exceeding 5 documents returns ProblemDetails (400)</criterion>
+    <criterion>All tests use {Method}_{Scenario}_{ExpectedResult} naming convention</criterion>
+    <criterion>NSubstitute used for SpeFileStore and service mocking</criterion>
+    <criterion>dotnet test passes with zero failures</criterion>
+  </acceptance-criteria>
+</task>

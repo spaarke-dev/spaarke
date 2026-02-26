@@ -1,0 +1,94 @@
+<task id="R2-030" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Create StreamingInsertPlugin for Lexical Editor</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package B: Streaming Write Engine</package>
+    <status>not-started</status>
+    <estimated-effort>8 hours</estimated-effort>
+    <tags>frontend, lexical, ui-components</tags>
+    <parallel-group>sprint1-track2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Create a new Lexical editor plugin `StreamingInsertPlugin` that handles token-by-token streaming
+    insertion into the RichTextEditor. The plugin provides three operations: `beginStreamingInsert(position)`
+    creates an insertion cursor at the target position and shows a visual pulsing cursor indicator;
+    token-by-token append converts incoming Markdown fragments to Lexical nodes and inserts them at
+    the cursor; `endStreamingInsert()` removes the cursor indicator and finalizes the insertion.
+    Use React 19 `startTransition` to keep the UI responsive during rapid token insertion. The
+    plugin lives in the shared component library (ADR-012) and uses Fluent UI v9 design tokens
+    for the cursor indicator styling (ADR-021).
+  </prompt>
+  <role>Senior full-stack developer with Spaarke platform expertise</role>
+  <goal>A functional Lexical plugin that can receive streaming tokens and insert them into the editor in real-time with a visual cursor indicator, while maintaining UI responsiveness via React 19 concurrent features.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Plugin MUST live in @spaarke/ui-components shared library. MUST be reusable across Code Pages.</constraint>
+    <constraint source="ADR-021">All visual elements (pulsing cursor indicator) MUST use Fluent UI v9 design tokens and makeStyles. No hard-coded colors. Dark mode support required.</constraint>
+    <constraint source="spec">MUST use Lexical editor API for streaming inserts — NOT raw DOM manipulation. Streaming write latency MUST be under 100ms per token (NFR-01).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Lexical editor plugin architecture and Fluent UI v9 styling</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The RichTextEditor in the Spaarke UI Components library is built on the Lexical editor
+      framework. Lexical uses a plugin architecture where plugins register with the editor instance
+      and can respond to commands, listen to updates, and transform the editor state. The
+      StreamingInsertPlugin is a new plugin that enables real-time token insertion during AI
+      streaming write operations. When the backend emits `document_stream_token` SSE events,
+      each token flows through SprkChatBridge to the Analysis Workspace, which calls the
+      plugin's append method. The plugin converts Markdown fragments to Lexical nodes (text,
+      headings, lists, code blocks) and inserts them at the active streaming cursor position.
+      React 19's `startTransition` is used to batch rapid updates and keep the editor responsive.
+    </background>
+    <dependencies>
+      <!-- No backend dependencies — this is a pure frontend plugin -->
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/plugins/StreamingInsertPlugin.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/RichTextEditor.tsx</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this is a complete frontend implementation -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Study existing RichTextEditor plugins">Read the existing Lexical plugins in the RichTextEditor directory to understand the plugin pattern: how plugins register, access the editor instance, and respond to commands.</step>
+    <step order="2" name="Design StreamHandle type">Define a `StreamHandle` type that represents an active streaming session. It holds the operationId, insertion position (Lexical NodeKey or RangeSelection), and accumulated content buffer.</step>
+    <step order="3" name="Implement beginStreamingInsert">Create the `beginStreamingInsert(position?: 'end' | 'cursor')` function that: creates a StreamHandle, positions the insertion cursor at the target location, and renders a pulsing cursor indicator element in the editor using a Lexical DecoratorNode.</step>
+    <step order="4" name="Implement token append with Markdown conversion">Create the token append function that: receives a Markdown fragment string, converts it to appropriate Lexical nodes (TextNode for plain text, HeadingNode for `#` prefixed lines, ListNode for `- ` prefixed lines, CodeNode for fenced code blocks), and inserts them at the streaming cursor position. Use `editor.update()` for state mutations.</step>
+    <step order="5" name="Add startTransition batching">Wrap token insertion in React 19 `startTransition` to prevent blocking the main thread during rapid token bursts. Batch multiple tokens that arrive within the same frame.</step>
+    <step order="6" name="Implement endStreamingInsert">Create the `endStreamingInsert(handle)` function that: removes the pulsing cursor indicator, finalizes the insertion (merge adjacent text nodes if needed), and disposes the StreamHandle.</step>
+    <step order="7" name="Style pulsing cursor indicator">Use Fluent UI v9 `makeStyles` with design tokens (`colorBrandForeground1`, animation tokens) to create a pulsing cursor indicator that works in light, dark, and high-contrast themes.</step>
+    <step order="8" name="Export plugin from barrel">Add the StreamingInsertPlugin export to the RichTextEditor plugins barrel file (if one exists) or the component's index.</step>
+    <step order="9" name="Build verification">Run TypeScript compilation for the shared UI components: `cd src/client/shared/Spaarke.UI.Components && npx tsc --noEmit`.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">StreamingInsertPlugin.tsx exists in the RichTextEditor plugins directory</criterion>
+    <criterion testable="true">`beginStreamingInsert` creates a streaming cursor and shows a pulsing indicator in the editor</criterion>
+    <criterion testable="true">Token append converts Markdown fragments (text, headings, lists, code) to Lexical nodes and inserts at cursor</criterion>
+    <criterion testable="true">`endStreamingInsert` removes the cursor indicator and finalizes the insertion</criterion>
+    <criterion testable="true">Pulsing cursor uses Fluent UI v9 makeStyles with design tokens — no hard-coded colors</criterion>
+    <criterion testable="true">Cursor indicator renders correctly in light, dark, and high-contrast themes</criterion>
+    <criterion testable="true">React 19 startTransition is used for token insertion batching</criterion>
+    <criterion testable="true">TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

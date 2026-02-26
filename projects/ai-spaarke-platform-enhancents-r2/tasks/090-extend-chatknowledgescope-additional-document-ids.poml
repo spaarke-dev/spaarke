@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Extend ChatKnowledgeScope with AdditionalDocumentIds</title>
+    <phase>2</phase>
+    <package>Package I: Web Search + Multi-Document</package>
+    <tags>bff-api, ai</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>Phase 1 complete</dependencies>
+    <parallel-group>sprint2-track3</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Add an AdditionalDocumentIds property to ChatKnowledgeScope (max 5 documents) and wire it
+      into the RAG search pipeline so that additional documents are included in the AI agent's
+      context window alongside the primary document.
+    </goal>
+    <context>
+      Currently, SprkChat operates with a single document context — the document associated with
+      the current record. Multi-document support allows users to bring additional documents into
+      the conversation for cross-referencing, comparison, or comprehensive analysis.
+
+      ChatKnowledgeScope (or the equivalent context model) tracks what knowledge sources are
+      available to the AI agent. Adding AdditionalDocumentIds extends this to include up to 5
+      additional document references. The RAG service must be updated to fetch and include
+      content from these additional documents when constructing the prompt context.
+
+      The max 5 limit prevents context window explosion — each additional document consumes
+      token budget, so the limit keeps costs bounded.
+    </context>
+    <constraints>
+      - Follow ADR-013: ChatHostContext flows through pipeline; knowledge scope is part of context
+      - Follow ADR-014: RAG search results cached via IDistributedCache (Redis)
+      - Follow ADR-015: Additional document content subject to same governance rules (no logging)
+      - Follow ADR-007: Document access MUST go through SpeFileStore facade
+      - AdditionalDocumentIds MUST be capped at 5 (enforce in model validation)
+      - PATCH /sessions/{id}/context endpoint must accept additional document IDs
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read the ChatKnowledgeScope (or equivalent) model to understand:
+      - Current structure and properties
+      - How it flows through the RAG pipeline
+      - How documents are currently referenced
+    </step>
+    <step order="2">
+      Read the RAG service to understand:
+      - How document content is fetched for prompt context
+      - How the knowledge scope currently determines what to include
+      - Where additional documents would be fetched and merged
+    </step>
+    <step order="3">
+      Add AdditionalDocumentIds property to ChatKnowledgeScope:
+      - Type: List&lt;string&gt; (document IDs)
+      - Validation: max 5 entries (throw if exceeded)
+      - Default: empty list
+      - XML documentation explaining the cap and purpose
+    </step>
+    <step order="4">
+      Wire AdditionalDocumentIds into the RAG search pipeline:
+      - When building prompt context, fetch content from additional documents via SpeFileStore
+      - Include additional document content in the context alongside primary document
+      - Respect token budget — additional documents share the same context window
+    </step>
+    <step order="5">
+      Update PATCH /sessions/{id}/context endpoint:
+      - Accept additionalDocumentIds in the request body
+      - Validate max 5 limit
+      - Persist to session context
+    </step>
+    <step order="6">
+      Build verification: Run dotnet build src/server/api/Sprk.Bff.Api/ to verify compilation.
+    </step>
+    <step order="7">
+      Run existing tests: dotnet test to verify no regressions.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine ChatKnowledgeScope model and RAG service</tool>
+    <tool>Edit - Add AdditionalDocumentIds property; wire into RAG pipeline</tool>
+    <tool>Bash - dotnet build and test verification</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Models/ChatKnowledgeScope.cs</file>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/RagService.cs</file>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task produces real implementation -->
+  </placeholders>
+
+  <outputs>
+    <output>Updated ChatKnowledgeScope with AdditionalDocumentIds property (max 5)</output>
+    <output>Updated RAG service to include additional documents in context</output>
+    <output>Updated PATCH /sessions/{id}/context to accept additionalDocumentIds</output>
+    <output>Successful dotnet build and test pass with 0 errors</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ChatKnowledgeScope has AdditionalDocumentIds property of type List&lt;string&gt;</criterion>
+    <criterion>AdditionalDocumentIds enforces max 5 document limit with validation</criterion>
+    <criterion>RAG service fetches and includes additional document content in prompt context</criterion>
+    <criterion>Additional documents accessed via SpeFileStore facade (ADR-007)</criterion>
+    <criterion>PATCH /sessions/{id}/context accepts additionalDocumentIds in request body</criterion>
+    <criterion>Exceeding 5 documents returns ProblemDetails validation error</criterion>
+    <criterion>dotnet build src/server/api/Sprk.Bff.Api/ succeeds with zero errors</criterion>
+    <criterion>dotnet test passes with zero failures (no regressions)</criterion>
+  </acceptance-criteria>
+</task>

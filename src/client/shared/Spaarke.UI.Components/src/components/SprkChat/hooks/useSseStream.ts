@@ -9,7 +9,7 @@
  */
 
 import { useState, useRef, useCallback } from "react";
-import { IChatSseEvent, IUseSseStreamResult } from "../types";
+import { IChatSseEvent, ICitation, IUseSseStreamResult } from "../types";
 
 /**
  * Parse a single SSE data line into a ChatSseEvent.
@@ -38,6 +38,25 @@ export function parseSseEvent(line: string): IChatSseEvent | null {
 }
 
 /**
+ * Extract suggestions array from a "suggestions" SSE event.
+ * The backend sends suggestions in the `data.suggestions` property:
+ * data: {"type":"suggestions","content":null,"data":{"suggestions":["s1","s2","s3"]}}
+ *
+ * Falls back to `event.suggestions` for backward compatibility.
+ */
+function parseSuggestions(event: IChatSseEvent): string[] {
+    // Primary: data.suggestions (ChatSseSuggestionsData from the backend)
+    if (event.data?.suggestions && event.data.suggestions.length > 0) {
+        return event.data.suggestions.filter((s) => typeof s === "string" && s.length > 0);
+    }
+    // Fallback: event.suggestions (if sent as a top-level property)
+    if (Array.isArray(event.suggestions) && event.suggestions.length > 0) {
+        return event.suggestions.filter((s) => typeof s === "string" && s.length > 0);
+    }
+    return [];
+}
+
+/**
  * Hook for consuming SSE streams from POST endpoints.
  *
  * Uses fetch() with ReadableStream to read server-sent events.
@@ -63,6 +82,8 @@ export function useSseStream(): IUseSseStreamResult {
     const [isDone, setIsDone] = useState<boolean>(false);
     const [error, setError] = useState<Error | null>(null);
     const [isStreaming, setIsStreaming] = useState<boolean>(false);
+    const [suggestions, setSuggestions] = useState<string[]>([]);
+    const [citations, setCitations] = useState<ICitation[]>([]);
 
     const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -72,6 +93,10 @@ export function useSseStream(): IUseSseStreamResult {
             abortControllerRef.current = null;
         }
         setIsStreaming(false);
+    }, []);
+
+    const clearSuggestions = useCallback(() => {
+        setSuggestions([]);
     }, []);
 
     /**
@@ -100,6 +125,8 @@ export function useSseStream(): IUseSseStreamResult {
             setIsDone(false);
             setError(null);
             setIsStreaming(true);
+            setSuggestions([]);
+            setCitations([]);
 
             const controller = new AbortController();
             abortControllerRef.current = controller;
@@ -159,6 +186,13 @@ export function useSseStream(): IUseSseStreamResult {
                                     accumulated += event.content;
                                     // Use functional update to ensure correct state
                                     setContent(accumulated);
+                                } else if (event.type === "suggestions") {
+                                    const suggestionsData = parseSuggestions(event);
+                                    if (suggestionsData.length > 0) {
+                                        setSuggestions(suggestionsData);
+                                    }
+                                } else if (event.type === "citations" && event.data?.citations) {
+                                    setCitations(mapSseCitations(event.data.citations));
                                 } else if (event.type === "done") {
                                     setIsDone(true);
                                     setIsStreaming(false);
@@ -182,6 +216,13 @@ export function useSseStream(): IUseSseStreamResult {
                             if (event.type === "token" && event.content) {
                                 accumulated += event.content;
                                 setContent(accumulated);
+                            } else if (event.type === "suggestions") {
+                                const suggestionsData = parseSuggestions(event);
+                                if (suggestionsData.length > 0) {
+                                    setSuggestions(suggestionsData);
+                                }
+                            } else if (event.type === "citations" && event.data?.citations) {
+                                setCitations(mapSseCitations(event.data.citations));
                             } else if (event.type === "done") {
                                 setIsDone(true);
                             } else if (event.type === "error") {
@@ -219,7 +260,28 @@ export function useSseStream(): IUseSseStreamResult {
         isDone,
         error,
         isStreaming,
+        suggestions,
+        citations,
         startStream,
         cancelStream,
+        clearSuggestions,
     };
+}
+
+/**
+ * Maps SSE citation items to the frontend ICitation format.
+ * Converts the camelCase `sourceName` from the server to the `source` field
+ * expected by CitationMarker/SprkChatCitationPopover components.
+ */
+function mapSseCitations(items: NonNullable<IChatSseEvent["data"]>["citations"]): ICitation[] {
+    if (!items || items.length === 0) {
+        return [];
+    }
+    return items.map((item) => ({
+        id: item.id,
+        source: item.sourceName,
+        page: item.page ?? undefined,
+        excerpt: item.excerpt,
+        chunkId: item.chunkId,
+    }));
 }

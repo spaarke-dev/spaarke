@@ -1,0 +1,101 @@
+<task id="R2-144" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Deploy AnalysisWorkspace Code Page to Dataverse</title>
+    <phase>Phase 4: Deployment &amp; Validation</phase>
+    <status>completed</status>
+    <completion-note>Deployment preparation completed 2026-02-26. Build artifacts verified, deployment checklist documented in notes/deployment-checklist-144-analysisworkspace.md. Legacy PCF deprecation steps documented from DEPRECATED.md. Actual deployment to Dataverse requires live environment access.</completion-note>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>deploy, code-page, dataverse</tags>
+  </metadata>
+
+  <prompt>
+    Build and deploy the AnalysisWorkspace Code Page as the `sprk_AnalysisWorkspace` web resource to
+    the Dataverse dev environment. Follow the two-step Code Page build pipeline (webpack + inline HTML).
+    Update the Analysis form to open the Code Page via Xrm.Navigation.navigateTo() instead of the
+    legacy PCF control binding. Verify the 2-panel layout (RichTextEditor + SprkChat side) renders
+    correctly at various viewport sizes. Remove the legacy AnalysisWorkspace PCF control binding from
+    the Analysis form — the form should now launch the Code Page dialog/page instead.
+  </prompt>
+  <role>Senior DevOps engineer with Dataverse deployment and form customization expertise</role>
+  <goal>The sprk_AnalysisWorkspace Code Page web resource is deployed, the Analysis form opens it via navigateTo, the 2-panel layout renders correctly, and the legacy PCF control binding is removed from the form.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">Code Pages for standalone UI; PCF only for field-bound form controls. The AnalysisWorkspace is standalone — it MUST be a Code Page, not a PCF control.</constraint>
+    <constraint source="ADR-022">Code Page bundles React 19 with createRoot(). Self-contained HTML web resource.</constraint>
+    <constraint source="skill:code-page-deploy">MUST follow code-page-deploy skill for the two-step build pipeline.</constraint>
+    <constraint source="skill:dataverse-deploy">MUST follow dataverse-deploy skill for solution import and web resource registration.</constraint>
+    <constraint source="ADR-021">The 2-panel layout must work correctly in dark mode and light mode.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Code Page deployment, Dataverse form customization, navigateTo API, PCF to Code Page migration</topic>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/webresource/custom-dialogs-in-dataverse.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The AnalysisWorkspace was originally implemented as a PCF control bound to a field on the
+      Analysis form. As part of R2, it has been migrated to a React 19 Code Page with a 2-panel
+      layout: RichTextEditor on the left and SprkChat on the right. This deployment task completes
+      the migration by: deploying the new Code Page web resource, updating the Analysis form to
+      use Xrm.Navigation.navigateTo() to open the workspace as a full-page dialog, and removing
+      the legacy PCF control binding from the form. The navigateTo call should open the Code Page
+      at 85% width and 85% height, passing the analysis record ID and entity type as data parameters.
+      After this task, the Analysis form no longer uses the AnalysisWorkspace PCF control.
+    </background>
+    <dependencies>
+      <dependency task="R2-072">AnalysisWorkspace Code Page must be fully implemented</dependency>
+      <dependency task="R2-143">SprkChatPane deployment must be complete (for cross-pane communication testing)</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="reference">src/client/code-pages/AnalysisWorkspace/webpack.config.js</file>
+    <file action="reference">src/client/code-pages/AnalysisWorkspace/package.json</file>
+    <file action="reference">src/client/code-pages/AnalysisWorkspace/index.tsx</file>
+    <file action="reference">scripts/build-webresource.ps1</file>
+    <file action="modify">src/solutions/SpaarkeCore/WebResources/sprk_AnalysisWorkspace.html</file>
+    <file action="modify">src/solutions/SpaarkeCore/Entities/sprk_analysis/FormXml/main/{form-id}.xml</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task is deployment only -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Build AnalysisWorkspace webpack bundle">Run `cd src/client/code-pages/AnalysisWorkspace &amp;&amp; npm install &amp;&amp; npm run build` to produce the production webpack bundle. Verify zero build errors.</step>
+    <step order="2" name="Inline bundle into HTML web resource">Run `build-webresource.ps1` to create the self-contained HTML file (sprk_AnalysisWorkspace.html). Verify no external script references.</step>
+    <step order="3" name="Import web resource to Dataverse">Use the dataverse-deploy skill to import `sprk_AnalysisWorkspace.html` as a web resource into the Spaarke solution. Set unique name: sprk_AnalysisWorkspace.</step>
+    <step order="4" name="Update Analysis form — add Code Page launcher">Add a JavaScript web resource or form onLoad handler to the Analysis form that opens the Code Page via Xrm.Navigation.navigateTo(): pageType "webresource", webresourceName "sprk_AnalysisWorkspace", data parameter with analysisId and entityType, target 2 (dialog), width 85%, height 85%.</step>
+    <step order="5" name="Remove legacy PCF control binding from form">Remove the AnalysisWorkspace PCF control binding from the Analysis form XML. The field that was bound to the PCF control should either be hidden or removed from the form layout. Verify no orphaned control references remain.</step>
+    <step order="6" name="Publish customizations">Publish all customizations to the Dataverse environment so form changes take effect.</step>
+    <step order="7" name="Verify 2-panel layout rendering">Open the Analysis form, trigger the Code Page launcher. Verify: 2-panel layout renders correctly (RichTextEditor left, SprkChat right), panels resize correctly, layout is responsive at different viewport sizes.</step>
+    <step order="8" name="Verify Code Page functionality">In the Code Page dialog: verify the analysis document loads in the editor, SprkChat is connected and functional, streaming write works from SprkChat to the editor, context parameters are correctly received from the form.</step>
+    <step order="9" name="Verify legacy PCF is no longer rendered">Confirm the Analysis form no longer renders the AnalysisWorkspace PCF control. The form should show the launcher button/link instead of the embedded PCF.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build produces a production bundle with zero errors for AnalysisWorkspace</criterion>
+    <criterion testable="true">build-webresource.ps1 produces a self-contained HTML file</criterion>
+    <criterion testable="true">sprk_AnalysisWorkspace web resource is registered in the Spaarke solution</criterion>
+    <criterion testable="true">Analysis form opens the Code Page via navigateTo at 85% width/height</criterion>
+    <criterion testable="true">2-panel layout (editor + SprkChat) renders correctly in the Code Page dialog</criterion>
+    <criterion testable="true">Legacy AnalysisWorkspace PCF control binding is removed from the Analysis form</criterion>
+    <criterion testable="true">Analysis document loads correctly in the Code Page editor</criterion>
+    <criterion testable="true">SprkChat is functional inside the Code Page (send message, receive streaming response)</criterion>
+    <criterion testable="true">Context parameters (analysisId, entityType) are correctly passed to the Code Page</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,89 @@
+<task id="R2-148" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Placeholder Audit — Verify Zero Unresolved Stubs</title>
+    <phase>Phase 4: Deployment &amp; Validation</phase>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>validation, cleanup</tags>
+  </metadata>
+
+  <prompt>
+    Perform a comprehensive audit of all files modified during the R2 project to verify that every
+    placeholder, stub, and TODO comment has been resolved by its designated downstream task. Grep
+    for `// PLACEHOLDER:` across all R2-modified source files and verify each has been replaced
+    with real implementation. Grep for `// TODO:` comments and verify each either has a task
+    reference for a future project or has been resolved. This is the code completeness gate —
+    no unresolved stubs should remain in the codebase after all Phase 1-3 tasks are complete.
+  </prompt>
+  <role>Senior quality engineer performing code completeness validation</role>
+  <goal>Zero unresolved PLACEHOLDER comments remain in any R2-modified file. Every TODO has either been resolved or has an explicit reference to a future task/project. The codebase is production-ready with no stub implementations.</goal>
+
+  <inputs>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+    <file purpose="task-index">projects/ai-spaarke-platform-enhancents-r2/tasks/TASK-INDEX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project-protocol">Every PLACEHOLDER comment must include a "Completed by task NNN" reference. If the referenced task is marked complete, the PLACEHOLDER must be resolved.</constraint>
+    <constraint source="project-protocol">TODO comments must either be resolved or explicitly reference a future task/project outside R2 scope.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Placeholder code protocol, code completeness validation</topic>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The R2 project uses a structured placeholder protocol where tasks can emit placeholder/stub
+      code that compiles but returns mock data or performs no-ops. Each placeholder is documented
+      in the task's POML file with a completed-by reference to the downstream task that will
+      replace the stub with real implementation. Now that all Phase 1-3 tasks are complete, every
+      placeholder should have been resolved. This audit task greps for remaining PLACEHOLDER and
+      TODO markers, cross-references them against task completion status, and flags any that were
+      missed. Unresolved placeholders indicate incomplete implementation that must be addressed
+      before project sign-off.
+    </background>
+    <dependencies>
+      <dependency task="all-previous">All Phase 0, Phase 1, Phase 2, and Phase 3 tasks must be completed before this audit</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="reference">src/client/code-pages/SprkChatPane/</file>
+    <file action="reference">src/client/code-pages/AnalysisWorkspace/</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Models/Ai/</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task is an audit -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Grep for PLACEHOLDER comments">Run `grep -rn "// PLACEHOLDER:" src/` across the entire source tree. Document every match with file path, line number, and placeholder description.</step>
+    <step order="2" name="Cross-reference with task completion">For each PLACEHOLDER found, extract the "Completed by task NNN" reference. Check TASK-INDEX.md to verify the referenced task is marked as completed. If the task is complete but the placeholder remains, flag as an unresolved stub.</step>
+    <step order="3" name="Grep for TODO comments">Run `grep -rn "// TODO:" src/` across the entire source tree. Document every match. Classify each TODO as: (a) resolved but marker not removed, (b) references a future task outside R2, (c) unresolved R2 work.</step>
+    <step order="4" name="Grep for hardcoded-return stubs">Search for common stub patterns: `return []`, `return null`, `return new List`, `return hardcoded`, `mock data`, `stub`, `// STUB:` in R2-modified files. Identify any hardcoded returns that should have been replaced with real implementation.</step>
+    <step order="5" name="Grep for no-op implementations">Search for empty function bodies, `{ }`, `// no-op`, `pass`, `void 0` in R2-modified files. Verify each is intentional (e.g., event handler stubs) or flag as unresolved.</step>
+    <step order="6" name="Resolve unresolved placeholders">For each unresolved placeholder or TODO identified in steps 1-5: implement the real logic, remove the PLACEHOLDER/TODO comment, and verify the code compiles. Document each resolution.</step>
+    <step order="7" name="Final verification grep">Re-run all greps from steps 1-5. Verify zero unresolved PLACEHOLDER comments remain. Verify all remaining TODOs have explicit future-task references.</step>
+    <step order="8" name="Build verification">Run `dotnet build` and `npm run build` for all affected projects to verify the codebase compiles cleanly after placeholder resolution.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep for "// PLACEHOLDER:" across src/ returns zero matches</criterion>
+    <criterion testable="true">Every TODO comment in R2-modified files either has been resolved or has an explicit reference to a task/project outside R2 scope</criterion>
+    <criterion testable="true">No hardcoded-return stubs remain in R2-modified code (all replaced with real implementations)</criterion>
+    <criterion testable="true">No no-op function bodies remain unintentionally in R2-modified code</criterion>
+    <criterion testable="true">dotnet build succeeds with zero errors after placeholder resolution</criterion>
+    <criterion testable="true">npm run build succeeds for all Code Page and shared component projects</criterion>
+  </acceptance-criteria>
+</task>

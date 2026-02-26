@@ -48,6 +48,9 @@ public sealed class AgentContentSafetyMiddleware : ISprkChatAgent
     /// <inheritdoc />
     public ChatContext Context => _inner.Context;
 
+    /// <inheritdoc />
+    public CitationContext? Citations => _inner.Citations;
+
     /// <summary>
     /// Streams the inner agent response, scanning each token for sensitive content
     /// patterns and replacing matches with <see cref="FilteredPlaceholder"/>.

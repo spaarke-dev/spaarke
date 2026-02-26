@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Wire SprkChat Component into SprkChatPane Code Page</title>
+    <phase>1</phase>
+    <tags>code-page, frontend</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>010, 011</dependencies>
+    <parallel-group>sprint1-track1</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Replace the placeholder App.tsx in the SprkChatPane Code Page with the real SprkChat component from @spaarke/ui-components. Parse URL parameters, wire theme detection with 4-level priority, and configure a full-viewport responsive layout suitable for the Dataverse side pane (300-600px width range).
+    </goal>
+    <context>
+      Task 010 scaffolded the SprkChatPane Code Page with a placeholder App.tsx that shows "SprkChat Pane Loading...".
+      Task 011 created SprkChatBridge for cross-pane communication.
+
+      Now we wire the real SprkChat component into the Code Page:
+      - SprkChat lives in @spaarke/ui-components (src/client/shared/Spaarke.UI.Components/src/components/SprkChat/)
+      - The side pane receives parameters via Xrm.App.sidePanes.createPane() which passes them as a data query string
+      - Dataverse wraps parameters in a URL-encoded `data` query param; we must unwrap this envelope
+
+      Theme detection priority (4 levels):
+      1. User preference (stored in localStorage)
+      2. URL parameter (?theme=dark)
+      3. Frame walk (check parent Dataverse frame for theme class)
+      4. System preference (prefers-color-scheme media query)
+
+      The side pane renders at variable widths (300-600px) depending on user resize.
+      SprkChat must adapt its layout responsively within this range.
+    </context>
+    <constraints>
+      - Follow ADR-021: Fluent UI v9 exclusively; makeStyles for custom styles; design tokens for all colors
+      - Follow ADR-022: React 19 createRoot() in Code Pages
+      - Parse URL parameters from both direct params and Dataverse data envelope
+      - Theme detection must follow 4-level priority chain
+      - Layout must be responsive between 300px and 600px width
+      - MUST use SprkChat from @spaarke/ui-components — do NOT duplicate the component
+      - Wire SprkChatBridge instance for cross-pane communication
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</reference>
+    <reference>src/client/code-pages/SemanticSearch/App.tsx</reference>
+    <reference>src/client/code-pages/SemanticSearch/index.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read existing SprkChat component API:
+      - Check SprkChat.tsx props interface
+      - Understand required props (sessionId, entityType, entityId, playbookId, etc.)
+      - Note any callback props or ref APIs
+    </step>
+    <step order="2">
+      Implement URL parameter parsing in index.tsx:
+      - Parse window.location.search for direct parameters
+      - Handle Dataverse data envelope: decode the `data` query param, then parse inner params
+      - Extract: entityType, entityId, playbookId, sessionId
+      - Provide sensible defaults for optional params
+    </step>
+    <step order="3">
+      Implement 4-level theme detection:
+      - Level 1: Check localStorage for user theme preference key
+      - Level 2: Check URL parameter (?theme=dark|light|high-contrast)
+      - Level 3: Walk parent frames looking for Dataverse theme CSS class
+      - Level 4: Use window.matchMedia('(prefers-color-scheme: dark)')
+      - Map resolved theme to Fluent v9 theme object (webLightTheme, webDarkTheme, teamsHighContrastTheme)
+    </step>
+    <step order="4">
+      Update App.tsx to render SprkChat:
+      - Remove placeholder "SprkChat Pane Loading..." content
+      - Import SprkChat from @spaarke/ui-components
+      - Pass parsed URL parameters as props
+      - Create SprkChatBridge instance with context from entityId or sessionId
+      - Pass bridge instance to SprkChat for cross-pane event emission
+    </step>
+    <step order="5">
+      Implement responsive full-viewport layout:
+      - Use makeStyles with Fluent design tokens
+      - Full height/width (100vh, 100vw) for side pane
+      - Responsive adjustments for 300-600px width range
+      - No horizontal scrollbar; vertical scroll within chat messages
+      - Proper spacing and padding using Fluent tokens
+    </step>
+    <step order="6">
+      Update index.tsx FluentProvider wrapping:
+      - Use resolved theme from 4-level detection
+      - Wrap App in FluentProvider with dynamic theme
+      - Add theme change listener for system preference changes
+    </step>
+    <step order="7">
+      Build and verify:
+      - npm run build
+      - Verify bundle compiles without errors
+      - Check that SprkChat component renders in development mode
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine SprkChat component API and SemanticSearch reference</tool>
+    <tool>Edit - Update App.tsx and index.tsx</tool>
+    <tool>Bash - npm run build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/SprkChatPane/App.tsx — Updated with real SprkChat component</output>
+    <output>src/client/code-pages/SprkChatPane/index.tsx — Updated with URL param parsing and theme detection</output>
+    <output>Successful build with SprkChat rendering</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>App.tsx renders the real SprkChat component from @spaarke/ui-components</criterion>
+    <criterion>URL parameters parsed correctly for both direct params and Dataverse data envelope</criterion>
+    <criterion>entityType, entityId, playbookId, sessionId extracted and passed to SprkChat</criterion>
+    <criterion>Theme detection follows 4-level priority: localStorage → URL → frame walk → system</criterion>
+    <criterion>FluentProvider wraps the app with the resolved theme</criterion>
+    <criterion>Layout is responsive and fills viewport at 300-600px width range</criterion>
+    <criterion>SprkChatBridge instance created and wired to SprkChat</criterion>
+    <criterion>No horizontal scrollbar at any supported width</criterion>
+    <criterion>npm run build succeeds without errors</criterion>
+    <criterion>Placeholder PH-010-A and PH-010-B from task 010 are resolved</criterion>
+  </acceptance-criteria>
+</task>

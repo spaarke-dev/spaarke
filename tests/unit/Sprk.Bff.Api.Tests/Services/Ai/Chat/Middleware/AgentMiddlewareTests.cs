@@ -48,6 +48,7 @@ public class AgentMiddlewareTests
         }
 
         public ChatContext Context => TestContext;
+        public CitationContext? Citations => null;
 
         public async IAsyncEnumerable<ChatResponseUpdate> SendMessageAsync(
             string message,
@@ -459,6 +460,7 @@ public class AgentMiddlewareTests
         }
 
         public ChatContext Context => TestContext;
+        public CitationContext? Citations => null;
 
         public async IAsyncEnumerable<ChatResponseUpdate> SendMessageAsync(
             string message,

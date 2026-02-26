@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Implement Side Pane Authentication</title>
+    <phase>1</phase>
+    <tags>code-page, frontend, auth</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>012</dependencies>
+    <parallel-group>sprint1-track1</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Implement independent authentication for the SprkChatPane Code Page using Xrm.Utility.getGlobalContext() to acquire access tokens for BFF API calls, and wire the token into SprkChat's API service layer.
+    </goal>
+    <context>
+      Each Dataverse Code Page pane authenticates independently — there is no shared auth session
+      between the side pane and the host form. This is a deliberate security constraint: auth tokens
+      MUST NEVER be transmitted via BroadcastChannel.
+
+      The Code Page runs inside a Dataverse-hosted iframe and has access to the Xrm SDK.
+      Xrm.Utility.getGlobalContext() provides access to the org URL, user info, and token acquisition.
+
+      The BFF API at spe-api-dev-67e2xz.azurewebsites.net requires a Bearer token for all AI endpoints.
+      SprkChat's existing API service layer accepts a token provider function that returns a Promise&lt;string&gt;.
+
+      Authentication flow:
+      1. Code Page loads → call Xrm.Utility.getGlobalContext()
+      2. Use context to acquire token for the BFF API resource
+      3. Pass token provider to SprkChat component
+      4. SprkChat calls token provider before each API request
+      5. Token auto-refreshes via the Xrm SDK token cache
+    </context>
+    <constraints>
+      - Follow ADR-008: Endpoint filters for auth — tokens must be valid for BFF API endpoints
+      - Follow .claude/constraints/api.md for auth token handling rules
+      - MUST use Xrm.Utility.getGlobalContext() — NOT MSAL browser directly
+      - MUST NOT transmit auth tokens via BroadcastChannel or postMessage
+      - MUST NOT hard-code client IDs, tenant IDs, or secrets
+      - Token provider must return a Promise&lt;string&gt; compatible with SprkChat's API service
+      - Handle token acquisition failures gracefully with user-friendly error messages
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/code-pages/SemanticSearch/</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Examine SprkChat's API service layer:
+      - How does SprkChat currently receive auth tokens?
+      - What is the token provider interface/type?
+      - How are API calls made (fetch, axios, custom client)?
+    </step>
+    <step order="2">
+      Examine how SemanticSearch Code Page handles authentication:
+      - Check if it uses Xrm SDK or MSAL directly
+      - Note the pattern for token acquisition
+    </step>
+    <step order="3">
+      Create authService.ts in src/client/code-pages/SprkChatPane/services/:
+      - Define getAccessToken(): Promise&lt;string&gt; function
+      - Use Xrm.Utility.getGlobalContext() to get org context
+      - Acquire token for the BFF API resource
+      - Cache token and handle refresh
+      - Handle errors: Xrm not available, token acquisition failed, network error
+    </step>
+    <step order="4">
+      Create TypeScript type declarations for Xrm SDK APIs used:
+      - Declare Xrm.Utility.getGlobalContext() types
+      - Declare token acquisition types
+      - Place in a types/ file or ambient declarations
+    </step>
+    <step order="5">
+      Wire authService into App.tsx:
+      - Import getAccessToken from services/authService
+      - Pass as tokenProvider prop to SprkChat component
+      - Add error boundary for auth failures
+      - Show user-friendly error state if authentication fails
+    </step>
+    <step order="6">
+      Handle edge cases:
+      - Code Page loaded outside Dataverse (Xrm not available): show "Must open from Dataverse" message
+      - Token expired during long session: auto-refresh via Xrm SDK
+      - Network error during token acquisition: retry with backoff
+    </step>
+    <step order="7">
+      Build and verify:
+      - npm run build
+      - Verify no TypeScript errors related to Xrm types
+      - Verify authService compiles correctly
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine SprkChat API service and SemanticSearch auth patterns</tool>
+    <tool>Write - Create authService.ts</tool>
+    <tool>Edit - Update App.tsx to wire auth</tool>
+    <tool>Bash - npm run build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/SprkChatPane/services/authService.ts — Token acquisition service</output>
+    <output>src/client/code-pages/SprkChatPane/App.tsx — Updated with auth wiring and error handling</output>
+    <output>Successful build</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>authService.ts uses Xrm.Utility.getGlobalContext() for token acquisition</criterion>
+    <criterion>getAccessToken() returns Promise&lt;string&gt; compatible with SprkChat's token provider</criterion>
+    <criterion>Token provider wired into SprkChat component via App.tsx</criterion>
+    <criterion>No auth tokens transmitted via BroadcastChannel or postMessage</criterion>
+    <criterion>No hard-coded client IDs, tenant IDs, or secrets</criterion>
+    <criterion>Graceful error handling when Xrm SDK unavailable (outside Dataverse)</criterion>
+    <criterion>Graceful error handling on token acquisition failure</criterion>
+    <criterion>npm run build succeeds without errors</criterion>
+  </acceptance-criteria>
+</task>

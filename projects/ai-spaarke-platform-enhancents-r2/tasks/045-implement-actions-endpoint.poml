@@ -1,0 +1,111 @@
+<task id="R2-045" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Implement GET /api/ai/chat/actions Endpoint</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package D: Action Menu / Command Palette</package>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>bff-api, api</tags>
+    <parallel-group>sprint1-track3</parallel-group>
+  </metadata>
+
+  <prompt>
+    Create a new GET endpoint at `/api/ai/chat/actions` that returns available actions based on
+    the current session context and playbook capability declarations. The response must be
+    categorized into four groups: Playbooks, Actions, Search, and Settings. Actions must be
+    filtered by the active playbook's capability declarations so that only relevant commands
+    appear in the client-side action menu. Follow the existing `ChatEndpoints.cs` pattern for
+    endpoint registration, apply `AiAuthorizationFilter` for authorization (ADR-008), and
+    assign `ai-stream` rate-limiting group (ADR-016).
+  </prompt>
+  <role>Senior .NET backend developer with Spaarke BFF API expertise</role>
+  <goal>A fully functional GET /api/ai/chat/actions endpoint that returns categorized, capability-filtered actions for the SprkChat action menu. The endpoint compiles, passes authorization, respects rate limits, and returns well-structured JSON matching the response model.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">All new API endpoints MUST use Minimal API pattern; no Azure Functions.</constraint>
+    <constraint source="ADR-008">All AI chat endpoints MUST use endpoint filters for authorization; no global middleware. Apply AiAuthorizationFilter.</constraint>
+    <constraint source="ADR-013">AI tools MUST follow AIFunctionFactory.Create pattern; ChatHostContext MUST flow through pipeline.</constraint>
+    <constraint source="ADR-016">Rate limiting MUST be applied to all AI endpoints. Use `ai-stream` rate-limiting group for this endpoint.</constraint>
+    <constraint source="ADR-010">0 additional DI registrations. Action resolution logic must be factory-instantiated or static.</constraint>
+    <constraint source="ADR-019">MUST return ProblemDetails for all HTTP error responses.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Minimal API endpoint patterns, AI authorization, rate limiting, ChatEndpoints conventions</topic>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The SprkChat action menu (Package D) needs a backend endpoint that returns available
+      actions based on the current session's playbook capabilities. The endpoint receives the
+      session ID (or playbook ID) as a query parameter, looks up the playbook's capability
+      declarations, and returns a categorized list of actions. Categories are: Playbooks
+      (switch playbook), Actions (write-back, re-analyze, summarize), Search (document search,
+      web search), and Settings (mode toggle, preferences). The response model must be designed
+      to support client-side filtering and keyboard navigation in the SprkChatActionMenu component.
+
+      Follow the existing ChatEndpoints.cs pattern for endpoint registration and map the new
+      endpoint within the same `/api/ai/chat` route group. The endpoint should accept optional
+      query parameters: `sessionId` (to resolve current playbook) and `entityType` (for context-
+      specific action filtering).
+    </background>
+    <dependencies>
+      <!-- No blocking dependencies — this is a foundation task -->
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file action="create">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatAction.cs</file>
+    <file action="create">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatActionsResponse.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatContext.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatHostContext.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <placeholder location="src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs" function="GetActionsAsync">
+      <stub-type>hardcoded-return</stub-type>
+      <real-implementation>Playbook capability lookup from Dataverse will replace hardcoded capability mapping once task 046 deploys the schema and task 047 implements filtering in SprkChatAgentFactory.</real-implementation>
+      <completed-by task="047">Task 047 wires Dataverse capability lookup into SprkChatAgentFactory.ResolveTools()</completed-by>
+      <build-impact>compiles: yes | tests-pass: yes</build-impact>
+    </placeholder>
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Review existing ChatEndpoints pattern">Read `src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs` to understand the endpoint registration pattern, route groups, authorization filters, and rate-limiting configuration.</step>
+    <step order="2" name="Define action response models">Create `ChatAction.cs` and `ChatActionsResponse.cs` in `Models/Ai/Chat/`. ChatAction: Id, Label, Description, Icon, Category (enum: Playbooks/Actions/Search/Settings), Shortcut (optional), RequiredCapability (string). ChatActionsResponse: categorized list of ChatAction items.</step>
+    <step order="3" name="Implement GetActionsAsync handler">Add a static `GetActionsAsync` method to ChatEndpoints that accepts sessionId (optional Guid) and entityType (optional string) as query parameters. Resolve the current playbook's capabilities (hardcoded mapping as placeholder), filter the master action list, and return a ChatActionsResponse.</step>
+    <step order="4" name="Register endpoint in MapChatEndpoints">Map the new GET endpoint at `/actions` within the existing chat route group. Apply `AiAuthorizationFilter` via `.AddEndpointFilter()`. Apply `ai-stream` rate-limiting group via `.RequireRateLimiting()`.</step>
+    <step order="5" name="Define master action catalog">Create a static readonly list of all possible actions across all categories. Each action declares which capability it requires (e.g., "search", "analyze", "write_back", "reanalyze", "summarize", "web_search", "selection_revise"). Actions without a required capability are always shown (e.g., Settings category).</step>
+    <step order="6" name="Implement capability-based filtering">Filter the master action catalog by the resolved playbook capabilities. Return only actions whose RequiredCapability is null (always show) or is present in the playbook's capability set.</step>
+    <step order="7" name="Add ProblemDetails error handling">Return ProblemDetails for invalid sessionId format, not-found sessions, and authorization failures. Follow ADR-019 patterns.</step>
+    <step order="8" name="Build verification">Run `dotnet build src/server/api/Sprk.Bff.Api/` to verify the endpoint compiles cleanly with all new models and the endpoint registration.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/ai/chat/actions returns HTTP 200 with a JSON body containing categorized actions (Playbooks, Actions, Search, Settings)</criterion>
+    <criterion testable="true">Endpoint has AiAuthorizationFilter applied — unauthenticated requests return 401</criterion>
+    <criterion testable="true">Endpoint is in `ai-stream` rate-limiting group — rate-limited requests return 429 with ProblemDetails</criterion>
+    <criterion testable="true">Actions are filtered by playbook capabilities — a playbook with only `search, summarize` does not return write-back or re-analyze actions</criterion>
+    <criterion testable="true">ChatActionsResponse model serializes correctly with categories, labels, descriptions, and icons</criterion>
+    <criterion testable="true">`dotnet build` succeeds with zero errors and zero warnings related to new code</criterion>
+    <criterion testable="true">Invalid sessionId returns ProblemDetails (400 Bad Request)</criterion>
+  </acceptance-criteria>
+</task>

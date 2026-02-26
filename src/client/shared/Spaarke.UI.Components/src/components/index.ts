@@ -30,3 +30,6 @@ export * from "./SidePane";
 
 // SprkChat - Reusable chat component with SSE streaming
 export * from "./SprkChat";
+
+// DiffCompareView - AI revision diff comparison (side-by-side + inline)
+export * from "./DiffCompareView";

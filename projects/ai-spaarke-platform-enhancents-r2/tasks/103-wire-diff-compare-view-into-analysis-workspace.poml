@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="103" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Wire DiffCompareView into Analysis Workspace</title>
+    <phase>3</phase>
+    <package>Package F: Diff Compare View</package>
+    <tags>frontend, code-page, integration</tags>
+    <estimate>4-6 hours</estimate>
+    <dependencies>100, 063</dependencies>
+    <parallel-group>sprint3-track1</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Integrate the DiffCompareView component into the Analysis Workspace Code Page so that when
+      the AI proposes revisions, the user sees a diff view with Accept/Reject/Edit actions. Accept
+      applies the change and pushes to the undo stack. Reject discards the proposal. Edit opens
+      an editable view of the proposed text.
+    </goal>
+    <context>
+      The Analysis Workspace Code Page (task 063) contains the RichTextEditor panel where document
+      content is displayed and edited. When the AI produces a revision (detected by the useWriteMode
+      hook as mode='diff'), the streaming output should be collected in full, then presented in a
+      DiffCompareView overlay or panel within the editor area.
+
+      The integration flow:
+      1. AI operation starts with operationType='revision' → useWriteMode returns mode='diff'
+      2. SSE tokens are collected silently (not streamed into editor)
+      3. On document_stream_end, the collected content is passed to DiffCompareView as proposedText
+      4. DiffCompareView shows original vs proposed with diff highlighting
+      5. User clicks Accept → proposedText replaces original in RichTextEditor, pushed to undo stack
+      6. User clicks Reject → DiffCompareView dismissed, original content unchanged
+      7. User clicks Edit → proposed text becomes editable; user modifies, then Save applies to editor
+
+      The DiffCompareView should appear as an overlay panel that slides in over the editor area,
+      similar to VS Code's diff view. The editor content remains visible but dimmed behind the overlay.
+    </context>
+    <constraints>
+      - Follow ADR-006: Integration is within the Analysis Workspace Code Page (React 19)
+      - Follow ADR-021: Fluent UI v9 styling; dark mode support for overlay
+      - Must integrate with the existing undo stack in RichTextEditor
+      - Must handle edge cases: user starts new chat message while diff is showing (auto-reject)
+      - Must not block the chat panel — user can still read chat while reviewing diff
+      - DiffCompareView overlay must be dismissible via Escape key
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/DiffCompareView.tsx</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/hooks/useWriteMode.ts</reference>
+    <reference>src/client/code-pages/AnalysisWorkspace/</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review the Analysis Workspace Code Page editor panel implementation:
+      - How the RichTextEditor is mounted and managed
+      - How SSE events currently flow to the editor (streaming insert plugin)
+      - How the undo stack works (push/pop operations)
+      - Layout structure for determining overlay placement
+    </step>
+    <step order="2">
+      Create a DiffReviewPanel wrapper component in the Analysis Workspace:
+      - Renders as an overlay panel over the editor area
+      - Contains DiffCompareView with original and proposed content
+      - Has a header with title ("Review Proposed Changes") and close button
+      - Dims the editor content behind it using a semi-transparent backdrop
+      - Slides in from the right or bottom with a CSS transition
+    </step>
+    <step order="3">
+      Wire useWriteMode into the Analysis Workspace SSE handling:
+      - Import and use useWriteMode hook
+      - When mode='diff': collect SSE tokens into a buffer instead of streaming to editor
+      - When document_stream_end fires: open DiffReviewPanel with buffered content
+      - When mode='stream': continue existing behavior (stream directly to editor)
+    </step>
+    <step order="4">
+      Implement Accept action handler:
+      - Get the proposed (or edited) text from DiffCompareView
+      - Push current editor content to undo stack
+      - Replace editor content at the target location with proposed text via RichTextEditor ref API
+      - Close the DiffReviewPanel
+      - Show a brief toast notification: "Changes applied"
+    </step>
+    <step order="5">
+      Implement Reject action handler:
+      - Close the DiffReviewPanel
+      - Discard the buffered proposed content
+      - Editor content remains unchanged
+      - Show a brief toast notification: "Changes discarded"
+    </step>
+    <step order="6">
+      Implement Edit action handler:
+      - DiffCompareView switches proposed text to editable mode (built-in Edit action)
+      - User modifies the proposed text
+      - User clicks Save → treated as Accept with the edited text
+      - User clicks Cancel → treated as Reject
+    </step>
+    <step order="7">
+      Handle edge cases:
+      - User sends new chat message while diff is showing: auto-reject current diff, close panel
+      - User navigates away from Analysis Workspace while diff is showing: auto-reject
+      - Multiple rapid revisions: queue and show one at a time
+      - Network error during SSE collection: show error state in DiffReviewPanel
+    </step>
+    <step order="8">
+      Build verification:
+      - Run the Analysis Workspace Code Page build (npm run build)
+      - Verify TypeScript compilation succeeds
+      - Verify no circular dependencies between AW and shared library
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review Analysis Workspace editor panel and SSE handling</tool>
+    <tool>Write - Create DiffReviewPanel wrapper component</tool>
+    <tool>Edit - Wire useWriteMode and diff handling into existing AW code</tool>
+    <tool>Bash - npm run build verification</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">src/client/code-pages/AnalysisWorkspace/components/DiffReviewPanel.tsx</file>
+    <file action="modify">src/client/code-pages/AnalysisWorkspace/App.tsx</file>
+    <file action="modify">src/client/code-pages/AnalysisWorkspace/hooks/useEditorState.ts</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/DiffCompareView.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/hooks/useWriteMode.ts</file>
+  </relevant-files>
+
+  <outputs>
+    <output>src/client/code-pages/AnalysisWorkspace/components/DiffReviewPanel.tsx - Overlay panel wrapping DiffCompareView</output>
+    <output>Updated Analysis Workspace App.tsx with diff review integration</output>
+    <output>Updated editor state hook with diff buffering logic</output>
+    <output>Successful build verification</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>DiffReviewPanel component renders as an overlay panel over the Analysis Workspace editor area</criterion>
+    <criterion>When AI operation mode is 'diff', SSE tokens are buffered instead of streamed to editor</criterion>
+    <criterion>On document_stream_end, DiffReviewPanel opens showing original vs proposed content</criterion>
+    <criterion>Accept action replaces editor content with proposed text and pushes to undo stack</criterion>
+    <criterion>Reject action closes the panel without modifying editor content</criterion>
+    <criterion>Edit action enables editable proposed text with Save/Cancel sub-actions</criterion>
+    <criterion>Escape key dismisses the DiffReviewPanel (same as Reject)</criterion>
+    <criterion>New chat message while diff is showing auto-rejects and closes the panel</criterion>
+    <criterion>Analysis Workspace Code Page builds successfully with zero errors</criterion>
+  </acceptance-criteria>
+
+  <placeholders />
+</task>

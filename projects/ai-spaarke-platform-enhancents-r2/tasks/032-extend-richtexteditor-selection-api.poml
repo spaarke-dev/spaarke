@@ -1,0 +1,85 @@
+<task id="R2-032" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Extend RichTextEditor Ref API for Selection Operations</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package B: Streaming Write Engine</package>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>frontend, lexical, ui-components</tags>
+    <parallel-group>sprint1-track2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Extend the RichTextEditor's imperative ref API with three selection-related methods:
+    `getSelectedHtml(): string | null` (returns the HTML content of the current selection),
+    `replaceSelection(html: string): void` (replaces the selected content with new HTML), and
+    `getSelectionRect(): DOMRect | null` (returns the bounding rectangle of the current selection
+    for UI positioning). These methods enable the cross-pane selection revision flow in Package G
+    (Phase 3) where users select text in the editor and trigger AI revision via SprkChat.
+    This task builds the foundation now so the ref API is complete for Package B consumers.
+  </prompt>
+  <role>Senior full-stack developer with Spaarke platform expertise</role>
+  <goal>The RichTextEditor ref exposes selection methods that enable downstream cross-pane revision workflows. Methods work correctly with Lexical's selection model.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">RichTextEditor lives in @spaarke/ui-components. Ref API must be backward-compatible.</constraint>
+    <constraint source="spec">MUST use Lexical editor API for selection operations — no raw DOM selection manipulation. Methods from spec: getSelectedHtml(), replaceSelection(), getSelectionRect().</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Lexical selection model and RichTextEditor ref API</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Package G (Selection-Based Revision, Phase 3) requires the editor to expose selection
+      operations so that when a user selects text in the Analysis Workspace editor, the selection
+      content can be sent to SprkChat via BroadcastChannel for AI revision, and the revised content
+      can be applied back to the editor via `replaceSelection`. Building these methods now in
+      Package B ensures the ref API is feature-complete for streaming writes AND selection-based
+      revision. `getSelectionRect()` is used for positioning floating UI elements (like a revision
+      tooltip) near the selection. All methods must work with Lexical's internal selection model
+      (RangeSelection, NodeSelection) rather than raw DOM Selection API.
+    </background>
+    <dependencies>
+      <!-- No direct dependencies — runs in parallel with other Package B tasks -->
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/RichTextEditor.tsx</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — these are complete implementations using Lexical API -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Study Lexical selection API">Read Lexical documentation and the existing RichTextEditor code to understand how to access the current selection (RangeSelection), convert selection content to HTML, and replace selection content programmatically.</step>
+    <step order="2" name="Update ref type interface">Add three new methods to the `RichTextEditorRef` interface: `getSelectedHtml(): string | null`, `replaceSelection(html: string): void`, `getSelectionRect(): DOMRect | null`.</step>
+    <step order="3" name="Implement getSelectedHtml">Use Lexical's `$getSelection()` inside `editor.getEditorState().read()` to get the current RangeSelection. Convert selected nodes to HTML using Lexical's `$generateHtmlFromNodes` (or equivalent). Return null if no selection or selection is collapsed.</step>
+    <step order="4" name="Implement replaceSelection">Use `editor.update()` to get the current selection and replace selected nodes with parsed HTML content (using Lexical's `$generateNodesFromDOM` or `$insertGeneratedNodes`). Handle edge cases: no selection (no-op), collapsed selection (insert at cursor).</step>
+    <step order="5" name="Implement getSelectionRect">Use `editor.getEditorState().read()` to get the current selection, then use the DOM Range API to compute the bounding rect. Return null if no selection. Note: this is one case where DOM access is needed alongside Lexical's selection model.</step>
+    <step order="6" name="Wire methods in useImperativeHandle">Add all three methods to the `useImperativeHandle` callback in RichTextEditor.tsx.</step>
+    <step order="7" name="Build verification">Run TypeScript compilation: `cd src/client/shared/Spaarke.UI.Components && npx tsc --noEmit`.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">RichTextEditor ref interface includes `getSelectedHtml`, `replaceSelection`, and `getSelectionRect` methods</criterion>
+    <criterion testable="true">`getSelectedHtml` returns HTML string when text is selected, null when no selection</criterion>
+    <criterion testable="true">`replaceSelection` replaces selected content with provided HTML using Lexical API</criterion>
+    <criterion testable="true">`getSelectionRect` returns DOMRect for current selection, null when no selection</criterion>
+    <criterion testable="true">Existing ref methods remain unchanged and functional</criterion>
+    <criterion testable="true">TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

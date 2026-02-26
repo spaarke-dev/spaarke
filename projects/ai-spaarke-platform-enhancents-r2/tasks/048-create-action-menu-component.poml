@@ -1,0 +1,106 @@
+<task id="R2-048" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Create SprkChatActionMenu Component</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package D: Action Menu / Command Palette</package>
+    <status>not-started</status>
+    <estimated-effort>8 hours</estimated-effort>
+    <tags>frontend, fluent-ui</tags>
+    <parallel-group>sprint1-track3</parallel-group>
+  </metadata>
+
+  <prompt>
+    Create the `SprkChatActionMenu` component — a floating popover triggered by `/` as the
+    first character in the chat input. The menu must be filterable (typing narrows results),
+    fully keyboard navigable (arrow keys, Enter to select, Escape to close), and display
+    actions organized by category: Playbooks, Actions, Search, Settings. Reference the
+    PlaybookBuilder `CommandPalette.tsx` for UX patterns but implement as a new shared
+    component in `@spaarke/ui-components`. Use Fluent UI v9 exclusively with makeStyles
+    and design tokens. Support dark mode and high-contrast themes.
+  </prompt>
+  <role>Senior React/TypeScript developer with Fluent UI v9 and accessibility expertise</role>
+  <goal>A reusable SprkChatActionMenu component in the shared component library that renders a categorized, filterable, keyboard-navigable floating popover for the SprkChat command palette. Component compiles, renders in Storybook/test harness, and supports all three Fluent v9 themes.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">All UI MUST use Fluent UI v9 exclusively. Use makeStyles and design tokens only. No hard-coded colors. Dark mode and high-contrast MUST be supported.</constraint>
+    <constraint source="ADR-012">Shared components MUST live in @spaarke/ui-components. The SprkChatActionMenu component is part of the SprkChat component family.</constraint>
+    <constraint source="spec-NFR-05">All UI MUST meet WCAG 2.1 AA accessibility standards. The action menu must have proper ARIA roles (listbox/option), focus management, and keyboard navigation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fluent UI v9 popover patterns, keyboard navigation, accessible list components, SprkChat component architecture</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The SprkChat action menu is the client-side component of Package D. It provides a
+      command palette UX similar to VS Code's Ctrl+Shift+P or Slack's `/` commands. When the
+      user types `/` as the first character in the chat input, the action menu appears as a
+      floating popover above the input area. As the user continues typing (e.g., `/sum`), the
+      menu filters to matching actions. Arrow keys navigate the list, Enter selects, Escape
+      closes.
+
+      Reference implementation: `src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/CommandPalette.tsx`
+      — this is a PCF-context component (React 16). The new SprkChatActionMenu is a shared
+      component (React 18-compatible) in `@spaarke/ui-components` that can be used in both
+      Code Pages (React 19) and potentially PCFs (React 16).
+
+      The component receives an array of categorized actions and exposes callbacks for action
+      selection and menu dismissal. It does NOT fetch data itself — that is handled by task 050.
+    </background>
+    <dependencies>
+      <!-- No blocking dependencies — this is a standalone UI component -->
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatActionMenu.tsx</file>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatActionMenu.styles.ts</file>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types/ActionMenuTypes.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/index.ts</file>
+    <file action="reference">src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/CommandPalette.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this is a complete component implementation -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Review CommandPalette reference">Read `src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/CommandPalette.tsx` to understand the existing command palette UX patterns, keyboard handling, and filtering logic.</step>
+    <step order="2" name="Review SprkChat component family">Read `SprkChat.tsx`, `SprkChatInput.tsx`, and the barrel export `index.ts` to understand the component architecture, props patterns, and how new components integrate.</step>
+    <step order="3" name="Define action menu types">Create `ActionMenuTypes.ts` with: `ChatActionCategory` enum (Playbooks, Actions, Search, Settings), `ChatActionItem` interface (id, label, description, icon, category, shortcut?, disabled?), `ChatActionGroup` interface (category, items), `SprkChatActionMenuProps` interface (groups, filterText, selectedIndex, onSelect, onDismiss, anchorRef, isOpen).</step>
+    <step order="4" name="Create styles file">Create `SprkChatActionMenu.styles.ts` using Fluent v9 `makeStyles` with design tokens. Define styles for: menu container (floating popover), category headers, action items (default, hover, selected/focused states), filter highlight, empty state, scrollable list area. Use `tokens.colorNeutralBackground1`, `tokens.colorBrandForeground1`, etc. No hard-coded colors.</step>
+    <step order="5" name="Implement SprkChatActionMenu component">Create the main component with: Fluent `Popover` + `PopoverSurface` for floating behavior, anchored to chat input. Render categorized action groups with headers. Implement text filtering — match against label and description. Highlight matching text in results. Render empty state when no actions match filter.</step>
+    <step order="6" name="Implement keyboard navigation">Add keyboard event handling: ArrowUp/ArrowDown to navigate items (wrap at boundaries), Enter to select focused item, Escape to dismiss menu. Manage `selectedIndex` state with proper focus indicators via ARIA attributes. Use `role="listbox"` on the menu and `role="option"` on items.</step>
+    <step order="7" name="Add accessibility attributes">Add ARIA attributes: `aria-label="Action menu"`, `aria-activedescendant` for keyboard focus, `role="listbox"` / `role="option"`, `aria-selected` on focused item. Ensure screen readers announce category groups and selected items.</step>
+    <step order="8" name="Update barrel exports">Add `SprkChatActionMenu` and its types to the `SprkChat/index.ts` barrel export and the top-level `@spaarke/ui-components` exports.</step>
+    <step order="9" name="Build verification">Run the shared component library build to verify TypeScript compilation and ensure no Fluent UI v8 imports or hard-coded colors are present.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">SprkChatActionMenu renders a floating popover with categorized action groups (Playbooks, Actions, Search, Settings)</criterion>
+    <criterion testable="true">Typing text filters the action list — only matching items by label or description are shown</criterion>
+    <criterion testable="true">ArrowUp/ArrowDown navigates the list with visual focus indicator; wraps at boundaries</criterion>
+    <criterion testable="true">Enter key selects the focused item and triggers onSelect callback with the action ID</criterion>
+    <criterion testable="true">Escape key dismisses the menu and triggers onDismiss callback</criterion>
+    <criterion testable="true">All styles use Fluent v9 makeStyles with design tokens — no hard-coded colors</criterion>
+    <criterion testable="true">Component renders correctly in light, dark, and high-contrast Fluent v9 themes</criterion>
+    <criterion testable="true">ARIA roles (listbox, option) and aria-activedescendant are properly set for accessibility</criterion>
+    <criterion testable="true">Component is exported from @spaarke/ui-components barrel exports</criterion>
+    <criterion testable="true">TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

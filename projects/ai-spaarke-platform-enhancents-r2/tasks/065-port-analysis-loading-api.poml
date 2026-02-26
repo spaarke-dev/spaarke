@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="065" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Port Analysis Loading and API Integration</title>
+    <phase>2</phase>
+    <package>C: AW Migration</package>
+    <tags>code-page, frontend, api</tags>
+    <estimate>4-5 hours</estimate>
+    <dependencies>061</dependencies>
+    <parallel-group>sprint2-track1</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Replace the PCF-based data loading (context.webAPI) with BFF API calls for the AnalysisWorkspace
+      Code Page. Load the analysis record from the BFF API, load the source document for the
+      SourceViewerPanel, and wire the hostContext from URL parameters to drive data fetching.
+    </goal>
+    <context>
+      The legacy AnalysisWorkspace PCF loads data via `context.webAPI.retrieveRecord()` (Dataverse Web API
+      through PCF SDK). Code Pages do not have PCF context — they must use the BFF API for all data access.
+
+      The Code Page receives context via URL query parameters:
+      - analysisId: GUID of the analysis record to load
+      - documentId: GUID of the source document to display in the viewer
+      - tenantId: Dataverse tenant for scoping
+
+      Data flow:
+      1. Parse URL parameters in index.tsx (done in task 060)
+      2. Fetch analysis record from BFF API: GET /api/analyses/{analysisId}
+      3. Load analysis HTML content into RichTextEditor
+      4. Fetch source document metadata from BFF API: GET /api/documents/{documentId}
+      5. Load source document into SourceViewerPanel (PDF viewer or Office Online frame)
+
+      The BFF API service layer must handle auth headers (token from task 066), error handling
+      (ProblemDetails), and loading states.
+    </context>
+    <constraints>
+      - Follow ADR-007: Document access must go through SpeFileStore facade (server side) — client calls BFF API
+      - Follow ADR-008: BFF API endpoints use endpoint filters for auth
+      - Follow ADR-019: Handle ProblemDetails error responses from BFF API
+      - Must NOT use context.webAPI (PCF-only; not available in Code Pages)
+      - Must NOT call Dataverse Web API directly from the Code Page (go through BFF)
+      - Loading states must show Fluent v9 Spinner with contextual messages
+      - Error states must show user-friendly messages with retry option
+      - Source document viewer must support PDF (via iframe or PDF.js) and Office Online
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx</reference>
+    <reference>src/client/code-pages/SemanticSearch/index.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read the existing AnalysisWorkspace PCF to understand current data loading:
+      - How analysis records are fetched (context.webAPI.retrieveRecord)
+      - What fields are loaded (content HTML, title, status, etc.)
+      - How the source document viewer is initialized
+      - How errors are handled during loading
+    </step>
+    <step order="2">
+      Create a BFF API service module:
+      - src/client/code-pages/AnalysisWorkspace/services/analysisApi.ts
+      - fetchAnalysis(analysisId: string, token: string): Promise&lt;AnalysisRecord&gt;
+      - fetchDocumentMetadata(documentId: string, token: string): Promise&lt;DocumentMetadata&gt;
+      - getDocumentViewUrl(documentId: string, token: string): Promise&lt;string&gt;
+      - saveAnalysisContent(analysisId: string, content: string, token: string): Promise&lt;void&gt;
+      - exportAnalysis(analysisId: string, format: string, token: string): Promise&lt;Blob&gt;
+      - Handle ProblemDetails responses and transform to typed errors
+    </step>
+    <step order="3">
+      Define TypeScript types for API responses:
+      - AnalysisRecord: { id, title, content, status, sourceDocumentId, createdOn, modifiedOn }
+      - DocumentMetadata: { id, name, mimeType, size, viewUrl }
+      - AnalysisError: { errorCode, message, detail, correlationId }
+    </step>
+    <step order="4">
+      Create a useAnalysisLoader hook:
+      - Accept: analysisId, documentId, authToken
+      - Fetch analysis record on mount
+      - Fetch document metadata in parallel
+      - Track states: loading, loaded, error for each
+      - Return: { analysis, document, isLoading, error, retry }
+    </step>
+    <step order="5">
+      Wire analysis content into EditorPanel:
+      - On successful load, call editorRef.setHtml(analysis.content) to populate editor
+      - Show loading Spinner while fetching
+      - Show error state with retry button on failure
+    </step>
+    <step order="6">
+      Wire source document into SourceViewerPanel:
+      - Replace placeholder "No document loaded" with actual viewer
+      - For PDF: render in iframe with document view URL
+      - For Office documents: render Office Online iframe with embed URL
+      - Show document name in panel header
+      - Handle missing/inaccessible documents gracefully
+    </step>
+    <step order="7">
+      Wire auto-save API endpoint:
+      - Update useAutoSave hook (from task 062) to use analysisApi.saveAnalysisContent()
+      - Pass auth token from context
+    </step>
+    <step order="8">
+      Wire export API endpoint:
+      - Update useExportAnalysis hook (from task 062) to use analysisApi.exportAnalysis()
+      - Pass auth token from context
+    </step>
+    <step order="9">
+      Create a hostContext module:
+      - Parse URL parameters (analysisId, documentId, tenantId) into a typed HostContext object
+      - Validate required parameters, show error if missing
+      - Export for use across components
+    </step>
+    <step order="10">
+      Build and verify:
+      - npm run build compiles cleanly
+      - Loading states render correctly
+      - Error states show retry button
+      - All API calls route through BFF (no direct Dataverse calls)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine existing PCF data loading and BFF API endpoints</tool>
+    <tool>Write - Create API service, types, and hooks</tool>
+    <tool>Edit - Update EditorPanel and SourceViewerPanel with data loading</tool>
+    <tool>Bash - npm run build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/AnalysisWorkspace/services/analysisApi.ts — BFF API service layer</output>
+    <output>src/client/code-pages/AnalysisWorkspace/types/index.ts — TypeScript types for API responses</output>
+    <output>src/client/code-pages/AnalysisWorkspace/hooks/useAnalysisLoader.ts — Data loading hook</output>
+    <output>src/client/code-pages/AnalysisWorkspace/services/hostContext.ts — URL parameter parsing</output>
+    <output>src/client/code-pages/AnalysisWorkspace/components/EditorPanel.tsx — Updated with data loading</output>
+    <output>src/client/code-pages/AnalysisWorkspace/components/SourceViewerPanel.tsx — Updated with document viewer</output>
+    <output>src/client/code-pages/AnalysisWorkspace/hooks/useAutoSave.ts — Updated with real API endpoint</output>
+    <output>src/client/code-pages/AnalysisWorkspace/hooks/useExportAnalysis.ts — Updated with real API endpoint</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Analysis record loads from BFF API GET /api/analyses/{analysisId} — NOT from context.webAPI</criterion>
+    <criterion>Source document metadata loads from BFF API in parallel with analysis</criterion>
+    <criterion>Editor content populated via editorRef.setHtml() after successful load</criterion>
+    <criterion>Source viewer shows PDF/Office document via iframe with correct URL</criterion>
+    <criterion>Loading states show Fluent v9 Spinner with contextual messages</criterion>
+    <criterion>Error states show ProblemDetails error message with retry button</criterion>
+    <criterion>URL parameters (analysisId, documentId, tenantId) parsed and validated</criterion>
+    <criterion>Auto-save and export hooks use real BFF API endpoints</criterion>
+    <criterion>No direct Dataverse Web API calls from the Code Page</criterion>
+    <criterion>npm run build completes without errors</criterion>
+  </acceptance-criteria>
+
+  <placeholders>
+    <placeholder id="PH-065-A">
+      <location>src/client/code-pages/AnalysisWorkspace/services/analysisApi.ts</location>
+      <type>todo-comment</type>
+      <description>Auth token parameter is accepted but not validated client-side; actual token acquisition wired in task 066</description>
+      <completed-by>066</completed-by>
+      <build-impact>Compiles; API calls will fail with 401 until auth is wired</build-impact>
+    </placeholder>
+  </placeholders>
+</task>

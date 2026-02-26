@@ -49,6 +49,9 @@ public sealed class AgentCostControlMiddleware : ISprkChatAgent
     /// <inheritdoc />
     public ChatContext Context => _inner.Context;
 
+    /// <inheritdoc />
+    public CitationContext? Citations => _inner.Citations;
+
     /// <summary>
     /// Current cumulative token count for this session.
     /// Exposed for testing and monitoring.

@@ -182,9 +182,19 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
     /**
      * Switch the document/playbook context for the current session.
      * PATCH /api/ai/chat/sessions/{sessionId}/context
+     *
+     * @param documentId - New primary document ID (null keeps current)
+     * @param playbookId - New playbook ID (null keeps current)
+     * @param hostContext - Optional host context override (null keeps current)
+     * @param additionalDocumentIds - Optional additional document IDs for multi-document context (max 5)
      */
     const switchContext = useCallback(
-        async (documentId?: string, playbookId?: string, hostContext?: IHostContext): Promise<void> => {
+        async (
+            documentId?: string,
+            playbookId?: string,
+            hostContext?: IHostContext,
+            additionalDocumentIds?: string[]
+        ): Promise<void> => {
             if (!session) {
                 return;
             }
@@ -193,15 +203,23 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
             setError(null);
 
             try {
+                const body: Record<string, unknown> = {
+                    documentId: documentId || null,
+                    playbookId: playbookId || null,
+                    hostContext: hostContext || null,
+                };
+
+                // Only include additionalDocumentIds when explicitly provided
+                // (undefined = keep current, [] = clear, [...ids] = set new list)
+                if (additionalDocumentIds !== undefined) {
+                    body.additionalDocumentIds = additionalDocumentIds;
+                }
+
                 const response = await apiRequest(
                     `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/context`,
                     {
                         method: "PATCH",
-                        body: JSON.stringify({
-                            documentId: documentId || null,
-                            playbookId: playbookId || null,
-                            hostContext: hostContext || null,
-                        }),
+                        body: JSON.stringify(body),
                     }
                 );
 

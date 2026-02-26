@@ -1,0 +1,96 @@
+<task id="R2-035" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Streaming Write Cancellation Handling</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package B: Streaming Write Engine</package>
+    <status>not-started</status>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>frontend, bff-api, streaming</tags>
+    <parallel-group>sprint1-track2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Implement comprehensive cancellation handling for the streaming write flow across both frontend
+    and backend. When the user clicks Cancel during a streaming write: (1) the frontend sends an
+    abort signal to the SSE connection, (2) the backend catches `OperationCanceledException` in
+    WorkingDocumentTools and emits `document_stream_end` with `cancelled: true`, (3) the frontend
+    StreamingInsertPlugin receives the end event and removes the pulsing cursor, (4) partial content
+    already inserted remains in the editor, and (5) `useDocumentHistory` allows undo to restore
+    the pre-stream document state. The cancel button must be responsive even during rapid token
+    streaming.
+  </prompt>
+  <role>Senior full-stack developer with Spaarke platform expertise</role>
+  <goal>Users can cancel streaming writes at any point. Partial content is preserved, the pulsing cursor disappears, and undo restores the pre-stream state. No orphaned streams or hanging SSE connections.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec">Cancelling a streaming write MUST keep partial content in the editor with undo available to revert (FR-06). Every AI-initiated modification MUST snapshot before writing (FR-07).</constraint>
+    <constraint source="ADR-019">document_stream_end MUST be emitted even on cancellation. The cancelled flag indicates non-error termination.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Cancellation patterns for SSE streaming</topic>
+    <files>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Cancellation is a critical UX requirement for streaming writes. When the LLM generates an
+      edit that the user doesn't want, they must be able to stop it immediately. The cancellation
+      flow spans both backend and frontend: the backend uses CancellationToken propagation from
+      the HTTP request to abort the inner LLM call; the frontend uses AbortController to terminate
+      the SSE connection. The key invariant is that partial content remains in the editor (it is
+      not rolled back automatically) but the user can undo to restore the pre-stream state via
+      `useDocumentHistory`. The `document_stream_end` event with `cancelled: true` signals clean
+      termination to all consumers.
+    </background>
+    <dependencies>
+      <dependency task="R2-028" status="complete">WorkingDocumentTools backend cancellation handling must be implemented.</dependency>
+      <dependency task="R2-031" status="complete">RichTextEditor streaming ref API must exist for endStreamingInsert.</dependency>
+      <dependency task="R2-033" status="complete">useDocumentHistory hook must exist for undo to pre-stream state.</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/plugins/StreamingInsertPlugin.tsx</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/hooks/useDocumentHistory.ts</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this completes the cancellation flow -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Add cancel button to SprkChat during streaming">Ensure the SprkChat component shows a Cancel button when a document streaming operation is in progress (detected by `document_stream_start` event). The button must be responsive (not blocked by token processing).</step>
+    <step order="2" name="Wire cancel to AbortController">When the user clicks Cancel, invoke the AbortController abort signal on the SSE connection in useSseStream. This propagates to the backend as CancellationToken cancellation.</step>
+    <step order="3" name="Handle cancelled document_stream_end in bridge">When SprkChatBridge receives `document_stream_end` with `cancelled: true`, forward to the editor consumer which calls `endStreamingInsert()`. The pulsing cursor indicator is removed.</step>
+    <step order="4" name="Verify partial content preservation">After cancellation, confirm that all tokens emitted before the cancel signal remain in the editor. The StreamingInsertPlugin must NOT roll back partial content on end.</step>
+    <step order="5" name="Integrate pushVersion before streaming starts">Ensure that `useDocumentHistory.pushVersion()` is called BEFORE `beginStreamingInsert()` so the pre-stream state is captured. This allows undo to restore the exact document state before the AI write began.</step>
+    <step order="6" name="Test undo after cancel">Verify that after cancellation, calling `useDocumentHistory.undo()` restores the document to its pre-stream state (removing all partial content).</step>
+    <step order="7" name="Handle SSE connection cleanup">Ensure that aborting the SSE connection does not leave orphaned connections or event listeners. The useSseStream hook must clean up properly on abort.</step>
+    <step order="8" name="Build verification">Run TypeScript compilation for the shared UI components.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Cancel button is visible and responsive during document streaming operations</criterion>
+    <criterion testable="true">Clicking Cancel aborts the SSE connection and triggers CancellationToken on the backend</criterion>
+    <criterion testable="true">document_stream_end with cancelled=true is received and processed by the frontend</criterion>
+    <criterion testable="true">Pulsing cursor indicator is removed after cancellation</criterion>
+    <criterion testable="true">Partial content remains in the editor after cancellation (not rolled back)</criterion>
+    <criterion testable="true">useDocumentHistory.undo() restores the pre-stream document state after cancellation</criterion>
+    <criterion testable="true">No orphaned SSE connections or event listeners after abort</criterion>
+    <criterion testable="true">TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

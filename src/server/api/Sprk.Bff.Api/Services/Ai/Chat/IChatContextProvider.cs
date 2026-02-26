@@ -28,6 +28,11 @@ public interface IChatContextProvider
     /// entity type and ID are propagated into <see cref="ChatKnowledgeScope"/> for
     /// entity-scoped search filtering.
     /// </param>
+    /// <param name="additionalDocumentIds">
+    /// Optional list of additional document IDs (max 5) pinned to the conversation.
+    /// Propagated into <see cref="ChatKnowledgeScope.AdditionalDocumentIds"/> so the
+    /// agent can include their content in the AI context window.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A fully composed <see cref="ChatContext"/>.</returns>
     Task<ChatContext> GetContextAsync(
@@ -35,5 +40,6 @@ public interface IChatContextProvider
         string tenantId,
         Guid playbookId,
         ChatHostContext? hostContext = null,
+        IReadOnlyList<string>? additionalDocumentIds = null,
         CancellationToken cancellationToken = default);
 }

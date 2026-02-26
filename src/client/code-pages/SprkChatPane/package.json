@@ -1,0 +1,32 @@
+{
+  "name": "sprkchatpane-code-page",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SprkChatPane React Code Page — side pane HTML web resource for SprkChat interactive collaboration",
+  "scripts": {
+    "build": "webpack --config webpack.config.js",
+    "build:dev": "webpack --config webpack.config.js --mode development",
+    "build:analyze": "webpack --config webpack.config.js --env analyze",
+    "dev": "webpack serve --config webpack.config.js --mode development --open",
+    "lint": "eslint src --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "@fluentui/react-components": "^9.54.0",
+    "@fluentui/react-icons": "^2.0.0",
+    "@spaarke/ui-components": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/xrm": "^9.0.0",
+    "esbuild-loader": "^4.4.2",
+    "terser-webpack-plugin": "^5.3.16",
+    "typescript": "^5.4.0",
+    "webpack": "^5.91.0",
+    "webpack-bundle-analyzer": "^5.2.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^5.0.4"
+  }
+}

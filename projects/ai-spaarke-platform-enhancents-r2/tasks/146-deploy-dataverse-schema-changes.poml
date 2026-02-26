@@ -1,0 +1,84 @@
+<task id="R2-146" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Deploy Dataverse Schema Changes</title>
+    <phase>Phase 4: Deployment &amp; Validation</phase>
+    <status>completed</status>
+    <completion-note>Deployment preparation completed 2026-02-26. PlaybookCapabilities.cs verified with all 7 capability constants. No solution XML for sprk_playbook entity found in repo (field may have been created in dev environment). Checklist documented in notes/deployment-checklist-146-dataverse-schema.md. Actual deployment to Dataverse requires live environment access.</completion-note>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>deploy, dataverse</tags>
+  </metadata>
+
+  <prompt>
+    Deploy the playbook capability field schema change to the Dataverse dev environment. The
+    sprk_capabilities multiline text field was added to the Playbook (sprk_playbook) entity
+    in task 046 to store comma-separated capability declarations (e.g., "search,analyze,write_back,
+    reanalyze,summarize"). Import the updated solution containing the schema change, verify the
+    field appears on the Playbook form, and configure capability values for existing playbooks
+    in the dev environment to enable R2 features.
+  </prompt>
+  <role>Dataverse administrator with schema deployment expertise</role>
+  <goal>The sprk_capabilities field is deployed to the Playbook entity, appears on the Playbook form, and existing playbooks are configured with appropriate capability values for R2 testing.</goal>
+
+  <inputs>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-002">Schema changes must be deployed via solution import — no manual field creation in the UI.</constraint>
+    <constraint source="skill:dataverse-deploy">MUST follow dataverse-deploy skill for solution export/import procedures.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse schema deployment, solution import, Playbook entity configuration</topic>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 046 added a new field (sprk_capabilities) to the Playbook entity to store playbook
+      capability declarations. These capabilities govern which AI tools and action menu items are
+      available when a particular playbook is active. The field is a multiline text field containing
+      a comma-separated list of capability strings. Valid capabilities include: search, analyze,
+      write_back, reanalyze, summarize, web_search, selection_revise. The capability field drives
+      the action menu filtering (task 045 /api/ai/chat/actions endpoint) and tool resolution
+      (SprkChatAgentFactory.ResolveTools). This deployment task ensures the schema change reaches
+      the dev environment and existing playbooks are configured for testing.
+    </background>
+    <dependencies>
+      <dependency task="R2-046">Playbook capability field schema must be defined in the solution</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="reference">src/solutions/SpaarkeCore/Entities/sprk_playbook/Entity.xml</file>
+    <file action="reference">src/solutions/SpaarkeCore/Entities/sprk_playbook/FormXml/main/{form-id}.xml</file>
+    <file action="reference">src/solutions/SpaarkeCore/customizations.xml</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task is deployment only -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Export solution with schema changes">Export the Spaarke solution as unmanaged from the development solution project. Verify the solution XML includes the sprk_capabilities field definition on the sprk_playbook entity.</step>
+    <step order="2" name="Import solution to dev environment">Use the dataverse-deploy skill to import the solution to the Dataverse dev environment (https://spaarkedev1.crm.dynamics.com). Monitor import logs for errors or warnings.</step>
+    <step order="3" name="Verify field on Playbook entity">Open the Dataverse admin center or solution explorer and verify the sprk_capabilities field exists on the sprk_playbook entity with the correct data type (multiline text).</step>
+    <step order="4" name="Verify field on Playbook form">Open a Playbook record in the Dataverse app. Verify the sprk_capabilities field appears on the form and is editable.</step>
+    <step order="5" name="Configure capabilities for test playbooks">For each existing playbook in the dev environment, set appropriate capability values. For example: Legal Analysis playbook: "search,analyze,write_back,reanalyze,summarize"; Research playbook: "search,analyze,summarize,web_search"; General Chat playbook: "search,summarize".</step>
+    <step order="6" name="Verify capabilities are readable via API">Send an API request that reads playbook capabilities (via the /api/ai/chat/actions endpoint or direct Dataverse Web API call). Verify the capability values are correctly returned and parsed.</step>
+    <step order="7" name="Publish customizations">Publish all customizations to ensure the schema changes and form updates are active in the dev environment.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Solution imports successfully with no errors</criterion>
+    <criterion testable="true">sprk_capabilities field exists on the sprk_playbook entity in Dataverse</criterion>
+    <criterion testable="true">sprk_capabilities field appears and is editable on the Playbook form</criterion>
+    <criterion testable="true">At least 2 playbooks are configured with capability values for testing</criterion>
+    <criterion testable="true">Capability values are readable via API and correctly parsed as comma-separated lists</criterion>
+    <criterion testable="true">All customizations are published</criterion>
+  </acceptance-criteria>
+</task>

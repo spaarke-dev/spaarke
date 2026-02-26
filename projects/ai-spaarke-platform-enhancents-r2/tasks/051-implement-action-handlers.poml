@@ -1,0 +1,126 @@
+<task id="R2-051" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Implement Action Handlers (Playbook Switch, Mode Toggle)</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package D: Action Menu / Command Palette</package>
+    <status>not-started</status>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>frontend</tags>
+    <parallel-group>sprint1-track3</parallel-group>
+  </metadata>
+
+  <prompt>
+    Implement handler functions for the actions available in the SprkChatActionMenu. Each action
+    type triggers a specific behavior: "Switch Playbook" calls PATCH /sessions/{id}/context to
+    change the active playbook; "Change Mode" toggles the user's preferred write mode (stream vs
+    diff); "Re-analyze" sends a chat message triggering re-analysis (Package E placeholder).
+    Create an action handler registry that maps action IDs to handler functions. Integrate
+    handlers with the SprkChat component so that selecting an action from the menu triggers the
+    appropriate behavior.
+  </prompt>
+  <role>Senior React/TypeScript developer with SprkChat component and state management expertise</role>
+  <goal>Selecting an action from the SprkChatActionMenu triggers the appropriate handler: playbook switch calls the API, mode toggle updates local state, re-analyze sends a chat message. Build compiles and tests pass — re-analyze uses a stub that sends a plain text message.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Any UI feedback (toast notifications, status indicators) MUST use Fluent UI v9 components.</constraint>
+    <constraint source="ADR-012">Handler logic should be encapsulated in a hook or utility within @spaarke/ui-components SprkChat folder.</constraint>
+    <constraint source="spec-FR-11">Available actions MUST be governed by playbook capability declarations. Only actions matching capabilities should be executable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SprkChat state management, API integration, action handler patterns</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 050 wired the action menu to fetch and display actions. When the user selects an
+      action, the menu calls `onActionSelected(action)` on SprkChatInput, which bubbles up to
+      SprkChat. This task implements what happens AFTER an action is selected.
+
+      Action handler behaviors:
+
+      1. **Switch Playbook** (category: Playbooks)
+         - Each playbook action has a `playbookId` in its metadata
+         - Call PATCH /api/ai/chat/sessions/{sessionId}/context with new playbookId
+         - On success: update SprkChat state, invalidate action menu cache (capabilities changed)
+         - On failure: show error toast
+
+      2. **Change Mode** (category: Settings)
+         - Toggle between "stream" and "diff" write mode preference
+         - Store preference in component state (and optionally localStorage)
+         - No API call — purely client-side preference
+         - Affects how Package B (streaming) and Package F (diff) render AI outputs
+
+      3. **Re-analyze** (category: Actions)
+         - PLACEHOLDER: Sends a chat message "Rerun analysis" to the current session
+         - Full re-analysis tool wired by task 078 (Package E)
+         - Build compiles; tests pass with the stub
+
+      4. **Summarize** (category: Actions)
+         - Sends a chat message "Summarize this document" to the current session
+         - Uses existing chat message sending flow
+
+      5. **Search** (category: Search)
+         - Focuses the chat input with a search prompt prefix
+         - Uses existing chat input focus management
+    </background>
+    <dependencies>
+      <dependency task="050">Action menu must be populated with data and wired to SprkChatInput's onActionSelected callback.</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionHandlers.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/index.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types/ActionMenuTypes.ts</file>
+  </relevant-files>
+
+  <placeholders>
+    <placeholder location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionHandlers.ts" function="handleReanalyze">
+      <stub-type>hardcoded-return</stub-type>
+      <real-implementation>Currently sends a plain "Rerun analysis" chat message. Task 078 (Package E) will wire this to the AnalysisExecutionTools re-analysis flow with progress tracking, document replace SSE events, and undo stack management.</real-implementation>
+      <completed-by task="078">Task 078 wires re-analysis to AnalysisExecutionTools and progress SSE events.</completed-by>
+      <build-impact>compiles: yes | tests-pass: yes</build-impact>
+    </placeholder>
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Review SprkChat state management">Read `SprkChat.tsx` to understand current state management patterns, session context, playbook state, and how chat messages are sent programmatically.</step>
+    <step order="2" name="Define action handler types">In `ActionMenuTypes.ts`, add `ActionHandlerMap` type: `Record&lt;string, (action: ChatActionItem, context: ActionHandlerContext) =&gt; Promise&lt;void&gt;&gt;`. Define `ActionHandlerContext` with: sessionId, apiBaseUrl, sendMessage callback, updatePlaybook callback, updateMode callback.</step>
+    <step order="3" name="Create useActionHandlers hook">Create `useActionHandlers.ts` that returns a handler function: `handleAction(action: ChatActionItem): Promise&lt;void&gt;`. The hook takes context parameters (sessionId, apiBaseUrl, sendMessage, etc.) and dispatches to the appropriate handler based on action category and ID.</step>
+    <step order="4" name="Implement Switch Playbook handler">When a Playbooks-category action is selected: call PATCH /api/ai/chat/sessions/{sessionId}/context with `{ playbookId: action.metadata.playbookId }`. On success, update SprkChat's playbook state and call `refetch()` on the action menu data hook (capabilities may have changed). On failure, show an error message via callback.</step>
+    <step order="5" name="Implement Change Mode handler">When the mode toggle action is selected: read current mode from state, toggle to the opposite value ("stream" ↔ "diff"), persist to localStorage (`sprk-chat-write-mode`), update component state. No API call needed.</step>
+    <step order="6" name="Implement Re-analyze handler (placeholder)">When the re-analyze action is selected: call `sendMessage("Rerun analysis")` to send a plain chat message. Mark with `// PLACEHOLDER: Re-analyze sends plain message — Completed by task 078`. The message flows through normal chat pipeline.</step>
+    <step order="7" name="Implement Summarize handler">When the summarize action is selected: call `sendMessage("Summarize this document")` to send a chat message. Uses existing chat flow — no special handling needed.</step>
+    <step order="8" name="Implement Search handler">When a search action is selected: set the chat input value to the search prompt prefix (e.g., "Search for: ") and focus the input. User completes the search query and sends normally.</step>
+    <step order="9" name="Wire handlers into SprkChat">In `SprkChat.tsx`, call `useActionHandlers()` and pass the `handleAction` function to SprkChatInput's `onActionSelected` prop. When SprkChatInput reports an action selection, SprkChat dispatches to the handler.</step>
+    <step order="10" name="Update barrel exports">Export `useActionHandlers` from `hooks/index.ts`.</step>
+    <step order="11" name="Build verification">Run the shared component library build to verify compilation and ensure all action handlers compile correctly with proper type safety.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Selecting a "Switch Playbook" action calls PATCH /api/ai/chat/sessions/{sessionId}/context and updates the SprkChat playbook state on success</criterion>
+    <criterion testable="true">Selecting "Change Mode" toggles the write mode between "stream" and "diff" and persists to localStorage</criterion>
+    <criterion testable="true">Selecting "Re-analyze" sends a "Rerun analysis" chat message via the existing sendMessage flow</criterion>
+    <criterion testable="true">Selecting "Summarize" sends a "Summarize this document" chat message</criterion>
+    <criterion testable="true">Selecting a "Search" action focuses the chat input with a search prompt prefix</criterion>
+    <criterion testable="true">Playbook switch invalidates the action menu cache (refetch on next open)</criterion>
+    <criterion testable="true">Failed PATCH call for playbook switch shows an error message (does not crash)</criterion>
+    <criterion testable="true">Placeholder comment `// PLACEHOLDER:` is present on the re-analyze handler with task 078 reference</criterion>
+    <criterion testable="true">useActionHandlers hook is exported from the SprkChat hooks barrel</criterion>
+    <criterion testable="true">TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

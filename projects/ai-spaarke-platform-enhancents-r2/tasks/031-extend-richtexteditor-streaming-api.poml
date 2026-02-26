@@ -1,0 +1,82 @@
+<task id="R2-031" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Extend RichTextEditor Ref API for Streaming Writes</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package B: Streaming Write Engine</package>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>frontend, lexical, ui-components</tags>
+    <parallel-group>sprint1-track2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Extend the RichTextEditor's imperative ref API (exposed via `React.forwardRef` / `useImperativeHandle`)
+    with three new methods for streaming write operations: `beginStreamingInsert(position): StreamHandle`,
+    `appendStreamToken(handle, token): void`, and `endStreamingInsert(handle): void`. These methods
+    delegate to the StreamingInsertPlugin created in task 030. The ref API is the public interface
+    that external consumers (Analysis Workspace, SprkChatBridge) use to control streaming writes
+    without needing direct access to the Lexical editor internals.
+  </prompt>
+  <role>Senior full-stack developer with Spaarke platform expertise</role>
+  <goal>The RichTextEditor ref exposes streaming write methods that external consumers can call. The StreamingInsertPlugin is integrated into the editor's plugin composition.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">RichTextEditor lives in @spaarke/ui-components. Ref API must be backward-compatible — existing methods (focus, getHtml, setHtml, clear) remain unchanged.</constraint>
+    <constraint source="spec">MUST use Lexical editor API — no raw DOM manipulation. Streaming inserts MUST go through the plugin system.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>RichTextEditor ref API extension pattern</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The RichTextEditor currently exposes a ref API with methods like `focus()`, `getHtml()`,
+      `setHtml()`, and `clear()` via `useImperativeHandle`. External consumers use this ref to
+      programmatically control the editor. The streaming write engine requires three new methods
+      that wrap the StreamingInsertPlugin's functionality: `beginStreamingInsert` starts a streaming
+      session and returns a handle; `appendStreamToken` feeds tokens into the active session;
+      `endStreamingInsert` finalizes the session. This keeps the plugin as an internal implementation
+      detail while exposing a clean public API.
+    </background>
+    <dependencies>
+      <dependency task="R2-030" status="complete">StreamingInsertPlugin must exist with beginStreamingInsert, append, and endStreamingInsert functions.</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/RichTextEditor.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/plugins/StreamingInsertPlugin.tsx</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this wires an existing plugin to the ref API -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Study existing ref API">Read `RichTextEditor.tsx` to understand the current `useImperativeHandle` implementation, the ref type interface, and how existing methods interact with the Lexical editor instance.</step>
+    <step order="2" name="Update ref type interface">Extend the `RichTextEditorRef` (or equivalent) TypeScript interface with three new methods: `beginStreamingInsert(position?: 'end' | 'cursor'): StreamHandle`, `appendStreamToken(handle: StreamHandle, token: string): void`, `endStreamingInsert(handle: StreamHandle): void`. Import `StreamHandle` from the StreamingInsertPlugin.</step>
+    <step order="3" name="Integrate StreamingInsertPlugin">Add the `StreamingInsertPlugin` to the editor's plugin composition (inside the `LexicalComposer` or equivalent). Obtain a ref to the plugin's imperative methods.</step>
+    <step order="4" name="Wire ref methods to plugin">In `useImperativeHandle`, implement the three new methods by delegating to the StreamingInsertPlugin's corresponding functions. Ensure the plugin ref is available before streaming methods are called.</step>
+    <step order="5" name="Verify backward compatibility">Confirm that existing ref methods (focus, getHtml, setHtml, clear) still work correctly. The new methods are purely additive.</step>
+    <step order="6" name="Build verification">Run TypeScript compilation: `cd src/client/shared/Spaarke.UI.Components && npx tsc --noEmit`.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">RichTextEditor ref interface includes `beginStreamingInsert`, `appendStreamToken`, and `endStreamingInsert` methods</criterion>
+    <criterion testable="true">Methods delegate to StreamingInsertPlugin functions correctly</criterion>
+    <criterion testable="true">StreamingInsertPlugin is composed into the editor's plugin tree</criterion>
+    <criterion testable="true">Existing ref methods (focus, getHtml, setHtml, clear) remain unchanged and functional</criterion>
+    <criterion testable="true">TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

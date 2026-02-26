@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Implement 2-Panel Layout (Editor + Source Viewer)</title>
+    <phase>2</phase>
+    <package>C: AW Migration</package>
+    <tags>code-page, frontend, layout</tags>
+    <estimate>4-6 hours</estimate>
+    <dependencies>060</dependencies>
+    <parallel-group>sprint2-track1</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Replace the placeholder App.tsx with a full 2-panel layout for the AnalysisWorkspace Code Page. The left panel hosts the RichTextEditor (analysis output and streaming write target). The right panel hosts a collapsible SourceDocumentViewer (PDF/Office document viewer). The panels use CSS grid/flexbox for full-viewport coverage with a resizable splitter between them.
+    </goal>
+    <context>
+      The AnalysisWorkspace displays two core panels side by side:
+      1. **Left Panel — Analysis Editor**: A RichTextEditor (Lexical-based) that shows the analysis output.
+         This is the streaming write target where SprkChat writes token-by-token via StreamingInsertPlugin.
+         It includes a toolbar with Save, Export, Copy, Undo/Redo (wired in task 062).
+      2. **Right Panel — Source Document Viewer**: A collapsible panel that shows the original source document
+         (PDF, Word, etc.) for reference during analysis review. The viewer can be collapsed to give the
+         editor full width.
+
+      The layout must fill the entire viewport (100vw x 100vh) since this is a Code Page opened via
+      navigateTo as a dialog. The splitter between panels must be draggable for resizing.
+
+      The existing AnalysisWorkspace PCF (src/client/pcf/AnalysisWorkspace/) has a similar layout that
+      can be referenced for component structure, but the Code Page version uses React 19 and Fluent v9
+      exclusively — do not copy React 16 patterns.
+    </context>
+    <constraints>
+      - Follow ADR-021: Fluent UI v9 exclusively; makeStyles + design tokens for all styling
+      - Follow ADR-022: React 19 APIs (hooks, concurrent features allowed)
+      - Follow ADR-012: Import RichTextEditor from @spaarke/ui-components
+      - Full viewport layout (100vw x 100vh) — no scroll on outer container
+      - Panels must be individually scrollable
+      - Right panel must be collapsible (toggle button or drag to edge)
+      - Splitter must be keyboard accessible (arrow keys for resize)
+      - No hard-coded colors — use Fluent design tokens for all theming
+      - Must support dark mode via FluentProvider theme inheritance
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/RichTextEditor.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read the existing AnalysisWorkspace PCF layout to understand the 2-panel structure, component
+      hierarchy, and how RichTextEditor and the source viewer are positioned.
+    </step>
+    <step order="2">
+      Create the layout shell in App.tsx:
+      - CSS grid or flexbox container filling 100vw x 100vh
+      - Left panel (editor area) — default 60% width
+      - Draggable splitter — 4px grip area with hover/focus indicator
+      - Right panel (source viewer) — default 40% width, collapsible
+    </step>
+    <step order="3">
+      Create a usePanelResize hook:
+      - Track splitter drag state (mousedown, mousemove, mouseup)
+      - Clamp minimum widths (editor min 300px, viewer min 200px)
+      - Support keyboard resize (left/right arrows when splitter focused)
+      - Persist last split ratio to sessionStorage
+    </step>
+    <step order="4">
+      Create the EditorPanel component:
+      - Import and render RichTextEditor from @spaarke/ui-components
+      - Include a toolbar placeholder area (wired in task 062)
+      - Forward ref to RichTextEditor for streaming API access
+      - Full height within panel, internal scroll for long documents
+    </step>
+    <step order="5">
+      Create the SourceViewerPanel component:
+      - Collapsible container with toggle button (chevron icon)
+      - Header showing source document name
+      - Viewer area placeholder (document loading wired in task 065)
+      - Collapsed state shows only a thin vertical strip with expand button
+    </step>
+    <step order="6">
+      Wire the splitter component:
+      - Visual grip indicator (3 vertical dots or similar)
+      - Cursor change on hover (col-resize)
+      - ARIA role="separator" with aria-valuenow for accessibility
+      - Double-click to reset to default 60/40 split
+    </step>
+    <step order="7">
+      Apply Fluent v9 theming:
+      - Use makeStyles with design tokens for all colors, spacing, borders
+      - Verify layout renders correctly in both light and dark themes
+      - No hard-coded color values anywhere
+    </step>
+    <step order="8">
+      Build and verify:
+      - npm run build compiles cleanly
+      - Layout renders at full viewport in browser
+      - Splitter is draggable and keyboard-accessible
+      - Right panel collapses and expands
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine existing PCF layout and RichTextEditor component</tool>
+    <tool>Write - Create/modify component files</tool>
+    <tool>Edit - Update App.tsx to replace placeholder</tool>
+    <tool>Bash - npm run build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/AnalysisWorkspace/App.tsx — Updated with 2-panel layout</output>
+    <output>src/client/code-pages/AnalysisWorkspace/components/EditorPanel.tsx — Left panel with RichTextEditor</output>
+    <output>src/client/code-pages/AnalysisWorkspace/components/SourceViewerPanel.tsx — Collapsible right panel</output>
+    <output>src/client/code-pages/AnalysisWorkspace/components/PanelSplitter.tsx — Draggable resizer</output>
+    <output>src/client/code-pages/AnalysisWorkspace/hooks/usePanelResize.ts — Panel resize logic</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>App.tsx renders a full-viewport 2-panel layout (no outer scroll)</criterion>
+    <criterion>Left panel contains RichTextEditor from @spaarke/ui-components</criterion>
+    <criterion>Right panel is collapsible via toggle button</criterion>
+    <criterion>Splitter is draggable with mouse and keyboard-accessible (arrow keys)</criterion>
+    <criterion>Minimum panel widths enforced (editor 300px, viewer 200px)</criterion>
+    <criterion>All styling uses Fluent v9 makeStyles with design tokens — no hard-coded colors</criterion>
+    <criterion>Layout adapts to FluentProvider theme (light/dark) without visual glitches</criterion>
+    <criterion>npm run build completes without errors</criterion>
+    <criterion>Splitter has ARIA role="separator" with aria-valuenow</criterion>
+  </acceptance-criteria>
+
+  <placeholders>
+    <placeholder id="PH-061-A">
+      <location>src/client/code-pages/AnalysisWorkspace/components/EditorPanel.tsx</location>
+      <type>todo-comment</type>
+      <description>Toolbar area is empty placeholder div; toolbar buttons wired in task 062</description>
+      <completed-by>062</completed-by>
+      <build-impact>Compiles; toolbar area renders empty</build-impact>
+    </placeholder>
+    <placeholder id="PH-061-B">
+      <location>src/client/code-pages/AnalysisWorkspace/components/SourceViewerPanel.tsx</location>
+      <type>hardcoded-return</type>
+      <description>Source viewer shows "No document loaded" text; document loading wired in task 065</description>
+      <completed-by>065</completed-by>
+      <build-impact>Compiles; viewer area shows placeholder text</build-impact>
+    </placeholder>
+  </placeholders>
+</task>

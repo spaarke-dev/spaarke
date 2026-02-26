@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="125" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Implement Citations SSE Event Handling</title>
+    <phase>3</phase>
+    <package>Package H: Suggestions + Citations</package>
+    <tags>bff-api, frontend, sse</tags>
+    <estimate>5-6 hours</estimate>
+    <dependencies>124</dependencies>
+    <parallel-group>sprint3-track3</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Add a new SSE event type 'citations' that delivers citation metadata (source name, page number,
+      excerpt, chunk ID) after the main AI response. On the frontend, parse citation markers [N] in
+      message content and replace them with clickable CitationMarker components linked to the
+      corresponding citation data.
+    </goal>
+    <context>
+      When the AI uses search tools (DocumentSearchTools, KnowledgeRetrievalTools), the AI response
+      may include citation markers like [1], [2], etc. that reference specific source chunks. The
+      backend needs to:
+
+      1. Collect citation metadata from search tool results during the response generation
+      2. After the main response is complete, emit a 'citations' SSE event with the collected metadata
+      3. The frontend receives the event, stores citation data, and re-renders the message to make
+        citation markers clickable
+
+      SSE event format:
+      ```
+      event: citations
+      data: {"citations":[{"id":1,"source":"Report.pdf","page":14,"excerpt":"Revenue grew...","chunkId":"abc123"}]}
+      ```
+
+      Event ordering: token* → citations → suggestions → done
+
+      On the frontend, the SprkChatMessage component needs to parse the rendered message text for
+      `[N]` patterns and replace them with CitationMarker components. This requires post-processing
+      the message HTML/text after citations data arrives.
+    </context>
+    <constraints>
+      - Follow ADR-001: Minimal API pattern
+      - Follow ADR-013: AI tool framework; citation metadata flows through ChatHostContext
+      - Follow ADR-015: Citation excerpts must not contain full document content — limit to 200 chars
+      - Follow ADR-019: If citation collection fails, log warning but do not emit error — citations are optional
+      - SSE event must follow existing serialization pattern in ChatEndpoints.cs
+      - Citations event MUST arrive before done event
+      - Citation marker parsing must handle edge cases: [1] in code blocks (skip), [1] in URLs (skip)
+      - Maximum 10 citations per message
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-data-governance.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessage.tsx</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatCitationPopover.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review how search tools return results in the current pipeline:
+      - DocumentSearchTools.cs result format (chunk IDs, source names, page numbers)
+      - KnowledgeRetrievalTools.cs result format
+      - How ChatHostContext accumulates tool results during response generation
+    </step>
+    <step order="2">
+      Implement citation collection on the backend:
+      - Add a CitationCollector class (or method) that extracts citation metadata from search tool results
+      - Track which chunks were used by the AI during response generation
+      - Build Citation[] with: id (sequential), source name, page number, excerpt (truncated to 200 chars),
+        chunkId (for source linking)
+      - Associate citation IDs with the [N] markers the AI includes in its response text
+    </step>
+    <step order="3">
+      Emit citations SSE event:
+      - After the last token event, serialize Citation[] and emit as 'citations' event
+      - Event format: `event: citations\ndata: {"citations":[...]}\n\n`
+      - If no citations (no search tools used), skip the event
+      - Maximum 10 citations per message — truncate if more
+      - Event ordering: token* → citations → suggestions → done
+    </step>
+    <step order="4">
+      Add citations event type to TypeScript types:
+      - In types.ts: add CitationsEvent to the SSE event discriminated union
+      - CitationsEvent: { type: 'citations', citations: Citation[] }
+      - Citation type already defined in task 124 — reuse it
+    </step>
+    <step order="5">
+      Handle citations event in useSseStream hook:
+      - Add case for 'citations' event type
+      - Store citations array in hook state, keyed by message ID
+      - Expose citations in the hook's return value alongside messages
+    </step>
+    <step order="6">
+      Implement citation marker parsing in SprkChatMessage:
+      - After message rendering, scan message content for `[N]` patterns (regex: /\[(\d+)\]/g)
+      - Skip patterns inside code blocks (`<code>`, `<pre>`) and URLs
+      - Replace matched patterns with CitationMarker components
+      - Link each CitationMarker to its corresponding Citation data from the citations state
+      - If a [N] marker has no corresponding citation data, render it as plain text
+    </step>
+    <step order="7">
+      Wire citation popover into SprkChatMessage:
+      - When CitationMarker is clicked, open SprkChatCitationPopover with the citation data
+      - Only one popover open at a time — clicking another citation closes the previous
+      - Popover state managed at the SprkChatMessage level
+    </step>
+    <step order="8">
+      Build verification:
+      - dotnet build src/server/api/Sprk.Bff.Api/
+      - TypeScript compilation for Spaarke.UI.Components
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review search tools, ChatEndpoints, SprkChatMessage, useSseStream</tool>
+    <tool>Edit - Add citation collection/emission backend, citation parsing frontend</tool>
+    <tool>Bash - dotnet build, TypeScript compilation</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessage.tsx</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DocumentSearchTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/KnowledgeRetrievalTools.cs</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatCitationPopover.tsx</file>
+  </relevant-files>
+
+  <outputs>
+    <output>Updated ChatEndpoints.cs with citation collection and SSE emission</output>
+    <output>Updated types.ts with CitationsEvent type</output>
+    <output>Updated useSseStream.ts with citations event handling</output>
+    <output>Updated SprkChatMessage.tsx with citation marker parsing and popover integration</output>
+    <output>Successful build for both backend and frontend</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Backend collects citation metadata from search tool results during response generation</criterion>
+    <criterion>Citations SSE event emitted after tokens and before done event</criterion>
+    <criterion>Citation payload includes id, source, page (optional), excerpt (max 200 chars), and chunkId</criterion>
+    <criterion>Maximum 10 citations per message</criterion>
+    <criterion>If no search tools used, no citations event is emitted</criterion>
+    <criterion>TypeScript CitationsEvent type exists in the SSE event discriminated union</criterion>
+    <criterion>useSseStream hook stores and exposes citations keyed by message</criterion>
+    <criterion>SprkChatMessage parses [N] markers and replaces with clickable CitationMarker components</criterion>
+    <criterion>[N] markers inside code blocks and URLs are not converted to citations</criterion>
+    <criterion>Clicking CitationMarker opens SprkChatCitationPopover with correct citation data</criterion>
+    <criterion>dotnet build succeeds with zero errors</criterion>
+    <criterion>TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+
+  <placeholders />
+</task>

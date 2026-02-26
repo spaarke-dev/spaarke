@@ -46,17 +46,46 @@ public sealed class TextRefinementTools
         ArgumentException.ThrowIfNullOrWhiteSpace(text, nameof(text));
         ArgumentException.ThrowIfNullOrWhiteSpace(instruction, nameof(instruction));
 
-        var messages = new List<ChatMessage>
-        {
-            new ChatMessage(ChatRole.System,
-                "You are a professional editor. Apply the user's instruction to refine the provided text. " +
-                "Output only the refined text — no explanation, preamble, or meta-commentary."),
-            new ChatMessage(ChatRole.User,
-                $"Instruction: {instruction}\n\nText to refine:\n{text}")
-        };
+        var messages = BuildRefineMessages(text, instruction);
 
         var response = await _chatClient.GetResponseAsync(messages, cancellationToken: cancellationToken);
         return response.Text ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Builds the prompt messages for a text refinement operation.
+    ///
+    /// This method is also used by the ChatEndpoints refine endpoint to construct
+    /// the prompt for streaming responses via <see cref="IChatClient.GetStreamingResponseAsync"/>.
+    /// </summary>
+    /// <param name="text">The text passage to refine.</param>
+    /// <param name="instruction">The refinement instruction.</param>
+    /// <param name="surroundingContext">
+    /// Optional surrounding paragraphs for additional AI context.
+    /// When provided, the model receives context about where the selection appears
+    /// in the document, improving refinement quality.
+    /// </param>
+    /// <returns>A list of chat messages ready for submission to the AI model.</returns>
+    public List<ChatMessage> BuildRefineMessages(
+        string text,
+        string instruction,
+        string? surroundingContext = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(text, nameof(text));
+        ArgumentException.ThrowIfNullOrWhiteSpace(instruction, nameof(instruction));
+
+        var systemPrompt = "You are a professional editor. Apply the user's instruction to refine the provided text. " +
+            "Output only the refined text — no explanation, preamble, or meta-commentary.";
+
+        var userPrompt = string.IsNullOrWhiteSpace(surroundingContext)
+            ? $"Instruction: {instruction}\n\nText to refine:\n{text}"
+            : $"Instruction: {instruction}\n\nSurrounding context (for reference only — do NOT include in output):\n{surroundingContext}\n\nText to refine:\n{text}";
+
+        return
+        [
+            new ChatMessage(ChatRole.System, systemPrompt),
+            new ChatMessage(ChatRole.User, userPrompt)
+        ];
     }
 
     /// <summary>

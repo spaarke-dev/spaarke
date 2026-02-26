@@ -1,0 +1,90 @@
+<task id="R2-033" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Implement useDocumentHistory Hook</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package B: Streaming Write Engine</package>
+    <status>not-started</status>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>frontend, ui-components</tags>
+    <parallel-group>sprint1-track2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Create a `useDocumentHistory` React hook that maintains a version stack (max 20 HTML snapshots)
+    for undo/redo of AI-initiated document changes. `pushVersion()` is called before every AI-initiated
+    change to snapshot the current document state via `RichTextEditor.getHtml()`. `undo()` restores
+    the previous snapshot via `RichTextEditor.setHtml()`. `redo()` moves forward in the version stack.
+    Each AI operation (streaming write, document replace, selection revision) constitutes one undo
+    step — granularity is at the operation level, not the token level. The hook manages its own
+    state and exposes `canUndo`, `canRedo` boolean flags for UI binding. Include a co-located
+    unit test file.
+  </prompt>
+  <role>Senior full-stack developer with Spaarke platform expertise</role>
+  <goal>A reusable hook that provides operation-level undo/redo for AI document modifications. Max 20 versions, with pushVersion/undo/redo/canUndo/canRedo API. Includes passing unit tests.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec">Max 20 snapshots in version stack (FR-07). Each AI operation = one undo step. Cancel mid-stream must allow undo to pre-stream state (FR-06).</constraint>
+    <constraint source="ADR-012">Hook MUST live in @spaarke/ui-components shared library. Reusable across Code Pages.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>React hooks and document history patterns</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The spec requires that every AI-initiated document modification snapshots the document state
+      before writing, enabling undo/redo with a maximum of 20 versions (FR-07). When a user
+      cancels a streaming write, they must be able to undo back to the pre-stream state (FR-06).
+      The granularity is per-operation, not per-token: a streaming write that emits 200 tokens
+      is one undo step. The hook works with the RichTextEditor ref API: it calls `getHtml()` to
+      capture snapshots and `setHtml()` to restore them. The version stack is a bounded circular
+      buffer that discards the oldest entry when the 20-version limit is reached.
+    </background>
+    <dependencies>
+      <!-- No direct dependencies — runs in parallel with other Package B tasks -->
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/hooks/useDocumentHistory.ts</file>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/hooks/useDocumentHistory.test.ts</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this is a complete implementation -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Design hook API">Define the hook's TypeScript interface: `useDocumentHistory(editorRef: RefObject&lt;RichTextEditorRef&gt;)` returns `{ pushVersion: () => void, undo: () => void, redo: () => void, canUndo: boolean, canRedo: boolean, historyLength: number }`.</step>
+    <step order="2" name="Implement version stack">Use `useRef` for the version stack (array of HTML strings), current index pointer, and max size (20). Implement circular buffer behavior: when the stack reaches 20 entries, discard the oldest.</step>
+    <step order="3" name="Implement pushVersion">Call `editorRef.current.getHtml()` to capture the current document state. Push onto the version stack. If the current index is not at the top (user has undone), truncate the forward history. Increment current index.</step>
+    <step order="4" name="Implement undo">Decrement current index. Call `editorRef.current.setHtml()` with the snapshot at the new index. Guard against underflow (index &lt; 0).</step>
+    <step order="5" name="Implement redo">Increment current index. Call `editorRef.current.setHtml()` with the snapshot at the new index. Guard against overflow (index &gt;= stack length).</step>
+    <step order="6" name="Expose canUndo/canRedo flags">Derive `canUndo` (current index &gt; 0) and `canRedo` (current index &lt; stack length - 1) as computed values. Use `useState` to trigger re-renders when these change.</step>
+    <step order="7" name="Write unit tests">Create `useDocumentHistory.test.ts` with tests for: push/undo/redo cycle, max 20 versions (oldest discarded), undo after push truncates forward history, canUndo/canRedo flags, empty stack behavior, rapid push behavior.</step>
+    <step order="8" name="Build verification">Run TypeScript compilation and tests for the shared UI components.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">`useDocumentHistory.ts` exists in the hooks directory with pushVersion, undo, redo, canUndo, canRedo API</criterion>
+    <criterion testable="true">Version stack is bounded at 20 entries; oldest entry discarded when limit reached</criterion>
+    <criterion testable="true">pushVersion captures current HTML via editorRef.getHtml()</criterion>
+    <criterion testable="true">undo restores previous snapshot via editorRef.setHtml()</criterion>
+    <criterion testable="true">redo moves forward in version stack via editorRef.setHtml()</criterion>
+    <criterion testable="true">Push after undo truncates forward history (no branching)</criterion>
+    <criterion testable="true">canUndo and canRedo flags correctly reflect stack state</criterion>
+    <criterion testable="true">Unit tests pass covering push/undo/redo cycle, max versions, truncation, and edge cases</criterion>
+    <criterion testable="true">TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>
