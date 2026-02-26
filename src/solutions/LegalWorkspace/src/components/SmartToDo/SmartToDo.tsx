@@ -587,6 +587,22 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   }, [refetch]);
 
   // -------------------------------------------------------------------------
+  // Close side pane on unmount (navigating away from workspace/page)
+  // -------------------------------------------------------------------------
+
+  React.useEffect(() => {
+    return () => {
+      try {
+        const xrm = (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
+        const pane = xrm?.App?.sidePanes?.getPane("todoDetailPane");
+        if (pane) pane.close();
+      } catch {
+        // Side pane API unavailable — ignore
+      }
+    };
+  }, []);
+
+  // -------------------------------------------------------------------------
   // Settings: save thresholds
   // -------------------------------------------------------------------------
 
