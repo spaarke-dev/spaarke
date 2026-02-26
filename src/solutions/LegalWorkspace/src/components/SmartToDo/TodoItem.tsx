@@ -48,6 +48,7 @@ import {
 import { IEvent } from "../../types/entities";
 import { PriorityLevel, EffortLevel, TodoSource } from "../../types/enums";
 import { computeDueLabel, parseDueDate, DueUrgency } from "../../utils/dueLabelUtils";
+import { computeTodoScore } from "../../utils/todoScoreUtils";
 
 // ---------------------------------------------------------------------------
 // Badge style maps (using tokens for all colours — zero hardcoded hex)
@@ -378,6 +379,7 @@ export const TodoItem: React.FC<ITodoItemProps> = React.memo(
     const sourceType = deriveSourceType(event.sprk_todosource);
     const dueDate = parseDueDate(event.sprk_duedate);
     const dueLabel = computeDueLabel(dueDate);
+    const { todoScore } = computeTodoScore(event);
 
     const sourceLabel = getSourceLabel(sourceType);
     const isCompleted = event.sprk_todostatus === 100000001; // Completed
@@ -500,6 +502,17 @@ export const TodoItem: React.FC<ITodoItemProps> = React.memo(
               {dueLabel.label}
             </InlineBadge>
           )}
+
+          {/* To Do Score */}
+          <InlineBadge
+            style={{
+              backgroundColor: tokens.colorBrandBackground2,
+              color: tokens.colorBrandForeground1,
+            }}
+            ariaLabel={`To Do Score: ${Math.round(todoScore)}`}
+          >
+            {Math.round(todoScore)}
+          </InlineBadge>
         </div>
 
         {/* Dismiss button — only shown when onDismiss handler is provided */}

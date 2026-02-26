@@ -40,11 +40,11 @@ import { FeedItemCard } from "./FeedItemCard";
 // ---------------------------------------------------------------------------
 
 /** Number of items in the initial render window */
-const INITIAL_WINDOW_SIZE = 40;
+const INITIAL_WINDOW_SIZE = 25;
 /** How many more items to render when the bottom sentinel fires */
-const LOAD_BATCH_SIZE = 30;
+const LOAD_BATCH_SIZE = 20;
 /** Approximate pixel height of a single feed item (used for spacer calculation) */
-const APPROX_ITEM_HEIGHT_PX = 72;
+const APPROX_ITEM_HEIGHT_PX = 112;
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -207,6 +207,12 @@ export interface IActivityFeedListProps {
    * The parent (ActivityFeed) opens the AI Summary dialog (task 013).
    */
   onAISummary?: (eventId: string) => void;
+  /** Called when the user clicks the Email action (stub). */
+  onEmail?: (eventId: string) => void;
+  /** Called when the user clicks the Teams action (stub). */
+  onTeams?: (eventId: string) => void;
+  /** Called when the user clicks the Edit action. */
+  onEdit?: (eventId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +224,9 @@ export const ActivityFeedList: React.FC<IActivityFeedListProps> = ({
   isLoadingMore = false,
   scrollContainerRef,
   onAISummary,
+  onEmail,
+  onTeams,
+  onEdit,
 }) => {
   const styles = useStyles();
 
@@ -293,6 +302,9 @@ export const ActivityFeedList: React.FC<IActivityFeedListProps> = ({
             key={event.sprk_eventid}
             event={event}
             onAISummary={handleAISummary}
+            onEmail={onEmail}
+            onTeams={onTeams}
+            onEdit={onEdit}
           />
         ))}
 

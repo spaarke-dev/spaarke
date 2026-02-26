@@ -100,6 +100,7 @@ const useStyles = makeStyles({
     padding: '0px',
     resize: 'both',
     overflow: 'auto',
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
   },
   // DialogBody: remove default padding so we control layout entirely
   body: {

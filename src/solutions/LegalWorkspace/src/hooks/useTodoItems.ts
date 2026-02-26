@@ -24,6 +24,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { DataverseService } from '../services/DataverseService';
 import { IEvent } from '../types/entities';
 import { useFeedTodoSync } from './useFeedTodoSync';
+import { computeTodoScore } from '../utils/todoScoreUtils';
 import type { IWebApi } from '../types/xrm';
 
 // ---------------------------------------------------------------------------
@@ -31,21 +32,23 @@ import type { IWebApi } from '../types/xrm';
 // ---------------------------------------------------------------------------
 
 /**
- * Sort todo items by priority score DESC, then due date ASC.
- * Items with no priority score sort to the end.
- * Items with no due date sort to the end of their priority group.
+ * Sort todo items by To Do Score DESC, then due date ASC as tiebreaker.
+ *
+ * To Do Score combines priority (50%), inverted effort (20%), and due-date
+ * urgency (30%) into a single 0-100 composite. Higher scores surface the
+ * most important, time-sensitive, and achievable items first.
  *
  * Returns a NEW array — does not mutate the original.
  */
 function sortTodoItems(items: IEvent[]): IEvent[] {
   return [...items].sort((a, b) => {
-    // Primary: priorityscore DESC (higher is more urgent)
-    const scoreA = a.sprk_priorityscore ?? -1;
-    const scoreB = b.sprk_priorityscore ?? -1;
+    // Primary: To Do Score DESC (higher is more important)
+    const scoreA = computeTodoScore(a).todoScore;
+    const scoreB = computeTodoScore(b).todoScore;
     const scoreDiff = scoreB - scoreA;
     if (scoreDiff !== 0) return scoreDiff;
 
-    // Secondary: duedate ASC (earlier is more urgent)
+    // Tiebreaker: duedate ASC (earlier is more urgent)
     const dueDateA = a.sprk_duedate ? new Date(a.sprk_duedate).getTime() : Infinity;
     const dueDateB = b.sprk_duedate ? new Date(b.sprk_duedate).getTime() : Infinity;
     return dueDateA - dueDateB;

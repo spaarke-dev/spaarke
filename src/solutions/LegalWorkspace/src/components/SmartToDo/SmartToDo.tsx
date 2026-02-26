@@ -57,6 +57,7 @@ import { DismissedSection } from "./DismissedSection";
 import { useTodoItems } from "../../hooks/useTodoItems";
 import { DataverseService } from "../../services/DataverseService";
 import { IEvent } from "../../types/entities";
+import { computeTodoScore } from "../../utils/todoScoreUtils";
 import type { IWebApi } from "../../types/xrm";
 
 // ---------------------------------------------------------------------------
@@ -99,11 +100,13 @@ export { LazyTodoAISummaryDialog, TodoAISummaryFallback };
 
 function sortTodoItems(items: IEvent[]): IEvent[] {
   return [...items].sort((a, b) => {
-    const scoreA = a.sprk_priorityscore ?? -1;
-    const scoreB = b.sprk_priorityscore ?? -1;
+    // Primary: To Do Score DESC (higher is more important)
+    const scoreA = computeTodoScore(a).todoScore;
+    const scoreB = computeTodoScore(b).todoScore;
     const scoreDiff = scoreB - scoreA;
     if (scoreDiff !== 0) return scoreDiff;
 
+    // Tiebreaker: duedate ASC (earlier is more urgent)
     const dueDateA = a.sprk_duedate ? new Date(a.sprk_duedate).getTime() : Infinity;
     const dueDateB = b.sprk_duedate ? new Date(b.sprk_duedate).getTime() : Infinity;
     return dueDateA - dueDateB;

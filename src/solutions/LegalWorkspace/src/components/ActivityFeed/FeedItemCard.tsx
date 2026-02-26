@@ -1,25 +1,30 @@
 /**
  * FeedItemCard — interactive card component for a single Updates Feed event.
  *
- * Layout (per wireframe):
- *   [type icon circle] [eventTypeName : eventName]         [flag] [AI sparkle]
- *                       [description (2 lines max)]
- *                       [priority badge] [record type] [regarding name]
- *                       [modifiedon]  [duedate]
+ * Layout (redesigned for spacious 2-row cards):
+ *   ┌──────────────────────────────────────────────────────────────────┐
+ *   │▌                                                                 │
+ *   │▌  [Icon 40px]  [Type badge]  Event Name          [Flag]        │
+ *   │▌               [Priority] [Matter ref] · Due date    [Email]   │
+ *   │▌                                                     [Teams]   │
+ *   │▌                                                     [Edit]    │
+ *   │▌                                                     [AI]      │
+ *   │▌                                                                 │
+ *   └──────────────────────────────────────────────────────────────────┘
+ *     ↑ 3px left border (red=overdue, amber=soon, green=on track, neutral)
  *
- * Flag behaviour (task 012):
- *   - Reads flag state from FeedTodoSyncContext (not from event.sprk_todoflag directly).
- *   - Optimistic UI: flag icon flips immediately on click; context issues the
- *     Dataverse write with 300 ms debounce. On failure the icon reverts.
- *   - Shows a pending spinner overlay on the flag button while the write is in-flight.
- *   - Error state: tooltip shows error text if the last write failed.
- *
- * Design constraints (task 011):
+ * Design constraints:
  *   - ALL colours from Fluent UI v9 semantic tokens — zero hardcoded hex/rgb
  *   - makeStyles (Griffel) only for custom styles
  *   - Icon-only buttons MUST have aria-label
- *   - Hover: colorNeutralBackground1Hover
+ *   - Generous white space: L/XL padding tokens
  *   - Dark mode + high-contrast supported automatically via token system
+ *   - Action buttons: medium size (24px+ touch targets), vertical stack
+ *
+ * Flag behaviour (task 012):
+ *   - Reads flag state from FeedTodoSyncContext (optimistic updates).
+ *   - Shows pending spinner overlay while Dataverse write is in-flight.
+ *   - Error state: tooltip shows error text if last write failed.
  */
 
 import * as React from "react";
@@ -36,21 +41,21 @@ import {
   FlagRegular,
   FlagFilled,
   SparkleRegular,
+  MailRegular,
+  ChatRegular,
+  EditRegular,
 } from "@fluentui/react-icons";
 import { IEvent } from "../../types/entities";
 import { PriorityLevel } from "../../types/enums";
 import { formatRelativeTime } from "../../utils/formatRelativeTime";
 import { getTypeIcon, getTypeIconLabel } from "../../utils/typeIconMap";
 import { useFeedTodoSync } from "../../hooks/useFeedTodoSync";
+import { navigateToEntity } from "../../utils/navigation";
 
 // ---------------------------------------------------------------------------
 // Priority badge token mapping
 // ---------------------------------------------------------------------------
 
-/**
- * Maps a PriorityLevel to the Fluent v9 semantic background token for the
- * badge colour. Dataverse: 0=Low, 1=Normal, 2=High, 3=Urgent.
- */
 const PRIORITY_BADGE_STYLES: Record<PriorityLevel, React.CSSProperties> = {
   Urgent: {
     backgroundColor: tokens.colorPaletteRedBackground3,
@@ -70,10 +75,8 @@ const PRIORITY_BADGE_STYLES: Record<PriorityLevel, React.CSSProperties> = {
   },
 };
 
-/** Map the raw sprk_priority option-set number to a PriorityLevel label */
 function derivePriorityLevel(priority: number | undefined): PriorityLevel | null {
   if (priority === undefined || priority === null) return null;
-  // Dataverse option-set: 0=Low, 1=Normal, 2=High, 3=Urgent
   switch (priority) {
     case 0: return "Low";
     case 1: return "Normal";
@@ -84,28 +87,50 @@ function derivePriorityLevel(priority: number | undefined): PriorityLevel | null
 }
 
 // ---------------------------------------------------------------------------
+// Urgency derivation (for left border accent)
+// ---------------------------------------------------------------------------
+
+type UrgencyTier = 'overdue' | 'dueSoon' | 'onTrack' | 'neutral';
+
+function deriveUrgencyTier(dueDate: string | undefined): UrgencyTier {
+  if (!dueDate) return 'neutral';
+  const now = new Date();
+  const due = new Date(dueDate);
+  if (isNaN(due.getTime())) return 'neutral';
+  const diffDays = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) return 'overdue';
+  if (diffDays <= 3) return 'dueSoon';
+  if (diffDays <= 10) return 'onTrack';
+  return 'neutral';
+}
+
+// ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
+  // ── Card container ────────────────────────────────────────────────────
   card: {
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalS,
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
-    borderBottomColor: tokens.colorNeutralStroke3,
+    paddingTop: tokens.spacingVerticalL,
+    paddingBottom: tokens.spacingVerticalL,
+    paddingLeft: tokens.spacingHorizontalXL,
+    paddingRight: tokens.spacingHorizontalXL,
     backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusMedium,
+    boxShadow: tokens.shadow2,
+    marginBottom: tokens.spacingVerticalS,
+    borderLeftWidth: "3px",
+    borderLeftStyle: "solid",
+    borderLeftColor: tokens.colorNeutralStroke2, // default, overridden by urgency class
     cursor: "default",
-    transitionProperty: "background-color",
+    transitionProperty: "background-color, box-shadow",
     transitionDuration: tokens.durationFaster,
     transitionTimingFunction: tokens.curveEasyEase,
     ":hover": {
       backgroundColor: tokens.colorNeutralBackground1Hover,
+      boxShadow: tokens.shadow4,
     },
     ":focus-visible": {
       outlineStyle: "solid",
@@ -115,35 +140,59 @@ const useStyles = makeStyles({
     },
   },
 
-  // ── Main row: icon + content + actions ─────────────────────────────────
+  // ── Left border urgency variants ──────────────────────────────────────
+  urgencyOverdue: {
+    borderLeftColor: tokens.colorPaletteRedBorder2,
+  },
+  urgencyDueSoon: {
+    borderLeftColor: tokens.colorPaletteDarkOrangeBorder2,
+  },
+  urgencyOnTrack: {
+    borderLeftColor: tokens.colorPaletteGreenBorder2,
+  },
+  urgencyNeutral: {
+    borderLeftColor: tokens.colorNeutralStroke2,
+  },
+
+  // ── Main row: icon + content + actions ────────────────────────────────
   mainRow: {
     display: "flex",
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: tokens.spacingHorizontalM,
+    gap: tokens.spacingHorizontalL,
   },
 
-  // ── Left: type icon circle ─────────────────────────────────────────────
+  // ── Left: type icon circle (40px) ────────────────────────────────────
   typeIconCircle: {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
-    width: "32px",
-    height: "32px",
+    width: "40px",
+    height: "40px",
     borderRadius: "50%",
     backgroundColor: tokens.colorBrandBackground2,
     color: tokens.colorBrandForeground1,
     marginTop: "2px",
   },
 
-  // ── Centre: content column ─────────────────────────────────────────────
+  // ── Centre: content column (2 rows) ──────────────────────────────────
   contentColumn: {
     flex: "1 1 0",
     minWidth: 0,
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalXXS,
+    gap: tokens.spacingVerticalS,
+  },
+
+  // Row 1: type badge + event name
+  primaryRow: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalS,
+    flexWrap: "nowrap",
+    minWidth: 0,
   },
   title: {
     display: "block",
@@ -153,20 +202,13 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
     fontWeight: tokens.fontWeightSemibold,
   },
-  description: {
-    display: "-webkit-box",
-    WebkitLineClamp: "2",
-    WebkitBoxOrient: "vertical",
-    overflow: "hidden",
-    color: tokens.colorNeutralForeground2,
-  },
 
-  // ── Metadata row: priority badge + record type + regarding name ────────
-  metaRow: {
+  // Row 2: priority badge + matter ref + due date
+  secondaryRow: {
     display: "flex",
     flexDirection: "row",
     alignItems: "center",
-    gap: tokens.spacingHorizontalXS,
+    gap: tokens.spacingHorizontalS,
     flexWrap: "wrap",
   },
   metaText: {
@@ -178,34 +220,27 @@ const useStyles = makeStyles({
   metaDivider: {
     color: tokens.colorNeutralForeground4,
   },
-
-  // ── Timestamp row: modifiedon + duedate ────────────────────────────────
-  timestampRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalS,
-  },
   timestamp: {
     color: tokens.colorNeutralForeground3,
     whiteSpace: "nowrap",
   },
   dueDateOverdue: {
     color: tokens.colorPaletteRedForeground3,
+    fontWeight: tokens.fontWeightSemibold,
     whiteSpace: "nowrap",
   },
 
-  // ── Right: action buttons ──────────────────────────────────────────────
+  // ── Right: action buttons (vertical stack) ────────────────────────────
   actionsColumn: {
     display: "flex",
-    flexDirection: "row",
+    flexDirection: "column",
     alignItems: "center",
-    gap: tokens.spacingHorizontalXXS,
+    gap: tokens.spacingVerticalXS,
     flexShrink: 0,
     paddingTop: "2px",
   },
 
-  // Flag active state
+  // Flag states
   flagButtonActive: {
     color: tokens.colorBrandForeground1,
   },
@@ -260,7 +295,41 @@ const PriorityBadge: React.FC<IPriorityBadgeProps> = ({ level }) => {
 };
 
 // ---------------------------------------------------------------------------
-// Record Type Badge sub-component
+// Type Badge sub-component (event type label)
+// ---------------------------------------------------------------------------
+
+interface ITypeBadgeProps {
+  typeName: string;
+}
+
+const TypeBadge: React.FC<ITypeBadgeProps> = ({ typeName }) => (
+  <span
+    role="img"
+    aria-label={`Type: ${typeName}`}
+    style={{
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: tokens.borderRadiusSmall,
+      paddingTop: "1px",
+      paddingBottom: "1px",
+      paddingLeft: tokens.spacingHorizontalXS,
+      paddingRight: tokens.spacingHorizontalXS,
+      fontSize: tokens.fontSizeBase100,
+      fontWeight: tokens.fontWeightSemibold,
+      lineHeight: tokens.lineHeightBase100,
+      whiteSpace: "nowrap",
+      backgroundColor: tokens.colorNeutralBackground3,
+      color: tokens.colorNeutralForeground2,
+      flexShrink: 0,
+    }}
+  >
+    {typeName}
+  </span>
+);
+
+// ---------------------------------------------------------------------------
+// Record Type Badge sub-component (matter/project/etc.)
 // ---------------------------------------------------------------------------
 
 interface IRecordTypeBadgeProps {
@@ -284,13 +353,25 @@ const RecordTypeBadge: React.FC<IRecordTypeBadgeProps> = ({ typeName }) => (
       fontWeight: tokens.fontWeightSemibold,
       lineHeight: tokens.lineHeightBase100,
       whiteSpace: "nowrap",
-      backgroundColor: tokens.colorNeutralBackground3,
-      color: tokens.colorNeutralForeground2,
+      backgroundColor: tokens.colorBrandBackground2,
+      color: tokens.colorBrandForeground1,
+      flexShrink: 0,
     }}
   >
     {typeName}
   </span>
 );
+
+// ---------------------------------------------------------------------------
+// Urgency class selector
+// ---------------------------------------------------------------------------
+
+const URGENCY_CLASS_MAP: Record<UrgencyTier, keyof ReturnType<typeof useStyles>> = {
+  overdue: 'urgencyOverdue',
+  dueSoon: 'urgencyDueSoon',
+  onTrack: 'urgencyOnTrack',
+  neutral: 'urgencyNeutral',
+};
 
 // ---------------------------------------------------------------------------
 // Props
@@ -299,11 +380,14 @@ const RecordTypeBadge: React.FC<IRecordTypeBadgeProps> = ({ typeName }) => (
 export interface IFeedItemCardProps {
   /** The event to display */
   event: IEvent;
-  /**
-   * Called when the user clicks the AI Summary button.
-   * The parent opens the AI Summary dialog (task 013).
-   */
+  /** Called when the user clicks the AI Summary button. */
   onAISummary: (eventId: string) => void;
+  /** Called when the user clicks the Email action (stub). */
+  onEmail?: (eventId: string) => void;
+  /** Called when the user clicks the Teams action (stub). */
+  onTeams?: (eventId: string) => void;
+  /** Called when the user clicks the Edit action. */
+  onEdit?: (eventId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -311,28 +395,22 @@ export interface IFeedItemCardProps {
 // ---------------------------------------------------------------------------
 
 export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
-  ({ event, onAISummary }) => {
+  ({ event, onAISummary, onEmail, onTeams, onEdit }) => {
     const styles = useStyles();
 
-    // Read flag state from shared context (optimistic updates included)
+    // Flag state from shared context (optimistic updates)
     const { isFlagged, toggleFlag, isPending, getError } = useFeedTodoSync();
     const flagged = isFlagged(event.sprk_eventid);
     const pending = isPending(event.sprk_eventid);
     const flagError = getError(event.sprk_eventid);
 
     const priorityLevel = derivePriorityLevel(event.sprk_priority);
-    const relativeTime = formatRelativeTime(event.modifiedon);
 
-    // Resolve type icon component
+    // Resolve type icon
     const TypeIconComponent = getTypeIcon(event.eventTypeName);
     const typeIconLabel = getTypeIconLabel(event.eventTypeName);
 
-    // Build title: "EventType : EventName" or just "EventName" if no type
-    const titleText = event.eventTypeName
-      ? `${event.eventTypeName} : ${event.sprk_eventname}`
-      : event.sprk_eventname;
-
-    // Due date formatting
+    // Due date
     const dueDateText = event.sprk_duedate
       ? `Due: ${formatRelativeTime(event.sprk_duedate)}`
       : null;
@@ -340,7 +418,12 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
       ? new Date(event.sprk_duedate) < new Date()
       : false;
 
-    // Flag toggle handler
+    // Urgency tier for left border
+    const urgencyTier = deriveUrgencyTier(event.sprk_duedate);
+    const urgencyClass = styles[URGENCY_CLASS_MAP[urgencyTier]];
+
+    // ── Handlers ──────────────────────────────────────────────────────────
+
     const handleFlagToggle = React.useCallback(() => {
       void toggleFlag(event.sprk_eventid);
     }, [toggleFlag, event.sprk_eventid]);
@@ -349,21 +432,49 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
       onAISummary(event.sprk_eventid);
     }, [onAISummary, event.sprk_eventid]);
 
-    // Build aria label for the card
+    const handleEmail = React.useCallback(() => {
+      if (onEmail) {
+        onEmail(event.sprk_eventid);
+      } else {
+        console.info(`[FeedItemCard] Email action for event ${event.sprk_eventid} (stub)`);
+      }
+    }, [onEmail, event.sprk_eventid]);
+
+    const handleTeams = React.useCallback(() => {
+      if (onTeams) {
+        onTeams(event.sprk_eventid);
+      } else {
+        console.info(`[FeedItemCard] Teams action for event ${event.sprk_eventid} (stub)`);
+      }
+    }, [onTeams, event.sprk_eventid]);
+
+    const handleEdit = React.useCallback(() => {
+      if (onEdit) {
+        onEdit(event.sprk_eventid);
+      } else {
+        navigateToEntity({
+          action: "openRecord",
+          entityName: "sprk_event",
+          entityId: event.sprk_eventid,
+        });
+      }
+    }, [onEdit, event.sprk_eventid]);
+
+    // ── Accessibility ─────────────────────────────────────────────────────
+
     const cardAriaLabel = [
-      titleText,
-      typeIconLabel,
+      event.eventTypeName || "",
+      event.sprk_eventname,
       priorityLevel ? `Priority: ${priorityLevel}.` : "",
       event.regardingRecordTypeName || "",
       event.sprk_regardingrecordname || "",
-      relativeTime,
       dueDateText || "",
       flagged ? "Flagged as to-do." : "",
     ]
       .filter(Boolean)
       .join(" ");
 
-    // Flag button tooltip
+    // Flag button tooltip / aria
     const flagTooltip = flagError
       ? `Error: ${flagError} — click to retry`
       : flagged
@@ -384,69 +495,55 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
 
     return (
       <div
-        className={styles.card}
+        className={mergeClasses(styles.card, urgencyClass)}
         role="listitem"
         tabIndex={0}
         aria-label={cardAriaLabel}
       >
-        {/* ── Main row: icon + content + actions ──────────────────── */}
         <div className={styles.mainRow}>
-          {/* Type icon in circle */}
+          {/* Type icon in 40px circle */}
           <div
             className={styles.typeIconCircle}
             aria-label={typeIconLabel}
             role="img"
           >
-            <TypeIconComponent fontSize={16} />
+            <TypeIconComponent fontSize={20} />
           </div>
 
-          {/* Content: title, description, metadata, timestamps */}
+          {/* Content: 2 rows */}
           <div className={styles.contentColumn}>
-            {/* Title: EventType : EventName */}
-            <Text
-              as="span"
-              size={300}
-              className={styles.title}
-            >
-              {titleText}
-            </Text>
-
-            {/* Description (sprk_description) */}
-            {event.sprk_description && (
+            {/* Row 1: Type badge + Event Name */}
+            <div className={styles.primaryRow}>
+              {event.eventTypeName && (
+                <TypeBadge typeName={event.eventTypeName} />
+              )}
               <Text
                 as="span"
-                size={200}
-                className={styles.description}
+                size={400}
+                className={styles.title}
               >
-                {event.sprk_description}
+                {event.sprk_eventname}
               </Text>
-            )}
+            </div>
 
-            {/* Metadata row: priority + record type + regarding name */}
-            <div className={styles.metaRow}>
+            {/* Row 2: Priority + record type + matter ref + due date */}
+            <div className={styles.secondaryRow}>
               {priorityLevel && <PriorityBadge level={priorityLevel} />}
               {event.regardingRecordTypeName && (
                 <RecordTypeBadge typeName={event.regardingRecordTypeName} />
               )}
               {event.sprk_regardingrecordname && (
-                <Text size={100} className={styles.metaText}>
+                <Text size={200} className={styles.metaText}>
                   {event.sprk_regardingrecordname}
                 </Text>
               )}
-            </div>
-
-            {/* Timestamp row: modifiedon + duedate */}
-            <div className={styles.timestampRow}>
-              <Text size={100} className={styles.timestamp}>
-                {relativeTime}
-              </Text>
               {dueDateText && (
                 <>
-                  <Text size={100} className={styles.metaDivider} aria-hidden="true">
-                    |
+                  <Text size={200} className={styles.metaDivider} aria-hidden="true">
+                    ·
                   </Text>
                   <Text
-                    size={100}
+                    size={200}
                     className={isDueOverdue ? styles.dueDateOverdue : styles.timestamp}
                   >
                     {dueDateText}
@@ -456,17 +553,14 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
             </div>
           </div>
 
-          {/* Action buttons (right side) */}
+          {/* Action buttons — vertical stack, medium size */}
           <div className={styles.actionsColumn}>
             {/* Flag toggle */}
-            <Tooltip
-              content={flagTooltip}
-              relationship="label"
-            >
+            <Tooltip content={flagTooltip} relationship="label">
               <div className={styles.flagButtonWrapper}>
                 <Button
                   appearance="subtle"
-                  size="small"
+                  size="medium"
                   icon={
                     flagged
                       ? <FlagFilled aria-hidden="true" />
@@ -487,11 +581,44 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
               </div>
             </Tooltip>
 
+            {/* Email (stub) */}
+            <Tooltip content="Send email" relationship="label">
+              <Button
+                appearance="subtle"
+                size="medium"
+                icon={<MailRegular aria-hidden="true" />}
+                aria-label="Send email about this event"
+                onClick={handleEmail}
+              />
+            </Tooltip>
+
+            {/* Teams (stub) */}
+            <Tooltip content="Start Teams chat" relationship="label">
+              <Button
+                appearance="subtle"
+                size="medium"
+                icon={<ChatRegular aria-hidden="true" />}
+                aria-label="Start Teams chat about this event"
+                onClick={handleTeams}
+              />
+            </Tooltip>
+
+            {/* Edit */}
+            <Tooltip content="Edit event" relationship="label">
+              <Button
+                appearance="subtle"
+                size="medium"
+                icon={<EditRegular aria-hidden="true" />}
+                aria-label="Edit this event"
+                onClick={handleEdit}
+              />
+            </Tooltip>
+
             {/* AI Summary */}
             <Tooltip content="Generate AI summary" relationship="label">
               <Button
                 appearance="subtle"
-                size="small"
+                size="medium"
                 icon={<SparkleRegular aria-hidden="true" />}
                 aria-label="Generate AI summary"
                 onClick={handleAISummary}
