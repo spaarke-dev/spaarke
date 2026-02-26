@@ -26,7 +26,6 @@ import {
   tokens,
   Text,
   Badge,
-  Button,
   TabList,
   Tab,
   SelectTabData,
@@ -35,7 +34,6 @@ import {
 import {
   AlertRegular,
   CheckboxCheckedRegular,
-  ArrowClockwiseRegular,
 } from "@fluentui/react-icons";
 import { ActivityFeed } from "../ActivityFeed";
 import { SmartToDo } from "../SmartToDo";
@@ -84,13 +82,6 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
-  headerActions: {
-    display: "flex",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalXXS,
-    paddingBottom: tokens.spacingVerticalXS,
-  },
-
   // ── TabList ─────────────────────────────────────────────────────────────
   tabList: {
     paddingLeft: tokens.spacingHorizontalM,
@@ -212,18 +203,6 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
     []
   );
 
-  // Refresh button — routes to active tab's refetch
-  const handleRefresh = React.useCallback(() => {
-    if (activeTab === "updates") {
-      feedRefetchRef.current?.();
-    } else {
-      todoRefetchRef.current?.();
-    }
-  }, [activeTab]);
-
-  const refreshLabel =
-    activeTab === "updates" ? "Refresh updates feed" : "Refresh to-do list";
-
   return (
     <div className={styles.card} role="region" aria-label="Updates and To Do">
       {/* ── Header ────────────────────────────────────────────────────── */}
@@ -231,15 +210,6 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
         <Text className={styles.headerTitle} size={400}>
           Activity
         </Text>
-        <div className={styles.headerActions}>
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={<ArrowClockwiseRegular />}
-            onClick={handleRefresh}
-            aria-label={refreshLabel}
-          />
-        </div>
       </div>
 
       {/* ── TabList ───────────────────────────────────────────────────── */}
