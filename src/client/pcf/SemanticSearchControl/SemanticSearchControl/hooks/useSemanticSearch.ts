@@ -109,6 +109,8 @@ export function useSemanticSearch(
         matterTypes: [],
         dateRange: null,
         fileTypes: [],
+        threshold: 0,
+        searchMode: "hybrid",
     });
 
     // Calculate if more results available
@@ -206,6 +208,8 @@ export function useSemanticSearch(
             matterTypes: [],
             dateRange: null,
             fileTypes: [],
+            threshold: 0,
+            searchMode: "hybrid",
         };
     }, []);
 

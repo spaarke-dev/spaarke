@@ -18,6 +18,8 @@ const initialFilters: SearchFilters = {
     matterTypes: [],
     dateRange: null,
     fileTypes: [],
+    threshold: 0,
+    searchMode: "hybrid",
 };
 
 /**
@@ -122,7 +124,9 @@ export function useFilters(): UseFiltersResult {
             filters.documentTypes.length > 0 ||
             filters.matterTypes.length > 0 ||
             filters.fileTypes.length > 0 ||
-            filters.dateRange !== null
+            filters.dateRange !== null ||
+            filters.threshold > 0 ||
+            filters.searchMode !== "hybrid"
         );
     }, [filters]);
 
