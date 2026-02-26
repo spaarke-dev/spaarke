@@ -16,7 +16,8 @@ import {
   Text,
 } from "@fluentui/react-components";
 import { parseSidePaneParams } from "./utils/parseParams";
-import { loadTodoRecord, saveDescription } from "./services/todoService";
+import { loadTodoRecord, saveTodoFields } from "./services/todoService";
+import type { ITodoFieldUpdates } from "./services/todoService";
 import { sendTodoSaved } from "./utils/broadcastChannel";
 import { TodoDetail } from "./components/TodoDetail";
 import type { ITodoRecord } from "./types/TodoRecord";
@@ -141,20 +142,19 @@ export function App() {
     };
   }, [eventId]);
 
-  // Save description handler
-  const handleSaveDescription = React.useCallback(
-    async (evtId: string, description: string) => {
-      const result = await saveDescription(evtId, description);
+  // Save fields handler — updates one or more fields on the event record
+  const handleSaveFields = React.useCallback(
+    async (evtId: string, fields: ITodoFieldUpdates) => {
+      const result = await saveTodoFields(evtId, fields);
       if (result.success) {
-        // Update local record
-        setRecord((prev) =>
-          prev ? { ...prev, sprk_description: description } : prev
-        );
+        // Update local record with saved values
+        setRecord((prev) => (prev ? { ...prev, ...fields } : prev));
         // Notify parent Kanban to refresh
         sendTodoSaved(evtId);
       } else {
         console.error("[App] Save failed:", result.error);
       }
+      return result;
     },
     []
   );
@@ -179,7 +179,7 @@ export function App() {
             record={record}
             isLoading={isLoading}
             error={error}
-            onSaveDescription={handleSaveDescription}
+            onSaveFields={handleSaveFields}
           />
         </div>
       </div>

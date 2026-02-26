@@ -39,12 +39,20 @@ export async function loadTodoRecord(eventId: string): Promise<ILoadResult> {
   }
 }
 
+/** Fields that can be saved from the detail pane. */
+export interface ITodoFieldUpdates {
+  sprk_description?: string;
+  sprk_duedate?: string | null;
+  sprk_priorityscore?: number;
+  sprk_effortscore?: number;
+}
+
 /**
- * Save the description field on an event record.
+ * Save one or more editable fields on an event record.
  */
-export async function saveDescription(
+export async function saveTodoFields(
   eventId: string,
-  description: string
+  fields: ITodoFieldUpdates
 ): Promise<ISaveResult> {
   const webApi = getXrmWebApi();
   if (!webApi) {
@@ -52,13 +60,11 @@ export async function saveDescription(
   }
 
   try {
-    await webApi.updateRecord("sprk_event", eventId, {
-      sprk_description: description,
-    });
+    await webApi.updateRecord("sprk_event", eventId, fields);
     return { success: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[todoService] Failed to save description:", message);
+    console.error("[todoService] Failed to save fields:", message);
     return { success: false, error: message };
   }
 }

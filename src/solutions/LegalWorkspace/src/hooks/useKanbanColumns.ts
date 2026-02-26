@@ -220,22 +220,18 @@ export function useKanbanColumns(options: IUseKanbanColumnsOptions): IUseKanbanC
         [eventId]: { column: choiceValue, pinned: true },
       }));
 
-      // Persist both column and pin in parallel
+      // Persist both column and pin in parallel.
+      // On failure we keep the override (user intent) — the override will persist
+      // until Dataverse fields are provisioned and the next recalculate/refetch.
       const service = serviceRef.current;
       Promise.all([
         service.updateEventColumn(eventId, choiceValue),
         service.updateEventPinned(eventId, true),
       ]).then(([colResult, pinResult]) => {
         if (!colResult.success || !pinResult.success) {
-          console.error('[useKanbanColumns] moveItem write failed, rolling back', {
+          console.warn('[useKanbanColumns] moveItem write failed (fields may not exist yet)', {
             colResult,
             pinResult,
-          });
-          // Rollback: remove overrides so item returns to its data-driven position
-          setOverrides((prev) => {
-            const next = { ...prev };
-            delete next[eventId];
-            return next;
           });
         }
       });
@@ -265,23 +261,10 @@ export function useKanbanColumns(options: IUseKanbanColumnsOptions): IUseKanbanC
         };
       });
 
-      // Persist
+      // Persist — keep override on failure (user intent takes priority)
       serviceRef.current.updateEventPinned(eventId, newPinned).then((result) => {
         if (!result.success) {
-          console.error('[useKanbanColumns] togglePin write failed, rolling back', result);
-          // Rollback pin to previous state
-          setOverrides((prev) => {
-            const existing = prev[eventId];
-            if (!existing) return prev;
-            // Remove the pin override; keep column if set
-            const { pinned: _removed, ...rest } = existing;
-            if (Object.keys(rest).length === 0) {
-              const next = { ...prev };
-              delete next[eventId];
-              return next;
-            }
-            return { ...prev, [eventId]: rest };
-          });
+          console.warn('[useKanbanColumns] togglePin write failed (fields may not exist yet)', result);
         }
       });
     },

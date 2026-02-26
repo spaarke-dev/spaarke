@@ -1,7 +1,11 @@
 /**
  * TodoDetail — Main content component for the To Do Detail side pane.
  *
- * Shows event name, editable description, score breakdown, badges, and action buttons.
+ * Editable fields: Description, Due Date, Priority Score, Effort Score.
+ * Read-only: Assigned To (lookup field — edit via form).
+ * Score breakdown computed live from current field values.
+ * Single Save button persists all dirty fields at once.
+ *
  * All colours from Fluent UI v9 semantic tokens (ADR-021).
  */
 
@@ -11,36 +15,38 @@ import {
   tokens,
   Text,
   Textarea,
+  Input,
+  SpinButton,
   Button,
   Divider,
   Spinner,
+  MessageBar,
+  MessageBarBody,
 } from "@fluentui/react-components";
-import {
-  EditRegular,
-  MailRegular,
-  ChatRegular,
-  SparkleRegular,
-} from "@fluentui/react-icons";
+import type { SpinButtonChangeEvent, SpinButtonOnChangeData } from "@fluentui/react-components";
+import { SaveRegular } from "@fluentui/react-icons";
 import { ITodoRecord } from "../types/TodoRecord";
-import { openEventForm } from "../services/sidePaneService";
+import type { ITodoFieldUpdates } from "../services/todoService";
 
 // ---------------------------------------------------------------------------
 // To Do Score computation (self-contained — no cross-solution imports)
 // ---------------------------------------------------------------------------
 
-function computeScore(record: ITodoRecord): {
+function computeScore(
+  priority: number,
+  effort: number,
+  duedate: string | null | undefined
+): {
   todoScore: number;
   priorityComponent: number;
   effortComponent: number;
   urgencyComponent: number;
 } {
-  const priority = record.sprk_priorityscore ?? 0;
-  const effort = record.sprk_effortscore ?? 0;
   const invertedEffort = 100 - effort;
 
   let urgencyRaw = 0;
-  if (record.sprk_duedate) {
-    const due = new Date(record.sprk_duedate);
+  if (duedate) {
+    const due = new Date(duedate);
     const now = new Date();
     const diffMs = due.getTime() - now.getTime();
     const diffDays = diffMs / (1000 * 60 * 60 * 24);
@@ -58,15 +64,12 @@ function computeScore(record: ITodoRecord): {
   return { todoScore, priorityComponent, effortComponent, urgencyComponent };
 }
 
-function formatDueDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const sameYear = date.getFullYear() === now.getFullYear();
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    ...(sameYear ? {} : { year: "numeric" }),
-  });
+/** Convert ISO date string to YYYY-MM-DD for input[type="date"]. */
+function toDateInputValue(dateStr?: string | null): string {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "";
+  return d.toISOString().split("T")[0];
 }
 
 // ---------------------------------------------------------------------------
@@ -100,10 +103,21 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
-  descriptionActions: {
+  fieldRow: {
     display: "flex",
-    justifyContent: "flex-end",
-    gap: tokens.spacingHorizontalS,
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXXS,
+  },
+  fieldLabel: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  readOnlyValue: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground1,
+    paddingTop: tokens.spacingVerticalXXS,
+    paddingBottom: tokens.spacingVerticalXXS,
   },
   detailRow: {
     display: "flex",
@@ -123,11 +137,18 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightBold,
     color: tokens.colorBrandForeground1,
   },
-  actionsRow: {
+  footer: {
     display: "flex",
-    flexDirection: "row",
+    justifyContent: "flex-end",
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalM,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: tokens.colorNeutralStroke2,
+    flexShrink: 0,
     gap: tokens.spacingHorizontalS,
-    flexWrap: "wrap",
   },
   emptyState: {
     display: "flex",
@@ -144,6 +165,9 @@ const useStyles = makeStyles({
     flex: "1 1 0",
     paddingTop: tokens.spacingVerticalXXXL,
   },
+  errorBanner: {
+    flexShrink: 0,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -154,7 +178,10 @@ export interface ITodoDetailProps {
   record: ITodoRecord | null;
   isLoading: boolean;
   error: string | null;
-  onSaveDescription: (eventId: string, description: string) => Promise<void>;
+  onSaveFields: (
+    eventId: string,
+    fields: ITodoFieldUpdates
+  ) => Promise<{ success: boolean; error?: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,45 +189,106 @@ export interface ITodoDetailProps {
 // ---------------------------------------------------------------------------
 
 export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
-  ({ record, isLoading, error, onSaveDescription }) => {
+  ({ record, isLoading, error, onSaveFields }) => {
     const styles = useStyles();
 
-    // Description editing state
-    const [descriptionValue, setDescriptionValue] = React.useState("");
-    const [isDirty, setIsDirty] = React.useState(false);
+    // Editable field values
+    const [description, setDescription] = React.useState("");
+    const [dueDate, setDueDate] = React.useState("");
+    const [priority, setPriority] = React.useState<number>(0);
+    const [effort, setEffort] = React.useState<number>(0);
+
+    // Save state
     const [isSaving, setIsSaving] = React.useState(false);
+    const [saveError, setSaveError] = React.useState<string | null>(null);
+
+    // Snapshot of original values (for dirty detection)
+    const origRef = React.useRef({ description: "", dueDate: "", priority: 0, effort: 0 });
 
     // Reset when record changes
     React.useEffect(() => {
       if (record) {
-        setDescriptionValue(record.sprk_description ?? "");
-        setIsDirty(false);
-        setIsSaving(false);
+        const desc = record.sprk_description ?? "";
+        const dd = toDateInputValue(record.sprk_duedate);
+        const pri = record.sprk_priorityscore ?? 0;
+        const eff = record.sprk_effortscore ?? 0;
+        setDescription(desc);
+        setDueDate(dd);
+        setPriority(pri);
+        setEffort(eff);
+        setSaveError(null);
+        origRef.current = { description: desc, dueDate: dd, priority: pri, effort: eff };
       }
     }, [record?.sprk_eventid]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // Dirty detection
+    const isDirty =
+      description !== origRef.current.description ||
+      dueDate !== origRef.current.dueDate ||
+      priority !== origRef.current.priority ||
+      effort !== origRef.current.effort;
+
+    // Handlers
     const handleDescriptionChange = React.useCallback(
-      (_ev: unknown, data: { value: string }) => {
-        setDescriptionValue(data.value);
-        setIsDirty(data.value !== (record?.sprk_description ?? ""));
-      },
-      [record?.sprk_description]
+      (_ev: unknown, data: { value: string }) => setDescription(data.value),
+      []
     );
 
+    const handleDueDateChange = React.useCallback(
+      (ev: React.ChangeEvent<HTMLInputElement>) => setDueDate(ev.target.value),
+      []
+    );
+
+    const handlePriorityChange = React.useCallback(
+      (_ev: SpinButtonChangeEvent, data: SpinButtonOnChangeData) => {
+        const val = data.value ?? data.displayValue ? Number(data.displayValue) : 0;
+        setPriority(Math.max(0, Math.min(100, val)));
+      },
+      []
+    );
+
+    const handleEffortChange = React.useCallback(
+      (_ev: SpinButtonChangeEvent, data: SpinButtonOnChangeData) => {
+        const val = data.value ?? data.displayValue ? Number(data.displayValue) : 0;
+        setEffort(Math.max(0, Math.min(100, val)));
+      },
+      []
+    );
+
+    // Save all dirty fields
     const handleSave = React.useCallback(async () => {
       if (!record || !isDirty) return;
       setIsSaving(true);
+      setSaveError(null);
+
+      const updates: ITodoFieldUpdates = {};
+      if (description !== origRef.current.description) {
+        updates.sprk_description = description;
+      }
+      if (dueDate !== origRef.current.dueDate) {
+        updates.sprk_duedate = dueDate || null;
+      }
+      if (priority !== origRef.current.priority) {
+        updates.sprk_priorityscore = priority;
+      }
+      if (effort !== origRef.current.effort) {
+        updates.sprk_effortscore = effort;
+      }
+
       try {
-        await onSaveDescription(record.sprk_eventid, descriptionValue);
-        setIsDirty(false);
+        const result = await onSaveFields(record.sprk_eventid, updates);
+        if (result.success) {
+          // Update snapshot so dirty detection resets
+          origRef.current = { description, dueDate, priority, effort };
+        } else {
+          setSaveError(result.error ?? "Save failed");
+        }
+      } catch {
+        setSaveError("Save failed — unexpected error");
       } finally {
         setIsSaving(false);
       }
-    }, [record, isDirty, descriptionValue, onSaveDescription]);
-
-    const handleEdit = React.useCallback(() => {
-      if (record) openEventForm(record.sprk_eventid);
-    }, [record]);
+    }, [record, isDirty, description, dueDate, priority, effort, onSaveFields]);
 
     // Loading state
     if (isLoading) {
@@ -229,85 +317,113 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       );
     }
 
-    // Compute values
-    const score = computeScore(record);
-    const assignedTo = record["_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue"] ?? null;
-    const dueDateFormatted = record.sprk_duedate ? formatDueDate(record.sprk_duedate) : null;
+    // Compute score from CURRENT field values (live preview as user edits)
+    const score = computeScore(priority, effort, dueDate || record.sprk_duedate);
+    const assignedTo =
+      record["_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue"] ?? null;
 
     return (
       <div className={styles.container}>
         <div className={styles.content}>
-          {/* Description section */}
+          {/* Save error banner */}
+          {saveError && (
+            <MessageBar intent="error" className={styles.errorBanner}>
+              <MessageBarBody>{saveError}</MessageBarBody>
+            </MessageBar>
+          )}
+
+          {/* Description */}
           <div className={styles.section}>
-            <Text className={styles.sectionTitle} size={300}>Description</Text>
+            <Text className={styles.sectionTitle} size={300}>
+              Description
+            </Text>
             <Textarea
-              value={descriptionValue}
+              value={description}
               onChange={handleDescriptionChange}
               placeholder="Add a description..."
               resize="vertical"
               rows={4}
             />
-            {isDirty && (
-              <div className={styles.descriptionActions}>
-                <Button
-                  appearance="primary"
-                  size="small"
-                  onClick={handleSave}
-                  disabled={isSaving}
-                >
-                  {isSaving ? "Saving..." : "Save"}
-                </Button>
-              </div>
-            )}
           </div>
 
           <Divider />
 
-          {/* Details section */}
+          {/* Editable details */}
           <div className={styles.section}>
-            <Text className={styles.sectionTitle} size={300}>Details</Text>
-            {dueDateFormatted && (
-              <div className={styles.detailRow}>
-                <span className={styles.detailLabel}>Due Date</span>
-                <span className={styles.detailValue}>{dueDateFormatted}</span>
-              </div>
-            )}
-            {assignedTo && (
-              <div className={styles.detailRow}>
-                <span className={styles.detailLabel}>Assigned To</span>
-                <span className={styles.detailValue}>{assignedTo}</span>
-              </div>
-            )}
-            {record.sprk_priorityscore != null && (
-              <div className={styles.detailRow}>
-                <span className={styles.detailLabel}>Priority Score</span>
-                <span className={styles.detailValue}>{record.sprk_priorityscore}</span>
-              </div>
-            )}
-            {record.sprk_effortscore != null && (
-              <div className={styles.detailRow}>
-                <span className={styles.detailLabel}>Effort Score</span>
-                <span className={styles.detailValue}>{record.sprk_effortscore}</span>
-              </div>
-            )}
+            <Text className={styles.sectionTitle} size={300}>
+              Details
+            </Text>
+
+            {/* Due Date */}
+            <div className={styles.fieldRow}>
+              <label className={styles.fieldLabel}>Due Date</label>
+              <Input
+                type="date"
+                value={dueDate}
+                onChange={handleDueDateChange}
+                size="small"
+              />
+            </div>
+
+            {/* Priority Score */}
+            <div className={styles.fieldRow}>
+              <label className={styles.fieldLabel}>Priority Score</label>
+              <SpinButton
+                value={priority}
+                onChange={handlePriorityChange}
+                min={0}
+                max={100}
+                step={5}
+                size="small"
+              />
+            </div>
+
+            {/* Effort Score */}
+            <div className={styles.fieldRow}>
+              <label className={styles.fieldLabel}>Effort Score</label>
+              <SpinButton
+                value={effort}
+                onChange={handleEffortChange}
+                min={0}
+                max={100}
+                step={5}
+                size="small"
+              />
+            </div>
+
+            {/* Assigned To — read-only (lookup field) */}
+            <div className={styles.fieldRow}>
+              <span className={styles.fieldLabel}>Assigned To</span>
+              <span className={styles.readOnlyValue}>
+                {assignedTo ?? "—"}
+              </span>
+            </div>
           </div>
 
           <Divider />
 
-          {/* To Do Score breakdown */}
+          {/* To Do Score breakdown — live preview from current values */}
           <div className={styles.section}>
-            <Text className={styles.sectionTitle} size={300}>To Do Score</Text>
+            <Text className={styles.sectionTitle} size={300}>
+              To Do Score
+            </Text>
             <div className={styles.detailRow}>
               <span className={styles.detailLabel}>Priority (50%)</span>
-              <span className={styles.detailValue}>{score.priorityComponent.toFixed(1)}</span>
+              <span className={styles.detailValue}>
+                {score.priorityComponent.toFixed(1)}
+              </span>
             </div>
             <div className={styles.detailRow}>
               <span className={styles.detailLabel}>Effort (20%)</span>
-              <span className={styles.detailValue}>{score.effortComponent.toFixed(1)}</span>
+              <span className={styles.detailValue}>
+                {score.effortComponent.toFixed(1)}
+              </span>
             </div>
             <div className={styles.detailRow}>
               <span className={styles.detailLabel}>Urgency (30%)</span>
-              <span className={styles.detailValue}>{score.urgencyComponent.toFixed(1)}</span>
+              <span className={styles.detailValue}>
+                {score.urgencyComponent.toFixed(1)}
+              </span>
             </div>
             <div className={styles.detailRow}>
               <span className={styles.detailLabel}>Total</span>
@@ -316,47 +432,18 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               </span>
             </div>
           </div>
+        </div>
 
-          <Divider />
-
-          {/* Actions */}
-          <div className={styles.section}>
-            <Text className={styles.sectionTitle} size={300}>Actions</Text>
-            <div className={styles.actionsRow}>
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<EditRegular />}
-                onClick={handleEdit}
-              >
-                Edit
-              </Button>
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<MailRegular />}
-                onClick={() => console.info("[TodoDetail] Email action — stub")}
-              >
-                Email
-              </Button>
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<ChatRegular />}
-                onClick={() => console.info("[TodoDetail] Teams action — stub")}
-              >
-                Teams
-              </Button>
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<SparkleRegular />}
-                onClick={() => console.info("[TodoDetail] AI action — stub")}
-              >
-                AI
-              </Button>
-            </div>
-          </div>
+        {/* Sticky footer with Save button */}
+        <div className={styles.footer}>
+          <Button
+            appearance="primary"
+            icon={<SaveRegular />}
+            onClick={handleSave}
+            disabled={!isDirty || isSaving}
+          >
+            {isSaving ? "Saving..." : "Save"}
+          </Button>
         </div>
       </div>
     );

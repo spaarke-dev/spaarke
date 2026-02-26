@@ -189,6 +189,7 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
 
   // Tab switch handler — refetch data when switching tabs so newly
   // flagged/created items appear without a full page reload.
+  // Also closes the To Do detail side pane when leaving the To Do tab.
   const handleTabSelect = React.useCallback(
     (_event: SelectTabEvent, data: SelectTabData) => {
       const tab = data.value as TabValue;
@@ -197,6 +198,15 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
         todoRefetchRef.current?.();
       } else if (tab === "updates") {
         feedRefetchRef.current?.();
+        // Close the To Do detail side pane when navigating away
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const xrm = (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
+          const pane = xrm?.App?.sidePanes?.getPane("todoDetailPane");
+          if (pane) pane.close();
+        } catch {
+          // Side pane API unavailable — ignore
+        }
       }
     },
     []
