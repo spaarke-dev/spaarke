@@ -27,11 +27,7 @@ import type { ITodoRecord } from "./types/TodoRecord";
 // ---------------------------------------------------------------------------
 
 function resolveTheme(): typeof webLightTheme {
-  // Check system preference
-  if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
-    return webDarkTheme;
-  }
-  // Check Power Apps dark mode indicator (navbar bg)
+  // 1. Check Power Apps navbar first (authoritative indicator of app theme)
   try {
     const navBar = window.parent?.document?.querySelector?.("[data-id='navbar']") as HTMLElement | null;
     if (navBar) {
@@ -40,9 +36,15 @@ function resolveTheme(): typeof webLightTheme {
         const [r, g, b] = bg.match(/\d+/g)?.map(Number) ?? [255, 255, 255];
         if ((r + g + b) / 3 < 128) return webDarkTheme;
       }
+      // Navbar found and is light — return light theme
+      return webLightTheme;
     }
   } catch {
-    // Cross-origin — ignore
+    // Cross-origin — fall through to system preference
+  }
+  // 2. Fallback: system preference (only when navbar is inaccessible)
+  if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
+    return webDarkTheme;
   }
   return webLightTheme;
 }
