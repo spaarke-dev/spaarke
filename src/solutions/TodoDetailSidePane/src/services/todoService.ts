@@ -45,6 +45,8 @@ export interface ITodoFieldUpdates {
   sprk_duedate?: string | null;
   sprk_priorityscore?: number;
   sprk_effortscore?: number;
+  /** OData bind for the Assigned To lookup (sprk_contact). */
+  "sprk_AssignedTo@odata.bind"?: string | null;
 }
 
 /**
@@ -66,5 +68,38 @@ export async function saveTodoFields(
     const message = err instanceof Error ? err.message : String(err);
     console.error("[todoService] Failed to save fields:", message);
     return { success: false, error: message };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Contact search for Assigned To lookup
+// ---------------------------------------------------------------------------
+
+export interface IContactOption {
+  id: string;
+  name: string;
+}
+
+/**
+ * Search sprk_contact records by name for the Assigned To picker.
+ */
+export async function searchContacts(query: string): Promise<IContactOption[]> {
+  const webApi = getXrmWebApi();
+  if (!webApi || !query.trim()) return [];
+
+  try {
+    const filter = `contains(sprk_name,'${query.replace(/'/g, "''")}')`;
+    const result = await webApi.retrieveMultipleRecords(
+      "sprk_contact",
+      `?$select=sprk_contactid,sprk_name&$filter=${filter}&$top=10&$orderby=sprk_name asc`
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (result.entities ?? []).map((e: any) => ({
+      id: e.sprk_contactid as string,
+      name: (e.sprk_name ?? "") as string,
+    }));
+  } catch (err) {
+    console.warn("[todoService] Contact search failed:", err);
+    return [];
   }
 }

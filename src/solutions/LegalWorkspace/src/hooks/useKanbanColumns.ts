@@ -64,6 +64,8 @@ export interface IUseKanbanColumnsResult {
   columns: IKanbanColumn<IEvent>[];
   /** Move an item to a target column. Auto-pins and persists to Dataverse. */
   moveItem: (eventId: string, targetColumn: TodoColumn) => void;
+  /** Reorder an item within the same column (user drag). */
+  reorderInColumn: (columnId: string, fromIndex: number, toIndex: number) => void;
   /** Toggle pin state for an item. Persists to Dataverse. */
   togglePin: (eventId: string) => void;
   /** Reassign all unpinned items by current scores. Batch-writes to Dataverse. */
@@ -142,6 +144,10 @@ export function useKanbanColumns(options: IUseKanbanColumnsOptions): IUseKanbanC
 
   const [isRecalculating, setIsRecalculating] = useState(false);
 
+  // Manual intra-column ordering. Key: column ID, Value: ordered eventId array.
+  // When present, overrides score-based sort within that column.
+  const [columnOrders, setColumnOrders] = useState<Record<string, string[]>>({});
+
   // Local overrides for optimistic column/pin mutations.
   // Key: eventId, Value: { column, pinned } overrides.
   const [overrides, setOverrides] = useState<
@@ -198,12 +204,44 @@ export function useKanbanColumns(options: IUseKanbanColumnsOptions): IUseKanbanC
   }, [items, overrides]);
 
   // -------------------------------------------------------------------------
-  // Derive columns
+  // Derive columns (score-based), then apply manual intra-column ordering
   // -------------------------------------------------------------------------
 
-  const columns = useMemo(
-    () => buildColumns(effectiveItems, todayThreshold, tomorrowThreshold),
-    [effectiveItems, todayThreshold, tomorrowThreshold]
+  const columns = useMemo(() => {
+    const base = buildColumns(effectiveItems, todayThreshold, tomorrowThreshold);
+    if (Object.keys(columnOrders).length === 0) return base;
+
+    return base.map((col) => {
+      const order = columnOrders[col.id];
+      if (!order || order.length === 0) return col;
+      const itemMap = new Map(col.items.map((i) => [i.sprk_eventid, i]));
+      const ordered: IEvent[] = [];
+      for (const id of order) {
+        const item = itemMap.get(id);
+        if (item) { ordered.push(item); itemMap.delete(id); }
+      }
+      // Append items not in the custom order (new items since reorder)
+      for (const item of col.items) {
+        if (itemMap.has(item.sprk_eventid)) ordered.push(item);
+      }
+      return { ...col, items: ordered };
+    });
+  }, [effectiveItems, todayThreshold, tomorrowThreshold, columnOrders]);
+
+  // -------------------------------------------------------------------------
+  // reorderInColumn — manual intra-column drag reorder
+  // -------------------------------------------------------------------------
+
+  const reorderInColumn = useCallback(
+    (columnId: string, fromIndex: number, toIndex: number) => {
+      const col = columns.find((c) => c.id === columnId);
+      if (!col) return;
+      const ids = col.items.map((i) => i.sprk_eventid);
+      const [moved] = ids.splice(fromIndex, 1);
+      ids.splice(toIndex, 0, moved);
+      setColumnOrders((prev) => ({ ...prev, [columnId]: ids }));
+    },
+    [columns]
   );
 
   // -------------------------------------------------------------------------
@@ -334,5 +372,5 @@ export function useKanbanColumns(options: IUseKanbanColumnsOptions): IUseKanbanC
     });
   }, [effectiveItems, todayThreshold, tomorrowThreshold]);
 
-  return { columns, moveItem, togglePin, recalculate, isRecalculating };
+  return { columns, moveItem, reorderInColumn, togglePin, recalculate, isRecalculating };
 }

@@ -353,6 +353,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   const {
     columns,
     moveItem,
+    reorderInColumn,
     togglePin,
     recalculate,
     isRecalculating,
@@ -499,7 +500,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
 
   const handleDragEnd = React.useCallback(
     (result: DropResult) => {
-      const { destination, source, draggableId } = result;
+      const { destination, source } = result;
 
       // Dropped outside any column or back to the same position
       if (!destination) return;
@@ -510,13 +511,18 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         return;
       }
 
-      // Cross-column move
-      const targetColumn = COLUMN_ID_MAP[destination.droppableId];
-      if (targetColumn) {
-        moveItem(draggableId, targetColumn);
+      if (destination.droppableId === source.droppableId) {
+        // Same-column reorder — preserve user's manual arrangement
+        reorderInColumn(source.droppableId, source.index, destination.index);
+      } else {
+        // Cross-column move
+        const targetColumn = COLUMN_ID_MAP[destination.droppableId];
+        if (targetColumn) {
+          moveItem(result.draggableId, targetColumn);
+        }
       }
     },
-    [moveItem]
+    [moveItem, reorderInColumn]
   );
 
   // -------------------------------------------------------------------------

@@ -1,10 +1,11 @@
 /**
  * TodoDetail — Main content component for the To Do Detail side pane.
  *
- * Editable fields: Description, Due Date, Priority Score, Effort Score.
- * Read-only: Assigned To (lookup field — edit via form).
- * Score breakdown computed live from current field values.
- * Single Save button persists all dirty fields at once.
+ * Layout (top to bottom):
+ *   1. Details: Due Date, Priority, Effort, Assigned To (editable)
+ *   2. Description (editable, fully expanded textarea)
+ *   3. To Do Score breakdown (live preview from current values)
+ *   4. Sticky footer Save button
  *
  * All colours from Fluent UI v9 semantic tokens (ADR-021).
  */
@@ -17,16 +18,23 @@ import {
   Textarea,
   Input,
   SpinButton,
+  Combobox,
+  Option,
   Button,
   Divider,
   Spinner,
   MessageBar,
   MessageBarBody,
 } from "@fluentui/react-components";
-import type { SpinButtonChangeEvent, SpinButtonOnChangeData } from "@fluentui/react-components";
+import type {
+  SpinButtonChangeEvent,
+  SpinButtonOnChangeData,
+  ComboboxProps,
+} from "@fluentui/react-components";
 import { SaveRegular } from "@fluentui/react-icons";
 import { ITodoRecord } from "../types/TodoRecord";
-import type { ITodoFieldUpdates } from "../services/todoService";
+import { searchContacts } from "../services/todoService";
+import type { ITodoFieldUpdates, IContactOption } from "../services/todoService";
 
 // ---------------------------------------------------------------------------
 // To Do Score computation (self-contained — no cross-solution imports)
@@ -59,7 +67,10 @@ function computeScore(
   const priorityComponent = priority * 0.5;
   const effortComponent = invertedEffort * 0.2;
   const urgencyComponent = urgencyRaw * 0.3;
-  const todoScore = Math.max(0, Math.min(100, priorityComponent + effortComponent + urgencyComponent));
+  const todoScore = Math.max(
+    0,
+    Math.min(100, priorityComponent + effortComponent + urgencyComponent)
+  );
 
   return { todoScore, priorityComponent, effortComponent, urgencyComponent };
 }
@@ -86,50 +97,47 @@ const useStyles = makeStyles({
   content: {
     flex: "1 1 0",
     overflowY: "auto",
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalM,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalL,
+    gap: tokens.spacingVerticalS,
   },
   section: {
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalS,
+    gap: tokens.spacingVerticalXS,
   },
   sectionTitle: {
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
+    marginBottom: tokens.spacingVerticalXXS,
   },
   fieldRow: {
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalXXS,
+    gap: "2px",
   },
   fieldLabel: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
   },
-  readOnlyValue: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground1,
-    paddingTop: tokens.spacingVerticalXXS,
-    paddingBottom: tokens.spacingVerticalXXS,
-  },
-  detailRow: {
+  scoreRow: {
     display: "flex",
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    paddingTop: "2px",
+    paddingBottom: "2px",
   },
-  detailLabel: {
+  scoreLabel: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
   },
-  detailValue: {
+  scoreValue: {
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase200,
   },
@@ -140,15 +148,14 @@ const useStyles = makeStyles({
   footer: {
     display: "flex",
     justifyContent: "flex-end",
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalM,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
     borderTopWidth: "1px",
     borderTopStyle: "solid",
     borderTopColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
-    gap: tokens.spacingHorizontalS,
   },
   emptyState: {
     display: "flex",
@@ -198,12 +205,25 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     const [priority, setPriority] = React.useState<number>(0);
     const [effort, setEffort] = React.useState<number>(0);
 
+    // Assigned To state
+    const [assignedToId, setAssignedToId] = React.useState<string | null>(null);
+    const [assignedToName, setAssignedToName] = React.useState("");
+    const [contactQuery, setContactQuery] = React.useState("");
+    const [contactOptions, setContactOptions] = React.useState<IContactOption[]>([]);
+    const [isSearching, setIsSearching] = React.useState(false);
+
     // Save state
     const [isSaving, setIsSaving] = React.useState(false);
     const [saveError, setSaveError] = React.useState<string | null>(null);
 
     // Snapshot of original values (for dirty detection)
-    const origRef = React.useRef({ description: "", dueDate: "", priority: 0, effort: 0 });
+    const origRef = React.useRef({
+      description: "",
+      dueDate: "",
+      priority: 0,
+      effort: 0,
+      assignedToId: null as string | null,
+    });
 
     // Reset when record changes
     React.useEffect(() => {
@@ -212,12 +232,27 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
         const dd = toDateInputValue(record.sprk_duedate);
         const pri = record.sprk_priorityscore ?? 0;
         const eff = record.sprk_effortscore ?? 0;
+        const aId = record._sprk_assignedto_value ?? null;
+        const aName =
+          record[
+            "_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue"
+          ] ?? "";
         setDescription(desc);
         setDueDate(dd);
         setPriority(pri);
         setEffort(eff);
+        setAssignedToId(aId);
+        setAssignedToName(aName);
+        setContactQuery("");
+        setContactOptions([]);
         setSaveError(null);
-        origRef.current = { description: desc, dueDate: dd, priority: pri, effort: eff };
+        origRef.current = {
+          description: desc,
+          dueDate: dd,
+          priority: pri,
+          effort: eff,
+          assignedToId: aId,
+        };
       }
     }, [record?.sprk_eventid]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -226,9 +261,11 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       description !== origRef.current.description ||
       dueDate !== origRef.current.dueDate ||
       priority !== origRef.current.priority ||
-      effort !== origRef.current.effort;
+      effort !== origRef.current.effort ||
+      assignedToId !== origRef.current.assignedToId;
 
-    // Handlers
+    // --- Handlers ---
+
     const handleDescriptionChange = React.useCallback(
       (_ev: unknown, data: { value: string }) => setDescription(data.value),
       []
@@ -241,7 +278,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
     const handlePriorityChange = React.useCallback(
       (_ev: SpinButtonChangeEvent, data: SpinButtonOnChangeData) => {
-        const val = data.value ?? data.displayValue ? Number(data.displayValue) : 0;
+        const val = data.value ?? (data.displayValue ? Number(data.displayValue) : 0);
         setPriority(Math.max(0, Math.min(100, val)));
       },
       []
@@ -249,8 +286,41 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
     const handleEffortChange = React.useCallback(
       (_ev: SpinButtonChangeEvent, data: SpinButtonOnChangeData) => {
-        const val = data.value ?? data.displayValue ? Number(data.displayValue) : 0;
+        const val = data.value ?? (data.displayValue ? Number(data.displayValue) : 0);
         setEffort(Math.max(0, Math.min(100, val)));
+      },
+      []
+    );
+
+    // Debounced contact search
+    const searchTimerRef = React.useRef<ReturnType<typeof setTimeout>>();
+    const handleContactInput: ComboboxProps["onInput"] = React.useCallback(
+      (ev: React.ChangeEvent<HTMLInputElement>) => {
+        const q = ev.target.value;
+        setContactQuery(q);
+        clearTimeout(searchTimerRef.current);
+        if (q.length < 2) {
+          setContactOptions([]);
+          return;
+        }
+        setIsSearching(true);
+        searchTimerRef.current = setTimeout(async () => {
+          const results = await searchContacts(q);
+          setContactOptions(results);
+          setIsSearching(false);
+        }, 300);
+      },
+      []
+    );
+
+    const handleContactSelect: ComboboxProps["onOptionSelect"] = React.useCallback(
+      (_ev, data) => {
+        if (data.optionValue && data.optionText) {
+          setAssignedToId(data.optionValue);
+          setAssignedToName(data.optionText);
+          setContactQuery("");
+          setContactOptions([]);
+        }
       },
       []
     );
@@ -274,12 +344,22 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       if (effort !== origRef.current.effort) {
         updates.sprk_effortscore = effort;
       }
+      if (assignedToId !== origRef.current.assignedToId) {
+        updates["sprk_AssignedTo@odata.bind"] = assignedToId
+          ? `/sprk_contacts(${assignedToId})`
+          : null;
+      }
 
       try {
         const result = await onSaveFields(record.sprk_eventid, updates);
         if (result.success) {
-          // Update snapshot so dirty detection resets
-          origRef.current = { description, dueDate, priority, effort };
+          origRef.current = {
+            description,
+            dueDate,
+            priority,
+            effort,
+            assignedToId,
+          };
         } else {
           setSaveError(result.error ?? "Save failed");
         }
@@ -288,9 +368,19 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       } finally {
         setIsSaving(false);
       }
-    }, [record, isDirty, description, dueDate, priority, effort, onSaveFields]);
+    }, [
+      record,
+      isDirty,
+      description,
+      dueDate,
+      priority,
+      effort,
+      assignedToId,
+      onSaveFields,
+    ]);
 
-    // Loading state
+    // --- Render states ---
+
     if (isLoading) {
       return (
         <div className={styles.loadingState}>
@@ -299,7 +389,6 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       );
     }
 
-    // Error state
     if (error) {
       return (
         <div className={styles.emptyState}>
@@ -308,7 +397,6 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       );
     }
 
-    // Empty state
     if (!record) {
       return (
         <div className={styles.emptyState}>
@@ -317,10 +405,8 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       );
     }
 
-    // Compute score from CURRENT field values (live preview as user edits)
+    // Compute score from CURRENT field values (live preview)
     const score = computeScore(priority, effort, dueDate || record.sprk_duedate);
-    const assignedTo =
-      record["_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue"] ?? null;
 
     return (
       <div className={styles.container}>
@@ -332,7 +418,75 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
             </MessageBar>
           )}
 
-          {/* Description */}
+          {/* ── Details (top) ──────────────────────────────────────────── */}
+          <div className={styles.section}>
+            <Text className={styles.sectionTitle} size={300}>
+              Details
+            </Text>
+
+            <div className={styles.fieldRow}>
+              <label className={styles.fieldLabel}>Due Date</label>
+              <Input
+                type="date"
+                value={dueDate}
+                onChange={handleDueDateChange}
+              />
+            </div>
+
+            <div className={styles.fieldRow}>
+              <label className={styles.fieldLabel}>Priority Score</label>
+              <SpinButton
+                value={priority}
+                onChange={handlePriorityChange}
+                min={0}
+                max={100}
+                step={5}
+              />
+            </div>
+
+            <div className={styles.fieldRow}>
+              <label className={styles.fieldLabel}>Effort Score</label>
+              <SpinButton
+                value={effort}
+                onChange={handleEffortChange}
+                min={0}
+                max={100}
+                step={5}
+              />
+            </div>
+
+            <div className={styles.fieldRow}>
+              <label className={styles.fieldLabel}>Assigned To</label>
+              <Combobox
+                freeform
+                placeholder={assignedToName || "Search contacts..."}
+                value={contactQuery}
+                onInput={handleContactInput}
+                onOptionSelect={handleContactSelect}
+                selectedOptions={assignedToId ? [assignedToId] : []}
+              >
+                {isSearching && (
+                  <Option key="__loading" value="" text="" disabled>
+                    Searching...
+                  </Option>
+                )}
+                {!isSearching && contactOptions.length === 0 && contactQuery.length >= 2 && (
+                  <Option key="__empty" value="" text="" disabled>
+                    No contacts found
+                  </Option>
+                )}
+                {contactOptions.map((c) => (
+                  <Option key={c.id} value={c.id} text={c.name}>
+                    {c.name}
+                  </Option>
+                ))}
+              </Combobox>
+            </div>
+          </div>
+
+          <Divider />
+
+          {/* ── Description ────────────────────────────────────────────── */}
           <div className={styles.section}>
             <Text className={styles.sectionTitle} size={300}>
               Description
@@ -342,99 +496,45 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               onChange={handleDescriptionChange}
               placeholder="Add a description..."
               resize="vertical"
-              rows={4}
+              style={{ minHeight: "120px" }}
             />
           </div>
 
           <Divider />
 
-          {/* Editable details */}
-          <div className={styles.section}>
-            <Text className={styles.sectionTitle} size={300}>
-              Details
-            </Text>
-
-            {/* Due Date */}
-            <div className={styles.fieldRow}>
-              <label className={styles.fieldLabel}>Due Date</label>
-              <Input
-                type="date"
-                value={dueDate}
-                onChange={handleDueDateChange}
-                size="small"
-              />
-            </div>
-
-            {/* Priority Score */}
-            <div className={styles.fieldRow}>
-              <label className={styles.fieldLabel}>Priority Score</label>
-              <SpinButton
-                value={priority}
-                onChange={handlePriorityChange}
-                min={0}
-                max={100}
-                step={5}
-                size="small"
-              />
-            </div>
-
-            {/* Effort Score */}
-            <div className={styles.fieldRow}>
-              <label className={styles.fieldLabel}>Effort Score</label>
-              <SpinButton
-                value={effort}
-                onChange={handleEffortChange}
-                min={0}
-                max={100}
-                step={5}
-                size="small"
-              />
-            </div>
-
-            {/* Assigned To — read-only (lookup field) */}
-            <div className={styles.fieldRow}>
-              <span className={styles.fieldLabel}>Assigned To</span>
-              <span className={styles.readOnlyValue}>
-                {assignedTo ?? "—"}
-              </span>
-            </div>
-          </div>
-
-          <Divider />
-
-          {/* To Do Score breakdown — live preview from current values */}
+          {/* ── To Do Score breakdown ──────────────────────────────────── */}
           <div className={styles.section}>
             <Text className={styles.sectionTitle} size={300}>
               To Do Score
             </Text>
-            <div className={styles.detailRow}>
-              <span className={styles.detailLabel}>Priority (50%)</span>
-              <span className={styles.detailValue}>
+            <div className={styles.scoreRow}>
+              <span className={styles.scoreLabel}>Priority (50%)</span>
+              <span className={styles.scoreValue}>
                 {score.priorityComponent.toFixed(1)}
               </span>
             </div>
-            <div className={styles.detailRow}>
-              <span className={styles.detailLabel}>Effort (20%)</span>
-              <span className={styles.detailValue}>
+            <div className={styles.scoreRow}>
+              <span className={styles.scoreLabel}>Effort (20%)</span>
+              <span className={styles.scoreValue}>
                 {score.effortComponent.toFixed(1)}
               </span>
             </div>
-            <div className={styles.detailRow}>
-              <span className={styles.detailLabel}>Urgency (30%)</span>
-              <span className={styles.detailValue}>
+            <div className={styles.scoreRow}>
+              <span className={styles.scoreLabel}>Urgency (30%)</span>
+              <span className={styles.scoreValue}>
                 {score.urgencyComponent.toFixed(1)}
               </span>
             </div>
-            <div className={styles.detailRow}>
-              <span className={styles.detailLabel}>Total</span>
-              <span className={`${styles.detailValue} ${styles.scoreTotal}`}>
+            <div className={styles.scoreRow}>
+              <span className={styles.scoreLabel}>Total</span>
+              <span className={`${styles.scoreValue} ${styles.scoreTotal}`}>
                 {Math.round(score.todoScore)}
               </span>
             </div>
           </div>
         </div>
 
-        {/* Sticky footer with Save button */}
+        {/* ── Sticky footer Save ──────────────────────────────────────── */}
         <div className={styles.footer}>
           <Button
             appearance="primary"
