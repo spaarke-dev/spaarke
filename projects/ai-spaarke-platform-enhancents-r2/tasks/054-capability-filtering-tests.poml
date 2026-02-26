@@ -1,0 +1,109 @@
+<task id="R2-054" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>SprkChatAgentFactory Capability Filtering Tests</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package D: Action Menu / Command Palette</package>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>testing, bff-api</tags>
+    <parallel-group>sprint1-track3</parallel-group>
+  </metadata>
+
+  <prompt>
+    Write unit tests for the capability-based tool filtering logic in
+    `SprkChatAgentFactory.ResolveTools()`. Test that different playbook capability sets produce
+    the correct set of registered tools. Cover edge cases: empty capabilities (no tools), full
+    capabilities (all tools), single capability, and missing future tool classes. Follow existing
+    test patterns in `SprkChatAgentFactoryTests.cs` using xUnit and NSubstitute.
+  </prompt>
+  <role>Senior .NET test engineer with xUnit, NSubstitute, and AI agent framework testing expertise</role>
+  <goal>Comprehensive unit tests for SprkChatAgentFactory's capability-based tool filtering. Tests verify correct tool registration for various capability sets, including edge cases. All tests pass. Coverage of filtering logic is 80%+.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="testing">Use xUnit + NSubstitute. Test naming: {Method}_{Scenario}_{ExpectedResult}. Follow existing SprkChatAgentFactoryTests patterns.</constraint>
+    <constraint source="ADR-010">Verify that no new DI registrations are created by the filtering logic — all tools remain factory-instantiated.</constraint>
+    <constraint source="ADR-013">Verify tools follow AIFunctionFactory.Create pattern and ChatHostContext flows through correctly.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>xUnit test patterns, NSubstitute mocking, SprkChatAgentFactory internals, tool registration verification</topic>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 047 modified `SprkChatAgentFactory.ResolveTools()` to filter tool registration based
+      on playbook capabilities read from Dataverse. This task extends the existing
+      `SprkChatAgentFactoryTests.cs` with new test methods covering the capability filtering logic.
+
+      Tool-to-capability mapping (from task 047):
+      - `search` → DocumentSearchTools
+      - `analyze` → AnalysisQueryTools
+      - `write_back` → WorkingDocumentTools (may not exist yet)
+      - `reanalyze` → AnalysisExecutionTools (may not exist yet)
+      - `selection_revise` → TextRefinementTools
+      - `web_search` → WebSearchTools (may not exist yet)
+      - `summarize` → KnowledgeRetrievalTools
+
+      Test scenarios:
+      1. Full capabilities → all existing tools registered
+      2. Empty capabilities → zero tools registered
+      3. Single capability `search` → only DocumentSearchTools registered
+      4. Partial capabilities `search, summarize` → DocumentSearchTools + KnowledgeRetrievalTools
+      5. Capabilities referencing non-existent tools (`write_back`) → skipped gracefully, no error
+      6. Null capabilities (field not deployed) → fallback to hardcoded mapping
+      7. Cache behavior: same playbook ID returns cached capabilities on second call
+    </background>
+    <dependencies>
+      <dependency task="047">Capability filtering in SprkChatAgentFactory must be implemented to be tested.</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SprkChatAgentFactoryTests.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DocumentSearchTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/KnowledgeRetrievalTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/TextRefinementTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisQueryTools.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — tests are complete implementations -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Review existing SprkChatAgentFactoryTests">Read `SprkChatAgentFactoryTests.cs` to understand the existing test setup, mock arrangements, and how tool registration is currently verified.</step>
+    <step order="2" name="Add test fixture for capability scenarios">Create a test fixture or helper method that configures mock Dataverse responses with specific capability sets. Use NSubstitute to mock `ChatDataverseRepository` or the Dataverse service to return different `sprk_capabilities` values.</step>
+    <step order="3" name="Write full capabilities test">Test `ResolveTools_AllCapabilities_RegistersAllTools`: Set all 7 capabilities. Verify all existing tool classes (DocumentSearchTools, AnalysisQueryTools, TextRefinementTools, KnowledgeRetrievalTools) are registered. Tool count should match the number of available (compiled) tool classes.</step>
+    <step order="4" name="Write empty capabilities test">Test `ResolveTools_EmptyCapabilities_RegistersNoTools`: Set empty capability set. Verify zero tools are registered. Verify no exceptions thrown.</step>
+    <step order="5" name="Write single capability test">Test `ResolveTools_SearchOnly_RegistersDocumentSearchToolsOnly`: Set only `search` capability. Verify only DocumentSearchTools is registered. Verify other tools (AnalysisQueryTools, TextRefinementTools, KnowledgeRetrievalTools) are NOT registered.</step>
+    <step order="6" name="Write partial capabilities test">Test `ResolveTools_SearchAndSummarize_RegistersTwoTools`: Set `search, summarize` capabilities. Verify DocumentSearchTools AND KnowledgeRetrievalTools are registered. Verify no other tools registered.</step>
+    <step order="7" name="Write missing tool class test">Test `ResolveTools_WriteBackCapability_SkipsNonExistentTool`: Set `write_back` capability (tool class may not exist yet). Verify no exception is thrown. Verify the tool is gracefully skipped if the class doesn't exist.</step>
+    <step order="8" name="Write fallback test">Test `ResolveTools_NullCapabilities_UsesHardcodedMapping`: Simulate the Dataverse field not being deployed (null response). Verify the hardcoded fallback mapping is used. Verify tools are registered based on the default mapping.</step>
+    <step order="9" name="Write cache behavior test">Test `ResolveTools_SamePlaybook_UsesCachedCapabilities`: Call ResolveTools twice with the same playbook ID. Verify Dataverse is queried only once (mock verification). Verify the second call returns the same tool set.</step>
+    <step order="10" name="Write ChatHostContext flow test">Test `ResolveTools_WithCapabilities_ChatHostContextFlowsToTools`: Verify that ChatHostContext is correctly passed to tool instances regardless of which tools are registered. This ensures capability filtering doesn't break context flow.</step>
+    <step order="11" name="Run tests">Execute `dotnet test tests/unit/Sprk.Bff.Api.Tests/` filtering to SprkChatAgentFactoryTests and verify all new tests pass. Fix any failures.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">All new tests in SprkChatAgentFactoryTests.cs pass with zero failures</criterion>
+    <criterion testable="true">Full capabilities test verifies all available tool classes are registered</criterion>
+    <criterion testable="true">Empty capabilities test verifies zero tools are registered without exceptions</criterion>
+    <criterion testable="true">Single capability test verifies only the matching tool class is registered</criterion>
+    <criterion testable="true">Partial capabilities test verifies exactly the expected tool classes are registered (no more, no less)</criterion>
+    <criterion testable="true">Missing tool class test verifies graceful skip without exceptions</criterion>
+    <criterion testable="true">Fallback test verifies hardcoded mapping is used when Dataverse field returns null</criterion>
+    <criterion testable="true">Cache test verifies Dataverse is queried only once for repeated calls with same playbook ID</criterion>
+    <criterion testable="true">Test naming follows {Method}_{Scenario}_{ExpectedResult} convention</criterion>
+    <criterion testable="true">`dotnet test` completes with all tests passing</criterion>
+  </acceptance-criteria>
+</task>

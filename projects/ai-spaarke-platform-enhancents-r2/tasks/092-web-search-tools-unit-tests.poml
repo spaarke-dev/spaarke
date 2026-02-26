@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="092" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>WebSearchTools Unit Tests</title>
+    <phase>2</phase>
+    <package>Package I: Web Search + Multi-Document</package>
+    <tags>testing, bff-api</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>088</dependencies>
+    <parallel-group>sprint2-track3</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Write comprehensive unit tests for WebSearchTools covering SearchWebAsync with mocked
+      HttpClient, result formatting, max results limit enforcement, external content marking,
+      and error handling. Target 80%+ line coverage.
+    </goal>
+    <context>
+      WebSearchTools is a factory-instantiated AI tool class with SearchWebAsync that calls
+      the Azure Bing Search API via HttpClient. Tests should mock the HttpClient (using
+      MockHttpMessageHandler or NSubstitute) to simulate API responses without making real
+      HTTP calls.
+
+      Key test scenarios:
+      - Successful search with multiple results
+      - Results formatted with [External Source] prefix (ADR-015 compliance)
+      - maxResults parameter respected (default 5, capped at 10)
+      - Empty/no results from Bing API
+      - HTTP error from Bing API (500, 429 rate limit)
+      - Invalid/empty query string
+      - API key header correctly set
+
+      Test naming convention: {Method}_{Scenario}_{ExpectedResult}
+    </context>
+    <constraints>
+      - Follow .claude/constraints/testing.md for test conventions
+      - Use xUnit + NSubstitute (or MockHttpMessageHandler for HttpClient mocking)
+      - Test naming: {Method}_{Scenario}_{ExpectedResult}
+      - Target 80%+ line coverage for WebSearchTools.cs
+      - Place tests at tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WebSearchTools.cs</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read existing AI tool test files and any HttpClient test patterns in the codebase
+      to understand the mocking approach.
+    </step>
+    <step order="2">
+      Create test file WebSearchToolsTests.cs with test fixture:
+      - Mock HttpMessageHandler to intercept HTTP calls
+      - Create helper to construct WebSearchTools with test ChatHostContext
+    </step>
+    <step order="3">
+      Write SearchWebAsync happy-path tests:
+      - SearchWebAsync_WithValidQuery_ReturnsFormattedResults
+      - SearchWebAsync_ResultsContainExternalSourcePrefix_ForDataGovernance
+      - SearchWebAsync_RespectsMaxResultsDefault_ReturnsFiveResults
+      - SearchWebAsync_RespectsMaxResultsCap_NeverExceedsTen
+      - SearchWebAsync_SetsApiKeyHeader_InRequest
+    </step>
+    <step order="4">
+      Write SearchWebAsync edge case tests:
+      - SearchWebAsync_EmptyQuery_ReturnsValidationError
+      - SearchWebAsync_NoResultsFromApi_ReturnsEmptyMessage
+      - SearchWebAsync_MaxResultsExceedsCap_ClampedToTen
+    </step>
+    <step order="5">
+      Write SearchWebAsync error handling tests:
+      - SearchWebAsync_ApiReturns500_ReturnsErrorResult
+      - SearchWebAsync_ApiReturns429_ReturnsRateLimitError
+      - SearchWebAsync_HttpTimeout_ReturnsTimeoutError
+    </step>
+    <step order="6">
+      Run tests: dotnet test targeting the new test file. Fix any failures.
+    </step>
+    <step order="7">
+      Verify coverage meets 80% threshold for WebSearchTools.cs.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine existing test patterns and HttpClient mocking</tool>
+    <tool>Write - Create WebSearchToolsTests.cs</tool>
+    <tool>Bash - dotnet test execution and coverage check</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/WebSearchToolsTests.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WebSearchTools.cs</file>
+    <file action="reference">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this is a test-only task -->
+  </placeholders>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/WebSearchToolsTests.cs — Comprehensive unit tests</output>
+    <output>All tests pass with 80%+ coverage on WebSearchTools.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>WebSearchToolsTests.cs exists at tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/</criterion>
+    <criterion>Tests cover SearchWebAsync with valid queries and multiple result scenarios</criterion>
+    <criterion>Tests verify [External Source] prefix on all results (ADR-015)</criterion>
+    <criterion>Tests verify maxResults default (5) and upper cap (10)</criterion>
+    <criterion>Tests verify API key header set correctly on HTTP request</criterion>
+    <criterion>Tests cover error scenarios: API 500, 429 rate limit, timeout</criterion>
+    <criterion>Tests cover edge cases: empty query, no results</criterion>
+    <criterion>All tests use {Method}_{Scenario}_{ExpectedResult} naming convention</criterion>
+    <criterion>HttpClient properly mocked (no real HTTP calls)</criterion>
+    <criterion>dotnet test passes with zero failures</criterion>
+    <criterion>80%+ line coverage on WebSearchTools.cs</criterion>
+  </acceptance-criteria>
+</task>

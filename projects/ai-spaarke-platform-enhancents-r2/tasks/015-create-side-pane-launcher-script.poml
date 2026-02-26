@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Create Side Pane Launcher Script</title>
+    <phase>1</phase>
+    <tags>frontend, dataverse</tags>
+    <estimate>1-2 hours</estimate>
+    <dependencies>010</dependencies>
+    <parallel-group>sprint1-track1</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create a TypeScript launcher script that opens the SprkChatPane Code Page as a Dataverse side pane via Xrm.App.sidePanes.createPane(), passing context parameters from the current form record.
+    </goal>
+    <context>
+      Dataverse side panes are persistent UI panels that remain open as users navigate between forms.
+      The launcher script will be called from a ribbon button (or form script onLoad event) to open
+      the SprkChat side pane.
+
+      Xrm.App.sidePanes.createPane() API:
+      - paneId: unique identifier (used for singleton behavior — same paneId reuses existing pane)
+      - title: display title in pane header
+      - imageSrc: icon URL or web resource reference
+      - canClose: whether user can close the pane
+      - width: initial width in pixels
+      - Then navigate the pane to the Code Page web resource with data params
+
+      The web resource name will be: sprk_SprkChatPane
+      Context params (entityType, entityId) come from the current form via Xrm.Page context.
+
+      The icon image resource (sprk_ai_icon) is a placeholder — the final icon will be provided
+      by a designer. For now, use a default AI/chat icon placeholder.
+    </context>
+    <constraints>
+      - Use Xrm.App.sidePanes.createPane() API — NOT Xrm.Navigation.navigateTo for side pane
+      - Script must be deployable as a Dataverse web resource (sprk_/scripts/openSprkChatPane.js)
+      - MUST handle case where pane is already open (reuse existing pane, don't create duplicate)
+      - Pass entityType and entityId as data query parameters
+      - Width should default to 400px (user can resize between 300-600px)
+      - PaneId should be deterministic: "sprk-chat-pane" (singleton per session)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/webresource/custom-dialogs-in-dataverse.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">
+      Research Xrm.App.sidePanes API:
+      - createPane() parameters and return type
+      - How to navigate pane content to a web resource
+      - Singleton behavior (reuse pane if already open)
+      - How to pass data parameters to the web resource
+    </step>
+    <step order="2">
+      Create src/client/code-pages/SprkChatPane/launcher/openSprkChatPane.ts:
+      - Export a function: openSprkChatPane()
+      - Get current form context: entityType from Xrm.Page.data.entity.getEntityName()
+      - Get current record ID: entityId from Xrm.Page.data.entity.getId()
+      - Strip curly braces from GUID if present
+    </step>
+    <step order="3">
+      Implement pane creation:
+      - Check if pane already exists via Xrm.App.sidePanes.getPane("sprk-chat-pane")
+      - If exists: bring to focus (select the pane)
+      - If not: create with createPane({ paneId, title, imageSrc, canClose, width })
+      - Navigate pane to sprk_SprkChatPane web resource with data params
+    </step>
+    <step order="4">
+      Configure pane parameters:
+      - paneId: "sprk-chat-pane"
+      - title: "SprkChat"
+      - imageSrc: placeholder icon reference (sprk_ai_icon or inline SVG data URI)
+      - canClose: true
+      - width: 400
+      - data: entityType={entityType}&amp;entityId={entityId}
+    </step>
+    <step order="5">
+      Add error handling:
+      - Try/catch around pane creation
+      - Fallback if sidePanes API unavailable (older Dataverse versions)
+      - Console.error logging for debugging
+    </step>
+    <step order="6">
+      Make the function callable from ribbon commands:
+      - Expose on window/global namespace as required by Dataverse ribbon
+      - Ribbon commands call window.Sprk.openSprkChatPane() or similar
+    </step>
+    <step order="7">
+      Build the launcher script:
+      - Verify it compiles to JavaScript
+      - Check output is suitable for deployment as a web resource
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Research Xrm.App.sidePanes API patterns</tool>
+    <tool>Write - Create openSprkChatPane.ts</tool>
+    <tool>Bash - Compile and verify</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/SprkChatPane/launcher/openSprkChatPane.ts — Side pane launcher function</output>
+    <output>Compiled JavaScript suitable for Dataverse web resource deployment</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>openSprkChatPane() creates a side pane via Xrm.App.sidePanes.createPane()</criterion>
+    <criterion>Pane navigates to sprk_SprkChatPane web resource</criterion>
+    <criterion>entityType and entityId passed as data query parameters</criterion>
+    <criterion>Reuses existing pane if already open (singleton via paneId)</criterion>
+    <criterion>Default width set to 400px</criterion>
+    <criterion>canClose set to true</criterion>
+    <criterion>Function exposed for ribbon command invocation</criterion>
+    <criterion>Graceful error handling if sidePanes API unavailable</criterion>
+    <criterion>Script compiles to deployable JavaScript</criterion>
+  </acceptance-criteria>
+
+  <placeholders>
+    <placeholder id="PH-015-A">
+      <location>src/client/code-pages/SprkChatPane/launcher/openSprkChatPane.ts</location>
+      <type>mock-data</type>
+      <description>Icon reference uses placeholder sprk_ai_icon — replace when designer provides final icon asset</description>
+      <completed-by>manual (designer deliverable)</completed-by>
+      <build-impact>Compiles; renders with placeholder/missing icon</build-impact>
+    </placeholder>
+  </placeholders>
+</task>

@@ -1,0 +1,102 @@
+<task id="R2-049" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Wire Action Menu Trigger into SprkChatInput</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package D: Action Menu / Command Palette</package>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>frontend</tags>
+    <parallel-group>sprint1-track3</parallel-group>
+  </metadata>
+
+  <prompt>
+    Modify `SprkChatInput.tsx` to detect when `/` is typed as the first character in the chat
+    input. When detected, open the `SprkChatActionMenu` popover above the input. As the user
+    continues typing after `/`, pass the filter text to the action menu for live filtering.
+    When an action is selected, insert the command text or trigger the associated behavior.
+    Close the menu on Escape, outside click, or action selection. Ensure the input retains
+    focus while the menu is open.
+  </prompt>
+  <role>Senior React/TypeScript developer with SprkChat component expertise</role>
+  <goal>SprkChatInput detects `/` as first character and opens the SprkChatActionMenu. Typing filters the menu. Selection inserts or triggers the action. Menu closes on Escape, outside click, or selection. Input retains focus throughout.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">All UI MUST use Fluent UI v9 exclusively. No hard-coded colors.</constraint>
+    <constraint source="ADR-012">SprkChatInput is a shared component in @spaarke/ui-components. Changes must remain backward-compatible with existing SprkChat consumers.</constraint>
+    <constraint source="spec-FR-10">The `/` command palette MUST trigger on first-character `/` in chat input, be filterable by typing, and fully keyboard navigable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SprkChatInput architecture, input event handling, popover anchoring, keyboard event delegation</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      SprkChatInput is the shared chat input component used by all SprkChat instances. It
+      currently handles text input, send button, and keyboard shortcuts (Enter to send). This
+      task adds action menu trigger detection and integration.
+
+      The trigger logic:
+      1. User types `/` as the FIRST character in an empty input → open action menu
+      2. Subsequent characters after `/` become filter text (e.g., `/sum` → filterText = "sum")
+      3. ArrowUp/ArrowDown keys are delegated to the action menu for navigation
+      4. Enter key: if menu is open and an item is focused → select item (not send message)
+      5. Escape key: close the menu, clear the `/` prefix, return to normal input
+      6. Backspace that removes the `/` → close the menu
+      7. Outside click → close the menu
+
+      The SprkChatInput must expose a new optional prop `onActionMenuOpen` or manage the menu
+      internally via state. The SprkChatActionMenu component (task 048) is rendered as a child
+      within SprkChatInput, anchored to the input element.
+    </background>
+    <dependencies>
+      <dependency task="048">SprkChatActionMenu component must exist to be rendered inside SprkChatInput.</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatActionMenu.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — full implementation -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Review SprkChatInput current implementation">Read `SprkChatInput.tsx` to understand existing state management, keyboard handling (Enter to send), props interface, and how it integrates with the parent SprkChat component.</step>
+    <step order="2" name="Add action menu state">Add state variables: `isActionMenuOpen` (boolean), `actionMenuFilterText` (string), `actionMenuSelectedIndex` (number). Add a ref for the input element to use as popover anchor.</step>
+    <step order="3" name="Implement slash detection">In the input's `onChange` handler, detect when the input value starts with `/` and the menu is not already open. Set `isActionMenuOpen = true` and extract filter text (everything after `/`). When the `/` is removed (backspace or clear), set `isActionMenuOpen = false`.</step>
+    <step order="4" name="Delegate keyboard events to action menu">In the input's `onKeyDown` handler, when `isActionMenuOpen` is true: delegate ArrowUp/ArrowDown to update `actionMenuSelectedIndex`, delegate Enter to select the focused action item (preventDefault to avoid sending message), delegate Escape to close the menu and clear the `/` prefix.</step>
+    <step order="5" name="Handle action selection">Create an `onActionSelect` callback that receives the selected action. Clear the input text (remove the `/command` text), close the menu, and invoke an `onActionSelected` callback prop with the action item so the parent component can handle the behavior.</step>
+    <step order="6" name="Handle menu dismissal">Create an `onActionMenuDismiss` callback for outside clicks and Escape. Clear the `/` prefix from the input, reset menu state, and restore normal input behavior. Ensure the input retains focus after dismissal.</step>
+    <step order="7" name="Render SprkChatActionMenu">Conditionally render `SprkChatActionMenu` when `isActionMenuOpen` is true. Pass the input element ref as anchor, filter text, selected index, and selection/dismissal callbacks. Position the menu above the input.</step>
+    <step order="8" name="Update SprkChatInput props interface">Add optional props: `actions` (ChatActionGroup[] — the action data to display), `onActionSelected` (callback when an action is chosen). These props are optional to maintain backward compatibility — existing consumers without action menu support continue to work unchanged.</step>
+    <step order="9" name="Build verification">Run the shared component library build to verify compilation. Ensure no breaking changes to SprkChatInput's existing props interface.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Typing `/` as the first character in an empty input opens the SprkChatActionMenu popover</criterion>
+    <criterion testable="true">Typing after `/` updates the filter text — e.g., `/sum` passes "sum" as filter to the menu</criterion>
+    <criterion testable="true">ArrowUp/ArrowDown keys navigate the action menu when open — not moving the text cursor</criterion>
+    <criterion testable="true">Enter key selects the focused action item when the menu is open — does NOT send a chat message</criterion>
+    <criterion testable="true">Escape key closes the menu, clears the `/` prefix, and returns focus to the input</criterion>
+    <criterion testable="true">Backspace that removes the leading `/` closes the menu</criterion>
+    <criterion testable="true">Outside click closes the menu</criterion>
+    <criterion testable="true">Input retains focus while the menu is open and after menu dismissal</criterion>
+    <criterion testable="true">SprkChatInput without `actions` prop works identically to before (backward compatible)</criterion>
+    <criterion testable="true">TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

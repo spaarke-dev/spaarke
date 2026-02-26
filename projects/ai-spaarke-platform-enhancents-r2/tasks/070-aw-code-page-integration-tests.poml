@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>AnalysisWorkspace Code Page Integration Tests</title>
+    <phase>2</phase>
+    <package>C: AW Migration</package>
+    <tags>testing, integration, frontend</tags>
+    <estimate>5-7 hours</estimate>
+    <dependencies>063, 065</dependencies>
+    <parallel-group>sprint2-track1</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create integration tests for the AnalysisWorkspace Code Page covering the analysis loading flow,
+      SprkChatBridge document streaming reception, auto-save triggering after streaming writes, and
+      toolbar functionality (save, export, undo/redo).
+    </goal>
+    <context>
+      The AnalysisWorkspace Code Page integrates multiple subsystems:
+      1. BFF API data loading (analysis records, document metadata)
+      2. SprkChatBridge cross-pane communication (document streaming, selection events)
+      3. Auto-save with debounce (triggers after content changes)
+      4. Toolbar operations (save, export, copy, undo/redo)
+      5. RichTextEditor streaming insert plugin
+
+      Integration tests must verify these subsystems work together correctly. Tests should use
+      mocked BFF API responses and simulated BroadcastChannel events to test the full flow without
+      requiring a live Dataverse environment.
+
+      Test framework: Jest with React Testing Library for component testing. Mock
+      BroadcastChannel API for cross-pane communication tests.
+    </context>
+    <constraints>
+      - Follow .claude/constraints/testing.md for test naming and organization
+      - Test naming: {Method}_{Scenario}_{ExpectedResult}
+      - 80%+ line coverage for new Code Page code
+      - Use Jest with React Testing Library
+      - Mock BroadcastChannel API (not available in Node.js test environment)
+      - Mock BFF API responses (no live network calls in tests)
+      - Mock Xrm SDK for auth tests
+      - Tests must be deterministic (no timing-dependent assertions without fake timers)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/code-pages/AnalysisWorkspace/hooks/useAnalysisLoader.ts</reference>
+    <reference>src/client/code-pages/AnalysisWorkspace/hooks/useDocumentStreaming.ts</reference>
+    <reference>src/client/code-pages/AnalysisWorkspace/hooks/useAutoSave.ts</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Set up test infrastructure:
+      - Create src/client/code-pages/AnalysisWorkspace/__tests__/ directory
+      - Configure Jest for the Code Page project (jest.config.js if not inherited)
+      - Create test mocks for BroadcastChannel, Xrm SDK, and fetch API
+      - Create test fixtures for analysis records and document metadata
+    </step>
+    <step order="2">
+      Write analysis loading flow tests:
+      - useAnalysisLoader_ValidAnalysisId_LoadsRecordAndContent
+      - useAnalysisLoader_InvalidAnalysisId_ReturnsErrorState
+      - useAnalysisLoader_NetworkFailure_ShowsRetryOption
+      - useAnalysisLoader_ParallelFetch_LoadsAnalysisAndDocumentSimultaneously
+      - useAnalysisLoader_MissingDocumentId_LoadsAnalysisOnly
+    </step>
+    <step order="3">
+      Write SprkChatBridge document streaming tests:
+      - useDocumentStreaming_StreamStart_BeginsStreamingInsert
+      - useDocumentStreaming_StreamTokens_AppendedToEditor
+      - useDocumentStreaming_StreamEnd_FinalizesAndPushesUndoSnapshot
+      - useDocumentStreaming_CancelMidStream_KeepsPartialContentAndUndo
+      - useDocumentStreaming_ConcurrentStreams_RejectsSecondStream
+      - useDocumentStreaming_DocumentReplace_PushesUndoBeforeReplace
+      - useDocumentStreaming_Unmount_CleansUpSubscriptions
+    </step>
+    <step order="4">
+      Write auto-save integration tests:
+      - useAutoSave_ContentChange_DebouncesSaveBy3Seconds
+      - useAutoSave_StreamingEnd_TriggersAutoSave
+      - useAutoSave_NetworkError_RetriesToSave
+      - useAutoSave_ForceSave_SavesImmediately
+      - useAutoSave_RapidChanges_OnlyLastContentSaved
+    </step>
+    <step order="5">
+      Write toolbar functionality tests:
+      - AnalysisToolbar_ClickSave_CallsForceSave
+      - AnalysisToolbar_ClickExport_GeneratesWordDocument
+      - AnalysisToolbar_ClickCopy_CopiesToClipboard
+      - AnalysisToolbar_ClickUndo_CallsDocumentHistoryUndo
+      - AnalysisToolbar_ClickRedo_CallsDocumentHistoryRedo
+      - AnalysisToolbar_UndoAtBoundary_ButtonDisabled
+      - AnalysisToolbar_KeyboardShortcuts_CtrlSTriggerssSave
+    </step>
+    <step order="6">
+      Write selection broadcast tests:
+      - useSelectionBroadcast_TextSelected_EmitsSelectionChangedEvent
+      - useSelectionBroadcast_DragSelect_DebouncesEvents
+      - useSelectionBroadcast_Deselect_EmitsSelectionClearedEvent
+      - useSelectionBroadcast_Unmount_CleansUpListeners
+    </step>
+    <step order="7">
+      Write component integration tests:
+      - App_ValidParams_RendersEditorAndViewer
+      - App_MissingParams_ShowsErrorMessage
+      - EditorPanel_LoadComplete_DisplaysAnalysisContent
+      - SourceViewerPanel_Collapsed_ShowsExpandButton
+      - SourceViewerPanel_DocumentLoaded_ShowsViewerIframe
+    </step>
+    <step order="8">
+      Run tests and verify coverage:
+      - npx jest --coverage
+      - Verify 80%+ line coverage for new Code Page code
+      - Fix any failing tests
+      - Review uncovered lines and add tests for critical paths
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine hooks and components to test</tool>
+    <tool>Write - Create test files and mocks</tool>
+    <tool>Bash - npx jest --coverage</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/AnalysisWorkspace/__tests__/useAnalysisLoader.test.ts — Loading flow tests</output>
+    <output>src/client/code-pages/AnalysisWorkspace/__tests__/useDocumentStreaming.test.ts — Streaming reception tests</output>
+    <output>src/client/code-pages/AnalysisWorkspace/__tests__/useAutoSave.test.ts — Auto-save integration tests</output>
+    <output>src/client/code-pages/AnalysisWorkspace/__tests__/useSelectionBroadcast.test.ts — Selection event tests</output>
+    <output>src/client/code-pages/AnalysisWorkspace/__tests__/AnalysisToolbar.test.tsx — Toolbar functionality tests</output>
+    <output>src/client/code-pages/AnalysisWorkspace/__tests__/App.test.tsx — Component integration tests</output>
+    <output>src/client/code-pages/AnalysisWorkspace/__tests__/mocks/ — Test mocks directory</output>
+    <output>Coverage report showing 80%+ line coverage</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All test files created in __tests__/ directory with consistent naming convention</criterion>
+    <criterion>Analysis loading tests cover success, error, retry, and parallel fetch scenarios</criterion>
+    <criterion>Document streaming tests cover full lifecycle (start, token, end, cancel, replace)</criterion>
+    <criterion>Auto-save tests verify debounce timing and streaming-triggered saves</criterion>
+    <criterion>Toolbar tests verify all buttons (save, export, copy, undo, redo) and keyboard shortcuts</criterion>
+    <criterion>Selection broadcast tests verify debounce and cleanup</criterion>
+    <criterion>BroadcastChannel, Xrm SDK, and fetch API are properly mocked</criterion>
+    <criterion>All tests pass: npx jest returns 0 exit code</criterion>
+    <criterion>Code coverage >= 80% for new Code Page source files</criterion>
+    <criterion>No timing-dependent tests (fake timers used for debounce tests)</criterion>
+  </acceptance-criteria>
+
+  <placeholders>
+    <!-- No placeholders — test task produces complete test suite -->
+  </placeholders>
+</task>

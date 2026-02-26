@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Wire SprkChatBridge for Document Streaming (AW Side)</title>
+    <phase>2</phase>
+    <package>C: AW Migration</package>
+    <tags>code-page, frontend, integration</tags>
+    <estimate>4-6 hours</estimate>
+    <dependencies>011, 030, 031, 060</dependencies>
+    <parallel-group>sprint2-track1</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Wire the AnalysisWorkspace Code Page to receive document streaming events from the SprkChat side
+      pane via SprkChatBridge. When SprkChat initiates a streaming write, the AW Code Page receives
+      `document_stream_start`, `document_stream_token`, and `document_stream_end` events and routes
+      tokens to the StreamingInsertPlugin in the RichTextEditor. Also handle `document_replace` for
+      bulk content replacement (used by re-analysis).
+    </goal>
+    <context>
+      SprkChatBridge (created in task 011) provides cross-pane communication via BroadcastChannel API.
+      The SprkChat side pane sends document streaming events when the LLM invokes WorkingDocumentTools.
+      The AnalysisWorkspace Code Page is the receiver — it must:
+
+      1. Subscribe to SprkChatBridge events on mount
+      2. On `document_stream_start`: prepare the editor (show streaming indicator, disable manual editing)
+      3. On `document_stream_token`: route each token to StreamingInsertPlugin.appendStreamToken()
+      4. On `document_stream_end`: finalize (re-enable editing, push snapshot to useDocumentHistory)
+      5. On `document_replace`: replace entire editor content (used by re-analysis in Package E)
+
+      Task 030 created the StreamingInsertPlugin. Task 031 added the SSE events. Task 011 created
+      SprkChatBridge. This task wires the AW Code Page as the receiving end.
+
+      The editor ref API from RichTextEditor provides:
+      - beginStreamingInsert() — prepare for streaming
+      - appendStreamToken(token: string) — insert a token
+      - endStreamingInsert() — finalize streaming session
+      - setHtml(html: string) — bulk content replacement
+    </context>
+    <constraints>
+      - Follow ADR-012: Import SprkChatBridge from @spaarke/ui-components
+      - BroadcastChannel subscription must be cleaned up on unmount (no memory leaks)
+      - Auth tokens must NEVER be transmitted via BroadcastChannel (independent auth per pane)
+      - Streaming tokens must be routed through Lexical API (not raw DOM insertion)
+      - Cancel handling: if user cancels mid-stream, keep partial content and push to undo stack
+      - Must handle edge cases: rapid stream start/end, multiple concurrent streams (reject second)
+      - document_replace must push previous content to undo stack before replacing
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatBridge.ts</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/plugins/StreamingInsertPlugin.ts</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/RichTextEditor.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read SprkChatBridge API to understand event subscription pattern:
+      - How to subscribe/unsubscribe to document streaming events
+      - Event payload shapes for document_stream_start, token, end, replace
+      - Channel naming pattern (sprk-workspace-{context})
+    </step>
+    <step order="2">
+      Read StreamingInsertPlugin and RichTextEditor ref API to understand the streaming interface:
+      - beginStreamingInsert() — returns void or streaming session ID
+      - appendStreamToken(token) — how tokens are buffered/flushed
+      - endStreamingInsert() — finalization behavior
+      - setHtml() — bulk replacement
+    </step>
+    <step order="3">
+      Create a useDocumentStreaming hook:
+      - Accept: editorRef (ref to RichTextEditor), bridgeInstance (SprkChatBridge), documentHistory (from useDocumentHistory)
+      - Subscribe to bridge events on mount, unsubscribe on unmount
+      - Track streaming state: idle, streaming, replacing
+      - Return: { isStreaming, streamProgress, cancelStream }
+    </step>
+    <step order="4">
+      Implement document_stream_start handler:
+      - Validate no active stream (reject if already streaming)
+      - Call editorRef.current.beginStreamingInsert()
+      - Set streaming state to 'streaming'
+      - Show streaming indicator in UI (pulsing cursor or progress bar)
+      - Disable manual editing while streaming is active
+    </step>
+    <step order="5">
+      Implement document_stream_token handler:
+      - Validate active stream exists
+      - Call editorRef.current.appendStreamToken(token)
+      - Update token count for progress tracking
+    </step>
+    <step order="6">
+      Implement document_stream_end handler:
+      - Call editorRef.current.endStreamingInsert()
+      - Push current content to documentHistory (undo snapshot)
+      - Re-enable manual editing
+      - Set streaming state to 'idle'
+      - Hide streaming indicator
+    </step>
+    <step order="7">
+      Implement document_replace handler:
+      - Push current editor content to documentHistory BEFORE replacing
+      - Call editorRef.current.setHtml(newContent)
+      - Push new content to documentHistory
+      - Trigger auto-save
+    </step>
+    <step order="8">
+      Implement cancel handler:
+      - If streaming, call endStreamingInsert() to finalize partial content
+      - Push partial content to documentHistory (user can undo)
+      - Send cancel acknowledgment back via bridge
+      - Reset streaming state to 'idle'
+    </step>
+    <step order="9">
+      Wire useDocumentStreaming into App.tsx:
+      - Initialize SprkChatBridge with workspace context from URL params
+      - Pass editor ref and bridge to useDocumentStreaming
+      - Show streaming indicator overlay when isStreaming is true
+      - Connect cancelStream to a cancel button or Escape key
+    </step>
+    <step order="10">
+      Build and verify:
+      - npm run build compiles cleanly
+      - No TypeScript errors on bridge event types
+      - Hook properly cleans up subscriptions on unmount
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine SprkChatBridge and StreamingInsertPlugin APIs</tool>
+    <tool>Write - Create useDocumentStreaming hook</tool>
+    <tool>Edit - Wire hook into App.tsx and EditorPanel</tool>
+    <tool>Bash - npm run build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/AnalysisWorkspace/hooks/useDocumentStreaming.ts — Bridge-to-editor streaming hook</output>
+    <output>src/client/code-pages/AnalysisWorkspace/components/StreamingIndicator.tsx — Visual streaming state indicator</output>
+    <output>src/client/code-pages/AnalysisWorkspace/App.tsx — Updated with SprkChatBridge initialization and streaming wiring</output>
+    <output>src/client/code-pages/AnalysisWorkspace/components/EditorPanel.tsx — Updated with streaming indicator and cancel support</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>useDocumentStreaming subscribes to SprkChatBridge on mount and unsubscribes on unmount</criterion>
+    <criterion>document_stream_start calls beginStreamingInsert() and disables manual editing</criterion>
+    <criterion>document_stream_token routes tokens to appendStreamToken() via Lexical API</criterion>
+    <criterion>document_stream_end calls endStreamingInsert() and pushes snapshot to undo stack</criterion>
+    <criterion>document_replace pushes previous content to undo stack before replacing with setHtml()</criterion>
+    <criterion>Cancel mid-stream keeps partial content and makes it undoable</criterion>
+    <criterion>Concurrent stream requests are rejected (only one active stream at a time)</criterion>
+    <criterion>No auth tokens transmitted via BroadcastChannel</criterion>
+    <criterion>StreamingIndicator shows during active streaming</criterion>
+    <criterion>npm run build completes without errors</criterion>
+  </acceptance-criteria>
+
+  <placeholders>
+    <!-- No placeholders — this task wires real implementations from tasks 011, 030, 031 -->
+  </placeholders>
+
+  <notes>
+    Completed 2026-02-26. Created 3 new files:
+    - src/client/code-pages/AnalysisWorkspace/src/hooks/useDocumentStreaming.ts
+      Integration hook combining SprkChatBridge + useDocumentStreamConsumer + useDocumentHistory.
+      Handles document_replaced events, cancel-stream, and FR-07 undo snapshots.
+    - src/client/code-pages/AnalysisWorkspace/src/components/StreamingIndicator.tsx
+      Fluent v9 streaming overlay with pulse animation, token count, progress bar, and cancel button.
+    - src/client/code-pages/AnalysisWorkspace/src/components/DocumentStreamBridge.tsx
+      Self-contained bridge wiring component (pluggable into App.tsx).
+      Handles Escape key for cancel, exposes onStreamingStateChange callback.
+    Modified App.tsx to include DocumentStreamBridge above EditorPanel in the left panel.
+    Build passes with zero errors (3 bundle size warnings expected for Code Pages).
+  </notes>
+</task>

@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Wire Re-Analysis Streaming Flow</title>
+    <phase>2</phase>
+    <package>Package E: Re-Analysis Pipeline</package>
+    <tags>bff-api, ai, streaming</tags>
+    <estimate>4-6 hours</estimate>
+    <dependencies>078, 079, 025</dependencies>
+    <parallel-group>sprint2-track2</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Wire the full re-analysis streaming pipeline: user instruction flows through
+      AnalysisExecutionTools.RerunAnalysisAsync, calls ExecutePlaybookAsync for real orchestration,
+      streams progress events during long-running re-analysis, and emits a document_replace SSE
+      event with the complete new analysis. The previous document version is pushed to the undo
+      stack before replacement.
+    </goal>
+    <context>
+      Task 078 created AnalysisExecutionTools with a placeholder RerunAnalysisAsync body. This task
+      replaces the placeholder with the real orchestration pipeline:
+
+      1. User sends "rerun analysis focusing on financial risks" via SprkChat
+      2. AnalysisExecutionTools.RerunAnalysisAsync receives the instruction
+      3. Tool calls IAnalysisOrchestrationService.ExecutePlaybookAsync with original playbook ID
+         plus appended user instructions
+      4. During execution, progress events are emitted via SSE ("progress" event with percent)
+      5. On completion, the full new analysis is emitted as a "document_replace" SSE event
+      6. The frontend receives document_replace and replaces editor content, pushing the previous
+         version to the undo stack (useDocumentHistory)
+
+      Progress events follow the pattern: { type: "progress", percent: 25, message: "Analyzing..." }
+      Document replace follows: { type: "document_replace", html: "...", metadata: {...} }
+
+      This task also completes placeholder PH-078-A from task 078.
+    </context>
+    <constraints>
+      - Follow ADR-013: AI tool pattern; ChatHostContext flows through
+      - Follow ADR-016: CostControl middleware enforces token budget for re-analysis
+      - Follow ADR-019: ProblemDetails for errors; terminal SSE error events
+      - New SSE event types must be additive (not break existing token/done/error events)
+      - Previous version MUST be pushed to undo stack before replacement
+      - Progress events MUST include percent (0-100) and human-readable message
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisOrchestrationService.cs</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read the existing SSE streaming pattern in ChatEndpoints.cs to understand:
+      - How SSE events are written to the response stream
+      - Event type naming conventions (token, done, error)
+      - How new event types can be added additively
+    </step>
+    <step order="2">
+      Read AnalysisOrchestrationService.ExecutePlaybookAsync to understand:
+      - How it accepts parameters (playbook ID, instructions)
+      - How it reports progress (callbacks, events, or return values)
+      - How it returns the final analysis result
+    </step>
+    <step order="3">
+      Define new SSE event types for re-analysis:
+      - "progress": { percent: number, message: string }
+      - "document_replace": { html: string, metadata: { playbookId: string, timestamp: string } }
+      Add these to the SSE event type definitions/models.
+    </step>
+    <step order="4">
+      Replace the placeholder in AnalysisExecutionTools.RerunAnalysisAsync with real implementation:
+      - Extract original playbook ID from ChatHostContext
+      - Append user's additionalInstructions to the original playbook instructions
+      - Call ExecutePlaybookAsync with a progress callback that emits "progress" SSE events
+      - On completion, emit "document_replace" SSE event with the full new analysis HTML
+      - Return a confirmation message to the chat stream
+      - Remove the // PLACEHOLDER comment from task 078
+    </step>
+    <step order="5">
+      Wire progress event emission:
+      - Create a progress callback/delegate that writes SSE "progress" events
+      - Progress events include percent (0-100) and descriptive message
+      - Events are emitted at meaningful intervals (not per-token — per-stage)
+    </step>
+    <step order="6">
+      Ensure undo stack integration:
+      - The document_replace SSE event must include a signal for the frontend to snapshot
+        the current document before replacing (or the frontend handles this on receipt)
+      - Document the expected frontend behavior in code comments
+    </step>
+    <step order="7">
+      Build verification: Run dotnet build src/server/api/Sprk.Bff.Api/ to verify compilation.
+    </step>
+    <step order="8">
+      Verify placeholder PH-078-A is resolved: grep for "// PLACEHOLDER:" in AnalysisExecutionTools.cs
+      to confirm the mock return has been replaced with real orchestration.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine ChatEndpoints.cs SSE pattern and AnalysisOrchestrationService</tool>
+    <tool>Edit - Replace placeholder in AnalysisExecutionTools.cs; add SSE event models</tool>
+    <tool>Bash - dotnet build verification</tool>
+    <tool>Grep - Verify placeholder removal</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs</file>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisOrchestrationService.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- This task RESOLVES placeholder PH-078-A from task 078 -->
+  </placeholders>
+
+  <outputs>
+    <output>Updated AnalysisExecutionTools.cs with real ExecutePlaybookAsync orchestration (PH-078-A resolved)</output>
+    <output>New SSE event types: "progress" and "document_replace" defined in models</output>
+    <output>Progress event emission during long-running re-analysis</output>
+    <output>Successful dotnet build with 0 errors</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>RerunAnalysisAsync calls real ExecutePlaybookAsync (not mock/placeholder)</criterion>
+    <criterion>Placeholder PH-078-A is fully resolved — no "// PLACEHOLDER:" comment remains in AnalysisExecutionTools.cs</criterion>
+    <criterion>"progress" SSE events emitted during re-analysis with percent (0-100) and message</criterion>
+    <criterion>"document_replace" SSE event emitted on completion with full analysis HTML</criterion>
+    <criterion>New SSE events are additive — existing token/done/error events unchanged</criterion>
+    <criterion>document_replace event includes metadata (playbookId, timestamp)</criterion>
+    <criterion>CostControl middleware budget enforcement is respected</criterion>
+    <criterion>dotnet build src/server/api/Sprk.Bff.Api/ succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

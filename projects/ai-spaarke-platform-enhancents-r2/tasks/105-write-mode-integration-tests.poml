@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="105" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Write Mode Integration Tests</title>
+    <phase>3</phase>
+    <package>Package F: Diff Compare View</package>
+    <tags>testing, frontend</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>102</dependencies>
+    <parallel-group>sprint3-track1</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Write integration tests for the useWriteMode hook that verify automatic mode selection logic
+      based on operation type and user override via action menu commands (/mode stream, /mode diff,
+      /mode auto).
+    </goal>
+    <context>
+      The useWriteMode hook (task 102) determines whether AI output should be streamed directly into
+      the editor or collected and shown in a diff review panel. This decision is critical to the
+      user experience — choosing the wrong mode results in either a disorienting streaming replacement
+      or an unnecessary diff review for simple additions.
+
+      These tests validate:
+      1. Automatic mode selection logic for each operation type
+      2. User override persistence across re-renders and in sessionStorage
+      3. Override reset via /mode auto
+      4. Edge cases: unknown operation types, missing sessionId, sessionStorage unavailable
+
+      Tests use React Testing Library's renderHook for hook testing and mock sessionStorage
+      for persistence tests.
+    </context>
+    <constraints>
+      - Follow project testing conventions: {Method}_{Scenario}_{ExpectedResult} naming
+      - Use React Testing Library renderHook for hook tests
+      - Mock sessionStorage for persistence tests
+      - Tests must cover all operation types and override scenarios
+      - Achieve 80%+ line coverage for useWriteMode.ts
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/hooks/useWriteMode.ts</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review the useWriteMode hook implementation to understand all code paths:
+      - Auto-detection logic for each operation type
+      - User override state management
+      - sessionStorage persistence
+      - Reset to auto behavior
+    </step>
+    <step order="2">
+      Create useWriteMode.test.ts with automatic mode selection tests:
+      - resolveMode_Addition_ReturnsStream: addition maps to stream mode
+      - resolveMode_Revision_ReturnsDiff: revision maps to diff mode
+      - resolveMode_SelectionRevision_ReturnsDiff: selection-revision maps to diff
+      - resolveMode_Reanalysis_ReturnsStream: reanalysis maps to stream mode
+      - resolveMode_Unknown_ReturnsStream: unknown defaults to stream mode
+      - mode_Default_IsStream: initial hook state is stream mode with auto source
+    </step>
+    <step order="3">
+      Add user override tests:
+      - setMode_Stream_OverridesAutoDetection: user override to stream is respected
+      - setMode_Diff_OverridesAutoDetection: user override to diff is respected
+      - setMode_Override_PersistsAcrossReRenders: re-render maintains override
+      - setMode_Override_PersistsInSessionStorage: sessionStorage is written
+      - resetToAuto_AfterOverride_ReturnsToAutoDetection: reset clears override
+      - resolveMode_WithOverride_IgnoresOperationType: override takes precedence
+    </step>
+    <step order="4">
+      Add sessionStorage persistence tests:
+      - mount_WithExistingOverride_RestoresFromSessionStorage: persisted override loaded
+      - mount_WithoutOverride_DefaultsToAuto: no persisted state defaults correctly
+      - mount_SessionStorageUnavailable_DefaultsToAuto: graceful fallback when storage unavailable
+      - setMode_WithSessionId_PersistsWithCorrectKey: storage key includes sessionId
+      - setMode_WithoutSessionId_UsesDefaultKey: fallback key when no sessionId
+    </step>
+    <step order="5">
+      Add action menu command integration tests:
+      - modeCommand_Stream_SetsStreamOverride: /mode stream command
+      - modeCommand_Diff_SetsDiffOverride: /mode diff command
+      - modeCommand_Auto_ResetsToAutoDetection: /mode auto command
+    </step>
+    <step order="6">
+      Run all tests and verify:
+      - All tests pass
+      - Coverage meets 80%+ threshold for useWriteMode.ts
+      - No flaky tests
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review useWriteMode hook implementation</tool>
+    <tool>Write - Create test file</tool>
+    <tool>Bash - Run Jest tests, coverage report</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/hooks/useWriteMode.test.ts</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/hooks/useWriteMode.ts</file>
+  </relevant-files>
+
+  <outputs>
+    <output>src/client/shared/Spaarke.UI.Components/src/hooks/useWriteMode.test.ts - Integration tests for write mode hook</output>
+    <output>All tests pass with 80%+ coverage</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>useWriteMode.test.ts exists with tests for all five operation types (addition, revision, selection-revision, reanalysis, unknown)</criterion>
+    <criterion>Tests verify user override via setMode() overrides auto-detection for all operation types</criterion>
+    <criterion>Tests verify sessionStorage persistence of user override</criterion>
+    <criterion>Tests verify resetToAuto() clears override and reverts to automatic detection</criterion>
+    <criterion>Tests verify graceful fallback when sessionStorage is unavailable</criterion>
+    <criterion>Tests verify /mode stream, /mode diff, and /mode auto commands</criterion>
+    <criterion>All tests pass (zero failures)</criterion>
+    <criterion>Line coverage is 80%+ for useWriteMode.ts</criterion>
+    <criterion>Test naming follows {Method}_{Scenario}_{ExpectedResult} convention</criterion>
+  </acceptance-criteria>
+
+  <placeholders />
+</task>

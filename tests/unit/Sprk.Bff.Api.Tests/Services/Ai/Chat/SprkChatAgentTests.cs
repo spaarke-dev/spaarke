@@ -261,7 +261,7 @@ public class SprkChatAgentTests
         // Arrange
         var context = CreateContext("System prompt.");
         // No tools — empty list
-        var agent = new SprkChatAgent(_chatClientMock.Object, context, [], _loggerMock.Object);
+        var agent = new SprkChatAgent(_chatClientMock.Object, context, [], citationContext: null, _loggerMock.Object);
 
         ChatOptions? capturedOptions = null;
 
@@ -287,7 +287,7 @@ public class SprkChatAgentTests
         // Arrange
         var context = CreateContext("System prompt.");
         var mockTool = AIFunctionFactory.Create(() => "tool result", "TestTool", "A test tool");
-        var agent = new SprkChatAgent(_chatClientMock.Object, context, [mockTool], _loggerMock.Object);
+        var agent = new SprkChatAgent(_chatClientMock.Object, context, [mockTool], citationContext: null, _loggerMock.Object);
 
         ChatOptions? capturedOptions = null;
 
@@ -344,8 +344,8 @@ public class SprkChatAgentTests
 
     #region Private helpers
 
-    private SprkChatAgent CreateAgent(ChatContext context, IReadOnlyList<AIFunction>? tools = null)
-        => new SprkChatAgent(_chatClientMock.Object, context, tools ?? [], _loggerMock.Object);
+    private SprkChatAgent CreateAgent(ChatContext context, IReadOnlyList<AIFunction>? tools = null, CitationContext? citationContext = null)
+        => new SprkChatAgent(_chatClientMock.Object, context, tools ?? [], citationContext, _loggerMock.Object);
 
     private static ChatContext CreateContext(
         string systemPrompt,

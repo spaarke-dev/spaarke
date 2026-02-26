@@ -1,0 +1,99 @@
+<task id="R2-147" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>End-to-End Smoke Test on Deployed Environment</title>
+    <phase>Phase 4: Deployment &amp; Validation</phase>
+    <status>completed</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>testing, e2e, smoke</tags>
+  </metadata>
+
+  <prompt>
+    Execute a comprehensive end-to-end smoke test on the fully deployed dev environment
+    (Dataverse + Azure BFF API) covering all R2 user scenarios. Open the Analysis form and verify
+    the Code Page loads. Open the SprkChat side pane from Matter, Project, and Analysis forms and
+    verify it loads correctly. Send a chat message and verify streaming response. Trigger a streaming
+    write and verify tokens appear in the editor. Use the action menu (`/` command) and verify
+    playbook-governed actions. Trigger a re-analysis and verify progress indicators and content
+    replacement. This is the final validation gate before project sign-off.
+  </prompt>
+  <role>QA engineer with Spaarke platform expertise performing acceptance testing</role>
+  <goal>All R2 user scenarios pass the end-to-end smoke test on the deployed dev environment. Every feature works correctly in the integrated deployed system.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="all-adrs">All R2 features must work correctly in the deployed environment, respecting all applicable ADRs.</constraint>
+    <constraint source="ADR-015">No real client data should be used in smoke tests — use designated test records only.</constraint>
+    <constraint source="ADR-021">All UI must render correctly in both light and dark modes during testing.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>End-to-end testing on Dataverse + Azure, deployed environment validation</topic>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      All R2 components have been deployed: SprkChatPane Code Page (task 143), AnalysisWorkspace
+      Code Page (task 144), BFF API with new endpoints (task 145), and Dataverse schema changes
+      (task 146). This smoke test validates the complete integrated system by exercising every
+      major user scenario. It is the final quality gate before project sign-off. Each test scenario
+      maps to a specific R2 feature package: Side Pane (Package A), Streaming Write (Package B),
+      AW Migration (Package C), Action Menu (Package D), Re-Analysis (Package E), Diff View
+      (Package F), Selection Revision (Package G), Suggestions/Citations (Package H), Web Search
+      (Package I). A checklist of pass/fail results will be produced.
+    </background>
+    <dependencies>
+      <dependency task="R2-143">SprkChatPane Code Page must be deployed to Dataverse</dependency>
+      <dependency task="R2-144">AnalysisWorkspace Code Page must be deployed to Dataverse</dependency>
+      <dependency task="R2-145">BFF API must be deployed with all new endpoints</dependency>
+      <dependency task="R2-146">Dataverse schema changes must be deployed</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <!-- This task operates on the deployed environment, not source files -->
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task is testing only -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Smoke test — Analysis form Code Page launch">Navigate to an Analysis record in Dataverse. Click the workspace launcher. Verify the AnalysisWorkspace Code Page opens as an 85% dialog with the 2-panel layout (editor left, SprkChat right). Verify the analysis document loads in the editor.</step>
+    <step order="2" name="Smoke test — SprkChat side pane on Matter form">Open a Matter record. Launch the SprkChat side pane via the ribbon button. Verify the pane opens and SprkChat renders with correct context (entityType=sprk_matter, entityId matches the record).</step>
+    <step order="3" name="Smoke test — SprkChat side pane on Project form">Open a Project record. Launch the SprkChat side pane. Verify pane opens with entityType=sprk_project context.</step>
+    <step order="4" name="Smoke test — SprkChat side pane on Analysis form">Open an Analysis record. Launch the SprkChat side pane. Verify pane opens with entityType=sprk_analysis context and establishes BroadcastChannel connection to the AnalysisWorkspace Code Page.</step>
+    <step order="5" name="Smoke test — chat message and streaming response">In the SprkChat side pane, type a question and send. Verify: SSE connection established, tokens stream in progressively, the response completes with a done event, the message appears in the chat history.</step>
+    <step order="6" name="Smoke test — streaming write to editor">In the AnalysisWorkspace, trigger a streaming write action (via SprkChat or action menu). Verify: document_stream_start event received, tokens appear in the editor progressively, document_stream_end fires, final content is correct in the editor.</step>
+    <step order="7" name="Smoke test — action menu (/ command)">In SprkChat, type `/` to open the action menu. Verify: menu appears within 200ms, actions are categorized (Playbooks, Actions, Search, Settings), actions are filtered by the active playbook's capabilities, selecting an action executes the correct command.</step>
+    <step order="8" name="Smoke test — re-analysis flow">In the AnalysisWorkspace, trigger a re-analysis action. Verify: progress indicator shows percent complete, the editor content is replaced with the new analysis, the user can accept or reject via diff view.</step>
+    <step order="9" name="Smoke test — diff compare view">After a re-analysis or streaming write, trigger the diff compare view. Verify: original and revised content displayed side-by-side, Accept/Reject/Edit buttons functional, accepting applies changes to the editor, rejecting restores original.</step>
+    <step order="10" name="Smoke test — selection-based revision">In the AnalysisWorkspace editor, select a paragraph of text. In SprkChat, request a revision of the selected text. Verify: selected text is transmitted via BroadcastChannel, SprkChat shows the revision request, AI response replaces the selected range in the editor.</step>
+    <step order="11" name="Smoke test — suggestions and citations">After a chat response, verify: suggested follow-up questions appear in the SuggestionBar, clicking a suggestion populates the chat input, citations appear with clickable links, citation links navigate to source documents.</step>
+    <step order="12" name="Smoke test — dark mode">Switch the Dataverse theme to dark mode (or use OS dark mode). Repeat key scenarios (side pane open, chat, streaming write, action menu). Verify all components render correctly in dark mode.</step>
+    <step order="13" name="Document smoke test results">Create a pass/fail checklist documenting the result of each smoke test scenario. Note any failures with screenshots and error details. Store results in project notes/.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AnalysisWorkspace Code Page opens from Analysis form with 2-panel layout and loaded document</criterion>
+    <criterion testable="true">SprkChat side pane opens and functions correctly on Matter, Project, and Analysis forms</criterion>
+    <criterion testable="true">Chat messages produce streaming AI responses via SSE</criterion>
+    <criterion testable="true">Streaming write tokens appear progressively in the editor</criterion>
+    <criterion testable="true">Action menu opens with `/`, shows categorized playbook-governed actions</criterion>
+    <criterion testable="true">Re-analysis shows progress indicator and replaces editor content</criterion>
+    <criterion testable="true">Diff compare view displays original vs. revised content with Accept/Reject/Edit</criterion>
+    <criterion testable="true">Selection-based revision transmits selection and replaces text in editor</criterion>
+    <criterion testable="true">Suggested follow-ups and citations appear after chat responses</criterion>
+    <criterion testable="true">All scenarios work correctly in dark mode</criterion>
+    <criterion testable="true">Smoke test results documented with pass/fail for each scenario</criterion>
+  </acceptance-criteria>
+</task>

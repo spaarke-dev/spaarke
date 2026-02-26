@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>SprkChatBridge Integration Tests</title>
+    <phase>1</phase>
+    <tags>testing, frontend</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>011</dependencies>
+    <parallel-group>sprint1-track1</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Write integration tests for SprkChatBridge that verify cross-pane message flow between two simulated pages, test both BroadcastChannel and postMessage fallback transports, validate event ordering and delivery guarantees, and confirm cleanup/disconnect behavior.
+    </goal>
+    <context>
+      Task 011 created SprkChatBridge with unit tests for basic functionality. This task adds
+      integration-level tests that simulate real cross-pane communication scenarios:
+
+      - Two SprkChatBridge instances (representing side pane and workspace pane) communicating
+        on the same channel
+      - Streaming scenario: rapid succession of document_stream_start → N document_stream_token →
+        document_stream_end events, verifying all arrive in order
+      - Context-switch scenario: context_changed event triggers cleanup in receiving pane
+      - Disconnection scenario: one pane disconnects, other pane handles gracefully
+
+      BroadcastChannel is synchronous for same-origin pages, so event ordering should be guaranteed.
+      postMessage fallback may have different timing characteristics that need validation.
+    </context>
+    <constraints>
+      - Tests must validate both BroadcastChannel and postMessage fallback transports
+      - Test event ordering: events received in the same order they were emitted
+      - Test delivery: all emitted events are received (no drops)
+      - Test isolation: messages on one channel don't leak to another
+      - Test cleanup: disconnect() prevents further event delivery
+      - Use Jest testing framework (consistent with shared library)
+      - Follow .claude/constraints/testing.md for naming conventions
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.ts</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.test.ts</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review the SprkChatBridge implementation and existing unit tests from task 011:
+      - Understand the public API: emit, subscribe, unsubscribe, disconnect
+      - Understand transport detection logic
+      - Note any test utilities or mocks already in place
+    </step>
+    <step order="2">
+      Create integration test file:
+      - src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.integration.test.ts
+      - Set up test harness that creates two bridge instances on the same channel
+    </step>
+    <step order="3">
+      Test cross-pane message flow (BroadcastChannel):
+      - Bridge A emits document_stream_start → Bridge B receives it with correct payload
+      - Bridge B emits selection_changed → Bridge A receives it with correct payload
+      - Bidirectional communication on same channel works
+    </step>
+    <step order="4">
+      Test streaming sequence ordering:
+      - Bridge A emits: document_stream_start, then 50 document_stream_token events, then document_stream_end
+      - Bridge B receives all 52 events in exact order
+      - Verify no events dropped and no reordering
+    </step>
+    <step order="5">
+      Test postMessage fallback:
+      - Mock BroadcastChannel as unavailable (delete from global or set to undefined)
+      - Repeat cross-pane message flow tests using postMessage transport
+      - Verify same behavior as BroadcastChannel transport
+      - Restore BroadcastChannel mock after test
+    </step>
+    <step order="6">
+      Test channel isolation:
+      - Bridge A on channel "sprk-workspace-session1"
+      - Bridge B on channel "sprk-workspace-session2"
+      - Bridge C on channel "sprk-workspace-session1"
+      - Bridge A emits event → Bridge C receives, Bridge B does NOT receive
+    </step>
+    <step order="7">
+      Test disconnect behavior:
+      - Bridge A and Bridge B on same channel
+      - Bridge A disconnects
+      - Bridge B emits event → Bridge A does NOT receive (no handler called, no error thrown)
+      - Bridge A emits event → throws or silently fails (no crash)
+    </step>
+    <step order="8">
+      Test cleanup completeness:
+      - Create bridge, subscribe to multiple events
+      - Call disconnect()
+      - Verify all internal listeners removed (no memory leaks)
+      - Verify BroadcastChannel.close() called (or postMessage listener removed)
+    </step>
+    <step order="9">
+      Run all tests and verify:
+      - npm test (filter to SprkChatBridge integration tests)
+      - All tests pass
+      - No flaky tests from timing issues
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review SprkChatBridge implementation and existing tests</tool>
+    <tool>Write - Create integration test file</tool>
+    <tool>Bash - Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.integration.test.ts — Integration tests</output>
+    <output>All integration tests passing</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Cross-pane message flow tested: Bridge A → Bridge B and Bridge B → Bridge A</criterion>
+    <criterion>Streaming sequence tested: 50+ tokens delivered in order with no drops</criterion>
+    <criterion>BroadcastChannel transport tested with passing results</criterion>
+    <criterion>postMessage fallback transport tested with passing results</criterion>
+    <criterion>Channel isolation verified: different channels don't cross-talk</criterion>
+    <criterion>Disconnect prevents further event delivery without errors</criterion>
+    <criterion>Cleanup removes all listeners (no memory leaks)</criterion>
+    <criterion>Test naming follows {Method}_{Scenario}_{ExpectedResult} convention</criterion>
+    <criterion>All integration tests pass without flaky/timing failures</criterion>
+  </acceptance-criteria>
+</task>

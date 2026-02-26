@@ -1,0 +1,94 @@
+<task id="R2-190" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <phase>Project Wrap-Up</phase>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>wrap-up, documentation</tags>
+  </metadata>
+
+  <prompt>
+    Complete the SprkChat Interactive Collaboration R2 project wrap-up. Update the project README.md
+    status to Complete. Create a lessons-learned.md document in the notes/ folder capturing key
+    decisions, challenges encountered, and recommendations for future work. Archive project artifacts
+    by ensuring all working files are committed and the project folder is clean. Update TASK-INDEX.md
+    to mark all tasks as complete. Create a final commit with a project completion message summarizing
+    the R2 deliverables. Recommend running `/repo-cleanup` to validate the repository structure.
+  </prompt>
+  <role>Project lead completing final project administration</role>
+  <goal>The R2 project is formally complete: README updated, lessons learned documented, all tasks marked complete, final commit created, and repository validated. The project is ready for branch merge to master.</goal>
+
+  <inputs>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+    <file purpose="task-index">projects/ai-spaarke-platform-enhancents-r2/tasks/TASK-INDEX.md</file>
+    <file purpose="readme">projects/ai-spaarke-platform-enhancents-r2/README.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project-protocol">All task statuses in TASK-INDEX.md must be updated to reflect final state.</constraint>
+    <constraint source="project-protocol">current-task.md must be reset to indicate no active task (project complete).</constraint>
+    <constraint source="skill:push-to-github">Final commit should follow repository commit conventions.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project wrap-up procedures, repository hygiene, branch management</topic>
+    <files>
+      <file>.claude/skills/push-to-github/SKILL.md</file>
+      <file>.claude/skills/merge-to-master/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The SprkChat Interactive Collaboration R2 project has completed all implementation phases:
+      Phase 0 (Legacy Cleanup), Phase 1 (Foundation — Packages A, B, D), Phase 2 (Integration —
+      Packages C, E, I), Phase 3 (Polish — Packages F, G, H), and Phase 4 (Deployment &amp; Validation).
+      All features are deployed, tested, and validated. This wrap-up task formalizes project completion
+      by updating status artifacts, documenting lessons learned, and preparing the branch for merge
+      to master. The R2 deliverables include: SprkChat side pane Code Page, streaming write engine,
+      AnalysisWorkspace Code Page migration, action menu / command palette, re-analysis pipeline,
+      diff compare view, selection-based revision, suggested follow-ups + citations, and web search
+      integration.
+    </background>
+    <dependencies>
+      <dependency task="R2-150">Final code review and ADR compliance check must pass</dependency>
+      <dependency task="R2-147">End-to-end smoke test must pass</dependency>
+      <dependency task="R2-148">Placeholder audit must confirm zero unresolved stubs</dependency>
+      <dependency task="R2-149">Legacy PCF removal must be complete</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">projects/ai-spaarke-platform-enhancents-r2/README.md</file>
+    <file action="create">projects/ai-spaarke-platform-enhancents-r2/notes/lessons-learned.md</file>
+    <file action="modify">projects/ai-spaarke-platform-enhancents-r2/tasks/TASK-INDEX.md</file>
+    <file action="modify">projects/ai-spaarke-platform-enhancents-r2/current-task.md</file>
+    <file action="modify">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task is administrative only -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Update README.md status">Update the project README.md: change Status field to "Complete", add completion date (today's date), add summary of delivered features (9 packages), add deployment details (dev environment URLs).</step>
+    <step order="2" name="Create lessons-learned.md">Create `projects/ai-spaarke-platform-enhancents-r2/notes/lessons-learned.md` documenting: key architectural decisions and rationale, challenges encountered during implementation, what worked well (parallel execution model, placeholder protocol, Code Page migration approach), what could be improved, recommendations for future R3 or follow-up work.</step>
+    <step order="3" name="Update TASK-INDEX.md">Review every task entry in TASK-INDEX.md. Update all completed tasks from earlier phases to reflect their final status. Verify tasks 140-150 and 190 are listed and marked with status indicators. Every task should be marked complete (checkmark).</step>
+    <step order="4" name="Reset current-task.md">Update current-task.md to indicate no active task: set current task to "none", set project status to "Complete", clear the Quick Recovery section, add a note indicating all R2 work is finished.</step>
+    <step order="5" name="Update project CLAUDE.md">Update the project CLAUDE.md: change Status to "Complete", update Last Updated date, add a "Project Completed" section noting the completion date and branch ready for merge.</step>
+    <step order="6" name="Verify project folder cleanliness">Check that the project folder contains no temporary files, editor artifacts, or uncommitted ephemeral files. Ensure notes/ contains only intentional documentation. Remove any working scratch files.</step>
+    <step order="7" name="Create final commit">Stage all project wrap-up changes and create a commit with message: "feat(sprkchat-r2): complete SprkChat Interactive Collaboration R2 — 9 packages delivered" with a body listing the major deliverables.</step>
+    <step order="8" name="Recommend repo-cleanup and merge">Advise the user to: (1) run `/repo-cleanup` to validate repository structure, (2) run `/merge-to-master` to merge the work branch into master, (3) create a PR if code review is required before merge.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">README.md status field shows "Complete" with completion date</criterion>
+    <criterion testable="true">lessons-learned.md exists in notes/ with substantive content covering decisions, challenges, and recommendations</criterion>
+    <criterion testable="true">Every task in TASK-INDEX.md is marked complete (no pending or in-progress tasks)</criterion>
+    <criterion testable="true">current-task.md indicates no active task and project status "Complete"</criterion>
+    <criterion testable="true">Project CLAUDE.md status updated to "Complete"</criterion>
+    <criterion testable="true">No temporary or ephemeral files in the project folder</criterion>
+    <criterion testable="true">Final commit created with descriptive message summarizing R2 deliverables</criterion>
+    <criterion testable="true">User advised to run /repo-cleanup and /merge-to-master</criterion>
+  </acceptance-criteria>
+</task>

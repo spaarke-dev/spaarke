@@ -18,6 +18,10 @@ namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
 /// as a required filter. The tenant ID is NOT exposed as an LLM tool parameter — it is
 /// injected by <see cref="SprkChatAgentFactory"/> from the authenticated session context.
 ///
+/// Each method populates the shared <see cref="CitationContext"/> with source metadata
+/// (chunk IDs, source names, excerpts) so the AI can reference sources via citation markers
+/// [N] and the frontend can render citation footnotes.
+///
 /// Instantiated by <see cref="SprkChatAgentFactory"/>. Not registered in DI — the factory
 /// creates instances and registers methods as <see cref="Microsoft.Extensions.AI.AIFunction"/>
 /// objects via <see cref="Microsoft.Extensions.AI.AIFunctionFactory.Create"/>.
@@ -29,8 +33,13 @@ public sealed class DocumentSearchTools
     private readonly IReadOnlyList<string>? _knowledgeSourceIds;
     private readonly string? _parentEntityType;
     private readonly string? _parentEntityId;
+    private readonly CitationContext? _citationContext;
 
-    public DocumentSearchTools(IRagService ragService, string tenantId, ChatKnowledgeScope? knowledgeScope = null)
+    public DocumentSearchTools(
+        IRagService ragService,
+        string tenantId,
+        ChatKnowledgeScope? knowledgeScope = null,
+        CitationContext? citationContext = null)
     {
         _ragService = ragService ?? throw new ArgumentNullException(nameof(ragService));
         _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
@@ -39,6 +48,7 @@ public sealed class DocumentSearchTools
             : null;
         _parentEntityType = knowledgeScope?.ParentEntityType;
         _parentEntityId = knowledgeScope?.ParentEntityId;
+        _citationContext = citationContext;
     }
 
     /// <summary>
@@ -77,13 +87,23 @@ public sealed class DocumentSearchTools
         sb.AppendLine($"Found {response.Results.Count} relevant document(s) for query: \"{query}\"");
         sb.AppendLine();
 
-        foreach (var (result, idx) in response.Results.Select((r, i) => (r, i + 1)))
+        for (var i = 0; i < response.Results.Count; i++)
         {
-            sb.AppendLine($"[{idx}] {result.DocumentName} (Relevance: {result.Score:P0})");
+            var result = response.Results[i];
+            var citationId = _citationContext?.AddCitation(
+                result.Id,
+                result.DocumentName,
+                pageNumber: null, // Page number not available in search index
+                result.Content);
+
+            var marker = citationId.HasValue ? $"[{citationId.Value}]" : $"[{i + 1}]";
+
+            sb.AppendLine($"Source {marker}: {result.DocumentName} (Relevance: {result.Score:P0})");
             if (!string.IsNullOrWhiteSpace(result.KnowledgeSourceName))
             {
-                sb.AppendLine($"    Source: {result.KnowledgeSourceName}");
+                sb.AppendLine($"    Knowledge Source: {result.KnowledgeSourceName}");
             }
+            sb.AppendLine($"    Chunk: {result.ChunkIndex + 1}/{result.ChunkCount}, ID: {result.Id}");
             sb.AppendLine($"    {result.Content}");
             sb.AppendLine();
         }
@@ -132,15 +152,26 @@ public sealed class DocumentSearchTools
         sb.AppendLine($"Discovery search found {response.Results.Count} document(s) for: \"{query}\"");
         sb.AppendLine();
 
-        foreach (var (result, idx) in response.Results.Select((r, i) => (r, i + 1)))
+        for (var i = 0; i < response.Results.Count; i++)
         {
-            sb.AppendLine($"[{idx}] {result.DocumentName} (Score: {result.Score:F2})");
+            var result = response.Results[i];
+            // Truncate content for discovery (show preview only)
+            var preview = result.Content.Length > 300 ? result.Content[..300] + "..." : result.Content;
+
+            var citationId = _citationContext?.AddCitation(
+                result.Id,
+                result.DocumentName,
+                pageNumber: null, // Page number not available in search index
+                preview);
+
+            var marker = citationId.HasValue ? $"[{citationId.Value}]" : $"[{i + 1}]";
+
+            sb.AppendLine($"Source {marker}: {result.DocumentName} (Score: {result.Score:F2})");
             if (!string.IsNullOrWhiteSpace(result.KnowledgeSourceName))
             {
                 sb.AppendLine($"    Collection: {result.KnowledgeSourceName}");
             }
-            // Truncate content for discovery (show preview only)
-            var preview = result.Content.Length > 300 ? result.Content[..300] + "..." : result.Content;
+            sb.AppendLine($"    Chunk: {result.ChunkIndex + 1}/{result.ChunkCount}, ID: {result.Id}");
             sb.AppendLine($"    {preview}");
             sb.AppendLine();
         }

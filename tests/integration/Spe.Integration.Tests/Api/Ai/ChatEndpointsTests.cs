@@ -603,6 +603,8 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<Guid>(),
+                It.IsAny<ChatHostContext?>(),
+                It.IsAny<IReadOnlyList<string>?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(testContext);
     }

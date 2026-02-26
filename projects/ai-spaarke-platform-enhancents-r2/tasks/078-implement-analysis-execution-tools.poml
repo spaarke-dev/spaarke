@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="078" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Implement AnalysisExecutionTools AI Tool Class</title>
+    <phase>2</phase>
+    <package>Package E: Re-Analysis Pipeline</package>
+    <tags>bff-api, ai, tools</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>Phase 1 complete</dependencies>
+    <parallel-group>sprint2-track2</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create the AnalysisExecutionTools AI tool class with RerunAnalysisAsync and RefineAnalysisAsync
+      methods, factory-instantiated with 0 DI registrations, following the AIFunctionFactory.Create pattern.
+    </goal>
+    <context>
+      Package E introduces re-analysis capabilities into SprkChat. The AnalysisExecutionTools class
+      is the AI tool that enables users to request full document reprocessing ("rerun analysis with
+      focus on financial risks") or conversational refinement ("refine the conclusion to be more
+      concise"). It follows the same pattern as TextRefinementTools — factory-instantiated via
+      AIFunctionFactory.Create, receiving ChatHostContext for session/document context.
+
+      RerunAnalysisAsync calls IAnalysisOrchestrationService.ExecutePlaybookAsync() with the
+      original playbook plus user-appended instructions. RefineAnalysisAsync handles lighter
+      conversational follow-ups that modify the analysis incrementally.
+
+      For initial testing, ExecutePlaybookAsync returns mock analysis output. Task 080 wires the
+      real orchestration with streaming and progress events.
+    </context>
+    <constraints>
+      - Follow ADR-010: 0 additional DI registrations — factory-instantiated via AIFunctionFactory.Create
+      - Follow ADR-013: AI tools MUST follow AIFunctionFactory.Create pattern; ChatHostContext flows through pipeline
+      - Follow ADR-016: Rate limiting applied; bounded concurrency for re-analysis (expensive operation)
+      - Follow existing TextRefinementTools.cs pattern exactly for class structure
+      - MUST receive IAnalysisOrchestrationService via constructor (injected by factory, not DI container)
+      - MUST NOT add any new registrations to Program.cs or AiModule.cs
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/TextRefinementTools.cs</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisOrchestrationService.cs</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read TextRefinementTools.cs to understand the canonical AI tool class pattern:
+      - Class structure, constructor parameters, AIFunctionFactory usage
+      - How ChatHostContext is received and used
+      - Method signatures and return types
+    </step>
+    <step order="2">
+      Read IAnalysisOrchestrationService.cs to understand the ExecutePlaybookAsync signature:
+      - Parameters (playbook ID, instructions, context)
+      - Return type and streaming behavior
+    </step>
+    <step order="3">
+      Create src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs:
+      - Class with constructor accepting ChatHostContext and IAnalysisOrchestrationService
+      - RerunAnalysisAsync(string additionalInstructions): calls ExecutePlaybookAsync with original
+        playbook + appended instructions. Returns mock analysis output (PLACEHOLDER).
+      - RefineAnalysisAsync(string refinementInstruction): conversational follow-up that refines
+        the current analysis based on the instruction
+      - Both methods decorated with AIFunction attributes for tool discovery
+    </step>
+    <step order="4">
+      Add XML documentation comments:
+      - Class-level summary explaining re-analysis tool purpose
+      - Method-level summaries with parameter descriptions
+      - Reference to ADR-010 (factory-instantiated) and ADR-013 (tool pattern)
+    </step>
+    <step order="5">
+      Build verification: Run dotnet build src/server/api/Sprk.Bff.Api/ to verify compilation.
+      Fix any errors.
+    </step>
+    <step order="6">
+      Verify 0 DI registrations added: grep Program.cs and AiModule.cs for AnalysisExecutionTools
+      to confirm no registrations were added.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine TextRefinementTools.cs and IAnalysisOrchestrationService.cs patterns</tool>
+    <tool>Write - Create AnalysisExecutionTools.cs</tool>
+    <tool>Bash - dotnet build verification</tool>
+    <tool>Grep - Verify 0 DI registrations</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/TextRefinementTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisOrchestrationService.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <placeholder id="PH-078-A">
+      <location>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs</location>
+      <type>hardcoded-return</type>
+      <description>RerunAnalysisAsync returns mock analysis output string instead of calling real ExecutePlaybookAsync orchestration. The method signature and tool attributes are real; only the body is stubbed.</description>
+      <completed-by>080</completed-by>
+      <build-impact>Compiles and tests pass; returns mock data</build-impact>
+    </placeholder>
+  </placeholders>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs — AI tool class with RerunAnalysisAsync and RefineAnalysisAsync</output>
+    <output>Successful dotnet build with 0 errors</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AnalysisExecutionTools.cs exists at Services/Ai/Chat/Tools/</criterion>
+    <criterion>Class follows AIFunctionFactory.Create pattern matching TextRefinementTools.cs</criterion>
+    <criterion>RerunAnalysisAsync method accepts additionalInstructions parameter and is decorated with AIFunction attribute</criterion>
+    <criterion>RefineAnalysisAsync method accepts refinementInstruction parameter and is decorated with AIFunction attribute</criterion>
+    <criterion>Constructor accepts ChatHostContext and IAnalysisOrchestrationService</criterion>
+    <criterion>0 DI registrations added to Program.cs or AiModule.cs</criterion>
+    <criterion>dotnet build src/server/api/Sprk.Bff.Api/ succeeds with zero errors</criterion>
+    <criterion>PLACEHOLDER comment present in RerunAnalysisAsync body referencing task 080</criterion>
+  </acceptance-criteria>
+</task>

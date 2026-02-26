@@ -17,7 +17,8 @@ import {
     Text,
     Spinner,
 } from "@fluentui/react-components";
-import { ISprkChatMessageProps } from "./types";
+import { ISprkChatMessageProps, ICitation } from "./types";
+import { CitationMarker } from "./SprkChatCitationPopover";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -86,6 +87,89 @@ function formatTimestamp(timestamp: string): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Citation Rendering
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Regex to match citation markers like [1], [2], [12], etc. in message text.
+ * Captures the numeric ID inside the brackets.
+ */
+const CITATION_MARKER_REGEX = /\[(\d+)\]/g;
+
+/**
+ * Builds a lookup map from citation ID to ICitation for O(1) access.
+ */
+function buildCitationMap(citations: ICitation[]): Map<number, ICitation> {
+    const map = new Map<number, ICitation>();
+    for (const c of citations) {
+        map.set(c.id, c);
+    }
+    return map;
+}
+
+/**
+ * Parses message text and replaces [N] markers with CitationMarker components
+ * when a matching citation exists.
+ *
+ * Returns an array of React nodes: plain text strings interspersed with
+ * CitationMarker elements. If no citations are provided or no markers match,
+ * returns the original text as a single-element array.
+ */
+function renderContentWithCitations(
+    text: string,
+    citations: ICitation[] | undefined
+): React.ReactNode[] {
+    if (!citations || citations.length === 0) {
+        return [text];
+    }
+
+    const citationMap = buildCitationMap(citations);
+    const nodes: React.ReactNode[] = [];
+    let lastIndex = 0;
+
+    // Reset regex state (global regex retains lastIndex between calls)
+    CITATION_MARKER_REGEX.lastIndex = 0;
+
+    let match: RegExpExecArray | null;
+    while ((match = CITATION_MARKER_REGEX.exec(text)) !== null) {
+        const citationId = parseInt(match[1], 10);
+        const citation = citationMap.get(citationId);
+
+        if (!citation) {
+            // No matching citation metadata — leave the [N] marker as plain text
+            continue;
+        }
+
+        // Add text before this marker
+        if (match.index > lastIndex) {
+            nodes.push(text.slice(lastIndex, match.index));
+        }
+
+        // Add the CitationMarker component
+        nodes.push(
+            React.createElement(CitationMarker, {
+                key: `citation-${citationId}-${match.index}`,
+                citation,
+            })
+        );
+
+        lastIndex = match.index + match[0].length;
+    }
+
+    // Add remaining text after the last marker
+    if (lastIndex < text.length) {
+        nodes.push(text.slice(lastIndex));
+    }
+
+    // If no markers were replaced, return original text
+    if (nodes.length === 0) {
+        return [text];
+    }
+
+    return nodes;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -106,9 +190,11 @@ function formatTimestamp(timestamp: string): string {
 export const SprkChatMessage: React.FC<ISprkChatMessageProps> = ({
     message,
     isStreaming = false,
+    citations,
 }) => {
     const styles = useStyles();
     const isUser = message.role === "User";
+    const isAssistant = message.role === "Assistant";
 
     const containerClass = mergeClasses(
         styles.container,
@@ -120,6 +206,15 @@ export const SprkChatMessage: React.FC<ISprkChatMessageProps> = ({
         isUser ? styles.userTimestamp : undefined
     );
 
+    // For assistant messages with citations, parse [N] markers and render
+    // interactive CitationMarker components. User messages are always plain text.
+    const renderedContent = React.useMemo(() => {
+        if (isAssistant && citations && citations.length > 0 && !isStreaming) {
+            return renderContentWithCitations(message.content, citations);
+        }
+        return message.content;
+    }, [message.content, citations, isAssistant, isStreaming]);
+
     return (
         <div
             className={containerClass}
@@ -127,7 +222,7 @@ export const SprkChatMessage: React.FC<ISprkChatMessageProps> = ({
             aria-label={`${message.role} message`}
         >
             <Text className={styles.messageContent}>
-                {message.content}
+                {renderedContent}
             </Text>
 
             {isStreaming && !message.content && (

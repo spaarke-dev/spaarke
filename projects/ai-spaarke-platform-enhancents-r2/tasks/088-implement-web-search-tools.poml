@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="088" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Implement WebSearchTools AI Tool Class</title>
+    <phase>2</phase>
+    <package>Package I: Web Search + Multi-Document</package>
+    <tags>bff-api, ai, tools</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>Phase 1 complete</dependencies>
+    <parallel-group>sprint2-track3</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create the WebSearchTools AI tool class with a SearchWebAsync method that calls the Azure
+      Bing Search API via HttpClient, returns results marked as external content, and is
+      factory-instantiated with 0 DI registrations.
+    </goal>
+    <context>
+      Package I adds web search capability to SprkChat. The WebSearchTools class enables the AI
+      agent to search the web when the user's question cannot be answered from internal documents
+      alone. Results are clearly marked as external content for data governance purposes.
+
+      The tool follows the same factory-instantiation pattern as TextRefinementTools — created
+      via AIFunctionFactory.Create, receiving ChatHostContext for session context. HttpClient
+      is constructed internally with the Bing API key retrieved from Key Vault configuration
+      (passed via ChatHostContext or options).
+
+      If the Azure Bing Search API is not yet provisioned, the tool returns mock search results
+      so the build compiles and tests pass. The mock is replaced when the API is provisioned.
+    </context>
+    <constraints>
+      - Follow ADR-010: 0 additional DI registrations — factory-instantiated via AIFunctionFactory.Create
+      - Follow ADR-013: AI tools MUST follow AIFunctionFactory.Create pattern; ChatHostContext flows through pipeline
+      - Follow ADR-015: Web search results MUST be marked as external content; MUST NOT log full result bodies
+      - Follow ADR-016: Rate limiting applied; web searches count toward AI endpoint rate limits
+      - MUST NOT expose Bing API key to client-side code
+      - HttpClient with Bing API key from Key Vault (Ocp-Apim-Subscription-Key header)
+      - maxResults parameter MUST be bounded (e.g., max 10)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/TextRefinementTools.cs</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read TextRefinementTools.cs to understand the canonical AI tool class pattern:
+      - Class structure, constructor parameters, AIFunctionFactory usage
+      - How ChatHostContext provides configuration/secrets
+    </step>
+    <step order="2">
+      Research the Azure Bing Web Search API v7 contract:
+      - Endpoint: https://api.bing.microsoft.com/v7.0/search
+      - Required header: Ocp-Apim-Subscription-Key
+      - Query parameters: q, count, mkt
+      - Response model: WebPages with name, url, snippet
+    </step>
+    <step order="3">
+      Create src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WebSearchTools.cs:
+      - Class with constructor accepting ChatHostContext
+      - SearchWebAsync(string query, int maxResults = 5): calls Bing API, returns formatted results
+      - Each result marked with [External Source] prefix for data governance
+      - maxResults capped at 10 (enforce upper bound)
+      - HttpClient created with Bing API key from configuration (via ChatHostContext)
+      - AIFunction attribute decorating the method for tool discovery
+    </step>
+    <step order="4">
+      Implement the Bing API call (or mock if not provisioned):
+      - Construct HttpClient with Ocp-Apim-Subscription-Key header
+      - GET request to Bing Web Search endpoint with query and count
+      - Deserialize response, extract WebPages results
+      - Format as structured text: [External Source] Title - URL\nSnippet
+      - If Bing API not provisioned: return mock results with PLACEHOLDER comment
+    </step>
+    <step order="5">
+      Add XML documentation comments referencing ADR-010 and ADR-015.
+    </step>
+    <step order="6">
+      Build verification: Run dotnet build src/server/api/Sprk.Bff.Api/ to verify compilation.
+    </step>
+    <step order="7">
+      Verify 0 DI registrations: grep Program.cs and AiModule.cs for WebSearchTools.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine TextRefinementTools.cs and ChatHostContext</tool>
+    <tool>Write - Create WebSearchTools.cs</tool>
+    <tool>Bash - dotnet build verification</tool>
+    <tool>Grep - Verify 0 DI registrations</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WebSearchTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/TextRefinementTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <placeholder id="PH-088-A">
+      <location>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WebSearchTools.cs</location>
+      <type>mock-data</type>
+      <description>If Azure Bing Search API is not yet provisioned, SearchWebAsync returns mock search results instead of calling the real API. The method signature and tool attributes are real; only the HTTP call is stubbed with static results.</description>
+      <completed-by>Bing API provisioning (external dependency)</completed-by>
+      <build-impact>Compiles and tests pass; returns mock data marked as [External Source]</build-impact>
+    </placeholder>
+  </placeholders>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WebSearchTools.cs — AI tool class with SearchWebAsync</output>
+    <output>Successful dotnet build with 0 errors</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>WebSearchTools.cs exists at Services/Ai/Chat/Tools/</criterion>
+    <criterion>Class follows AIFunctionFactory.Create pattern matching TextRefinementTools.cs</criterion>
+    <criterion>SearchWebAsync method accepts query and maxResults parameters with AIFunction attribute</criterion>
+    <criterion>maxResults has a default value (5) and upper bound cap (10)</criterion>
+    <criterion>Results are marked with [External Source] prefix for data governance (ADR-015)</criterion>
+    <criterion>Bing API key is NOT exposed to client-side code</criterion>
+    <criterion>Constructor accepts ChatHostContext (no IServiceProvider or DI container access)</criterion>
+    <criterion>0 DI registrations added to Program.cs or AiModule.cs</criterion>
+    <criterion>dotnet build src/server/api/Sprk.Bff.Api/ succeeds with zero errors</criterion>
+    <criterion>PLACEHOLDER comment present if Bing API is not provisioned, referencing external dependency</criterion>
+  </acceptance-criteria>
+</task>

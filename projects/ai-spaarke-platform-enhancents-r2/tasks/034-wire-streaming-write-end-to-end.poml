@@ -1,0 +1,99 @@
+<task id="R2-034" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Wire Streaming Write Flow End-to-End (SSE to Bridge to Editor)</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package B: Streaming Write Engine</package>
+    <status>not-started</status>
+    <estimated-effort>8 hours</estimated-effort>
+    <tags>frontend, integration, streaming</tags>
+    <parallel-group>sprint1-track2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Connect the full streaming write data path from BFF API SSE events through the SprkChatBridge
+    cross-pane communication layer to the RichTextEditor's StreamingInsertPlugin. When the backend
+    emits `document_stream_start`, the bridge signals the editor to `beginStreamingInsert()`.
+    Each `document_stream_token` event is routed through the bridge to `appendStreamToken()`.
+    On `document_stream_end`, the bridge calls `endStreamingInsert()`. Test the full flow: user
+    sends a message that triggers WorkingDocumentTools → LLM streams tokens → SSE events →
+    BroadcastChannel → editor insertion. Since the Analysis Workspace Code Page does not exist yet
+    (Package C), wire to a test harness page for validation.
+  </prompt>
+  <role>Senior full-stack developer with Spaarke platform expertise</role>
+  <goal>The streaming write data path works end-to-end from SSE events to editor insertion. A test harness page demonstrates the full flow. Ready for integration with the real Analysis Workspace Code Page in task 071.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec">Cross-pane communication MUST use BroadcastChannel API with window.postMessage fallback. Streaming write latency MUST be under 100ms per token (NFR-01). BroadcastChannel messages MUST deliver within 10ms (NFR-03).</constraint>
+    <constraint source="ADR-012">SprkChatBridge communication module MUST live in @spaarke/ui-components.</constraint>
+    <constraint source="ADR-015">Auth tokens MUST NOT be transmitted via BroadcastChannel. Only document/selection events.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Cross-pane communication and streaming integration</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The streaming write engine involves multiple layers: (1) BFF API emits `document_stream_*`
+      SSE events via ChatEndpoints.cs, (2) the SprkChat side pane receives these events via the
+      useSseStream hook, (3) SprkChatBridge forwards document stream events across the
+      BroadcastChannel to the Analysis Workspace pane, (4) the Analysis Workspace receives bridge
+      events and calls the RichTextEditor's streaming ref methods. This task wires all these layers
+      together. Since the Analysis Workspace Code Page (Package C) does not exist yet, a test
+      harness page is used to validate the flow. The harness includes a RichTextEditor instance
+      connected to the bridge as a consumer.
+    </background>
+    <dependencies>
+      <dependency task="R2-025" status="complete">SSE event types (TypeScript) must exist for event parsing.</dependency>
+      <dependency task="R2-030" status="complete">StreamingInsertPlugin must exist for editor-side token insertion.</dependency>
+      <dependency task="R2-031" status="complete">RichTextEditor streaming ref API must be wired.</dependency>
+      <dependency task="R2-011" status="complete">SprkChatBridge module must exist with BroadcastChannel support (Package A).</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatBridge.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/RichTextEditor.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/plugins/StreamingInsertPlugin.tsx</file>
+  </relevant-files>
+
+  <placeholders>
+    <placeholder type="mock-data" location="test harness page">
+      Test harness page at `src/client/shared/Spaarke.UI.Components/src/__test-harness__/StreamingWriteHarness.tsx` used for E2E flow validation. This is NOT shipped to production. Completed by task R2-071 which integrates with the real Analysis Workspace Code Page.
+    </placeholder>
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Extend SprkChatBridge for document stream events">Add event handlers to SprkChatBridge for `document_stream_start`, `document_stream_token`, and `document_stream_end`. Bridge forwards these events over BroadcastChannel to the Analysis Workspace pane.</step>
+    <step order="2" name="Extend useSseStream for new event types">Update the useSseStream hook (shared version) to recognize and dispatch the new document stream SSE event types. Route them through the bridge instead of treating them as chat tokens.</step>
+    <step order="3" name="Create bridge consumer hook">Create a `useDocumentStreamConsumer` hook (or extend existing) that subscribes to document stream events from the bridge and calls the RichTextEditor ref methods: `beginStreamingInsert` on start, `appendStreamToken` on token, `endStreamingInsert` on end.</step>
+    <step order="4" name="Create test harness page">Create a test harness page with: a RichTextEditor instance, the bridge consumer hook connected, and a mock SSE event emitter (simulates backend events). Use this to validate the full flow visually.</step>
+    <step order="5" name="Test full flow">Simulate the complete path: trigger a mock SSE event sequence (start → tokens → end) and verify tokens appear in the editor character-by-character with the pulsing cursor indicator visible during streaming.</step>
+    <step order="6" name="Verify latency">Measure per-token insertion latency. Target: &lt;100ms from SSE event receipt to editor DOM update (NFR-01).</step>
+    <step order="7" name="Build verification">Run TypeScript compilation for the shared UI components.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">SprkChatBridge forwards document_stream_* events over BroadcastChannel</criterion>
+    <criterion testable="true">useSseStream hook recognizes and routes new document stream SSE event types</criterion>
+    <criterion testable="true">Bridge consumer hook calls RichTextEditor streaming ref methods in correct sequence</criterion>
+    <criterion testable="true">Test harness page demonstrates full flow: mock SSE → bridge → editor insertion</criterion>
+    <criterion testable="true">Tokens appear in editor character-by-character with pulsing cursor visible</criterion>
+    <criterion testable="true">Per-token insertion latency is under 100ms (NFR-01)</criterion>
+    <criterion testable="true">No auth tokens are transmitted via BroadcastChannel</criterion>
+    <criterion testable="true">TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

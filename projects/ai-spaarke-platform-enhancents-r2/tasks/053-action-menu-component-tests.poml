@@ -1,0 +1,102 @@
+<task id="R2-053" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>SprkChatActionMenu Component Tests</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package D: Action Menu / Command Palette</package>
+    <status>not-started</status>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>testing, frontend</tags>
+    <parallel-group>sprint1-track3</parallel-group>
+  </metadata>
+
+  <prompt>
+    Write Jest component tests for SprkChatActionMenu and the `/` trigger integration in
+    SprkChatInput. Test the `/` trigger detection, keyboard navigation (ArrowUp, ArrowDown,
+    Enter, Escape), text filtering behavior, category rendering, action selection callbacks,
+    and accessibility attributes. Follow the existing SprkChat test patterns in
+    `__tests__/SprkChatInput.test.tsx`.
+  </prompt>
+  <role>Senior React/TypeScript test engineer with Jest, React Testing Library, and accessibility testing expertise</role>
+  <goal>Comprehensive component tests for SprkChatActionMenu and the SprkChatInput `/` trigger integration. Tests cover trigger detection, keyboard navigation, filtering, category rendering, and accessibility. All tests pass.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="testing">Use Jest + React Testing Library. Follow existing SprkChat test patterns. Test naming: describe/it blocks with clear scenario descriptions.</constraint>
+    <constraint source="ADR-021">Test theme rendering: verify component renders in light, dark, and high-contrast themes without errors.</constraint>
+    <constraint source="spec-NFR-05">Test accessibility: verify ARIA roles (listbox, option), aria-activedescendant, and keyboard-only navigation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Jest component testing, React Testing Library, keyboard event simulation, ARIA testing, Fluent v9 test patterns</topic>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 048 created the SprkChatActionMenu component and task 049 wired the `/` trigger into
+      SprkChatInput. This task writes comprehensive tests for both the component in isolation and
+      the trigger integration.
+
+      Test categories:
+      1. **Trigger detection**: `/` as first character opens menu; mid-text `/` does not
+      2. **Keyboard navigation**: ArrowUp/Down moves focus, Enter selects, Escape dismisses
+      3. **Filtering**: typing after `/` filters visible actions
+      4. **Category rendering**: all four categories render with headers
+      5. **Action selection**: selecting an item calls onSelect and closes menu
+      6. **Accessibility**: ARIA roles, keyboard-only operability
+      7. **Edge cases**: empty action list, all actions filtered out, rapid typing
+
+      Reference existing test file: `__tests__/SprkChatInput.test.tsx` for setup patterns
+      (FluentProvider wrapper, mock props, event simulation).
+    </background>
+    <dependencies>
+      <dependency task="048">SprkChatActionMenu component must exist to be tested.</dependency>
+      <dependency task="049">SprkChatInput trigger integration must exist to be tested.</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/SprkChatActionMenu.test.tsx</file>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/SprkChatInput.actionMenu.test.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/SprkChatInput.test.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatActionMenu.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — tests are complete implementations -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Review existing SprkChatInput tests">Read `__tests__/SprkChatInput.test.tsx` to understand the test setup patterns: FluentProvider wrapper, mock props, fireEvent/userEvent usage, and assertion conventions.</step>
+    <step order="2" name="Create SprkChatActionMenu test file">Create `SprkChatActionMenu.test.tsx` with describe blocks for: rendering, filtering, keyboard navigation, action selection, accessibility, theme support.</step>
+    <step order="3" name="Write rendering tests">Test that the component renders all four category headers. Test that actions are rendered with label, description, and icon. Test that the menu renders in a popover (positioned element). Test empty state when no actions provided.</step>
+    <step order="4" name="Write filtering tests">Test that setting filterText to "sum" shows only actions containing "sum" in label or description. Test that clearing filter shows all actions again. Test that no matches shows empty state message. Test case-insensitive matching.</step>
+    <step order="5" name="Write keyboard navigation tests">Test ArrowDown moves selectedIndex forward. Test ArrowUp moves selectedIndex backward. Test ArrowDown at last item wraps to first. Test ArrowUp at first item wraps to last. Test Enter on focused item calls onSelect with the correct action. Test Escape calls onDismiss.</step>
+    <step order="6" name="Write accessibility tests">Test `role="listbox"` is present on the menu container. Test `role="option"` is present on each action item. Test `aria-activedescendant` updates when selectedIndex changes. Test `aria-selected` is true only on the focused item. Test `aria-label` is set on the menu.</step>
+    <step order="7" name="Create SprkChatInput action menu integration tests">Create `SprkChatInput.actionMenu.test.tsx` with describe blocks for: trigger detection, keyboard delegation, menu lifecycle.</step>
+    <step order="8" name="Write trigger detection tests">Test that typing `/` as first character in empty input opens the action menu. Test that typing `/` in the middle of text does NOT open the menu. Test that deleting back to remove `/` closes the menu. Test that pasting text starting with `/` opens the menu.</step>
+    <step order="9" name="Write keyboard delegation tests">Test that ArrowDown with menu open navigates the menu (not the input cursor). Test that Enter with menu open selects an action (does not send message). Test that Escape closes the menu and clears the `/`. Test that normal typing without `/` does not affect menu state.</step>
+    <step order="10" name="Write menu lifecycle tests">Test that selecting an action clears the input text. Test that input retains focus after menu closes. Test that the onActionSelected callback is called with the selected action. Test backward compatibility: no actions prop → no menu behavior.</step>
+    <step order="11" name="Run tests">Execute Jest test runner for the SprkChat test files and verify all new tests pass. Fix any failures.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">All tests in SprkChatActionMenu.test.tsx pass with zero failures</criterion>
+    <criterion testable="true">All tests in SprkChatInput.actionMenu.test.tsx pass with zero failures</criterion>
+    <criterion testable="true">`/` trigger detection is tested: first-char opens menu, mid-text does not</criterion>
+    <criterion testable="true">Keyboard navigation tested: ArrowUp, ArrowDown (including wrap), Enter (select), Escape (dismiss)</criterion>
+    <criterion testable="true">Filtering tested: partial text match, case insensitive, empty results</criterion>
+    <criterion testable="true">Category rendering tested: all four categories present with headers</criterion>
+    <criterion testable="true">Accessibility tested: role="listbox", role="option", aria-activedescendant, aria-selected</criterion>
+    <criterion testable="true">Backward compatibility tested: SprkChatInput without actions prop works unchanged</criterion>
+    <criterion testable="true">Jest test suite completes with all tests passing</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="066" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Implement Code Page Authentication</title>
+    <phase>2</phase>
+    <package>C: AW Migration</package>
+    <tags>code-page, frontend, auth</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>060</dependencies>
+    <parallel-group>sprint2-track1</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Implement independent authentication for the AnalysisWorkspace Code Page using
+      `Xrm.Utility.getGlobalContext()` to acquire auth tokens. Wire the token into the BFF API
+      service layer so all API calls are authenticated. This follows the independent-auth-per-pane
+      pattern established for Code Pages.
+    </goal>
+    <context>
+      Code Pages run as Dataverse web resources inside an iframe. They do not have PCF context or
+      MSAL auth providers. Instead, they acquire auth tokens via the Xrm SDK:
+
+      ```typescript
+      const globalContext = Xrm.Utility.getGlobalContext();
+      const token = await globalContext.getCurrentAppUrl(); // or acquireToken pattern
+      ```
+
+      The SprkChatPane Code Page (task 010) established the pattern for Code Page authentication.
+      The AnalysisWorkspace must follow the same pattern.
+
+      Critical security constraint: auth tokens are NEVER transmitted via BroadcastChannel. Each
+      Code Page pane acquires its own token independently.
+
+      The token must be passed as a Bearer token in the Authorization header for all BFF API calls
+      made by the analysisApi service layer (created in task 065).
+    </context>
+    <constraints>
+      - Follow ADR-008: Endpoint filters for authorization — BFF API expects Bearer token
+      - Auth tokens MUST NOT be transmitted via BroadcastChannel or postMessage
+      - Each Code Page pane acquires its own token independently
+      - Token refresh must be handled (tokens expire; auto-refresh before expiry)
+      - Must handle auth failures gracefully (redirect to sign-in or show error)
+      - Must work within Dataverse iframe security context
+      - Follow the SprkChatPane Code Page auth pattern from task 010
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/code-pages/SprkChatPane/index.tsx</reference>
+    <reference>src/client/code-pages/SemanticSearch/index.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read the SprkChatPane Code Page auth implementation to understand the pattern:
+      - How Xrm.Utility.getGlobalContext() is used
+      - How tokens are acquired and refreshed
+      - How tokens are passed to API service layers
+    </step>
+    <step order="2">
+      Create a useAuth hook for the AnalysisWorkspace Code Page:
+      - Acquire initial token via Xrm global context on mount
+      - Track auth state: authenticating, authenticated, error
+      - Implement token refresh (proactive refresh before expiry)
+      - Return: { token, isAuthenticated, isAuthenticating, authError, refreshToken }
+    </step>
+    <step order="3">
+      Create an AuthContext provider:
+      - React context to provide auth token throughout the component tree
+      - Wrap the app in AuthProvider in index.tsx
+      - Components can useAuthContext() to get current token
+    </step>
+    <step order="4">
+      Wire auth token into analysisApi service:
+      - Update all API functions in analysisApi.ts to use token from AuthContext
+      - Add Authorization: Bearer {token} header to all fetch calls
+      - Handle 401 responses by triggering token refresh
+    </step>
+    <step order="5">
+      Add auth error handling:
+      - If token acquisition fails, show a full-page error with retry
+      - If token refresh fails mid-session, show a non-blocking warning with re-auth option
+      - Log auth errors (without logging the token itself)
+    </step>
+    <step order="6">
+      Add Xrm SDK type declarations:
+      - Create or extend type declarations for Xrm.Utility.getGlobalContext()
+      - Ensure TypeScript can resolve Xrm types without errors
+    </step>
+    <step order="7">
+      Wire AuthProvider into App.tsx / index.tsx:
+      - Wrap component tree: FluentProvider > AuthProvider > App
+      - Show Spinner while authenticating
+      - Block rendering until auth is complete
+    </step>
+    <step order="8">
+      Build and verify:
+      - npm run build compiles cleanly
+      - Auth hook handles the full lifecycle (acquire, refresh, error)
+      - No auth tokens appear in BroadcastChannel events
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine SprkChatPane auth pattern and Xrm SDK usage</tool>
+    <tool>Write - Create auth hook and context</tool>
+    <tool>Edit - Wire auth into index.tsx, App.tsx, and analysisApi.ts</tool>
+    <tool>Bash - npm run build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/AnalysisWorkspace/hooks/useAuth.ts — Auth token acquisition and refresh hook</output>
+    <output>src/client/code-pages/AnalysisWorkspace/context/AuthContext.tsx — React context for auth token</output>
+    <output>src/client/code-pages/AnalysisWorkspace/types/xrm.d.ts — Xrm SDK type declarations</output>
+    <output>src/client/code-pages/AnalysisWorkspace/index.tsx — Updated with AuthProvider wrapping</output>
+    <output>src/client/code-pages/AnalysisWorkspace/services/analysisApi.ts — Updated with Bearer token headers</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Auth token acquired via Xrm.Utility.getGlobalContext() — NOT via MSAL or BroadcastChannel</criterion>
+    <criterion>Token passed as Authorization: Bearer header on all BFF API calls</criterion>
+    <criterion>Token refresh occurs proactively before expiry</criterion>
+    <criterion>Auth state tracked: authenticating, authenticated, error</criterion>
+    <criterion>Full-page error shown if initial auth fails, with retry option</criterion>
+    <criterion>401 API responses trigger automatic token refresh</criterion>
+    <criterion>Auth tokens never appear in BroadcastChannel or postMessage events</criterion>
+    <criterion>Xrm type declarations compile without errors</criterion>
+    <criterion>App blocks rendering until authentication completes (Spinner shown)</criterion>
+    <criterion>npm run build completes without errors</criterion>
+  </acceptance-criteria>
+
+  <placeholders>
+    <!-- No placeholders — this task implements real auth using established Code Page patterns -->
+  </placeholders>
+
+  <notes>
+    Completed 2026-02-26. Authentication implemented following SprkChatPane pattern:
+    - authService.ts: Multi-strategy token acquisition (getAccessToken API, __crmTokenProvider,
+      AUTHENTICATION_TOKEN global, Xrm.Page.context.getAuthToken, Web API session),
+      Xrm frame-walk, exponential backoff retry, in-memory token cache with 5-min expiry buffer
+    - AuthContext.tsx: React context provider with auth state management, proactive token refresh
+      on 4-minute interval, retryAuth and refreshToken actions
+    - useAuth.ts: Convenience hook wrapping AuthContext with simplified return shape
+    - xrm.d.ts: Ambient type declarations for Xrm SDK (getGlobalContext, Page, theme)
+    - App.tsx: Auth gating with loading spinner, Xrm-unavailable error, token-failure error
+      with retry button; all hooks called before early returns (React rules of hooks)
+    - index.tsx: FluentProvider > AuthProvider > App wrapping
+    - npm run build compiles cleanly (webpack)
+    - Note: Step 4 (wire auth into analysisApi.ts) deferred -- analysisApi.ts does not exist
+      yet (will be created by task 065). The AuthContext provides useAuthContext() so task 065
+      can consume the token via context.
+  </notes>
+</task>

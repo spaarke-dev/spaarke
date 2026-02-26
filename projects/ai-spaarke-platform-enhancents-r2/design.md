@@ -4,49 +4,101 @@
 > **Author**: Ralph Schroeder / Claude Code
 > **Date**: 2026-02-25
 > **Status**: Draft — Pending Review
+> **Revision**: 2 — Major architectural revision (platform-wide side pane, Code Page migration, streaming writes)
 
 ---
 
 ## 1. Executive Summary
 
-SprkChat today is a **read-only AI assistant** — it can answer questions about documents, retrieve analysis results, search knowledge bases, and refine text passages. However, it cannot write back to the working document, re-execute analysis with user context, or provide an action-oriented command interface.
+SprkChat today is a **read-only AI assistant** embedded as a child component inside the Analysis Workspace PCF control. It can answer questions about documents, retrieve analysis results, search knowledge bases, and refine text passages — but it cannot write back to the working document, re-execute analysis with user context, or provide an action-oriented command interface. It is also locked to React 16 and tightly coupled to the Analysis Workspace layout.
 
-This project transforms SprkChat from a passive Q&A assistant into an **active AI collaborator** that can modify the working document, re-run analysis with user-supplied instructions, revise selected text inline, and expose a rich action menu for playbook switching, web search, and other operations.
+This project transforms SprkChat into a **platform-wide AI collaborator** deployed as a **standalone side pane** accessible from any Dataverse form — Matters, Projects, Invoices, Analysis records. The Analysis Workspace becomes the first "context" use case, not the only one. The project also migrates the Analysis Workspace from a PCF control to a **Code Page** (React 19, full viewport control) to enable streaming write sessions, modern rendering, and clean separation from the SprkChat side pane.
 
 ### Driving User Expectations
 
-Users working in the Analysis Workspace expect:
+Users across the platform expect an AI collaborator that:
 
-1. **Chat-directed document editing** — "Add a section about regulatory compliance" → AI updates the working document
-2. **Re-analysis with context** — "Rerun the analysis but focus on financial risks" → AI re-executes with added instructions
-3. **Selection-based revision** — Select text in the editor, ask AI to rewrite/expand/simplify it in-place
-4. **Action menu / command palette** — Quick access to playbook switching, web search, export, and other operations (inspired by Claude Code's `/` command pattern)
+1. **Is always available** — A persistent side pane on any form, not buried inside one workspace
+2. **Edits documents interactively** — Streaming write sessions where the AI types into the editor in real time (like Claude/ChatGPT artifacts), not bulk file replacement
+3. **Re-processes on demand** — "Rerun the analysis focusing on financial risks" triggers full document reprocessing through the analysis pipeline
+4. **Offers structured actions** — A `/` command palette for playbook switching, web search, export, and other operations
+5. **Shows its work** — Diff compare view to review AI-proposed changes before accepting
+6. **Revises selected text** — Select text in the editor, ask AI to rewrite/expand/simplify in-place
+7. **Works within the playbook model** — Playbooks govern what capabilities SprkChat has in each context
 
 ### Scope
 
-Nine feature phases organized by priority:
+Nine work packages organized for **maximum parallel execution** by agent teams:
 
-| Priority | Phase | Feature | Size |
-|----------|-------|---------|------|
-| P0 | 1 | Chat-to-Editor Write-Back | L |
-| P0 | 2 | Re-Analysis with User Context | M |
-| P0 | 3 | Action Menu / Command Palette | M |
-| P1 | 4 | Selection-Based Revision (Editor) | M |
-| P1 | 5 | Suggested Follow-Up Actions | S |
-| P1 | 6 | Citation Grounding & Source Links | L |
-| P2 | 7 | Web Search Integration | M |
-| P2 | 8 | Undo AI Changes (Version Stack) | M |
-| P2 | 9 | Multi-Document Context | S |
+| Priority | Package | Feature | Size | Parallelizable |
+|----------|---------|---------|------|----------------|
+| P0 | A | SprkChat Side Pane (Code Page) | L | Yes — independent |
+| P0 | B | Streaming Write Engine | L | Yes — independent |
+| P0 | C | Analysis Workspace Code Page Migration | L | Depends on A |
+| P0 | D | Action Menu / Command Palette | M | Yes — independent |
+| P0 | E | Re-Analysis Pipeline | M | Depends on B |
+| P1 | F | Diff Compare View | M | Depends on B |
+| P1 | G | Selection-Based Revision | M | Depends on B, C |
+| P1 | H | Suggested Follow-Ups + Citations | M | Depends on A |
+| P2 | I | Web Search + Multi-Document | M | Depends on A |
 
-**Estimated task count**: 85–106 POML tasks across all phases.
+**Estimated task count**: 100–130 POML tasks across all packages.
 
 ---
 
 ## 2. Current Architecture (Baseline)
 
-### 2.1 Frontend — Analysis Workspace (PCF)
+### 2.1 Chat Implementation Inventory
 
-The Analysis Workspace is a 3-column PCF control layout:
+The codebase contains **three distinct chat implementations**. Understanding each is critical for reconciliation.
+
+#### 2.1.1 Legacy Analysis Chat (DEPRECATED)
+
+| Aspect | Detail |
+|--------|--------|
+| **Location** | Inline in `AnalysisWorkspaceApp.tsx` (lines 1404-1489) |
+| **Status** | Deprecated — behind `useLegacyChat` flag (default: `false`) |
+| **Backend** | `POST /api/ai/analysis/{analysisId}/continue` — marked DEPRECATED in AnalysisEndpoints.cs |
+| **Session** | Manual resume via `POST /api/ai/analysis/{id}/resume`; in-memory only |
+| **Persistence** | Chat history saved to Dataverse `sprk_chathistory` field |
+| **UI** | Custom SSE hook (`useSseStream.ts`, 294 lines), `ResumeSessionDialog` component |
+| **Features** | Basic streaming chat, session resume dialog |
+
+This is the original chat — it talks directly to the analysis orchestration service, not the agent framework. **SprkChat already replaced it** (the flag defaults to `false`). This project will complete the deprecation by removing the legacy code and endpoints.
+
+#### 2.1.2 SprkChat (CURRENT — Unified Standard)
+
+| Aspect | Detail |
+|--------|--------|
+| **Location** | `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/` (~1,600 lines) |
+| **Status** | Active, production — the system this project enhances |
+| **Backend** | `/api/ai/chat/sessions/` endpoints (agent framework with tools) |
+| **Session** | Redis hot cache + Dataverse fallback |
+| **UI** | `SprkChatInput`, `SprkChatMessage`, `SprkChatContextSelector`, `SprkChatPredefinedPrompts`, `SprkChatHighlightRefine` |
+| **Hooks** | `useChatSession`, `useSseStream`, `useChatPlaybooks` |
+| **Features** | Context switching, highlight-refine, playbook discovery, predefined prompts, `hostContext` entity scoping |
+
+SprkChat is currently embedded as a child component inside the Analysis Workspace PCF. This project promotes it to a **standalone side pane deployable on any Dataverse form**.
+
+#### 2.1.3 PlaybookBuilder AI Assistant (SEPARATE — Not In Scope)
+
+| Aspect | Detail |
+|--------|--------|
+| **Location** | `src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/` (~3,000+ lines) |
+| **Status** | Active — fully custom implementation, NOT using SprkChat |
+| **Backend** | `POST /api/ai/playbook-builder/process` (52K bytes endpoint file) |
+| **State** | Zustand store (`aiAssistantStore.ts`, 1,089 lines) |
+| **UI** | Floating draggable modal with: ChatHistory, ChatInput, CommandPalette, ClarificationOptions, SuggestionBar, OperationFeedback, TestProgressView |
+| **SSE Events** | `thinking`, `canvas_patch`, `dataverse_operation`, `message`, `clarification`, `plan_preview`, `done`, `error` |
+| **Features** | Canvas patch application, Dataverse record creation, model selection, intent classification, clarification flow, test execution |
+
+The PlaybookBuilder AI Assistant is a **domain-specific system** for building playbooks on a visual canvas. Its needs (canvas patches, Dataverse operations, clarification flows) are fundamentally different from document analysis chat. **It remains separate in R2.** However, its `CommandPalette` and `SuggestionBar` components serve as reference implementations for similar SprkChat features (Packages D and H).
+
+**Future convergence (R3+)**: Extend SprkChat with a plugin/event system that the PlaybookBuilder could adopt, centralizing shared infrastructure (SSE streaming, session management, action menus) while preserving domain-specific tools.
+
+### 2.2 Analysis Workspace (PCF — Current)
+
+The Analysis Workspace is currently a **PCF control** with a 3-column layout:
 
 ```
 ┌─────────────────────┬──────────────────┬──────────────────┐
@@ -55,25 +107,19 @@ The Analysis Workspace is a 3-column PCF control layout:
 │                     │                   │                  │
 │  ← editable panel   │  ← read-only      │  ← AI chat       │
 │  setHtml() / getHtml│  collapsible      │  350px min width  │
-│                     │                   │                  │
 └─────────────────────┴──────────────────┴──────────────────┘
 ```
 
-**RichTextEditor** (Lexical-based):
-- Ref API: `getHtml()`, `setHtml(html)`, `focus()`, `clear()`
-- Props: `value`, `onChange`, `readOnly`, `isDarkMode`
-- No streaming insert API — only full `setHtml()` replacement
-- No external selection manipulation API
+**Constraints of the PCF model:**
+- React 16/17 only (platform-provided, cannot upgrade)
+- No concurrent rendering — streaming writes cause jank
+- Layout constrained by Dataverse form column
+- SprkChat is embedded as a child — cannot be deployed independently
+- No `startTransition`, `useDeferredValue`, or Suspense for smooth streaming UX
 
-**SprkChat** component:
-- Props: `sessionId`, `playbookId`, `documentId`, `hostContext`, `contentRef`, `predefinedPrompts`, `playbooks`, `documents`
-- Sub-components: `SprkChatInput`, `SprkChatMessage`, `SprkChatContextSelector`, `SprkChatPredefinedPrompts`, `SprkChatHighlightRefine`
-- Hooks: `useChatSession`, `useSseStream`, `useChatPlaybooks`
-- `contentRef` monitors text selection for highlight-refine (currently pointed at chat message list)
+**In the revised architecture**, the Analysis Workspace becomes a **2-panel Code Page** (output editor + source viewer) and SprkChat becomes a **separate side pane Code Page**. See Section 3.
 
-**Critical Gap**: No message passing between SprkChat and RichTextEditor. They are sibling components in `AnalysisWorkspaceApp` with no shared state or callbacks for document mutation.
-
-### 2.2 Backend — BFF API
+### 2.3 Backend — BFF API
 
 **Chat Endpoints** (`/api/ai/chat/`):
 
@@ -86,6 +132,13 @@ The Analysis Workspace is a 3-column PCF control layout:
 | GET | `/sessions/{id}/history` | Load message history |
 | DELETE | `/sessions/{id}` | Delete session |
 | GET | `/playbooks` | Discover available playbooks |
+
+**Deprecated Endpoints** (to be removed):
+
+| Method | Path | Status |
+|--------|------|--------|
+| POST | `/api/ai/analysis/{id}/continue` | DEPRECATED — replaced by `/chat/sessions/{id}/messages` |
+| POST | `/api/ai/analysis/{id}/resume` | DEPRECATED — replaced by session management in ChatSessionManager |
 
 **SSE Event Types** (current):
 ```
@@ -103,61 +156,325 @@ The Analysis Workspace is a 3-column PCF control layout:
 | `KnowledgeRetrievalTools` | `GetKnowledgeSource`, `SearchKnowledgeBase` | Knowledge retrieval |
 | `TextRefinementTools` | `RefineText`, `ExtractKeyPoints`, `GenerateSummary` | Text manipulation |
 
-All tools are **read-only** — none can modify the working document or trigger re-analysis.
+All current tools are **read-only**. This project adds write-capable tools.
 
 **Analysis Service** (`IAnalysisOrchestrationService`):
-- `ExecuteAnalysisAsync` — full streaming analysis
-- `ContinueAnalysisAsync` — conversational refinement (existing but not wired to SprkChat)
+- `ExecuteAnalysisAsync` — full streaming analysis (re-analysis trigger)
+- `ContinueAnalysisAsync` — conversational refinement (existing, not yet wired to SprkChat)
 - `SaveWorkingDocumentAsync` — persist to SPE + Dataverse
 - `ExecutePlaybookAsync` — playbook-driven execution
 - `GetAnalysisAsync` — fetch full record
 
-**Middleware Pipeline** (ADR-013 / AIPL-057):
-- ContentSafety → CostControl → Telemetry → IChatClient
+**Middleware Pipeline** (ADR-013 / AIPL-057): ContentSafety → CostControl → Telemetry → IChatClient
 
-**DI Budget**: 12 of 15 registrations used (ADR-010). New tools are factory-instantiated, not DI-registered — **0 additional DI slots required**.
+**DI Budget**: 12 of 15 registrations used (ADR-010). New tools are factory-instantiated — **0 additional DI slots required**.
 
-### 2.3 Existing Building Blocks (Reusable)
+### 2.4 Existing Building Blocks (Reusable)
 
-| Component | Status | Reuse Opportunity |
-|-----------|--------|-------------------|
-| `SprkChatHighlightRefine` | Built | Extend to editor panel (Phase 4) |
-| `SprkChatPredefinedPrompts` | Built | Extend with action categories (Phase 3) |
-| `SprkChatContextSelector` | Built | Integrate into action menu (Phase 3) |
-| `POST /sessions/{id}/refine` | Built | Wire to editor selections (Phase 4) |
-| `PATCH /sessions/{id}/context` | Built | Expose via action menu (Phase 3) |
-| `useChatPlaybooks` hook | Built | Feed action menu playbook list (Phase 3) |
-| `ContinueAnalysisAsync` | Built | Wire to SprkChat for re-analysis (Phase 2) |
-| `RichTextEditor` ref API | Built | Use `setHtml()` for write-back (Phase 1) |
+| Component | Status | Reuse In |
+|-----------|--------|----------|
+| `SprkChatHighlightRefine` | Built | Package G (wire to editor panel) |
+| `SprkChatPredefinedPrompts` | Built | Package D (extend with action categories) |
+| `SprkChatContextSelector` | Built | Package D (integrate into action menu) |
+| `POST /sessions/{id}/refine` | Built | Package G (wire to editor selections) |
+| `PATCH /sessions/{id}/context` | Built | Package D (expose via action menu) |
+| `useChatPlaybooks` hook | Built | Package D (feed action menu playbook list) |
+| `ContinueAnalysisAsync` | Built | Package E (wire to SprkChat for re-analysis) |
+| `RichTextEditor` ref API | Built | Package B (enhance for streaming inserts) |
+| PlaybookBuilder `CommandPalette` | Built | Package D (reference implementation) |
+| PlaybookBuilder `SuggestionBar` | Built | Package H (reference implementation) |
+| `hostContext` pattern | Built | Package A (entity-scoped side pane) |
 
 ---
 
-## 3. Feature Phases — Detailed Design
+## 3. Architectural Decisions
 
-### Phase 1: Chat-to-Editor Write-Back (P0, Large)
+### 3.1 SprkChat as Platform-Wide Side Pane
 
-**Goal**: Allow SprkChat to programmatically update the working document in the RichTextEditor panel.
+**Decision**: Deploy SprkChat as a **standalone Code Page web resource** opened via `Xrm.App.sidePanes.createPane()`, not embedded within individual workspaces.
 
-#### 3.1.1 Problem
+**Rationale**:
+- Available on **any** Dataverse form — Matters, Projects, Invoices, Analysis records
+- Persists across form navigation (side panes stay open as user browses records)
+- Independent deployment lifecycle — update SprkChat without redeploying host controls
+- Clean separation of concerns — the host form provides context, SprkChat provides AI
 
-When a user says "Add a section about regulatory compliance to the analysis," SprkChat can generate the content but has no mechanism to push it into the editor. The generated text appears only as a chat message — the user must manually copy-paste.
+**Context Resolution**:
+```
+Matter Form       → sidePanes.createPane() → SprkChat → hostContext: { entityType: "matter", entityId: "guid" }
+Project Form      → sidePanes.createPane() → SprkChat → hostContext: { entityType: "project", entityId: "guid" }
+Analysis Record   → sidePanes.createPane() → SprkChat → hostContext: { entityType: "analysis", entityId: "guid" }
+```
 
-#### 3.1.2 Solution Architecture
+The `hostContext` pattern (already built in R1) is the abstraction that makes this work. The playbook determines what SprkChat can do in each context — a Matter gets "Legal Research" playbooks, an Analysis gets "Document Profile" playbooks.
+
+**Cross-Pane Communication** (SprkChat ↔ Analysis Workspace):
+- `BroadcastChannel` API for real-time messaging between the side pane and host page
+- Events: `document_stream_start`, `document_stream_token`, `document_stream_end`, `document_replaced`, `selection_changed`
+- Fallback: `window.postMessage` for environments where BroadcastChannel is unavailable
+
+### 3.2 Analysis Workspace Migration: PCF → Code Page
+
+**Decision**: Rebuild the Analysis Workspace as a **Code Page** (standalone HTML/CSS/JS web resource, React 19).
+
+**What It Becomes**: A 2-panel document editing environment:
 
 ```
-User → SprkChat → BFF API (new tool) → LLM generates content
-                                         ↓
-                                   SSE event: { type: "document_update", content: "..." }
-                                         ↓
-SprkChat → onDocumentUpdate callback → AnalysisWorkspaceApp → editorRef.setHtml(merged)
+┌──────────────────────────────┬──────────────────────────────┐
+│      Analysis Output          │      Source Document          │
+│      (RichTextEditor)         │      (Viewer)                 │
+│                               │                               │
+│  ← AI writes here via        │  ← read-only, collapsible     │
+│    streaming tokens           │                               │
+│  ← user edits directly       │                               │
+│  ← diff view toggle          │                               │
+└──────────────────────────────┴──────────────────────────────┘
+                               +
+┌──────────────────────────────┐
+│  SprkChat Side Pane           │  ← separate Code Page
+│  (persistent, cross-form)     │     via Xrm.App.sidePanes
+└──────────────────────────────┘
 ```
 
-**New SSE Event Type**:
+**Why Code Page over PCF**:
+
+| Factor | PCF (Current) | Code Page (Proposed) |
+|--------|---------------|---------------------|
+| React version | 16/17 (platform, can't upgrade) | 19 (bundled, we control) |
+| Streaming UX | React 16 batching causes jank | `startTransition`, concurrent rendering for smooth streaming |
+| Deployment | Field-bound on form column | Full viewport web resource via `navigateTo` |
+| SprkChat coupling | Embedded child component | Decoupled — separate side pane |
+| Layout control | Constrained by form | Full CSS grid/flexbox control |
+| Component library | React 16-compatible only | Any modern library (Lexical latest, etc.) |
+| Dark mode | Platform tokens only | Full CSS variable + `prefers-color-scheme` control |
+
+**Migration Path**: The existing React components (`RichTextEditor`, `SourceDocumentViewer`) are in the shared library and are React 18/19-compatible. Migration involves:
+- New webpack entry point (Code Page pattern from ADR-006)
+- `createRoot()` instead of `ReactDOM.render()`
+- Replace `context.webAPI` calls with direct BFF API calls (already happening via `apiBaseUrl`)
+- Layout restructured for full viewport (2-panel instead of 3-column)
+- Open via `Xrm.Navigation.navigateTo({ pageType: "webresource", ... })`
+
+### 3.3 Playbook-Governed Capabilities
+
+**Decision**: Playbooks define what capabilities SprkChat has in each context, not just the system prompt.
+
+**Current state**: Playbooks provide system prompt + knowledge scope. Tools are hardcoded in `ResolveTools()`.
+
+**Proposed**: Playbooks declare a capability set that controls which tools are registered:
+
+```
+Playbook "Document Profile":
+  capabilities: [search, analyze, write_back, reanalyze, selection_revise]
+
+Playbook "Quick Q&A":
+  capabilities: [search, summarize]
+  // No write_back — read-only assistant
+
+Playbook "Contract Review":
+  capabilities: [search, analyze, write_back, selection_revise, web_search]
+
+Playbook "General Assistant" (Matter/Project context):
+  capabilities: [search, summarize, web_search]
+  // No write_back — no editor to write to
+```
+
+`SprkChatAgentFactory.ResolveTools()` filters tools based on playbook capabilities. The action menu (Package D) only shows actions the current playbook supports.
+
+### 3.4 Streaming Write Sessions (Not File Replacement)
+
+**Decision**: AI edits to the working document stream token-by-token into the editor in real time, like Claude/ChatGPT artifact editing. Not bulk `setHtml()` replacement.
+
+**User experience**:
+```
+User: "Add a section about regulatory compliance after the risk assessment"
+
+Editor (live, streaming):
+  ... existing content ...
+  ## Risk Assessment
+  [existing text]
+
+  ## Regulatory Compliance        ← cursor appears, text streams in
+  The document reveals several    ← user sees AI "typing" in real time
+  regulatory considerations...    ← smooth concurrent rendering (React 19)
+```
+
+**Why this matters**:
+- Users see progress immediately — no frozen UI waiting for a complete response
+- Users can cancel mid-stream if the direction is wrong
+- Matches the experience users expect from Claude/ChatGPT
+- React 19 concurrent rendering (`startTransition`) keeps the editor responsive during streaming
+
+**Architecture**:
+- New SSE event: `document_stream` with positional metadata
+- New Lexical plugin: `StreamingInsertPlugin` that appends tokens at a target position
+- Existing `setHtml()` retained for bulk operations (re-analysis replacement)
+
+### 3.5 Dual Write Modes: Live Streaming + Diff Review
+
+**Decision**: Support two modes for AI-initiated document changes.
+
+**Mode 1 — Live Streaming** (default for additions/expansions):
+- AI writes directly into the editor via streaming tokens
+- User sees real-time progress
+- Cancel button stops the stream
+- Best for: "Add a section about...", "Expand on the risk factors..."
+
+**Mode 2 — Diff Review** (for revisions/replacements):
+- AI proposes changes shown as a side-by-side or inline diff
+- User reviews, then accepts, rejects, or edits
+- Best for: "Rewrite the conclusion to be more formal", selection-based revision
+
+```
+┌────────────────────────────┬────────────────────────────┐
+│  Original                  │  AI Proposed               │
+├────────────────────────────┼────────────────────────────┤
+│  ## Conclusion             │  ## Conclusion             │
+│  The document shows        │  The document demonstrates │
+│  some risk factors.        │  significant risk factors  │
+│                            │  warranting immediate      │
+│                            │  remediation.              │
+└────────────────────────────┴────────────────────────────┘
+                    [ Accept ] [ Reject ] [ Edit ]
+```
+
+Mode selection is automatic based on operation type, but users can override via a preference or the action menu.
+
+### 3.6 Re-Analysis = Full Document Reprocessing
+
+**Decision**: When the user requests re-analysis, the **entire analysis pipeline re-executes** with the new instructions. This is not an inline edit — it's a full reprocessing of the source document through the playbook.
+
+**Flow**:
+1. User: "Rerun the analysis focusing on financial risks"
+2. LLM calls `RerunAnalysisAsync("Focus on financial risk factors")`
+3. Tool calls `_analysisService.ExecutePlaybookAsync()` with original playbook + appended instructions
+4. Editor shows progress state (streaming analysis output replacing content)
+5. Result: New analysis version (previous version preserved for undo)
+
+**Distinct from interactive editing**: "Add a paragraph about compliance" is a streaming write session (Section 3.4). "Rerun the analysis focusing on risks" is a full reprocessing pipeline.
+
+---
+
+## 4. Legacy Cleanup (Prerequisite)
+
+Before building new features, remove deprecated code to reduce confusion and maintenance burden.
+
+### 4.1 Frontend Removal
+
+| Item | Location | Action |
+|------|----------|--------|
+| `useLegacyChat` flag | `AnalysisWorkspaceApp.tsx`, `types/index.ts`, `index.ts` | Remove flag and all conditional branches |
+| Legacy chat panel | `AnalysisWorkspaceApp.tsx` lines 1404-1489 | Remove inline chat rendering |
+| Legacy SSE hook | `AnalysisWorkspace/hooks/useSseStream.ts` (294 lines) | Delete file |
+| `ResumeSessionDialog` | `AnalysisWorkspace/components/ResumeSessionDialog.tsx` | Delete file |
+| Chat message badge | `AnalysisWorkspaceApp.tsx` lines 1397-1402 | Remove legacy badge |
+| `MsalAuthProvider` | Internal auth for legacy chat | Remove if unused after cleanup |
+
+### 4.2 Backend Removal
+
+| Item | Location | Action |
+|------|----------|--------|
+| `POST /api/ai/analysis/{id}/continue` | `AnalysisEndpoints.cs` | Remove deprecated endpoint |
+| `POST /api/ai/analysis/{id}/resume` | `AnalysisEndpoints.cs` | Remove deprecated endpoint |
+| `sprk_chathistory` field usage | Legacy chat persistence | Stop writing; field remains in Dataverse schema |
+
+### 4.3 Impact Assessment
+
+- Zero user impact: `useLegacyChat` already defaults to `false`; no active consumers of legacy endpoints
+- Removes ~500 lines of frontend code and 2 API endpoints
+- Simplifies the Analysis Workspace codebase before migration to Code Page
+
+---
+
+## 5. Work Packages — Detailed Design
+
+### Package A: SprkChat Side Pane (P0, Large)
+
+**Goal**: Deploy SprkChat as a standalone Code Page web resource accessible as a persistent side pane on any Dataverse form.
+
+#### 5.A.1 New Artifacts
+
+**Code Page: `sprk_SprkChatPane`**
+- Entry point: `src/client/code-pages/SprkChatPane/index.tsx`
+- React 19 with `createRoot()`
+- Receives context via URL parameters: `entityType`, `entityId`, `playbookId`, `sessionId`
+- Renders `<FluentProvider>` → `<SprkChat>` with full viewport
+
+**Side Pane Launcher** (ribbon button or form script):
 ```typescript
-{ type: "document_update", content: "<html>...</html>", operation: "append" | "replace" | "insert_section" }
+Xrm.App.sidePanes.createPane({
+    title: "AI Assistant",
+    imageSrc: "sprk_ai_icon",
+    paneId: "sprkchat",
+    canClose: true,
+    width: 400,
+}).then((pane) => {
+    pane.navigate({
+        pageType: "webresource",
+        webresourceName: "sprk_SprkChatPane",
+        data: `entityType=${entityType}&entityId=${entityId}`
+    });
+});
 ```
 
-#### 3.1.3 Backend Changes
+**Cross-Pane Communication Service**:
+```typescript
+// Shared module in @spaarke/ui-components
+export class SprkChatBridge {
+    private channel: BroadcastChannel;
+
+    // SprkChat → Host (document editing events)
+    emitDocumentStreamStart(position: InsertPosition): void;
+    emitDocumentStreamToken(token: string): void;
+    emitDocumentStreamEnd(): void;
+    emitDocumentReplaced(html: string): void;
+
+    // Host → SprkChat (selection, context events)
+    emitSelectionChanged(selectedText: string, rect: DOMRect): void;
+    emitContextChanged(entityType: string, entityId: string): void;
+
+    // Subscriptions
+    onDocumentStream(handler: StreamHandler): Unsubscribe;
+    onSelectionChanged(handler: SelectionHandler): Unsubscribe;
+}
+```
+
+#### 5.A.2 SprkChat Enhancements
+
+- **Authentication**: Receive access token via URL parameter or `Xrm.Utility.getGlobalContext()` call
+- **Session persistence**: Side pane preserves session across form navigations (same `sessionId`)
+- **Context auto-detection**: When navigating to a new record, detect `entityType` + `entityId` change and offer to switch context or start new session
+- **Responsive layout**: Full-height pane, adapts to 300-600px width range
+
+#### 5.A.3 Key Decisions
+
+- **No internal router**: SprkChat pane is single-purpose — just the chat interface
+- **Session survives navigation**: User can browse records while keeping chat open
+- **Playbook auto-selection**: Default playbook is selected based on `entityType` from playbook configuration
+
+---
+
+### Package B: Streaming Write Engine (P0, Large)
+
+**Goal**: Enable token-by-token streaming writes into the RichTextEditor from AI tool responses.
+
+#### 5.B.1 Backend: Streaming Document Events
+
+**New SSE Event Types**:
+```typescript
+// Streaming write — token-by-token into editor
+{ type: "document_stream_start", position: "after:section-id" | "end" | "replace:selection" }
+{ type: "document_stream_token", content: "The " }
+{ type: "document_stream_token", content: "document " }
+{ type: "document_stream_token", content: "reveals..." }
+{ type: "document_stream_end", summary: "Added regulatory compliance section" }
+
+// Bulk replacement — for re-analysis results
+{ type: "document_replace", content: "<full html>" }
+
+// Progress — for long-running operations
+{ type: "progress", content: "Analyzing document...", percent: 45 }
+```
 
 **New Tool Class: `WorkingDocumentTools`**
 
@@ -168,9 +485,9 @@ public sealed class WorkingDocumentTools
     private readonly IChatClient _chatClient;
     private readonly string _analysisId;  // constructor-injected, not LLM-visible
 
-    // Tool 1: Update working document based on chat instruction
-    public async Task<string> UpdateWorkingDocumentAsync(
-        [Description("Update the analysis working document")] string instruction,
+    // Tool 1: Stream an edit into the working document
+    public async Task<string> EditWorkingDocumentAsync(
+        [Description("Edit the analysis working document per user instruction")] string instruction,
         CancellationToken cancellationToken = default)
 
     // Tool 2: Append a new section to the working document
@@ -181,212 +498,25 @@ public sealed class WorkingDocumentTools
 }
 ```
 
-**Flow**:
-1. LLM calls `UpdateWorkingDocumentAsync("Add regulatory compliance section")`
-2. Tool fetches current working document via `_analysisService.GetAnalysisAsync()`
-3. Tool sends current document + instruction to `IChatClient` with focused prompt
-4. Tool returns the updated document content
-5. Agent streams the response, endpoint emits `document_update` SSE event
-6. Frontend applies the update to RichTextEditor
+**Streaming Flow**:
+1. LLM calls `EditWorkingDocumentAsync("Add regulatory compliance section")`
+2. Tool fetches current working document
+3. Tool creates a focused `IChatClient` call with current doc + instruction
+4. As tokens arrive from inner LLM call, they are emitted as `document_stream_token` SSE events
+5. Frontend inserts tokens into editor in real time
+6. On completion, `document_stream_end` signals the write is finished
+7. Auto-save triggers
 
-**New Endpoint Enhancement**: Modify `POST /sessions/{id}/messages` to detect `document_update` tool results and emit a new SSE event type alongside the normal `token` events.
+#### 5.B.2 Frontend: Lexical Streaming Insert
 
-#### 3.1.4 Frontend Changes
+**New Lexical Plugin: `StreamingInsertPlugin`**
+- Listens for `document_stream_start` → creates an insertion cursor at the target position
+- On each `document_stream_token` → appends text at the cursor (with Markdown → Lexical node conversion)
+- On `document_stream_end` → finalizes the insertion, pushes to version history
+- Uses React 19 `startTransition` to keep the editor responsive during streaming
+- Shows a pulsing cursor indicator where AI is writing
 
-**AnalysisWorkspaceApp** — New callback bridge:
-```typescript
-// New prop on SprkChat
-onDocumentUpdate?: (html: string, operation: "append" | "replace" | "insert_section") => void;
-
-// In AnalysisWorkspaceApp:
-const handleDocumentUpdate = useCallback((html: string, operation: string) => {
-    if (operation === "replace") {
-        editorRef.current?.setHtml(html);
-    } else if (operation === "append") {
-        const current = editorRef.current?.getHtml() ?? "";
-        editorRef.current?.setHtml(current + html);
-    }
-    // Trigger auto-save
-    onWorkingDocumentChange(editorRef.current?.getHtml() ?? "");
-}, []);
-```
-
-**SprkChat** — Parse new SSE event:
-```typescript
-// In useSseStream hook, handle new event type:
-case "document_update":
-    props.onDocumentUpdate?.(event.content, event.operation);
-    break;
-```
-
-#### 3.1.5 Key Decisions
-
-- **Full document replacement vs. diff-based patching**: Start with full replacement via `setHtml()`. Diff-based patching (Phase 8 dependency) can be added later.
-- **Auto-save after AI edit**: Trigger `onWorkingDocumentChange` callback after every document update so the existing auto-save mechanism persists changes.
-- **Confirmation UX**: Show a toast/notification in the editor panel when AI updates the document: "Document updated by AI — review changes."
-
----
-
-### Phase 2: Re-Analysis with User Context (P0, Medium)
-
-**Goal**: Allow the user to re-execute the analysis with additional instructions or context provided through chat.
-
-#### 3.2.1 Problem
-
-After reviewing an initial analysis, users often want to refine the focus: "Rerun this but focus on financial risks" or "Redo the analysis including the amendment documents." Currently, re-analysis requires navigating back to the analysis setup and manually reconfiguring.
-
-#### 3.2.2 Solution Architecture
-
-**New Tool Class: `AnalysisExecutionTools`**
-
-```csharp
-public sealed class AnalysisExecutionTools
-{
-    private readonly IAnalysisOrchestrationService _analysisService;
-    private readonly string _analysisId;  // constructor-injected
-
-    // Tool 1: Re-execute analysis with additional user instructions
-    public async Task<string> RerunAnalysisAsync(
-        [Description("Re-execute the document analysis with added instructions")] string additionalInstructions,
-        CancellationToken cancellationToken = default)
-
-    // Tool 2: Continue analysis conversation (existing ContinueAnalysisAsync)
-    public async Task<string> RefineAnalysisAsync(
-        [Description("Refine the analysis with follow-up instructions")] string refinementInstruction,
-        CancellationToken cancellationToken = default)
-}
-```
-
-**Flow**:
-1. User: "Rerun the analysis but focus on financial risk factors"
-2. LLM calls `RerunAnalysisAsync("Focus on financial risk factors")`
-3. Tool calls `_analysisService.ExecutePlaybookAsync()` with the original playbook + appended user instructions
-4. Streaming analysis results flow back through SSE
-5. New `document_update` event pushes the updated output to the editor
-
-#### 3.2.3 Frontend Changes
-
-- Show a progress indicator in the editor panel during re-analysis (replace content with spinner + "Re-analyzing...")
-- Emit `document_update` SSE events as analysis completes, replacing the editor content
-- Preserve chat history across re-analysis (the re-analysis is a tool call within the existing chat session)
-
-#### 3.2.4 Key Decisions
-
-- **Preserve vs. replace**: Re-analysis replaces the working document entirely. The original is recoverable via Phase 8 (Undo) or by re-fetching the prior analysis record.
-- **Streaming**: Re-analysis streams progress events. The frontend shows a progress state rather than appearing frozen.
-- **Token budget**: Re-analysis is expensive. The CostControl middleware (AIPL-057) enforces the existing budget. Consider a confirmation prompt: "This will re-analyze the document. Proceed?"
-
----
-
-### Phase 3: Action Menu / Command Palette (P0, Medium)
-
-**Goal**: Provide a Claude Code-style `/` command menu for quick access to playbook switching, predefined actions, web search, and other operations.
-
-#### 3.3.1 Problem
-
-SprkChat currently requires users to type natural language for every interaction. Power users want quick access to structured actions: switch playbooks, trigger specific analysis types, search the web, export results.
-
-#### 3.3.2 Solution Architecture
-
-**New Component: `SprkChatActionMenu`**
-
-A floating popover triggered by typing `/` in the chat input field:
-
-```
-┌─────────────────────────────────┐
-│  / Command Menu                 │
-├─────────────────────────────────┤
-│  📋 Playbooks                   │
-│    ├─ Document Profile          │
-│    ├─ Contract Review           │
-│    └─ Financial Analysis        │
-│  🔄 Actions                     │
-│    ├─ Re-analyze                │
-│    ├─ Summarize document        │
-│    ├─ Extract key points        │
-│    └─ Export to Word            │
-│  🔍 Search                      │
-│    ├─ Search knowledge base     │
-│    └─ Web search (Phase 7)      │
-│  ⚙️ Settings                    │
-│    └─ Switch document           │
-└─────────────────────────────────┘
-```
-
-#### 3.3.3 Frontend Changes
-
-**`SprkChatActionMenu` component**:
-- Triggered when user types `/` as the first character in the input
-- Filterable — typing `/sum` narrows to "Summarize document"
-- Keyboard navigable (arrow keys + Enter)
-- Categories: Playbooks, Actions, Search, Settings
-- Each action maps to either:
-  - A pre-filled chat message (e.g., `/summarize` → "Please summarize the current document")
-  - A direct API call (e.g., `/switch-playbook Contract Review` → `PATCH /context`)
-  - A UI state change (e.g., `/export` → trigger export dialog)
-
-**`SprkChatInput` enhancement**:
-- Detect `/` prefix and show `SprkChatActionMenu` popover
-- Pass selected action back as either a message or a callback invocation
-
-#### 3.3.4 Backend Changes
-
-**New Endpoint: `GET /api/ai/chat/actions`**
-
-Returns available actions based on current session context:
-```json
-{
-  "categories": [
-    {
-      "name": "Playbooks",
-      "icon": "clipboard",
-      "actions": [
-        { "id": "switch-playbook:guid", "label": "Document Profile", "description": "..." }
-      ]
-    },
-    {
-      "name": "Actions",
-      "icon": "wand",
-      "actions": [
-        { "id": "reanalyze", "label": "Re-analyze", "description": "Re-run analysis with new instructions" },
-        { "id": "summarize", "label": "Summarize document", "description": "Generate executive summary" }
-      ]
-    }
-  ]
-}
-```
-
-Actions are context-sensitive — available actions depend on:
-- Whether a document is loaded (show/hide document-specific actions)
-- Whether an analysis exists (show/hide re-analysis)
-- Available playbooks for the current entity type
-
-#### 3.3.5 Key Decisions
-
-- **`/` trigger only in empty or start-of-input**: Typing `/` mid-sentence does not trigger the menu
-- **Extensible action registry**: Actions are defined server-side and can be extended without frontend changes
-- **Keyboard-first**: Full keyboard navigation (arrow keys, Enter, Escape) for power users
-
----
-
-### Phase 4: Selection-Based Revision in Editor (P1, Medium)
-
-**Goal**: Allow users to select text in the RichTextEditor and have AI revise it in-place via SprkChat's refinement flow.
-
-#### 3.4.1 Problem
-
-`SprkChatHighlightRefine` already exists but is wired to the **chat message list** (`contentRef`). Users want to select text in the **editor panel** and have AI revise it directly in the working document.
-
-#### 3.4.2 Solution Architecture
-
-Two integration points:
-
-1. **Editor-side selection detection**: Reuse `SprkChatHighlightRefine` but point its `contentRef` at the editor container
-2. **Write-back after refinement**: Use `POST /sessions/{id}/refine` → SSE stream → replace selected text in editor
-
-#### 3.4.3 RichTextEditor Enhancement
-
-**New ref methods**:
+**New RichTextEditor Ref Methods**:
 ```typescript
 interface IRichTextEditorRef {
     // Existing
@@ -395,118 +525,324 @@ interface IRichTextEditorRef {
     setHtml(html: string): void;
     clear(): void;
 
-    // New for Phase 4
-    getSelectedHtml(): string | null;       // Get HTML of current selection
-    replaceSelection(html: string): void;   // Replace selection with new content
-    getSelectionRect(): DOMRect | null;      // Get selection bounding rect for toolbar positioning
+    // New — Streaming Write API
+    beginStreamingInsert(position: InsertPosition): StreamHandle;
+    appendStreamToken(handle: StreamHandle, token: string): void;
+    endStreamingInsert(handle: StreamHandle): void;
+
+    // New — Selection API (for Package G)
+    getSelectedHtml(): string | null;
+    replaceSelection(html: string): void;
+    getSelectionRect(): DOMRect | null;
 }
 ```
 
-These methods wrap Lexical's selection API to provide a clean external interface.
+#### 5.B.3 Version History (Undo Support)
 
-#### 3.4.4 Frontend Integration
+Every AI write operation snapshots the document state before modification:
+- `useDocumentHistory` hook maintains a version stack (max 20)
+- `pushVersion()` called before every AI-initiated change
+- `undo()` / `redo()` restore snapshots
+- Each AI operation = one undo step
+
+---
+
+### Package C: Analysis Workspace Code Page Migration (P0, Large)
+
+**Goal**: Migrate the Analysis Workspace from a PCF control to a Code Page (React 19, full viewport).
+
+#### 5.C.1 What It Becomes
+
+A **2-panel document editing environment** deployed as a web resource:
 
 ```
-User selects text in Editor
+┌──────────────────────────────┬──────────────────────────────┐
+│      Analysis Output          │      Source Document          │
+│      (RichTextEditor)         │      (Viewer)                 │
+│                               │                               │
+│  ← streaming write target     │  ← collapsible                │
+│  ← diff view toggle           │  ← PDF/Office viewer          │
+│  ← undo/redo toolbar          │                               │
+└──────────────────────────────┴──────────────────────────────┘
+```
+
+SprkChat is **not embedded** — it lives in the side pane (Package A). Communication flows via `SprkChatBridge` (BroadcastChannel).
+
+#### 5.C.2 Migration Steps
+
+1. Create new Code Page: `src/client/code-pages/AnalysisWorkspace/index.tsx`
+2. React 19 entry with `createRoot()` and `<FluentProvider>`
+3. Port `AnalysisWorkspaceApp` layout to 2-panel (remove chat column)
+4. Wire `SprkChatBridge` for cross-pane communication with SprkChat side pane
+5. Port auto-save, export, and toolbar functionality
+6. Remove legacy chat code (Section 4)
+7. Register as web resource `sprk_AnalysisWorkspace`
+8. Update Dataverse form to open via `Xrm.Navigation.navigateTo()` instead of PCF binding
+
+#### 5.C.3 Component Reuse
+
+| Component | Source | Migration Notes |
+|-----------|--------|-----------------|
+| `RichTextEditor` | `@spaarke/ui-components` | Already React 18/19 compatible |
+| `SourceDocumentViewer` | `@spaarke/ui-components` | Already React 18/19 compatible |
+| Toolbar (Save, Export, Copy) | `AnalysisWorkspaceApp` | Port to standalone component |
+| Auto-save logic | `AnalysisWorkspaceApp` | Port using `useAutoSave` hook |
+
+#### 5.C.4 SprkChatBridge Integration
+
+```typescript
+// In Analysis Workspace Code Page:
+const bridge = new SprkChatBridge("analysis-workspace");
+
+// Receive streaming writes from SprkChat side pane
+bridge.onDocumentStreamStart((position) => {
+    const handle = editorRef.current.beginStreamingInsert(position);
+    streamHandleRef.current = handle;
+});
+
+bridge.onDocumentStreamToken((token) => {
+    editorRef.current.appendStreamToken(streamHandleRef.current, token);
+});
+
+bridge.onDocumentStreamEnd(() => {
+    editorRef.current.endStreamingInsert(streamHandleRef.current);
+    triggerAutoSave();
+});
+
+// Send selection events to SprkChat side pane
+const handleEditorSelection = (selectedText: string, rect: DOMRect) => {
+    bridge.emitSelectionChanged(selectedText, rect);
+};
+```
+
+---
+
+### Package D: Action Menu / Command Palette (P0, Medium)
+
+**Goal**: Provide a Claude Code-style `/` command menu in SprkChat for structured actions.
+
+#### 5.D.1 Component: `SprkChatActionMenu`
+
+A floating popover triggered by typing `/` as the first character in chat input:
+
+```
+┌─────────────────────────────────┐
+│  / Command Menu                 │
+├─────────────────────────────────┤
+│  Playbooks                      │
+│    Document Profile             │
+│    Contract Review              │
+│    Financial Analysis           │
+│  Actions                        │
+│    Re-analyze document          │
+│    Summarize                    │
+│    Extract key points           │
+│    Export to Word               │
+│  Search                         │
+│    Search knowledge base        │
+│    Web search                   │
+│  Settings                       │
+│    Switch document              │
+│    Change mode (stream/diff)    │
+└─────────────────────────────────┘
+```
+
+- Filterable: typing `/sum` narrows to "Summarize"
+- Keyboard navigable (arrow keys + Enter + Escape)
+- **Playbook-governed**: Only shows actions the current playbook supports (Section 3.3)
+
+#### 5.D.2 Backend: `GET /api/ai/chat/actions`
+
+Returns available actions based on session context and playbook capabilities:
+```json
+{
+  "categories": [
+    {
+      "name": "Playbooks",
+      "actions": [
+        { "id": "switch-playbook:guid", "label": "Document Profile", "capabilities": ["search", "analyze", "write_back"] }
+      ]
+    },
+    {
+      "name": "Actions",
+      "actions": [
+        { "id": "reanalyze", "label": "Re-analyze document", "requiresCapability": "reanalyze" }
+      ]
+    }
+  ]
+}
+```
+
+#### 5.D.3 Reference Implementation
+
+The PlaybookBuilder's `CommandPalette.tsx` and `SuggestionBar.tsx` provide proven patterns for:
+- Keyboard navigation UX
+- Action categorization
+- Quick-filter search
+- Contextual action visibility
+
+---
+
+### Package E: Re-Analysis Pipeline (P0, Medium)
+
+**Goal**: Allow users to re-execute analysis with additional instructions through SprkChat.
+
+#### 5.E.1 New Tool Class: `AnalysisExecutionTools`
+
+```csharp
+public sealed class AnalysisExecutionTools
+{
+    private readonly IAnalysisOrchestrationService _analysisService;
+    private readonly string _analysisId;  // constructor-injected
+
+    // Full re-analysis — reprocesses the source document
+    public async Task<string> RerunAnalysisAsync(
+        [Description("Re-execute the document analysis with added instructions")] string additionalInstructions,
+        CancellationToken cancellationToken = default)
+
+    // Conversational refinement — continues the analysis conversation
+    public async Task<string> RefineAnalysisAsync(
+        [Description("Refine the analysis with follow-up instructions")] string refinementInstruction,
+        CancellationToken cancellationToken = default)
+}
+```
+
+#### 5.E.2 Flow
+
+1. User: "Rerun the analysis focusing on financial risk factors"
+2. LLM calls `RerunAnalysisAsync("Focus on financial risk factors")`
+3. Tool calls `_analysisService.ExecutePlaybookAsync()` with original playbook + appended instructions
+4. Streaming analysis output emitted as `document_replace` SSE events
+5. Editor replaces content with new analysis output (streaming progress shown)
+6. Previous version pushed to undo stack
+7. Chat message confirms: "Analysis re-executed with focus on financial risk factors."
+
+#### 5.E.3 Key Decisions
+
+- Re-analysis creates a **new version** — previous output preserved in undo stack
+- CostControl middleware enforces token budget; confirmation prompt for expensive operations
+- Progress events (`type: "progress"`) keep the UI responsive during long re-analysis
+
+---
+
+### Package F: Diff Compare View (P1, Medium)
+
+**Goal**: Show AI-proposed changes as a diff before applying, similar to Claude Code's diff view.
+
+#### 5.F.1 Component: `DiffCompareView`
+
+```
+┌────────────────────────────┬────────────────────────────┐
+│  Original                  │  AI Proposed               │
+├────────────────────────────┼────────────────────────────┤
+│  ## Conclusion             │  ## Conclusion             │
+│  The document shows        │- The document shows        │
+│  some risk factors.        │+ The document demonstrates │
+│                            │+ significant risk factors  │
+│                            │+ warranting immediate      │
+│                            │+ remediation.              │
+└────────────────────────────┴────────────────────────────┘
+                    [ Accept ] [ Reject ] [ Edit ]
+```
+
+- Side-by-side or inline diff modes
+- Accept applies the change and pushes to undo stack
+- Reject discards the proposal
+- Edit opens the proposed text for manual modification before accepting
+
+#### 5.F.2 Automatic Mode Selection
+
+| Operation Type | Default Mode | Rationale |
+|----------------|-------------|-----------|
+| Add section / expand | Live streaming | User wants to see progress |
+| Rewrite / revise existing | Diff review | User needs to verify changes |
+| Selection-based revision | Diff review | Replacing specific text — show before/after |
+| Re-analysis | Live streaming + replace | Full reprocessing — show progress |
+
+Users can override via action menu: `/mode stream` or `/mode diff`.
+
+---
+
+### Package G: Selection-Based Revision (P1, Medium)
+
+**Goal**: Select text in the editor, ask AI to revise it in-place.
+
+#### 5.G.1 Cross-Pane Selection Flow
+
+```
+User selects text in Editor (Analysis Workspace Code Page)
        ↓
-SprkChatHighlightRefine detects selection (via editorContainerRef)
+SprkChatBridge.emitSelectionChanged(selectedText, rect)
        ↓
-User enters refinement instruction
+SprkChat Side Pane shows refinement UI (SprkChatHighlightRefine)
        ↓
-SprkChat calls POST /sessions/{id}/refine with { selectedText, instruction }
+User enters instruction → POST /sessions/{id}/refine
        ↓
 SSE streams refined text back
        ↓
-editorRef.replaceSelection(refinedText) — in-place replacement
+SprkChat emits via bridge → Editor applies replacement
+       ↓
+Diff view shown (if mode=diff) OR direct replacement (if mode=stream)
 ```
 
-**AnalysisWorkspaceApp** changes:
-- Pass `editorContainerRef` to SprkChat as `contentRef` (instead of chat message list)
-- Or: support **dual contentRef** — both editor and chat message list can trigger highlight-refine
+#### 5.G.2 Editor Selection API
 
-#### 3.4.5 Key Decisions
+New ref methods on `RichTextEditor` (from Package B):
+- `getSelectedHtml()` — get HTML of current selection
+- `replaceSelection(html: string)` — replace selection with new content
+- `getSelectionRect()` — bounding rect for floating toolbar positioning
 
-- **Dual selection sources**: Support selection in both the editor (primary use case) and chat messages (existing behavior). The toolbar shows context-appropriate actions based on which panel the selection is in.
-- **Preserve formatting**: When replacing selected text, preserve the surrounding HTML structure. The `replaceSelection()` method must handle Lexical's node tree correctly.
-- **Undo integration**: Each selection replacement should push to the undo stack (Phase 8).
+#### 5.G.3 Dual Selection Sources
+
+- **Editor selections**: Primary use case — revise text in the working document
+- **Chat message selections**: Existing behavior — refine text from AI responses
+- `SprkChatHighlightRefine` detects which source the selection is in and adjusts behavior
 
 ---
 
-### Phase 5: Suggested Follow-Up Actions (P1, Small)
+### Package H: Suggested Follow-Ups + Citations (P1, Medium)
 
-**Goal**: After each assistant response, show 2–3 contextual follow-up suggestions the user can click to continue the conversation.
+**Goal**: After each response, show contextual follow-up suggestions. When AI references sources, provide clickable citations.
 
-#### 3.5.1 Solution
+#### 5.H.1 Suggestions
 
-**New SSE Event Type**:
+**New SSE Event**:
 ```typescript
-{ type: "suggestions", content: JSON.stringify(["Expand on the risk factors", "Compare with industry standards", "Export as executive brief"]) }
+{ type: "suggestions", content: ["Expand on risk factors", "Compare with industry standards", "Export as executive brief"] }
 ```
 
-**Backend**: After the main response completes, the agent makes one additional LLM call with a focused prompt:
-> "Based on the conversation and your last response, suggest 2-3 concise follow-up questions or actions the user might want to take. Return as a JSON array of strings."
+**Component: `SprkChatSuggestions`** — clickable chips below the latest assistant message.
 
-The suggestions are emitted as a final SSE event before `done`.
+**Backend**: After main response, one focused LLM call (~100 tokens) generates 2-3 contextual suggestions. Emitted as final SSE event before `done`.
 
-**Frontend**: New `SprkChatSuggestions` component renders clickable chips below the latest assistant message. Clicking a suggestion sends it as the next user message.
+#### 5.H.2 Citations
 
-#### 3.5.2 Key Decisions
-
-- **Cost**: One additional LLM call per response (~100 tokens). Use a small/fast model or cache common suggestion patterns.
-- **Opt-out**: Include a setting to disable suggestions for users who find them distracting.
-- **Contextual**: Suggestions should reference the current document and analysis state, not be generic.
-
----
-
-### Phase 6: Citation Grounding & Source Links (P1, Large)
-
-**Goal**: When the AI references specific content from the knowledge base or source document, provide inline citations that link back to the source.
-
-#### 3.6.1 Problem
-
-Users need to verify AI-generated claims. Currently, the AI may say "According to Section 4.2 of the agreement..." but provides no clickable link or exact source reference.
-
-#### 3.6.2 Solution Architecture
-
-**Backend — Citation Tracking**:
-- Modify `DocumentSearchTools` and `KnowledgeRetrievalTools` to return chunk IDs and source metadata alongside content
-- The agent's system prompt instructs it to include citation markers: `[1]`, `[2]`, etc.
-- A post-processing step maps citation markers to source chunks
-
-**New SSE Event Type**:
+**New SSE Event**:
 ```typescript
-{ type: "citations", content: JSON.stringify([
+{ type: "citations", content: [
     { id: 1, source: "Contract_Amendment_v3.pdf", page: 4, excerpt: "..." },
     { id: 2, source: "Knowledge Base: Regulatory Requirements", chunkId: "abc123", excerpt: "..." }
-]) }
+] }
 ```
 
-**Frontend — `SprkChatCitationPopover`**:
-- Render citation markers as clickable superscripts in chat messages
-- Clicking opens a popover with source excerpt, document name, and "Open Source" link
-- "Open Source" navigates to the document viewer at the relevant page/section
+**Component: `SprkChatCitationPopover`** — clickable superscripts `[1]` in chat messages that open a popover with source details and "Open Source" link.
 
-#### 3.6.3 Key Decisions
-
-- **Chunk-level granularity**: Citations reference specific chunks from the RAG index, not entire documents
-- **Best-effort**: Not all AI statements will have citations. The system encourages but does not force citation on every claim.
-- **Performance**: Citation metadata is collected during tool calls and emitted once after the response completes (not inline with streaming tokens)
+**Backend**: Modify search tools to return chunk IDs and source metadata. System prompt instructs AI to include citation markers.
 
 ---
 
-### Phase 7: Web Search Integration (P2, Medium)
+### Package I: Web Search + Multi-Document (P2, Medium)
 
-**Goal**: Allow the AI to search the web for current information when the knowledge base doesn't have the answer.
+**Goal**: Add web search capability and support for multiple documents in a single session.
 
-#### 3.7.1 Solution Architecture
+#### 5.I.1 Web Search
 
 **New Tool Class: `WebSearchTools`**
-
 ```csharp
 public sealed class WebSearchTools
 {
     private readonly HttpClient _httpClient;
-    private readonly string _bingApiKey;  // constructor-injected from Key Vault
+    private readonly string _bingApiKey;  // from Key Vault
 
     public async Task<string> SearchWebAsync(
         [Description("Search the web for current information")] string query,
@@ -515,237 +851,190 @@ public sealed class WebSearchTools
 }
 ```
 
-**Integration**: Uses Azure Bing Search API (already available in the Azure resource group). Results are formatted as a markdown list with titles, snippets, and URLs.
+Uses Azure Bing Search API. Results marked as external content. Available via `/websearch` in action menu.
 
-**Action Menu**: Web search appears in the `/` action menu under "Search" category.
+#### 5.I.2 Multi-Document Context
 
-#### 3.7.2 Key Decisions
-
-- **Guardrails**: Web search results are clearly marked as external content. The system prompt instructs the AI to distinguish between knowledge base content and web results.
-- **Cost**: Bing Search API has a per-query cost. Consider rate limiting or requiring explicit user opt-in via the action menu.
-- **Content safety**: Web search results pass through the existing ContentSafety middleware.
-
----
-
-### Phase 8: Undo AI Changes (P2, Medium)
-
-**Goal**: Provide an undo/redo mechanism for AI-initiated document changes, allowing users to revert unwanted modifications.
-
-#### 3.8.1 Solution Architecture
-
-**New Hook: `useDocumentHistory`**
-
-```typescript
-const { canUndo, canRedo, undo, redo, pushVersion } = useDocumentHistory(editorRef, maxVersions);
-```
-
-- Maintains a version stack of HTML snapshots
-- `pushVersion()` is called before every AI-initiated document update (Phase 1, 2, 4)
-- `undo()` / `redo()` restore previous/next versions via `editorRef.setHtml()`
-- Stack limited to `maxVersions` (default: 20) to prevent memory issues
-
-**UI**: Undo/Redo buttons in the editor toolbar (or in the chat panel as a notification: "AI updated the document. [Undo]")
-
-#### 3.8.2 Key Decisions
-
-- **Scope**: Only AI-initiated changes are tracked in this stack. User manual edits use Lexical's built-in undo.
-- **Granularity**: Each AI operation (write-back, re-analysis, selection revision) is one undo step.
-- **Persistence**: Version stack is in-memory only (React state). Refreshing the page loses undo history. Full persistence is out of scope.
+Extend `ChatKnowledgeScope` with `AdditionalDocumentIds`:
+- Primary document in editor; secondary documents AI-accessible for cross-referencing
+- Maximum 5 documents per session (token budget control)
+- `SprkChatContextSelector` supports multi-select
 
 ---
 
-### Phase 9: Multi-Document Context (P2, Small)
+## 6. Architecture Summary
 
-**Goal**: Allow the AI to work with multiple documents simultaneously, comparing and cross-referencing content.
+### 6.1 New SSE Event Types
 
-#### 3.9.1 Solution Architecture
-
-**Backend**: Extend `ChatKnowledgeScope` to support multiple active document IDs:
-```csharp
-public record ChatKnowledgeScope(
-    IReadOnlyList<string> RagKnowledgeSourceIds,
-    string? InlineContent,
-    string? SkillInstructions,
-    string? ActiveDocumentId,           // Primary document
-    IReadOnlyList<string>? AdditionalDocumentIds,  // New: secondary documents
-    string? ParentEntityType,
-    string? ParentEntityId);
-```
-
-**Frontend**: Extend `SprkChatContextSelector` to support multi-select for documents. The primary document remains in the editor; secondary documents are available to the AI for cross-referencing.
-
-**Tools**: `AnalysisQueryTools` and `DocumentSearchTools` can query across all documents in the knowledge scope.
-
-#### 3.9.2 Key Decisions
-
-- **Primary vs. secondary**: Only the primary document appears in the editor. Secondary documents are AI-accessible only.
-- **Token budget**: Multiple documents increase context size. The system prompt summarizes secondary documents rather than including full content.
-- **Limit**: Maximum 5 documents in a single session to control token costs.
-
----
-
-## 4. Architecture & Integration
-
-### 4.1 New SSE Event Types (Summary)
-
-| Event Type | Phase | Payload | Purpose |
-|------------|-------|---------|---------|
-| `token` | Existing | `{ content: string }` | Streaming text chunk |
+| Event Type | Package | Payload | Purpose |
+|------------|---------|---------|---------|
+| `token` | Existing | `{ content }` | Chat streaming text |
 | `done` | Existing | `{ content: null }` | Stream complete |
-| `error` | Existing | `{ content: string }` | Error message |
-| `document_update` | Phase 1 | `{ content: string, operation: string }` | Write to editor |
-| `suggestions` | Phase 5 | `{ content: string[] }` | Follow-up suggestions |
-| `citations` | Phase 6 | `{ content: Citation[] }` | Source references |
-| `progress` | Phase 2 | `{ content: string, percent: number }` | Re-analysis progress |
+| `error` | Existing | `{ content }` | Error message |
+| `document_stream_start` | B | `{ position }` | Begin streaming write to editor |
+| `document_stream_token` | B | `{ content }` | Single token for editor |
+| `document_stream_end` | B | `{ summary }` | End streaming write |
+| `document_replace` | E | `{ content }` | Bulk editor replacement (re-analysis) |
+| `progress` | E | `{ content, percent }` | Long-running operation progress |
+| `suggestions` | H | `{ content: string[] }` | Follow-up suggestions |
+| `citations` | H | `{ content: Citation[] }` | Source references |
 
-### 4.2 New AI Tool Classes (Summary)
+### 6.2 New AI Tool Classes
 
-| Tool Class | Phase | Methods | DI Impact |
-|------------|-------|---------|-----------|
-| `WorkingDocumentTools` | 1 | `UpdateWorkingDocumentAsync`, `AppendSectionAsync` | 0 (factory) |
-| `AnalysisExecutionTools` | 2 | `RerunAnalysisAsync`, `RefineAnalysisAsync` | 0 (factory) |
-| `WebSearchTools` | 7 | `SearchWebAsync` | 0 (factory) |
+| Tool Class | Package | Methods | DI Impact |
+|------------|---------|---------|-----------|
+| `WorkingDocumentTools` | B | `EditWorkingDocumentAsync`, `AppendSectionAsync` | 0 (factory) |
+| `AnalysisExecutionTools` | E | `RerunAnalysisAsync`, `RefineAnalysisAsync` | 0 (factory) |
+| `WebSearchTools` | I | `SearchWebAsync` | 0 (factory) |
 
-All new tool classes follow the established pattern: constructor-injected infrastructure values, factory-instantiated in `SprkChatAgentFactory.ResolveTools()`, registered as `AIFunction` objects. **0 additional DI registrations required** (ADR-010 compliant).
+### 6.3 New Code Page Web Resources
 
-### 4.3 New Frontend Components (Summary)
+| Web Resource | Package | React | Purpose |
+|-------------|---------|-------|---------|
+| `sprk_SprkChatPane` | A | 19 | Side pane chat — deployable on any form |
+| `sprk_AnalysisWorkspace` | C | 19 | 2-panel editor + document viewer |
 
-| Component | Phase | Parent | Purpose |
-|-----------|-------|--------|---------|
-| `SprkChatActionMenu` | 3 | `SprkChatInput` | Command palette popover |
-| `SprkChatSuggestions` | 5 | `SprkChat` | Follow-up suggestion chips |
-| `SprkChatCitationPopover` | 6 | `SprkChatMessage` | Citation source popover |
+### 6.4 New Frontend Components
 
-### 4.4 Modified Existing Components
+| Component | Package | Location | Purpose |
+|-----------|---------|----------|---------|
+| `SprkChatBridge` | A | `@spaarke/ui-components` | Cross-pane BroadcastChannel communication |
+| `StreamingInsertPlugin` | B | `RichTextEditor` (Lexical) | Token-by-token editor inserts |
+| `DiffCompareView` | F | `@spaarke/ui-components` | Side-by-side diff with accept/reject |
+| `SprkChatActionMenu` | D | `SprkChat` | Command palette popover |
+| `SprkChatSuggestions` | H | `SprkChat` | Follow-up suggestion chips |
+| `SprkChatCitationPopover` | H | `SprkChat` | Citation source popover |
 
-| Component | Phases | Changes |
-|-----------|--------|---------|
-| `AnalysisWorkspaceApp` | 1, 4, 8 | Add editor↔chat bridge callbacks, undo buttons |
-| `SprkChat` | 1, 3, 5 | New props (`onDocumentUpdate`), parse new SSE events |
-| `SprkChatInput` | 3 | Detect `/` prefix, show action menu |
-| `SprkChatHighlightRefine` | 4 | Support dual `contentRef` (editor + chat) |
-| `RichTextEditor` | 4 | New ref methods: `getSelectedHtml()`, `replaceSelection()`, `getSelectionRect()` |
-| `useSseStream` | 1, 5, 6 | Handle new SSE event types |
-| `useChatSession` | 3 | Handle action menu commands |
-
-### 4.5 Modified Backend Services
-
-| Service | Phases | Changes |
-|---------|--------|---------|
-| `SprkChatAgentFactory` | 1, 2, 7 | Register new tool classes in `ResolveTools()` |
-| `ChatEndpoints` | 1, 2, 3, 5, 6 | New SSE event emission, new `/actions` endpoint |
-| `SprkChatAgent` | 5 | Post-response suggestion generation |
-
-### 4.6 ADR Compliance
+### 6.5 ADR Compliance
 
 | ADR | Impact | Notes |
 |-----|--------|-------|
-| ADR-001 | Compliant | All new endpoints in existing Minimal API; no Azure Functions |
-| ADR-006 | Compliant | All UI in PCF (AnalysisWorkspace) and shared components; no legacy JS |
-| ADR-010 | Compliant | 0 additional DI registrations; tools are factory-instantiated |
-| ADR-012 | Compliant | New shared components in `@spaarke/ui-components` |
-| ADR-013 | Compliant | Extends AI Tool Framework pattern; new tools follow `AIFunctionFactory.Create` |
-| ADR-021 | Compliant | All UI uses Fluent UI v9; dark mode supported |
-| ADR-022 | Compliant | PCF components use React 16 APIs; shared components are compatible |
+| ADR-001 | Compliant | All new endpoints in existing Minimal API |
+| ADR-006 | **Updated** | Analysis Workspace migrates from PCF to Code Page per ADR-006 guidance ("standalone → Code Page") |
+| ADR-010 | Compliant | 0 additional DI registrations |
+| ADR-012 | Compliant | Shared components in `@spaarke/ui-components`; `SprkChatBridge` as shared module |
+| ADR-013 | Compliant | New tools follow `AIFunctionFactory.Create` pattern |
+| ADR-021 | Compliant | All UI uses Fluent UI v9 |
+| ADR-022 | **Relaxed** | Code Pages bundle React 19 (not platform-provided React 16) — consistent with ADR-022 Code Page guidance |
 
 ---
 
-## 5. Implementation Sequencing
+## 7. Parallel Execution Strategy
 
-### 5.1 Phase Dependencies
+### 7.1 Package Dependency Graph
 
 ```
-Phase 1 (Write-Back) ──────────────────┐
-    ↓                                   │
-Phase 2 (Re-Analysis) ─── depends on ──┤
-    ↓                                   │
-Phase 4 (Selection Revision) ──────────┤
-    ↓                                   │
-Phase 8 (Undo) ──── depends on ────────┘
-                     (all write phases)
+Package A (Side Pane) ──────────────┐
+                                     ├── Package C (AW Migration) depends on A
+Package B (Streaming Engine) ────────┤
+                                     ├── Package E (Re-Analysis) depends on B
+                                     ├── Package F (Diff View) depends on B
+                                     └── Package G (Selection Revision) depends on B + C
+Package D (Action Menu) ── independent (no dependencies)
 
-Phase 3 (Action Menu) ── independent ── can parallel with Phase 1
-
-Phase 5 (Suggestions) ── independent ── can follow any phase
-
-Phase 6 (Citations) ── independent ── can follow Phase 1
-
-Phase 7 (Web Search) ── independent ── can follow Phase 3
-
-Phase 9 (Multi-Doc) ── independent ── can follow any phase
+Package H (Suggestions + Citations) ── depends on A (side pane must exist)
+Package I (Web Search + Multi-Doc) ── depends on A (side pane must exist)
 ```
 
-### 5.2 Recommended Execution Order
+### 7.2 Sprint Execution Plan (Agent Teams)
 
-| Order | Phase | Rationale |
-|-------|-------|-----------|
-| 1st | Phase 1 (Write-Back) | Foundation for all write operations |
-| 2nd | Phase 3 (Action Menu) | High user-facing value, independent |
-| 3rd | Phase 2 (Re-Analysis) | Depends on Phase 1 write-back infrastructure |
-| 4th | Phase 4 (Selection Revision) | Builds on Phase 1 + existing highlight-refine |
-| 5th | Phase 5 (Suggestions) | Quick win, small scope |
-| 6th | Phase 8 (Undo) | Requires all write phases to be stable |
-| 7th | Phase 6 (Citations) | Large scope, independent timeline |
-| 8th | Phase 7 (Web Search) | External dependency (Bing API) |
-| 9th | Phase 9 (Multi-Document) | Lowest priority, smallest scope |
+**Sprint 1 — Foundation (3 parallel tracks)**:
 
-### 5.3 Parallelization Opportunities
+| Track | Package | Team Focus | File Ownership |
+|-------|---------|------------|----------------|
+| Track 1 | A: SprkChat Side Pane | Frontend | `src/client/code-pages/SprkChatPane/`, `SprkChatBridge` |
+| Track 2 | B: Streaming Write Engine | Full-stack | `RichTextEditor` plugins, `WorkingDocumentTools.cs`, SSE events |
+| Track 3 | D: Action Menu | Frontend + API | `SprkChatActionMenu`, `/actions` endpoint |
 
-- **Phase 1 + Phase 3** can develop in parallel (different file ownership: API tools vs. UI components)
-- **Phase 5 + Phase 6** can develop in parallel after Phase 1 completes
-- **Phase 7 + Phase 8** can develop in parallel
+**Sprint 2 — Integration (3 parallel tracks)**:
+
+| Track | Package | Team Focus | File Ownership |
+|-------|---------|------------|----------------|
+| Track 1 | C: AW Code Page Migration | Frontend | `src/client/code-pages/AnalysisWorkspace/` |
+| Track 2 | E: Re-Analysis Pipeline | Backend | `AnalysisExecutionTools.cs`, re-analysis flow |
+| Track 3 | I: Web Search + Multi-Doc | Backend | `WebSearchTools.cs`, `ChatKnowledgeScope` |
+
+**Sprint 3 — Polish (3 parallel tracks)**:
+
+| Track | Package | Team Focus | File Ownership |
+|-------|---------|------------|----------------|
+| Track 1 | F: Diff Compare View | Frontend | `DiffCompareView` component |
+| Track 2 | G: Selection-Based Revision | Full-stack | Selection API, cross-pane flow |
+| Track 3 | H: Suggestions + Citations | Full-stack | `SprkChatSuggestions`, citation tracking |
+
+### 7.3 Task Creation Guidance for `/project-pipeline`
+
+Each package should be decomposed into tasks that maintain **clean file ownership boundaries** so agent teammates don't conflict:
+
+| Package | Approximate Tasks | Key File Boundaries |
+|---------|-------------------|---------------------|
+| A | 12-15 | `code-pages/SprkChatPane/`, `SprkChatBridge.ts` |
+| B | 15-20 | `RichTextEditor/plugins/`, `WorkingDocumentTools.cs`, SSE event types |
+| C | 15-18 | `code-pages/AnalysisWorkspace/`, remove legacy from PCF |
+| D | 10-12 | `SprkChatActionMenu.tsx`, `SprkChatInput` changes, `/actions` endpoint |
+| E | 8-10 | `AnalysisExecutionTools.cs`, re-analysis orchestration |
+| F | 8-10 | `DiffCompareView.tsx`, diff algorithm, mode toggle |
+| G | 10-12 | Selection API methods, cross-pane selection flow |
+| H | 10-12 | `SprkChatSuggestions.tsx`, `SprkChatCitationPopover.tsx`, citation tracking |
+| I | 8-10 | `WebSearchTools.cs`, `ChatKnowledgeScope` extension |
+
+**Total: 96-119 POML tasks**
 
 ---
 
-## 6. Risk Assessment
+## 8. Risk Assessment
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| `setHtml()` causes editor flicker during AI updates | Medium | Medium | Implement optimistic rendering; batch updates |
-| Re-analysis token costs exceed budget | Medium | High | CostControl middleware enforces limits; add confirmation prompt |
-| `/` command conflicts with user input | Low | Low | Only trigger when `/` is first character; Escape dismisses |
-| Selection-based revision loses formatting | Medium | Medium | Implement Lexical-aware replacement; test with complex HTML |
-| Undo stack memory usage | Low | Low | Cap at 20 versions; use compressed snapshots |
-| Web search returns irrelevant/harmful content | Medium | Medium | ContentSafety middleware filters; clear external content markers |
-| Multi-document context exceeds token limits | Medium | High | Summarize secondary documents; limit to 5 documents |
+| `BroadcastChannel` not available in all browsers | Low | High | Fallback to `window.postMessage`; detect at runtime |
+| Streaming write causes Lexical state corruption | Medium | High | Extensive testing; `StreamingInsertPlugin` isolated from user edits during stream |
+| Code Page migration breaks existing Dataverse form integrations | Medium | Medium | Maintain PCF as fallback during transition; feature flag |
+| React 19 bundle size increases load time | Low | Medium | Code splitting; lazy load non-critical components |
+| Cross-pane latency impacts streaming UX | Low | Medium | BroadcastChannel is synchronous within same origin; benchmark |
+| Re-analysis token costs exceed budget | Medium | High | CostControl middleware; confirmation prompt |
+| Diff view for large documents is slow | Medium | Medium | Virtual rendering; only diff visible sections |
 
 ---
 
-## 7. Success Criteria
+## 9. Success Criteria
 
 | Criterion | Measurement |
 |-----------|-------------|
-| User can update working document via chat | Chat instruction → document updated within 5 seconds |
-| User can re-analyze with new context | Re-analysis completes and replaces editor content |
-| Action menu is discoverable and fast | `/` shows menu in <200ms; keyboard navigation works |
-| Selection revision works in editor | Select text → refine → text replaced in-place |
-| Suggestions are contextually relevant | >70% of suggestions are actionable (user testing) |
-| Citations link to correct sources | Citation click opens correct document/page |
-| Undo reliably reverts AI changes | Undo restores exact previous state |
+| SprkChat accessible as side pane on any Dataverse form | Verified on Matter, Project, Analysis forms |
+| AI streams edits into editor token-by-token | Visible streaming with <100ms per-token latency |
+| Diff view shows before/after for revisions | Accept/reject workflow functional |
+| Re-analysis reprocesses full document | New analysis output replaces editor content |
+| Action menu responds to `/` in <200ms | Keyboard navigation works end-to-end |
+| Analysis Workspace runs as Code Page (React 19) | No PCF dependency; full viewport layout |
+| Playbook capabilities govern available tools | Switching playbook changes action menu + tool set |
 | All features support dark mode | Visual inspection in both themes |
-| 0 additional DI registrations | `AiModule.cs` registration count unchanged |
+| Packages A, B, D executable in parallel | No file conflicts between tracks |
+| 0 additional DI registrations | ADR-010 compliant |
+| Legacy chat code fully removed | No `useLegacyChat` flag, no deprecated endpoints |
 
 ---
 
-## 8. Out of Scope
+## 10. Out of Scope
 
-- **Real-time collaborative editing** (multiple users editing simultaneously)
-- **Document version history persistence** (beyond in-memory undo stack)
-- **Custom playbook creation** from within SprkChat
+- **PlaybookBuilder AI Assistant convergence** — Remains separate; future R3+ consideration
+- **Real-time collaborative editing** (multiple users simultaneously)
 - **Voice input** for chat
-- **Mobile/responsive layout** for the 3-column workspace
-- **Dataverse write-back of analysis** (separate project: Task 032 in R1)
+- **Mobile/responsive layout** for the workspace
+- **Dataverse analysis persistence** (separate project: Task 032 in R1)
+- **Custom playbook creation** from within SprkChat
+- **Office Add-in integration** for SprkChat
 
 ---
 
-## 9. Open Questions
+## 11. Open Questions
 
-1. **Confirmation UX for destructive operations**: Should re-analysis require explicit user confirmation before replacing the working document? Or is undo sufficient?
-2. **Citation format**: Should citations be numbered `[1]` or use author-date style? Numbered is simpler for AI to generate.
-3. **Web search API choice**: Azure Bing Search vs. alternative? Bing is already in the Azure resource group.
-4. **Action menu extensibility**: Should actions be purely server-driven (API returns available actions) or have some client-side registration for faster UX?
-5. **Selection revision scope**: Should the highlight-refine toolbar also appear over the source document viewer (read-only panel), allowing users to ask questions about specific passages?
+1. **Side pane width**: Fixed 400px or user-resizable? Resizable adds complexity but improves UX.
+2. **Cross-pane auth**: Should the side pane inherit the host form's auth token, or authenticate independently?
+3. **Code Page transition**: Big-bang migration or incremental (PCF calls Code Page as embedded iframe)?
+4. **Diff algorithm**: Use existing library (diff-match-patch, jsdiff) or build custom for HTML-aware diffing?
+5. **Streaming cancellation**: When user cancels a streaming write, how to cleanly roll back partial inserts?
+6. **PlaybookBuilder future**: Should Package D's action menu be designed with PlaybookBuilder adoption in mind (R3 convergence)?
 
 ---
 
-*End of Design Document*
+*End of Design Document — Revision 2*

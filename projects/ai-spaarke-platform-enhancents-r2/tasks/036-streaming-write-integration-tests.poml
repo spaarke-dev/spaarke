@@ -1,0 +1,92 @@
+<task id="R2-036" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Streaming Write Integration Tests</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package B: Streaming Write Engine</package>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>testing, integration</tags>
+    <parallel-group>sprint1-track2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Write integration tests for the streaming write backend flow using `WebApplicationFactory&lt;Program&gt;`.
+    Tests exercise the full server-side path: HTTP request → ChatEndpoints SSE → SprkChatAgent →
+    WorkingDocumentTools → inner LLM call → SSE event emission. Mock the external LLM service
+    (IChatClient) at the DI boundary to return controlled streaming responses. Validate the SSE
+    event sequence (document_stream_start → document_stream_token[] → document_stream_end),
+    cancellation mid-stream, version history push before write, and error handling for LLM failures.
+  </prompt>
+  <role>Senior full-stack developer with Spaarke platform expertise</role>
+  <goal>Integration tests validate the complete server-side streaming write path with controlled LLM responses. Tests cover happy path, cancellation, and error scenarios. All tests pass with `dotnet test`.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="testing">Use WebApplicationFactory&lt;Program&gt; for integration tests. xUnit + NSubstitute. Test naming: {Method}_{Scenario}_{ExpectedResult}. 80%+ coverage target for tested paths.</constraint>
+    <constraint source="ADR-008">Integration tests must verify that endpoint filters (AiAuthorizationFilter) are applied to chat endpoints.</constraint>
+    <constraint source="ADR-019">SSE error events MUST use ProblemDetails format with stable errorCode.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Integration testing SSE streaming endpoints</topic>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Integration tests for SSE streaming require special handling: the test client must read the
+      SSE response as a stream, parse `data:` lines, and deserialize event payloads. The test
+      replaces `IChatClient` with a mock at the DI level (via `WebApplicationFactory.ConfigureServices`)
+      to control LLM responses without hitting the real Azure OpenAI service. This allows testing
+      specific scenarios: normal completion (all tokens emitted), cancellation (abort the HTTP
+      request mid-stream), and LLM failure (mock throws exception after N tokens). The tests
+      validate both the event sequence and individual event payloads.
+    </background>
+    <dependencies>
+      <dependency task="R2-028" status="complete">WorkingDocumentTools with real IChatClient streaming must be implemented.</dependency>
+      <dependency task="R2-029" status="complete">Unit tests must pass before integration tests are written.</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="create">tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Ai/StreamingWriteTests.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this is a test-only task -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Create test class and WebApplicationFactory setup">Create `StreamingWriteTests.cs` with a custom `WebApplicationFactory&lt;Program&gt;` that replaces `IChatClient` with a controllable mock. Set up authentication bypass for tests (test-specific auth handler).</step>
+    <step order="2" name="Create SSE response parser helper">Build a helper that reads an SSE response stream, parses `data:` lines with `\n\n` delimiters, and deserializes events into typed objects. Support both synchronous collection and async streaming consumption.</step>
+    <step order="3" name="Test happy path — streaming write complete">Send a chat message that triggers WorkingDocumentTools.EditWorkingDocumentAsync. Mock IChatClient to return a 5-token streaming response. Verify SSE events: 1 document_stream_start, 5 document_stream_token (with correct indices and content), 1 document_stream_end (cancelled=false, totalTokens=5).</step>
+    <step order="4" name="Test cancellation mid-stream">Send a chat message, then abort the HTTP request after receiving 2 document_stream_token events. Verify: document_stream_end is emitted with cancelled=true and totalTokens=2 (or the count emitted before abort).</step>
+    <step order="5" name="Test LLM failure">Configure IChatClient mock to throw after 1 token. Verify: document_stream_end is emitted with error details (errorCode, message). No unhandled 500 response.</step>
+    <step order="6" name="Test AppendSectionAsync">Send a chat message that triggers AppendSectionAsync. Verify correct SSE event sequence with section-specific content.</step>
+    <step order="7" name="Test playbook without write_back capability">Send a chat message with a playbook that lacks `write_back` capability. Verify WorkingDocumentTools methods are not available to the agent (no document_stream events).</step>
+    <step order="8" name="Run all tests">Execute `dotnet test` for the integration test project. Verify all tests pass.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">All integration tests pass with `dotnet test`</criterion>
+    <criterion testable="true">Happy path test verifies complete SSE event sequence with correct payloads</criterion>
+    <criterion testable="true">Cancellation test verifies cancelled=true in document_stream_end after abort</criterion>
+    <criterion testable="true">LLM failure test verifies error details in document_stream_end event</criterion>
+    <criterion testable="true">AppendSectionAsync test verifies section-specific streaming flow</criterion>
+    <criterion testable="true">Capability gating test verifies tools are absent without write_back</criterion>
+    <criterion testable="true">SSE response parser correctly handles multi-line event payloads</criterion>
+  </acceptance-criteria>
+</task>

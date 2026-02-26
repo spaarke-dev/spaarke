@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="104" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>DiffCompareView and diffUtils Unit Tests</title>
+    <phase>3</phase>
+    <package>Package F: Diff Compare View</package>
+    <tags>testing, frontend</tags>
+    <estimate>4-5 hours</estimate>
+    <dependencies>100, 101</dependencies>
+    <parallel-group>sprint3-track1</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Write comprehensive unit tests for the DiffCompareView component and diffUtils module, covering
+      rendering modes (side-by-side and inline), Accept/Reject/Edit actions, diff algorithm accuracy
+      with various HTML inputs, and edge cases.
+    </goal>
+    <context>
+      The DiffCompareView component (task 100) and diffUtils module (task 101) are critical UI
+      infrastructure for Phase 3. They must be thoroughly tested to ensure:
+      - Visual diff rendering is correct in both side-by-side and inline modes
+      - Action callbacks fire correctly with the right data
+      - The diff algorithm handles HTML content faithfully (preserving structure)
+      - Edge cases (empty content, identical content, large diffs) are handled gracefully
+
+      Tests use Jest with React Testing Library for component tests and plain Jest for utility
+      function tests. Follow the project testing conventions: test naming pattern
+      {Method}_{Scenario}_{ExpectedResult}, and aim for 80%+ line coverage.
+    </context>
+    <constraints>
+      - Follow project testing conventions: {Method}_{Scenario}_{ExpectedResult} naming
+      - Use Jest + React Testing Library for component tests
+      - Use plain Jest for diffUtils function tests
+      - Achieve 80%+ line coverage for both DiffCompareView and diffUtils
+      - Tests must run without browser DOM dependencies (use jsdom environment)
+      - No snapshot tests — use explicit assertions for rendering behavior
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/DiffCompareView.tsx</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/diffUtils.ts</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review existing test patterns in @spaarke/ui-components:
+      - Jest configuration and test file conventions
+      - How React Testing Library is used for component tests
+      - Mock patterns for Fluent UI v9 components if needed
+    </step>
+    <step order="2">
+      Create DiffCompareView.test.tsx with component rendering tests:
+      - render_SideBySideMode_ShowsTwoColumns: verify two-column layout renders
+      - render_InlineMode_ShowsSingleColumn: verify inline layout renders
+      - render_WithAdditions_HighlightsAddedTextGreen: verify addition highlighting
+      - render_WithDeletions_HighlightsRemovedTextRed: verify deletion highlighting
+      - render_WithMixedChanges_ShowsBothAdditionsAndDeletions: mixed diff rendering
+      - render_IdenticalContent_ShowsNoHighlighting: no diffs when content matches
+      - render_EmptyOriginal_ShowsAllAdditions: original is empty string
+      - render_EmptyProposed_ShowsAllDeletions: proposed is empty string
+      - modeToggle_Click_SwitchesBetweenModes: verify mode toggle button works
+    </step>
+    <step order="3">
+      Create DiffCompareView.test.tsx with action tests:
+      - accept_Click_CallsOnAcceptWithProposedText: verify Accept fires callback
+      - reject_Click_CallsOnReject: verify Reject fires callback
+      - edit_Click_EnablesEditableProposedText: verify Edit mode activates
+      - edit_Save_CallsOnAcceptWithEditedText: verify Save in edit mode
+      - edit_Cancel_ReturnsToDiffView: verify Cancel in edit mode
+      - keyboard_CtrlEnter_TriggersAccept: keyboard shortcut test
+      - keyboard_Escape_TriggersReject: keyboard shortcut test
+    </step>
+    <step order="4">
+      Create diffUtils.test.ts with text extraction tests:
+      - extractTextFromHtml_Paragraphs_PreservesLineBreaks: paragraph handling
+      - extractTextFromHtml_Headings_PreservesHierarchy: heading extraction
+      - extractTextFromHtml_Lists_PreservesStructure: list item extraction
+      - extractTextFromHtml_InlineFormatting_StripsTagsKeepsText: bold/italic handling
+      - extractTextFromHtml_EmptyString_ReturnsEmpty: empty input handling
+      - extractTextFromHtml_PlainText_ReturnsUnchanged: no-HTML input
+    </step>
+    <step order="5">
+      Create diffUtils.test.ts with HTML diff computation tests:
+      - computeHtmlDiff_WordChange_IdentifiesModifiedWords: single word change
+      - computeHtmlDiff_ParagraphAddition_DetectsNewParagraph: paragraph added
+      - computeHtmlDiff_ParagraphRemoval_DetectsDeletedParagraph: paragraph removed
+      - computeHtmlDiff_HeadingLevelChange_DetectsModification: h2 → h3 change
+      - computeHtmlDiff_ListItemAddition_DetectsNewItem: list item added
+      - computeHtmlDiff_WhitespaceOnly_RelaxedModeIgnores: whitespace normalization
+      - computeHtmlDiff_WhitespaceOnly_StrictModeDetects: strict mode catches whitespace
+      - computeHtmlDiff_LargeContent_CompletesWithinTimeout: performance test (< 500ms for 10KB)
+      - computeHtmlDiff_Stats_ReturnsAccurateCounts: addition/deletion/unchanged counts
+    </step>
+    <step order="6">
+      Run all tests and verify:
+      - All tests pass
+      - Coverage meets 80%+ threshold for both files
+      - No flaky tests (run twice to verify stability)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review existing test patterns</tool>
+    <tool>Write - Create test files</tool>
+    <tool>Bash - Run Jest tests, coverage report</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/DiffCompareView.test.tsx</file>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/diffUtils.test.ts</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/DiffCompareView.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/diffUtils.ts</file>
+  </relevant-files>
+
+  <outputs>
+    <output>src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/DiffCompareView.test.tsx - Component tests</output>
+    <output>src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/diffUtils.test.ts - Utility tests</output>
+    <output>All tests pass with 80%+ coverage</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>DiffCompareView.test.tsx exists with tests for side-by-side rendering, inline rendering, and mode toggle</criterion>
+    <criterion>DiffCompareView.test.tsx includes tests for Accept, Reject, and Edit action callbacks</criterion>
+    <criterion>DiffCompareView.test.tsx includes keyboard shortcut tests (Ctrl+Enter, Escape)</criterion>
+    <criterion>diffUtils.test.ts exists with tests for extractTextFromHtml with paragraphs, headings, and lists</criterion>
+    <criterion>diffUtils.test.ts includes tests for computeHtmlDiff with word changes, paragraph additions/removals, heading level changes</criterion>
+    <criterion>diffUtils.test.ts includes whitespace normalization tests for both strict and relaxed modes</criterion>
+    <criterion>All tests pass (zero failures)</criterion>
+    <criterion>Line coverage is 80%+ for both DiffCompareView.tsx and diffUtils.ts</criterion>
+    <criterion>Test naming follows {Method}_{Scenario}_{ExpectedResult} convention</criterion>
+  </acceptance-criteria>
+
+  <placeholders />
+</task>

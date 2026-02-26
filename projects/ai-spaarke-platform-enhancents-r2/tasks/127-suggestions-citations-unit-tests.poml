@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="127" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Suggestions and Citations Unit Tests</title>
+    <phase>3</phase>
+    <package>Package H: Suggestions + Citations</package>
+    <tags>testing, frontend</tags>
+    <estimate>4-5 hours</estimate>
+    <dependencies>122, 124</dependencies>
+    <parallel-group>sprint3-track3</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Write comprehensive unit tests for SprkChatSuggestions rendering and click handling, citation
+      marker parsing logic, and SprkChatCitationPopover content display and interaction.
+    </goal>
+    <context>
+      The suggestions (task 122) and citations (task 124) components are user-facing UI elements
+      that must be thoroughly tested for correct rendering, interaction, and accessibility. Tests
+      cover three areas:
+
+      1. SprkChatSuggestions: chip rendering, click handling, visibility animations, keyboard navigation
+      2. Citation marker parsing: regex-based [N] detection in message content, handling of edge
+        cases (code blocks, URLs, missing citations)
+      3. SprkChatCitationPopover: popover content display, dismiss behavior, "Open Source" link
+
+      Tests use Jest with React Testing Library for component tests. Follow the project testing
+      conventions: {Method}_{Scenario}_{ExpectedResult} naming and 80%+ line coverage target.
+    </context>
+    <constraints>
+      - Follow project testing conventions: {Method}_{Scenario}_{ExpectedResult} naming
+      - Use Jest + React Testing Library for component tests
+      - Achieve 80%+ line coverage for SprkChatSuggestions, SprkChatCitationPopover, and citation parsing
+      - Mock Fluent UI v9 Popover component if needed for test stability
+      - Tests must work in jsdom environment (no real browser needed)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatSuggestions.tsx</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatCitationPopover.tsx</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessage.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review existing test patterns in the SprkChat directory:
+      - Jest configuration and test file naming conventions
+      - React Testing Library usage patterns
+      - Any mock utilities or test helpers already in use
+    </step>
+    <step order="2">
+      Create SprkChatSuggestions.test.tsx with rendering tests:
+      - render_WithSuggestions_ShowsChips: renders 2-3 suggestion chips
+      - render_EmptySuggestions_RendersNothing: empty array renders nothing
+      - render_SingleSuggestion_ShowsOneChip: single suggestion works
+      - render_LongText_TruncatesWithEllipsis: text over 50 chars truncated
+      - render_VisibleFalse_HidesComponent: visible=false hides chips
+    </step>
+    <step order="3">
+      Add SprkChatSuggestions interaction tests:
+      - click_Suggestion_CallsOnSelect: clicking chip calls onSelect with suggestion text
+      - click_Suggestion_DisablesChipsBriefly: prevents double-click
+      - keyboard_ArrowRight_FocusesNextChip: keyboard navigation between chips
+      - keyboard_ArrowLeft_FocusesPreviousChip: backward navigation
+      - keyboard_Enter_SelectsFocusedChip: Enter key activates chip
+      - keyboard_Space_SelectsFocusedChip: Space key activates chip
+      - accessibility_ChipsHaveAriaLabels: ARIA attributes present
+    </step>
+    <step order="4">
+      Create citation marker parsing tests (in SprkChatMessage.test.tsx or separate file):
+      - parseCitations_SingleMarker_ReturnsOneCitation: [1] detected
+      - parseCitations_MultipleMarkers_ReturnsAll: [1], [2], [3] detected
+      - parseCitations_InCodeBlock_Skipped: [1] inside code block not converted
+      - parseCitations_InUrl_Skipped: [1] inside URL not converted
+      - parseCitations_NoMarkers_ReturnsEmpty: no [N] patterns found
+      - parseCitations_HighNumbers_Handles: [10], [15] work correctly
+      - parseCitations_MissingCitationData_RendersPlainText: [5] without data stays as text
+      - parseCitations_AdjacentMarkers_ParsesSeparately: [1][2] parsed as two citations
+    </step>
+    <step order="5">
+      Create SprkChatCitationPopover.test.tsx:
+      - render_OpenPopover_ShowsSourceName: popover displays source name
+      - render_OpenPopover_ShowsPageNumber: page number displayed when available
+      - render_OpenPopover_ShowsExcerpt: excerpt text displayed
+      - render_NoPageNumber_HidesPageField: page field hidden when not provided
+      - render_LongExcerpt_TruncatesTo200Chars: excerpt truncated with ellipsis
+      - render_WithSourceUrl_ShowsOpenLink: "Open Source" link rendered
+      - render_NoSourceUrl_HidesOpenLink: link hidden when no URL
+      - dismiss_ClickOutside_ClosesPopover: click outside dismisses
+      - dismiss_EscapeKey_ClosesPopover: Escape key dismisses
+      - accessibility_PopoverHasAriaAttributes: ARIA role and label present
+    </step>
+    <step order="6">
+      Run all tests and verify:
+      - All tests pass
+      - Coverage meets 80%+ threshold for all three areas
+      - No flaky tests (run twice to verify)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review component implementations and existing test patterns</tool>
+    <tool>Write - Create test files</tool>
+    <tool>Bash - Run Jest tests, coverage report</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/SprkChatSuggestions.test.tsx</file>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/SprkChatCitationPopover.test.tsx</file>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/citationParsing.test.ts</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatSuggestions.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatCitationPopover.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessage.tsx</file>
+  </relevant-files>
+
+  <outputs>
+    <output>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/SprkChatSuggestions.test.tsx - Suggestions component tests</output>
+    <output>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/SprkChatCitationPopover.test.tsx - Citation popover tests</output>
+    <output>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/citationParsing.test.ts - Citation marker parsing tests</output>
+    <output>All tests pass with 80%+ coverage</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SprkChatSuggestions.test.tsx covers rendering, click handling, keyboard navigation, and accessibility</criterion>
+    <criterion>citationParsing.test.ts covers single/multiple markers, code block/URL exclusion, missing data, and edge cases</criterion>
+    <criterion>SprkChatCitationPopover.test.tsx covers content display, dismiss behavior, and accessibility</criterion>
+    <criterion>All tests pass (zero failures)</criterion>
+    <criterion>Line coverage is 80%+ for SprkChatSuggestions.tsx, SprkChatCitationPopover.tsx, and citation parsing logic</criterion>
+    <criterion>Test naming follows {Method}_{Scenario}_{ExpectedResult} convention</criterion>
+    <criterion>No snapshot tests — explicit assertions only</criterion>
+  </acceptance-criteria>
+
+  <placeholders />
+</task>

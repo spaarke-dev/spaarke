@@ -1,0 +1,88 @@
+<task id="R2-029" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>WorkingDocumentTools Unit Tests</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package B: Streaming Write Engine</package>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>testing, bff-api</tags>
+    <parallel-group>sprint1-track2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Write comprehensive unit tests for the `WorkingDocumentTools` class covering both tool methods
+    (EditWorkingDocumentAsync, AppendSectionAsync), cancellation behavior, SSE event emission
+    ordering, error handling, and playbook capability gating. Use xUnit + NSubstitute to mock
+    IChatClient, IAnalysisOrchestrationService, and the SSE writer. Tests must verify the complete
+    SSE event sequence (start → tokens → end) and correct handling of edge cases (empty document,
+    LLM failure mid-stream, cancellation at various points).
+  </prompt>
+  <role>Senior full-stack developer with Spaarke platform expertise</role>
+  <goal>Achieve 80%+ line coverage for WorkingDocumentTools with tests that validate SSE event ordering, cancellation, error handling, and capability gating. All tests pass with `dotnet test`.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="testing">xUnit + NSubstitute for mocking. Test naming convention: {Method}_{Scenario}_{ExpectedResult}. 80%+ line coverage target.</constraint>
+    <constraint source="ADR-015">Tests MUST NOT log or assert on document content strings that would appear in CI logs. Use generic test content.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Unit testing AI tool classes</topic>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      WorkingDocumentTools is a factory-instantiated AI tool class with two tool methods that
+      perform inner LLM calls and emit SSE events. Testing requires mocking IChatClient to
+      return controlled streaming responses, mocking IAnalysisOrchestrationService to return
+      test document content, and capturing SSE events emitted via the writer delegate. The test
+      suite validates the contract between the tool class and its consumers: correct event
+      sequencing, cancellation behavior, and error propagation.
+    </background>
+    <dependencies>
+      <dependency task="R2-028" status="complete">WorkingDocumentTools with real IChatClient streaming must be implemented.</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="create">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/WorkingDocumentToolsTests.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DocumentStreamEvent.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this is a test-only task -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Create test file and setup">Create `WorkingDocumentToolsTests.cs` in the test project. Set up a base test fixture with NSubstitute mocks for `IChatClient`, `IAnalysisOrchestrationService`, and an SSE event capture list. Create a helper to instantiate `WorkingDocumentTools` with mocked dependencies.</step>
+    <step order="2" name="Test EditWorkingDocumentAsync happy path">Test that `EditWorkingDocumentAsync` emits the correct SSE event sequence: `document_stream_start` → N `document_stream_token` events → `document_stream_end`. Mock IChatClient to return a 3-token streaming response. Verify event order, operationId consistency, and token content.</step>
+    <step order="3" name="Test AppendSectionAsync happy path">Same as above but for `AppendSectionAsync`. Verify the section title appears in the prompt passed to IChatClient.</step>
+    <step order="4" name="Test cancellation mid-stream">Configure IChatClient mock to yield 2 tokens then throw OperationCanceledException. Verify: 2 document_stream_token events emitted, then document_stream_end with cancelled=true and totalTokens=2.</step>
+    <step order="5" name="Test LLM failure mid-stream">Configure IChatClient mock to yield 1 token then throw an exception. Verify: document_stream_end emitted with error details; no unhandled exception propagates.</step>
+    <step order="6" name="Test empty document scenario">Configure IAnalysisOrchestrationService to return null or empty document. Verify the tool handles this gracefully (either skips editing or returns an informative message).</step>
+    <step order="7" name="Test SSE event ordering invariants">Verify that document_stream_start is always emitted first, document_stream_end is always emitted last, and token indices are monotonically increasing.</step>
+    <step order="8" name="Test playbook capability gating">Verify that SprkChatAgentFactory does NOT include WorkingDocumentTools when playbook lacks `write_back` capability. (This may be a separate integration-level test using the factory directly.)</step>
+    <step order="9" name="Run tests">Execute `dotnet test` for the test project. Verify all tests pass. Check coverage if coverage tooling is configured.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">All unit tests pass with `dotnet test`</criterion>
+    <criterion testable="true">Happy path tests verify complete SSE event sequence (start → tokens → end) for both tool methods</criterion>
+    <criterion testable="true">Cancellation test verifies partial content preservation and cancelled=true in end event</criterion>
+    <criterion testable="true">Error test verifies graceful failure with error details in end event</criterion>
+    <criterion testable="true">Empty document test verifies no crash and appropriate handling</criterion>
+    <criterion testable="true">Event ordering test verifies start-first, end-last, monotonic token indices</criterion>
+    <criterion testable="true">80%+ line coverage for WorkingDocumentTools.cs</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Wire Streaming Write End-to-End with Real AW Code Page</title>
+    <phase>2</phase>
+    <package>C: AW Migration</package>
+    <tags>integration, streaming</tags>
+    <estimate>4-5 hours</estimate>
+    <dependencies>034, 063</dependencies>
+    <parallel-group>sprint2-track1</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Replace the test harness from task 034 with the real AnalysisWorkspace Code Page as the streaming
+      write target. Validate the full end-to-end flow: user sends a SprkChat message that triggers an
+      LLM tool call, which streams tokens via SSE, which are relayed through SprkChatBridge to the
+      AnalysisWorkspace editor where they appear token-by-token via StreamingInsertPlugin.
+    </goal>
+    <context>
+      Task 034 created a test harness to validate the streaming write pipeline independently of the
+      AnalysisWorkspace Code Page. Now that the Code Page is built (tasks 060-066) and the bridge
+      is wired (task 063), this task connects the real components end-to-end:
+
+      **Full Flow:**
+      1. User types a message in SprkChat side pane (e.g., "Draft an executive summary")
+      2. SprkChat sends the message to BFF API via SSE streaming endpoint
+      3. LLM invokes WorkingDocumentTools.edit_document (created in Package B)
+      4. BFF API emits `document_stream_start` SSE event
+      5. SprkChat side pane receives SSE and relays via SprkChatBridge (BroadcastChannel)
+      6. AnalysisWorkspace Code Page receives bridge event (useDocumentStreaming hook)
+      7. Editor calls beginStreamingInsert() on StreamingInsertPlugin
+      8. BFF API emits `document_stream_token` SSE events (one per token)
+      9. SprkChat relays each token via bridge
+      10. Editor calls appendStreamToken() for each token (appears in editor)
+      11. BFF API emits `document_stream_end` SSE event
+      12. Editor calls endStreamingInsert(), pushes to undo stack
+      13. Auto-save triggers after streaming ends
+
+      This task validates that this entire chain works with real components — no test harnesses
+      or mock intermediaries.
+    </context>
+    <constraints>
+      - Must test with the real AnalysisWorkspace Code Page (not test harness from task 034)
+      - Must test with the real SprkChatBridge (not mocked BroadcastChannel)
+      - Must test with the real StreamingInsertPlugin (not simulated DOM manipulation)
+      - Latency requirement: tokens appear in editor within 100ms of SSE receipt
+      - Cancel mid-stream must leave partial content visible and undoable
+      - After streaming ends, auto-save must trigger within debounce window
+      - Task 034 test harness should be removed or marked as superseded
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/code-pages/AnalysisWorkspace/hooks/useDocumentStreaming.ts</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatBridge.ts</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/plugins/StreamingInsertPlugin.ts</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review the test harness from task 034 to understand what it tested and what gaps remain:
+      - What parts of the flow were mocked?
+      - What edge cases were covered?
+      - What needs to be validated with real components?
+    </step>
+    <step order="2">
+      Verify SprkChatBridge channel naming is consistent between SprkChat pane and AW Code Page:
+      - Both panes must use the same channel name pattern (sprk-workspace-{context})
+      - Context must match (e.g., same analysisId or entityId)
+      - Verify the bridge connects when both panes are open
+    </step>
+    <step order="3">
+      Test the happy path end-to-end:
+      - Open SprkChat side pane and AnalysisWorkspace Code Page simultaneously
+      - Send a message that triggers WorkingDocumentTools.edit_document
+      - Verify: stream_start received by AW, streaming indicator shown
+      - Verify: tokens appear in editor one by one
+      - Verify: stream_end received, streaming indicator hidden
+      - Verify: content is in undo stack (Ctrl+Z reverts)
+      - Verify: auto-save triggered after streaming ends
+    </step>
+    <step order="4">
+      Test cancel mid-stream:
+      - Start a streaming write
+      - Cancel after partial tokens received
+      - Verify: partial content visible in editor
+      - Verify: partial content is undoable
+      - Verify: editor re-enabled for manual editing
+    </step>
+    <step order="5">
+      Test document_replace flow:
+      - Trigger a re-analysis that sends document_replace event
+      - Verify: previous content pushed to undo stack
+      - Verify: new content replaces editor content
+      - Verify: auto-save triggered after replacement
+    </step>
+    <step order="6">
+      Test error scenarios:
+      - SSE connection drops mid-stream (network error)
+      - Bridge disconnects (one pane closed)
+      - Invalid token data
+      - Verify graceful degradation in each case
+    </step>
+    <step order="7">
+      Measure latency:
+      - Time from SSE receipt to token appearance in editor DOM
+      - Target: <100ms per token
+      - If latency exceeds target, profile and identify bottleneck
+    </step>
+    <step order="8">
+      Mark task 034 test harness as superseded:
+      - Add comment in test harness indicating it is replaced by real E2E testing
+      - OR remove the test harness if it served only as a temporary scaffold
+      - Document the decision
+    </step>
+    <step order="9">
+      Build and verify:
+      - Both Code Pages compile cleanly
+      - Integration test suite passes
+      - E2E flow works in browser testing
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine task 034 test harness and real components</tool>
+    <tool>Write - Create E2E validation scripts or tests</tool>
+    <tool>Edit - Update/remove test harness from task 034</tool>
+    <tool>Bash - npm run build, test execution</tool>
+  </tools>
+
+  <outputs>
+    <output>Validated end-to-end streaming flow with real components</output>
+    <output>src/client/code-pages/AnalysisWorkspace/__tests__/streaming-e2e.test.ts — E2E streaming tests</output>
+    <output>Task 034 test harness marked as superseded or removed</output>
+    <output>Latency measurements documented</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Full streaming flow works: SprkChat message -> LLM tool call -> SSE -> Bridge -> AW editor</criterion>
+    <criterion>Tokens appear in editor within 100ms of SSE receipt</criterion>
+    <criterion>Cancel mid-stream preserves partial content and enables undo</criterion>
+    <criterion>document_replace pushes previous content to undo stack before replacement</criterion>
+    <criterion>Auto-save triggers after streaming write completes</criterion>
+    <criterion>Bridge channel naming is consistent between SprkChat and AW panes</criterion>
+    <criterion>Error scenarios (network drop, bridge disconnect) degrade gracefully</criterion>
+    <criterion>Task 034 test harness is marked superseded or removed</criterion>
+    <criterion>Both Code Pages compile cleanly (npm run build)</criterion>
+  </acceptance-criteria>
+
+  <placeholders>
+    <!-- No placeholders — this task completes the placeholder from task 034 -->
+  </placeholders>
+</task>

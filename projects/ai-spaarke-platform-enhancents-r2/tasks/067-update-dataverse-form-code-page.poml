@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="067" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Update Dataverse Form to Open Code Page</title>
+    <phase>2</phase>
+    <package>C: AW Migration</package>
+    <tags>dataverse, frontend</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>060, 065, 066</dependencies>
+    <parallel-group>sprint2-track1</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Update the Analysis Dataverse form to open the AnalysisWorkspace Code Page via
+      `Xrm.Navigation.navigateTo()` instead of binding the legacy AnalysisWorkspace PCF control.
+      Pass analysisId, documentId, and tenantId via URL parameters to the Code Page.
+    </goal>
+    <context>
+      Currently, the Analysis form in Dataverse has the AnalysisWorkspace PCF control bound to a field
+      on the form. The PCF receives context via the PCF SDK (context.parameters, context.webAPI).
+
+      In the new architecture, the Analysis form will open the AnalysisWorkspace as a Code Page dialog
+      using Xrm.Navigation.navigateTo(). This provides a full-viewport experience without the
+      constraints of a field-bound PCF control.
+
+      The navigateTo call pattern:
+      ```typescript
+      Xrm.Navigation.navigateTo(
+        {
+          pageType: "webresource",
+          webresourceName: "sprk_AnalysisWorkspace",
+          data: `analysisId=${analysisId}&documentId=${documentId}&tenantId=${tenantId}`
+        },
+        {
+          target: 2,
+          width: { value: 95, unit: "%" },
+          height: { value: 95, unit: "%" }
+        }
+      );
+      ```
+
+      This can be triggered from:
+      - A ribbon button on the Analysis form
+      - A form event (onLoad or field change)
+      - An embedded web resource script on the form
+    </context>
+    <constraints>
+      - Follow ADR-006: Use navigateTo webresource for standalone pages (not custom pages)
+      - The form script must be a JavaScript web resource (form events require JS, not TS directly)
+      - Pass only IDs via URL parameters — NO auth tokens or sensitive data
+      - The dialog should open at 95% width/height for near-full-screen experience
+      - Must work on both Main Form and Quick View scenarios
+      - Must handle the case where analysisId or documentId is null (new/unsaved record)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/webresource/custom-dialogs-in-dataverse.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/code-pages/SemanticSearch/index.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read the existing Analysis form configuration to understand:
+      - Which form(s) have the AnalysisWorkspace PCF
+      - How the PCF is currently bound (field name, events)
+      - What data the form provides to the PCF
+      - Any existing form scripts (onLoad, onSave)
+    </step>
+    <step order="2">
+      Create a form script web resource for launching the Code Page:
+      - sprk_AnalysisWorkspaceLauncher.js
+      - Function: openAnalysisWorkspace(executionContext)
+      - Extract analysisId from form context (Xrm.Page.data.entity.getId())
+      - Extract documentId from the source document lookup field
+      - Extract tenantId from global context
+      - Call Xrm.Navigation.navigateTo() with parameters
+    </step>
+    <step order="3">
+      Handle edge cases in the launcher:
+      - If record is unsaved (no analysisId), prompt user to save first
+      - If documentId is null, open Code Page without source viewer context
+      - If navigateTo fails (e.g., popup blocker), show fallback error message
+    </step>
+    <step order="4">
+      Configure the form trigger:
+      - Option A: Add a ribbon/command bar button "Open Workspace" that calls the launcher
+      - Option B: Wire to form onLoad event with a "Open in Workspace" button in the form
+      - Document which approach is chosen and why
+    </step>
+    <step order="5">
+      Remove or disable the PCF control binding on the form:
+      - Note: actual PCF removal from solution is task 068
+      - This task focuses on adding the new launch mechanism
+      - If both PCF and Code Page are active during transition, add a feature flag
+    </step>
+    <step order="6">
+      Test the navigation flow:
+      - navigateTo opens the Code Page at 95% width/height
+      - URL parameters are correctly parsed by the Code Page
+      - Closing the dialog returns to the form
+      - Form data is not lost when dialog opens/closes
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine existing form configuration and PCF binding</tool>
+    <tool>Write - Create launcher web resource script</tool>
+    <tool>Edit - Update form configuration if applicable</tool>
+    <tool>Bash - Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/AnalysisWorkspace/launcher/sprk_AnalysisWorkspaceLauncher.js — Form script to open Code Page</output>
+    <output>Documentation of form configuration changes needed in Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Launcher script calls Xrm.Navigation.navigateTo with pageType "webresource"</criterion>
+    <criterion>webresourceName is "sprk_AnalysisWorkspace"</criterion>
+    <criterion>URL parameters include analysisId, documentId, and tenantId</criterion>
+    <criterion>Dialog opens at 95% width and 95% height</criterion>
+    <criterion>Unsaved records prompt the user to save before opening the workspace</criterion>
+    <criterion>Missing documentId is handled gracefully (Code Page opens without source viewer)</criterion>
+    <criterion>No auth tokens or sensitive data passed via URL parameters</criterion>
+    <criterion>Closing the dialog returns to the Analysis form without data loss</criterion>
+  </acceptance-criteria>
+
+  <placeholders>
+    <!-- No placeholders — this task produces a complete launcher script -->
+  </placeholders>
+</task>

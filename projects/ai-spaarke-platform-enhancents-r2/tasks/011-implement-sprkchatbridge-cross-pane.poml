@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Implement SprkChatBridge Cross-Pane Communication</title>
+    <phase>1</phase>
+    <tags>frontend, ui-components, shared</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>none</dependencies>
+    <parallel-group>sprint1-track1</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create the SprkChatBridge class in the @spaarke/ui-components shared library that enables typed cross-pane communication between Code Pages via BroadcastChannel with a postMessage fallback.
+    </goal>
+    <context>
+      The SprkChat side pane and Analysis Workspace Code Page run in separate iframes/panes within Dataverse.
+      They need a reliable, typed communication channel for streaming document updates, selection events,
+      and context changes. BroadcastChannel is the primary transport (synchronous, same-origin, &lt;10ms latency),
+      with window.postMessage as a fallback for environments where BroadcastChannel is unavailable.
+
+      Channel naming convention: sprk-workspace-{context} where context is typically a session or record identifier.
+
+      Events to support:
+      - document_stream_start: Signals beginning of a streaming write operation
+      - document_stream_token: Individual token during streaming write
+      - document_stream_end: Signals completion of streaming write
+      - document_replaced: Full document replacement (re-analysis)
+      - selection_changed: User selected text in editor pane
+      - context_changed: User navigated to a different record
+
+      SECURITY CONSTRAINT: Auth tokens MUST NEVER be transmitted via BroadcastChannel.
+      Each pane authenticates independently via Xrm.Utility.getGlobalContext().
+    </context>
+    <constraints>
+      - Follow ADR-012: Shared component library — SprkChatBridge lives in @spaarke/ui-components
+      - BroadcastChannel as primary transport with window.postMessage fallback
+      - Typed event handlers using TypeScript generics
+      - Channel naming: sprk-workspace-{context}
+      - MUST NOT transmit auth tokens or secrets via the bridge
+      - MUST support subscribe/unsubscribe pattern for clean lifecycle management
+      - MUST handle cleanup when pane closes (disconnect/close channel)
+      - Unit tests for both BroadcastChannel and postMessage code paths
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/services/</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review existing service patterns in @spaarke/ui-components:
+      - Check src/client/shared/Spaarke.UI.Components/src/services/ for existing patterns
+      - Understand export conventions and barrel file structure
+    </step>
+    <step order="2">
+      Define TypeScript interfaces for bridge events:
+      - SprkChatBridgeEventMap: maps event name to payload type
+      - SprkChatBridgeEvent: discriminated union of all event types
+      - SprkChatBridgeOptions: constructor options (context, transport preference)
+      - Individual payload types for each event (DocumentStreamStartPayload, etc.)
+    </step>
+    <step order="3">
+      Implement SprkChatBridge class:
+      - Constructor: accepts context string, creates channel name sprk-workspace-{context}
+      - Detect BroadcastChannel availability; fall back to postMessage
+      - emit(event, payload): send typed event to all listeners on the channel
+      - subscribe(event, handler): register typed handler; return unsubscribe function
+      - unsubscribe(event, handler): remove specific handler
+      - disconnect(): close channel and remove all listeners
+      - Private: internal message routing and type discrimination
+    </step>
+    <step order="4">
+      Implement BroadcastChannel transport:
+      - Create BroadcastChannel with channel name
+      - onmessage handler routes to registered event handlers
+      - postMessage sends serialized event
+      - close() on disconnect
+    </step>
+    <step order="5">
+      Implement postMessage fallback transport:
+      - window.addEventListener('message', handler) with origin validation
+      - window.postMessage with structured event data
+      - Filter messages by channel name to avoid cross-talk
+      - removeEventListener on disconnect
+    </step>
+    <step order="6">
+      Export SprkChatBridge from the shared library barrel file:
+      - Add to services/index.ts
+      - Add to main library index
+    </step>
+    <step order="7">
+      Write unit tests (SprkChatBridge.test.ts):
+      - Test BroadcastChannel transport: emit and receive events
+      - Test postMessage fallback: emit and receive events
+      - Test typed event handlers receive correct payload types
+      - Test subscribe returns working unsubscribe function
+      - Test disconnect cleans up all listeners
+      - Test channel naming convention
+      - Test that messages for wrong channel are ignored
+      - Test event ordering (events received in order sent)
+    </step>
+    <step order="8">
+      Run tests and verify all pass:
+      - npm test (or jest) in the shared library
+      - Fix any failures
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review existing service patterns</tool>
+    <tool>Write - Create SprkChatBridge.ts and test file</tool>
+    <tool>Edit - Update barrel exports</tool>
+    <tool>Bash - Run unit tests</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.ts — Bridge implementation</output>
+    <output>src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.test.ts — Unit tests</output>
+    <output>Updated barrel exports in services/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SprkChatBridge class created in @spaarke/ui-components services</criterion>
+    <criterion>BroadcastChannel transport works: emit → subscribe delivers typed events</criterion>
+    <criterion>postMessage fallback transport works when BroadcastChannel unavailable</criterion>
+    <criterion>All 6 event types defined with TypeScript interfaces: document_stream_start, document_stream_token, document_stream_end, document_replaced, selection_changed, context_changed</criterion>
+    <criterion>subscribe() returns an unsubscribe function for clean lifecycle</criterion>
+    <criterion>disconnect() closes channel and removes all event listeners</criterion>
+    <criterion>Channel naming follows sprk-workspace-{context} pattern</criterion>
+    <criterion>No auth tokens or secrets included in any event payload types</criterion>
+    <criterion>Unit tests pass for both BroadcastChannel and postMessage fallback</criterion>
+    <criterion>Library compiles without errors</criterion>
+  </acceptance-criteria>
+</task>

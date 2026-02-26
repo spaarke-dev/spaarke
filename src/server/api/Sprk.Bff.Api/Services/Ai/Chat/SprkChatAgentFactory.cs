@@ -52,6 +52,21 @@ public sealed class SprkChatAgentFactory
     /// <param name="documentId">Dataverse sprk_document ID for the active document.</param>
     /// <param name="playbookId">Playbook governing the agent's system prompt and tools.</param>
     /// <param name="tenantId">Tenant ID extracted from the user's JWT claims.</param>
+    /// <param name="hostContext">Optional host context describing where SprkChat is embedded.</param>
+    /// <param name="additionalDocumentIds">
+    /// Optional list of additional document IDs (max 5) pinned to the conversation for
+    /// cross-referencing. Propagated to <see cref="ChatKnowledgeScope.AdditionalDocumentIds"/>.
+    /// </param>
+    /// <param name="httpContext">
+    /// HTTP context for OBO authentication. Required by <see cref="AnalysisExecutionTools"/> to call
+    /// <see cref="IAnalysisOrchestrationService.ExecutePlaybookAsync"/> which downloads files from SPE.
+    /// May be null for non-streaming contexts (e.g., background processing).
+    /// </param>
+    /// <param name="sseWriter">
+    /// Optional SSE writer delegate for out-of-band events (progress, document_replace).
+    /// Used by <see cref="AnalysisExecutionTools.RerunAnalysisAsync"/> to emit progress and
+    /// document replacement events during re-analysis. Null when SSE is not available.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
@@ -64,6 +79,9 @@ public sealed class SprkChatAgentFactory
         Guid playbookId,
         string tenantId,
         ChatHostContext? hostContext = null,
+        IReadOnlyList<string>? additionalDocumentIds = null,
+        HttpContext? httpContext = null,
+        Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -82,11 +100,25 @@ public sealed class SprkChatAgentFactory
             tenantId,
             playbookId,
             hostContext,
+            additionalDocumentIds,
             cancellationToken);
 
-        // Resolve registered AIFunction tools from DI, passing tenant ID and knowledge scope
-        // so search tools can constrain queries to the correct tenant and playbook's knowledge sources.
-        var tools = ResolveTools(scope.ServiceProvider, tenantId, context.KnowledgeScope);
+        // Resolve playbook capabilities to determine which tools should be available.
+        // TODO: Wire Dataverse lookup for sprk_capabilities field (task 047 added the field;
+        //       server-side query awaits generic Dataverse OData query path — post-R2).
+        var capabilities = GetPlaybookCapabilities(context.PlaybookId);
+
+        // Create a shared CitationContext for search tools to populate with source metadata.
+        // This context is passed to DocumentSearchTools and KnowledgeRetrievalTools so they
+        // can register citations during tool execution. The SprkChatAgent resets it before
+        // each message to keep citation numbering scoped per assistant response.
+        var citationContext = new CitationContext();
+
+        // Resolve registered AIFunction tools from DI, passing tenant ID, knowledge scope,
+        // and playbook capabilities so tools are gated to only those the playbook declares.
+        var tools = ResolveTools(
+            scope.ServiceProvider, tenantId, context.KnowledgeScope, capabilities,
+            playbookId, documentId, httpContext, sseWriter, citationContext);
 
         _logger.LogInformation(
             "SprkChatAgent created: playbook={PlaybookId}, toolCount={ToolCount}, hasDocSummary={HasDocSummary}",
@@ -94,7 +126,7 @@ public sealed class SprkChatAgentFactory
 
         var agentLogger = scope.ServiceProvider.GetRequiredService<ILogger<SprkChatAgent>>();
 
-        ISprkChatAgent agent = new SprkChatAgent(_chatClient, context, tools, agentLogger);
+        ISprkChatAgent agent = new SprkChatAgent(_chatClient, context, tools, citationContext, agentLogger);
 
         // === Middleware pipeline (AIPL-057) ===
         // Wrap order: ContentSafety (innermost) -> CostControl -> Telemetry (outermost).
@@ -146,6 +178,12 @@ public sealed class SprkChatAgentFactory
     ///
     /// Required services (IRagService, IAnalysisOrchestrationService, IChatClient) are already
     /// registered in DI and are resolved here from <paramref name="scopedProvider"/>.
+    ///
+    /// Tools gated by playbook capabilities (AnalysisExecutionTools, WebSearchTools) are only
+    /// included when the playbook declares the corresponding capability. Ungated tools
+    /// (DocumentSearchTools, AnalysisQueryTools, KnowledgeRetrievalTools, TextRefinementTools)
+    /// are registered based on service availability — task 047 will refactor these to be
+    /// capability-gated as well.
     /// </summary>
     /// <param name="scopedProvider">The scoped DI provider for this agent creation call.</param>
     /// <param name="tenantId">Tenant ID from the authenticated session — injected into tool constructors (ADR-014).</param>
@@ -153,11 +191,29 @@ public sealed class SprkChatAgentFactory
     /// Knowledge scope from the playbook, containing RAG source IDs for search filtering.
     /// Null when the playbook has no knowledge sources configured.
     /// </param>
+    /// <param name="capabilities">
+    /// Playbook capabilities governing which tools are available. Tools gated behind a capability
+    /// are only registered when the capability is present in this set. See <see cref="PlaybookCapabilities"/>.
+    /// </param>
+    /// <param name="playbookId">The playbook ID — passed to AnalysisExecutionTools for re-analysis.</param>
+    /// <param name="documentId">The active document ID — passed to AnalysisExecutionTools for re-analysis.</param>
+    /// <param name="httpContext">HTTP context for OBO auth — passed to AnalysisExecutionTools for re-analysis.</param>
+    /// <param name="sseWriter">SSE writer delegate — passed to AnalysisExecutionTools for progress/document_replace events.</param>
+    /// <param name="citationContext">
+    /// Shared citation context for search tools to populate with source metadata (chunk IDs, source names, excerpts).
+    /// Passed to DocumentSearchTools and KnowledgeRetrievalTools so they register citations during execution.
+    /// </param>
     /// <returns>List of registered <see cref="AIFunction"/> instances, or empty list on failure.</returns>
     private IReadOnlyList<AIFunction> ResolveTools(
         IServiceProvider scopedProvider,
         string tenantId,
-        ChatKnowledgeScope? knowledgeScope)
+        ChatKnowledgeScope? knowledgeScope,
+        IReadOnlySet<string> capabilities,
+        Guid playbookId,
+        string documentId,
+        HttpContext? httpContext,
+        Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter,
+        CitationContext? citationContext)
     {
         try
         {
@@ -172,7 +228,7 @@ public sealed class SprkChatAgentFactory
             // DocumentSearchTools — requires IRagService, accepts knowledge scope for domain filtering
             if (ragService != null)
             {
-                var documentSearchTools = new DocumentSearchTools(ragService, tenantId, knowledgeScope);
+                var documentSearchTools = new DocumentSearchTools(ragService, tenantId, knowledgeScope, citationContext);
                 tools.Add(AIFunctionFactory.Create(
                     documentSearchTools.SearchDocumentsAsync,
                     name: "SearchDocuments",
@@ -208,7 +264,7 @@ public sealed class SprkChatAgentFactory
             // KnowledgeRetrievalTools — requires IRagService, accepts knowledge scope for domain filtering
             if (ragService != null)
             {
-                var knowledgeRetrievalTools = new KnowledgeRetrievalTools(ragService, tenantId, knowledgeScope);
+                var knowledgeRetrievalTools = new KnowledgeRetrievalTools(ragService, tenantId, knowledgeScope, citationContext);
                 tools.Add(AIFunctionFactory.Create(
                     knowledgeRetrievalTools.GetKnowledgeSourceAsync,
                     name: "GetKnowledgeSource",
@@ -234,6 +290,38 @@ public sealed class SprkChatAgentFactory
                 name: "GenerateSummary",
                 description: "Generate a concise summary of text in bullet, paragraph, or tldr format."));
 
+            // AnalysisExecutionTools — gated behind "reanalyze" capability (task 079).
+            // Requires IAnalysisOrchestrationService + IChatClient.
+            // Only available when the playbook declares the "reanalyze" capability, preventing
+            // re-analysis from appearing in lightweight playbooks (e.g., "Quick Q&A").
+            // Task 080: Now wired with real orchestration — requires httpContext for OBO auth
+            // and sseWriter for progress/document_replace SSE events during re-analysis.
+            if (capabilities.Contains(PlaybookCapabilities.Reanalyze) && analysisService != null)
+            {
+                var analysisExecutionTools = new AnalysisExecutionTools(
+                    analysisService, _chatClient,
+                    analysisId: null,
+                    playbookId: playbookId,
+                    documentId: documentId,
+                    httpContext: httpContext,
+                    sseWriter: sseWriter);
+                tools.AddRange(analysisExecutionTools.GetTools());
+            }
+
+            // WebSearchTools — gated behind "web_search" capability (task 089).
+            // Only available when the playbook explicitly enables web search. Many playbooks
+            // deal with confidential internal documents and should not reach out to the public
+            // internet. The "web_search" capability provides admin control over which contexts
+            // allow external web queries (ADR-015: external content governance).
+            if (capabilities.Contains(PlaybookCapabilities.WebSearch))
+            {
+                var webSearchTools = new WebSearchTools(_logger);
+                tools.Add(AIFunctionFactory.Create(
+                    webSearchTools.SearchWebAsync,
+                    name: "SearchWeb",
+                    description: "Search the web for information relevant to the user's query. Use when the question cannot be answered from internal documents alone."));
+            }
+
             _logger.LogDebug("Resolved {ToolCount} AIFunction tools for agent session", tools.Count);
             return tools;
         }
@@ -242,5 +330,25 @@ public sealed class SprkChatAgentFactory
             _logger.LogWarning(ex, "Failed to resolve AIFunction tools; agent will run without tools");
             return [];
         }
+    }
+
+    /// <summary>
+    /// Returns the set of capabilities for a given playbook.
+    ///
+    /// Returns all capabilities as a permissive default.
+    ///
+    /// Task 047 (R2) added the <c>sprk_capabilities</c> multi-select field on the Playbook entity
+    /// in Dataverse. This method should be replaced with a Dataverse lookup query once the
+    /// generic OData query path is available (post-R2 work).
+    /// </summary>
+    /// <param name="playbookId">The playbook ID to look up capabilities for.</param>
+    /// <returns>A set of capability strings from <see cref="PlaybookCapabilities"/>.</returns>
+    private static IReadOnlySet<string> GetPlaybookCapabilities(Guid playbookId)
+    {
+        // TODO: Replace with Dataverse lookup of sprk_capabilities field (post-R2).
+        // Task 047 added the Dataverse field; server-side query awaits generic OData path.
+        // Until then, all playbooks get all capabilities for development/testing purposes.
+        _ = playbookId; // Suppress unused parameter warning until Dataverse lookup is wired
+        return new HashSet<string>(PlaybookCapabilities.All);
     }
 }

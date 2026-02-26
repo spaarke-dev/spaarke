@@ -1,0 +1,84 @@
+<task id="R2-027" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Register WorkingDocumentTools in SprkChatAgentFactory</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package B: Streaming Write Engine</package>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>bff-api, ai</tags>
+    <parallel-group>sprint1-track2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Register the new `WorkingDocumentTools` class in `SprkChatAgentFactory.ResolveTools()` so the
+    SprkChat agent can invoke document editing tools during chat sessions. The registration MUST be
+    gated behind the `write_back` playbook capability — when a playbook does not declare `write_back`,
+    the WorkingDocumentTools must not appear in the agent's tool list. Inject the required dependencies
+    (IAnalysisOrchestrationService, IChatClient, SSE writer) from the factory's existing scope.
+    No new DI registrations are permitted.
+  </prompt>
+  <role>Senior full-stack developer with Spaarke platform expertise</role>
+  <goal>WorkingDocumentTools appears in the agent's tool list when the active playbook has `write_back` capability and is absent when it does not. No new DI registrations added.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">0 additional DI registrations. WorkingDocumentTools MUST be factory-instantiated within ResolveTools(). Current budget: 12 of 15.</constraint>
+    <constraint source="ADR-013">Tool registration MUST follow AIFunctionFactory.Create pattern. ChatHostContext MUST flow through the tool class.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Tool registration and playbook capability gating</topic>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      `SprkChatAgentFactory.ResolveTools()` is the central method that assembles the tool list for
+      each SprkChat agent session. It receives session context (playbook, analysisId, user) and
+      instantiates tool classes with appropriate dependencies. The factory already has access to
+      `IAnalysisOrchestrationService` and `IChatClient` from its constructor scope. Playbook
+      capability gating is the mechanism by which different playbooks enable different tool sets —
+      for example, a "Quick Q&A" playbook would not have `write_back` capability and therefore
+      would not expose document editing tools. This ensures the LLM only sees tools appropriate
+      for the current context.
+    </background>
+    <dependencies>
+      <dependency task="R2-026" status="complete">WorkingDocumentTools class must exist with GetTools() method.</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task wires an existing class into an existing factory -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Study ResolveTools method">Read `SprkChatAgentFactory.ResolveTools()` to understand the current tool registration pattern, how existing tools (e.g., TextRefinementTools) are instantiated, and how playbook context is passed.</step>
+    <step order="2" name="Identify capability gating pattern">Determine how playbook capabilities are accessed in the factory. If no capability gating exists yet, establish the pattern: check `playbook.Capabilities` (or equivalent) for the presence of `write_back` before adding tools.</step>
+    <step order="3" name="Add WorkingDocumentTools registration">In `ResolveTools()`, add a conditional block: if the playbook has `write_back` capability, instantiate `WorkingDocumentTools` with `IAnalysisOrchestrationService`, `IChatClient`, `analysisId`, and SSE writer from factory scope. Call `GetTools()` and add results to the tool list.</step>
+    <step order="4" name="Verify no new DI registrations">Confirm that `Program.cs` and `AiModule.cs` (or equivalent DI configuration) have NO new `services.Add*` calls. Count total registrations to ensure ≤15.</step>
+    <step order="5" name="Build verification">Run `dotnet build src/server/api/Sprk.Bff.Api/` to verify compilation succeeds.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">WorkingDocumentTools is instantiated in `ResolveTools()` when playbook has `write_back` capability</criterion>
+    <criterion testable="true">WorkingDocumentTools tools are NOT included when playbook lacks `write_back` capability</criterion>
+    <criterion testable="true">WorkingDocumentTools receives IAnalysisOrchestrationService, IChatClient, analysisId, and SSE writer from factory scope</criterion>
+    <criterion testable="true">0 new DI registrations in Program.cs or AiModule.cs; total remains ≤15</criterion>
+    <criterion testable="true">`dotnet build` succeeds for BFF API project with zero errors</criterion>
+  </acceptance-criteria>
+</task>

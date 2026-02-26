@@ -1,0 +1,89 @@
+<task id="R2-149" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Remove Legacy AnalysisWorkspace PCF from Dataverse Solution</title>
+    <phase>Phase 4: Deployment &amp; Validation</phase>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>cleanup, dataverse, pcf</tags>
+  </metadata>
+
+  <prompt>
+    Remove the legacy AnalysisWorkspace PCF control from the Dataverse solution XML now that the
+    Code Page replacement is deployed and validated. Remove the PCF control registration from
+    the solution's customizations.xml, remove the control folder from the solution project, and
+    verify the solution still imports cleanly to the dev environment. Verify no orphaned references
+    to the PCF control remain in any form XML, sitemap, or configuration. This completes the
+    PCF-to-Code-Page migration for the AnalysisWorkspace.
+  </prompt>
+  <role>Dataverse solution architect with PCF and solution management expertise</role>
+  <goal>The legacy AnalysisWorkspace PCF control is completely removed from the Dataverse solution. The solution imports cleanly. No orphaned references remain. The Code Page replacement is the sole AnalysisWorkspace implementation.</goal>
+
+  <inputs>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">PCF controls are for field-bound form controls only. The AnalysisWorkspace is standalone and must be a Code Page. The PCF control must be removed.</constraint>
+    <constraint source="skill:dataverse-deploy">Solution modifications must follow dataverse-deploy skill procedures.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse solution management, PCF control removal, solution XML structure</topic>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The AnalysisWorkspace was originally a PCF control bound to a field on the Analysis form.
+      As part of R2, it was migrated to a React 19 Code Page (tasks 070-072) and the Code Page
+      was deployed (task 144). The legacy PCF control binding was removed from the Analysis form
+      in task 144, but the PCF control itself still exists in the Dataverse solution as a registered
+      component. This task removes the PCF control registration entirely from the solution so that
+      only the Code Page web resource remains. Care must be taken to ensure no other forms, views,
+      sitemaps, or configurations reference the old PCF control — orphaned references would cause
+      solution import errors. After removal, the solution should be exported and re-imported to
+      verify clean import.
+    </background>
+    <dependencies>
+      <dependency task="R2-144">AnalysisWorkspace Code Page must be deployed and validated as the replacement</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">src/solutions/SpaarkeCore/customizations.xml</file>
+    <file action="delete">src/solutions/SpaarkeCore/Controls/sprk_Spaarke.AnalysisWorkspace/</file>
+    <file action="modify">src/solutions/SpaarkeCore/solution.xml</file>
+    <file action="reference">src/solutions/SpaarkeCore/Entities/sprk_analysis/FormXml/main/{form-id}.xml</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task is cleanup only -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Identify PCF control references in solution">Search the entire solution project for references to the AnalysisWorkspace PCF control: grep for "AnalysisWorkspace" in customizations.xml, solution.xml, all FormXml files, and sitemap XML. Document every reference.</step>
+    <step order="2" name="Remove PCF control from customizations.xml">Remove the AnalysisWorkspace PCF control registration from customizations.xml. This includes the control element, any associated property definitions, and related component entries.</step>
+    <step order="3" name="Remove PCF control folder from solution">Delete the PCF control folder (src/solutions/SpaarkeCore/Controls/sprk_Spaarke.AnalysisWorkspace/ or equivalent path). Verify no other solution components depend on files in this folder.</step>
+    <step order="4" name="Update solution.xml component list">Remove the AnalysisWorkspace PCF control from the solution.xml component list if it is listed there. Update the solution version if required.</step>
+    <step order="5" name="Verify no orphaned form references">Search all FormXml files for references to the AnalysisWorkspace PCF control. Confirm the Analysis form was updated in task 144 to remove the control binding. Remove any remaining orphaned references.</step>
+    <step order="6" name="Verify no orphaned sitemap references">Search sitemap XML for references to the AnalysisWorkspace PCF control. Remove any navigation entries that pointed to the PCF control.</step>
+    <step order="7" name="Import solution to verify clean import">Use the dataverse-deploy skill to import the modified solution to the dev environment. Verify the import completes with zero errors and zero warnings related to missing components.</step>
+    <step order="8" name="Verify Analysis form still functions">Open the Analysis form in Dataverse after solution import. Verify the Code Page launcher works correctly and no errors appear related to the removed PCF control.</step>
+    <step order="9" name="Final grep for orphaned references">Run a final grep across the entire solution project for "AnalysisWorkspace" PCF references. Verify only Code Page web resource references remain (sprk_AnalysisWorkspace.html), not PCF control references.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AnalysisWorkspace PCF control registration removed from customizations.xml</criterion>
+    <criterion testable="true">PCF control folder deleted from the solution project</criterion>
+    <criterion testable="true">solution.xml no longer lists the AnalysisWorkspace PCF control as a component</criterion>
+    <criterion testable="true">No orphaned references to the PCF control in any form XML, sitemap, or configuration</criterion>
+    <criterion testable="true">Solution imports cleanly to dev environment with zero errors</criterion>
+    <criterion testable="true">Analysis form functions correctly with Code Page launcher after PCF removal</criterion>
+    <criterion testable="true">Only Code Page web resource references (sprk_AnalysisWorkspace.html) remain — no PCF control references</criterion>
+  </acceptance-criteria>
+</task>

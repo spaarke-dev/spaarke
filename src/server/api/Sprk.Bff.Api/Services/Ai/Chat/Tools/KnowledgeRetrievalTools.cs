@@ -17,6 +17,10 @@ namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
 /// time and passed to <see cref="IRagService.SearchAsync(string, RagSearchOptions, System.Threading.CancellationToken)"/>
 /// as a required filter. The tenant ID is NOT exposed as an LLM tool parameter.
 ///
+/// Each method populates the shared <see cref="CitationContext"/> with source metadata
+/// (chunk IDs, source names, excerpts) so the AI can reference sources via citation markers
+/// [N] and the frontend can render citation footnotes.
+///
 /// Instantiated by <see cref="SprkChatAgentFactory"/>. Not registered in DI — the factory
 /// creates instances and registers methods as <see cref="Microsoft.Extensions.AI.AIFunction"/>
 /// objects via <see cref="Microsoft.Extensions.AI.AIFunctionFactory.Create"/>.
@@ -26,14 +30,20 @@ public sealed class KnowledgeRetrievalTools
     private readonly IRagService _ragService;
     private readonly string _tenantId;
     private readonly IReadOnlyList<string>? _knowledgeSourceIds;
+    private readonly CitationContext? _citationContext;
 
-    public KnowledgeRetrievalTools(IRagService ragService, string tenantId, ChatKnowledgeScope? knowledgeScope = null)
+    public KnowledgeRetrievalTools(
+        IRagService ragService,
+        string tenantId,
+        ChatKnowledgeScope? knowledgeScope = null,
+        CitationContext? citationContext = null)
     {
         _ragService = ragService ?? throw new ArgumentNullException(nameof(ragService));
         _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
         _knowledgeSourceIds = knowledgeScope?.RagKnowledgeSourceIds is { Count: > 0 }
             ? knowledgeScope.RagKnowledgeSourceIds
             : null;
+        _citationContext = citationContext;
     }
 
     /// <summary>
@@ -72,9 +82,18 @@ public sealed class KnowledgeRetrievalTools
         sb.AppendLine($"Knowledge source '{knowledgeSourceId}' contains {response.Results.Count} chunk(s):");
         sb.AppendLine();
 
-        foreach (var (result, idx) in response.Results.Select((r, i) => (r, i + 1)))
+        for (var i = 0; i < response.Results.Count; i++)
         {
-            sb.AppendLine($"[{idx}] {result.DocumentName} (Chunk {result.ChunkIndex + 1}/{result.ChunkCount})");
+            var result = response.Results[i];
+            var citationId = _citationContext?.AddCitation(
+                result.Id,
+                result.DocumentName,
+                pageNumber: null, // Page number not available in knowledge index
+                result.Content);
+
+            var marker = citationId.HasValue ? $"[{citationId.Value}]" : $"[{i + 1}]";
+
+            sb.AppendLine($"Source {marker}: {result.DocumentName} (Chunk {result.ChunkIndex + 1}/{result.ChunkCount}, ID: {result.Id})");
             sb.AppendLine($"    {result.Content}");
             sb.AppendLine();
         }
@@ -125,13 +144,23 @@ public sealed class KnowledgeRetrievalTools
         sb.AppendLine($"Knowledge base search found {response.Results.Count} result(s) for: \"{query}\"");
         sb.AppendLine();
 
-        foreach (var (result, idx) in response.Results.Select((r, i) => (r, i + 1)))
+        for (var i = 0; i < response.Results.Count; i++)
         {
-            sb.AppendLine($"[{idx}] {result.DocumentName} (Relevance: {result.Score:P0})");
+            var result = response.Results[i];
+            var citationId = _citationContext?.AddCitation(
+                result.Id,
+                result.DocumentName,
+                pageNumber: null, // Page number not available in knowledge index
+                result.Content);
+
+            var marker = citationId.HasValue ? $"[{citationId.Value}]" : $"[{i + 1}]";
+
+            sb.AppendLine($"Source {marker}: {result.DocumentName} (Relevance: {result.Score:P0})");
             if (!string.IsNullOrWhiteSpace(result.KnowledgeSourceName))
             {
                 sb.AppendLine($"    Knowledge Source: {result.KnowledgeSourceName}");
             }
+            sb.AppendLine($"    Chunk: {result.ChunkIndex + 1}/{result.ChunkCount}, ID: {result.Id}");
             sb.AppendLine($"    {result.Content}");
             sb.AppendLine();
         }

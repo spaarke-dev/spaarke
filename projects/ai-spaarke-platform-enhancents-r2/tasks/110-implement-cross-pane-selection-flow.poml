@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="110" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Implement Cross-Pane Selection Flow</title>
+    <phase>3</phase>
+    <package>Package G: Selection-Based Revision</package>
+    <tags>frontend, integration</tags>
+    <estimate>4-6 hours</estimate>
+    <dependencies>032, 064</dependencies>
+    <parallel-group>sprint3-track2</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Implement the cross-pane selection flow where text selected in the Analysis Workspace editor
+      is communicated to the SprkChat side pane via SprkChatBridge.emitSelectionChanged, enabling
+      selection-based revision workflows.
+    </goal>
+    <context>
+      The Analysis Workspace editor (Code Page) and the SprkChat side pane run in separate iframes/panes
+      within Dataverse. When a user selects text in the editor, the SprkChat pane needs to receive that
+      selection so it can offer contextual refinement options (e.g., "Make this more formal",
+      "Expand on this point").
+
+      The flow:
+      1. User selects text in the RichTextEditor within the Analysis Workspace Code Page
+      2. A selection listener on the editor detects the selection change
+      3. The listener extracts selectedText and boundingRect from the selection
+      4. SprkChatBridge.emit('selection_changed', { selectedText, boundingRect, source: 'editor' })
+        sends the selection to all listeners
+      5. The SprkChat component in the side pane receives the selection_changed event
+      6. SprkChat shows the selection context in its UI (SprkChatHighlightRefine component)
+      7. When the selection is cleared (user clicks elsewhere), a selection_changed event with
+        empty selectedText is emitted to clear the refinement UI
+
+      The SprkChatBridge (task 011/032) already supports selection_changed events. This task wires
+      the editor-side emission and the chat-side reception.
+    </context>
+    <constraints>
+      - Follow ADR-012: SprkChatBridge is in @spaarke/ui-components — use the existing bridge, do not create new communication channels
+      - Auth tokens MUST NOT be included in selection events
+      - Selection events must be debounced (200ms) to avoid flooding the bridge during rapid selection changes
+      - Must handle selection across multiple paragraphs/elements in the RichTextEditor
+      - Must handle selection clearing (empty selection) as a distinct event
+      - BoundingRect is relative to the editor viewport — used for positioning UI, not for content identification
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.ts</reference>
+    <reference>src/client/code-pages/AnalysisWorkspace/</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review SprkChatBridge event types and selection_changed payload:
+      - Understand the existing SelectionChangedPayload type
+      - Review emit/subscribe API
+      - Check how the bridge is instantiated in both panes
+    </step>
+    <step order="2">
+      Add selection listener to the Analysis Workspace editor:
+      - Listen for 'selectionchange' events on the RichTextEditor's document/contenteditable element
+      - Extract selected text via window.getSelection().toString()
+      - Get bounding rect via Selection.getRangeAt(0).getBoundingClientRect()
+      - Debounce emission by 200ms to avoid rapid-fire events during drag selection
+    </step>
+    <step order="3">
+      Emit selection_changed event via SprkChatBridge:
+      - On selection: emit({ selectedText, boundingRect: { top, left, width, height }, source: 'editor' })
+      - On deselection (empty selection): emit({ selectedText: '', boundingRect: null, source: 'editor' })
+      - Include selection metadata: start offset, end offset, parent element tag for context
+    </step>
+    <step order="4">
+      Wire SprkChat to receive selection_changed events:
+      - In the SprkChat component (or a parent wrapper), subscribe to bridge selection_changed
+      - Store received selection in component state
+      - Pass selection data to SprkChatHighlightRefine component
+      - Clear selection state when empty selection received
+    </step>
+    <step order="5">
+      Handle selection lifecycle:
+      - When user selects text → show selection context in SprkChat
+      - When user clears selection → hide selection context in SprkChat
+      - When user switches to a different document/record → clear selection state
+      - When bridge disconnects → clear selection state
+    </step>
+    <step order="6">
+      Handle edge cases:
+      - Selection spanning multiple HTML elements (paragraphs, lists)
+      - Selection in non-text areas (images, tables) — ignore or handle gracefully
+      - Very large selections (>5000 chars) — truncate selectedText preview, keep full text available
+      - Rapid selection changes — debouncing prevents bridge flooding
+    </step>
+    <step order="7">
+      Build verification:
+      - Build Analysis Workspace Code Page (npm run build)
+      - Verify SprkChat/shared library compiles
+      - No TypeScript errors
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review SprkChatBridge, Analysis Workspace editor, SprkChat component</tool>
+    <tool>Edit - Add selection listener to AW, add selection handler to SprkChat</tool>
+    <tool>Bash - npm run build verification</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="modify">src/client/code-pages/AnalysisWorkspace/components/EditorPanel.tsx</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.ts</file>
+  </relevant-files>
+
+  <outputs>
+    <output>Updated Analysis Workspace EditorPanel with selection listener and bridge emission</output>
+    <output>Updated SprkChat component with selection_changed event subscription</output>
+    <output>Successful build verification for both Code Page and shared library</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Selecting text in the Analysis Workspace editor emits a selection_changed event via SprkChatBridge</criterion>
+    <criterion>Event payload includes selectedText, boundingRect, and source='editor'</criterion>
+    <criterion>Clearing selection emits selection_changed with empty selectedText and null boundingRect</criterion>
+    <criterion>Selection events are debounced by 200ms</criterion>
+    <criterion>SprkChat component receives selection_changed events and stores selection in state</criterion>
+    <criterion>Selection spanning multiple elements extracts the full combined text</criterion>
+    <criterion>Large selections (&gt;5000 chars) are handled gracefully (truncated preview, full text available)</criterion>
+    <criterion>Analysis Workspace Code Page builds successfully</criterion>
+    <criterion>Shared library compiles successfully</criterion>
+  </acceptance-criteria>
+
+  <placeholders />
+</task>

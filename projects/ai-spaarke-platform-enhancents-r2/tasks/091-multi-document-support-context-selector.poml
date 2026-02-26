@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="091" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Multi-Document Support in SprkChatContextSelector</title>
+    <phase>2</phase>
+    <package>Package I: Web Search + Multi-Document</package>
+    <tags>frontend, bff-api</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>090</dependencies>
+    <parallel-group>sprint2-track3</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Add multi-select document support to SprkChatContextSelector.tsx, allowing users to select
+      up to 5 additional documents for the AI agent's context. Wire the selection to the
+      PATCH /sessions/{id}/context endpoint to persist additionalDocumentIds.
+    </goal>
+    <context>
+      SprkChatContextSelector is the UI component that shows the current document context for
+      a chat session. Currently it displays a single document. This task extends it to support
+      multi-select, enabling users to add additional documents to broaden the AI agent's knowledge.
+
+      The UX flow:
+      1. User clicks "Add document" or expands the context selector
+      2. A document picker (Fluent UI Combobox or similar) allows searching and selecting documents
+      3. Selected documents appear as removable chips/tags (max 5)
+      4. On selection change, PATCH /sessions/{id}/context is called with the updated
+         additionalDocumentIds array
+      5. The AI agent's subsequent responses incorporate content from all selected documents
+
+      The component lives in @spaarke/ui-components since SprkChatContextSelector is a shared
+      component used by the SprkChat family.
+    </context>
+    <constraints>
+      - Follow ADR-021: Fluent UI v9 exclusively; Combobox, Tag, TagGroup from @fluentui/react-components
+      - Follow ADR-012: Component in @spaarke/ui-components shared library
+      - Max 5 additional documents — enforce in UI with disabled state when limit reached
+      - Use makeStyles with design tokens — no custom CSS
+      - Support dark mode and high-contrast themes
+      - Call PATCH /sessions/{id}/context to persist selection changes
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatContextSelector.tsx</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read SprkChatContextSelector.tsx to understand:
+      - Current component structure and props
+      - How the single document context is displayed
+      - How context changes are communicated to the parent
+      - API call pattern for session context updates
+    </step>
+    <step order="2">
+      Extend the component props/interface:
+      - Add additionalDocumentIds: string[] (current selection)
+      - Add onAdditionalDocumentsChange: (ids: string[]) => void (callback)
+      - Add maxAdditionalDocuments: number (default 5)
+    </step>
+    <step order="3">
+      Implement the multi-select UI:
+      - "Add document" button or expandable section below current document
+      - Fluent UI Combobox with search/filter for document selection
+      - Selected documents rendered as Fluent UI Tag components in a TagGroup
+      - Each tag has a dismiss button to remove the document
+      - "Add document" button disabled when 5 documents reached
+    </step>
+    <step order="4">
+      Wire selection changes to API:
+      - On add/remove, call PATCH /sessions/{id}/context with updated additionalDocumentIds
+      - Debounce rapid changes (e.g., 300ms)
+      - Show loading state during API call
+      - Handle errors gracefully (toast notification or inline error)
+    </step>
+    <step order="5">
+      Ensure styling works across themes:
+      - Test visual appearance in light, dark, and high-contrast modes
+      - Use design tokens for all colors and spacing
+    </step>
+    <step order="6">
+      Build verification: Run the appropriate build command for the shared library.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine SprkChatContextSelector.tsx</tool>
+    <tool>Edit - Extend component with multi-select support</tool>
+    <tool>Bash - Build verification</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatContextSelector.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task produces real implementation -->
+  </placeholders>
+
+  <outputs>
+    <output>Updated SprkChatContextSelector.tsx with multi-select document support</output>
+    <output>Max 5 additional documents enforced in UI</output>
+    <output>Selection changes call PATCH /sessions/{id}/context</output>
+    <output>Successful build with 0 errors</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SprkChatContextSelector supports selecting up to 5 additional documents</criterion>
+    <criterion>Selected documents displayed as removable Fluent UI Tag components</criterion>
+    <criterion>"Add document" interaction available (button, combobox, or expandable section)</criterion>
+    <criterion>UI disables adding when 5 additional documents reached</criterion>
+    <criterion>Selection changes trigger PATCH /sessions/{id}/context with additionalDocumentIds</criterion>
+    <criterion>API calls debounced to avoid rapid-fire requests</criterion>
+    <criterion>Uses Fluent UI v9 components exclusively (Combobox, Tag, TagGroup)</criterion>
+    <criterion>Renders correctly in light, dark, and high-contrast themes</criterion>
+    <criterion>Build succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

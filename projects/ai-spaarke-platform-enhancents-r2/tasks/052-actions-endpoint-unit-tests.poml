@@ -1,0 +1,98 @@
+<task id="R2-052" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Actions Endpoint Unit Tests</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package D: Action Menu / Command Palette</package>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>testing, bff-api</tags>
+    <parallel-group>sprint1-track3</parallel-group>
+  </metadata>
+
+  <prompt>
+    Write unit tests for the `GET /api/ai/chat/actions` endpoint and its capability-based
+    filtering logic. Test that actions are correctly filtered by playbook capabilities, that the
+    response is properly categorized (Playbooks, Actions, Search, Settings), that the authorization
+    filter is applied, and that error cases return ProblemDetails. Follow existing test patterns in
+    `Sprk.Bff.Api.Tests` using xUnit and NSubstitute.
+  </prompt>
+  <role>Senior .NET test engineer with xUnit, NSubstitute, and API testing expertise</role>
+  <goal>Comprehensive unit tests for the actions endpoint covering capability-based filtering, category structure, authorization enforcement, and error handling. All tests pass. 80%+ coverage of new endpoint code.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="testing">Use xUnit + NSubstitute. Test naming: {Method}_{Scenario}_{ExpectedResult}. WebApplicationFactory&lt;Program&gt; for integration-style endpoint tests.</constraint>
+    <constraint source="ADR-008">Test that AiAuthorizationFilter is applied — unauthenticated requests must return 401.</constraint>
+    <constraint source="ADR-016">Test that rate limiting is applied — verify the endpoint is in the `ai-stream` rate-limiting group.</constraint>
+    <constraint source="ADR-019">Error responses must return ProblemDetails with proper status codes and error codes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>xUnit test patterns, NSubstitute mocking, WebApplicationFactory, API endpoint testing in Spaarke BFF</topic>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 045 created the `GET /api/ai/chat/actions` endpoint with capability-based filtering.
+      This task writes the corresponding unit tests. Follow the existing test patterns found in
+      `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/` — particularly `SprkChatAgentFactoryTests.cs`
+      and `DocumentSearchToolsTests.cs` for setup, mocking, and assertion patterns.
+
+      Tests should cover:
+      1. **Capability filtering**: Different playbook capability sets produce different action lists
+      2. **Category structure**: Response contains all four categories properly populated
+      3. **Authorization**: Unauthenticated requests return 401
+      4. **Error handling**: Invalid sessionId returns ProblemDetails 400
+      5. **Rate limiting**: Verify endpoint metadata includes rate-limiting group
+      6. **Default behavior**: No sessionId returns default/full action set
+      7. **Edge cases**: Empty capabilities → only Settings actions; null playbook → all actions
+    </background>
+    <dependencies>
+      <dependency task="045">The actions endpoint implementation must exist to be tested.</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="create">tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ChatActionsEndpointTests.cs</file>
+    <file action="reference">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SprkChatAgentFactoryTests.cs</file>
+    <file action="reference">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/DocumentSearchToolsTests.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatAction.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatActionsResponse.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — tests are complete implementations -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Review existing test patterns">Read `SprkChatAgentFactoryTests.cs` and `DocumentSearchToolsTests.cs` to understand the project's test setup patterns, mock arrangements, and assertion conventions.</step>
+    <step order="2" name="Create test class scaffold">Create `ChatActionsEndpointTests.cs` in `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/`. Set up the test class with necessary using statements, xUnit attributes, and NSubstitute mock arrangements for dependencies.</step>
+    <step order="3" name="Write capability filtering tests">Test scenarios: (a) Playbook with `search, summarize` → response contains only search and summarize actions; (b) Playbook with all capabilities → response contains all actions; (c) Playbook with empty capabilities → response contains only Settings (always-on) actions; (d) Playbook with `write_back` → response includes write-back actions.</step>
+    <step order="4" name="Write category structure tests">Test that response contains exactly four category groups (Playbooks, Actions, Search, Settings). Test that each action is in the correct category. Test that Settings category is always present regardless of capabilities.</step>
+    <step order="5" name="Write authorization tests">Test that a request without valid auth headers returns HTTP 401. Test that a request with valid auth headers returns HTTP 200. Use WebApplicationFactory if integration test style, or verify endpoint metadata for filter registration.</step>
+    <step order="6" name="Write error handling tests">Test that an invalid sessionId format returns ProblemDetails with 400 status. Test that a non-existent sessionId returns ProblemDetails with 404 or gracefully falls back to default actions. Test the ProblemDetails structure (type, title, status, detail fields).</step>
+    <step order="7" name="Write rate limiting verification test">Verify the endpoint metadata includes the `ai-stream` rate-limiting group. This can be a metadata/endpoint discovery test rather than actually triggering rate limits.</step>
+    <step order="8" name="Write default behavior tests">Test that calling the endpoint without sessionId returns the full action catalog (no filtering). Test that calling without entityType still returns all categories.</step>
+    <step order="9" name="Run tests">Execute `dotnet test tests/unit/Sprk.Bff.Api.Tests/` and verify all new tests pass. Fix any failures.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">All tests in ChatActionsEndpointTests.cs pass with zero failures</criterion>
+    <criterion testable="true">Test coverage for the GetActionsAsync handler is 80%+ (excluding generated code)</criterion>
+    <criterion testable="true">Capability filtering is tested with at least 4 different capability combinations</criterion>
+    <criterion testable="true">Category structure test verifies all four categories are present in response</criterion>
+    <criterion testable="true">Authorization test verifies unauthenticated requests return 401</criterion>
+    <criterion testable="true">Error handling test verifies ProblemDetails format for invalid input</criterion>
+    <criterion testable="true">Test naming follows {Method}_{Scenario}_{ExpectedResult} convention</criterion>
+    <criterion testable="true">`dotnet test` completes with all tests passing</criterion>
+  </acceptance-criteria>
+</task>

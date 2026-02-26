@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="113" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Selection Revision End-to-End Tests</title>
+    <phase>3</phase>
+    <package>Package G: Selection-Based Revision</package>
+    <tags>testing, integration</tags>
+    <estimate>4-6 hours</estimate>
+    <dependencies>112</dependencies>
+    <parallel-group>sprint3-track2</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Write end-to-end integration tests for the selection-based revision flow: editor selection
+      to SprkChat refinement to editor replacement, covering both diff mode and stream mode paths.
+    </goal>
+    <context>
+      The selection-based revision flow (tasks 110-112) is a complex cross-pane interaction that
+      involves multiple components communicating through the SprkChatBridge. End-to-end tests must
+      verify the complete flow works correctly, including:
+
+      1. Editor selection → SprkChatBridge emission → SprkChat reception
+      2. SprkChatHighlightRefine submission → API call → SSE response
+      3. SSE response → SprkChatBridge → Analysis Workspace editor replacement
+
+      Tests need to mock the API/SSE layer while testing the real component interactions through
+      the bridge. Both diff mode and stream mode paths must be exercised.
+
+      For the BFF API side, integration tests use WebApplicationFactory&lt;Program&gt; to test the
+      refine endpoint with mocked AI services.
+    </context>
+    <constraints>
+      - Follow project testing conventions: {Method}_{Scenario}_{ExpectedResult} naming
+      - Frontend tests use Jest + React Testing Library
+      - Backend tests use xUnit + WebApplicationFactory&lt;Program&gt; + NSubstitute
+      - Mock SSE responses for frontend tests (do not hit real API)
+      - Mock SprkChatBridge with in-memory event bus for cross-pane tests
+      - Achieve 80%+ line coverage for the selection revision flow code paths
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.ts</reference>
+    <reference>tests/</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review the complete selection revision flow implementation:
+      - Selection listener in Analysis Workspace
+      - SprkChatBridge event emission/subscription
+      - SprkChatHighlightRefine → SprkChat refine submission
+      - SSE response handling and bridge routing
+      - DiffCompareView / direct replacement in editor
+    </step>
+    <step order="2">
+      Create frontend integration tests for the selection → refinement path:
+      - selectionFlow_EditorSelection_BridgeEmitsEvent: verify editor selection triggers bridge event
+      - selectionFlow_BridgeEvent_SprkChatReceivesSelection: verify SprkChat receives and stores selection
+      - selectionFlow_SelectionCleared_HighlightRefineDismissed: verify clear selection hides UI
+      - highlightRefine_SubmitInstruction_CallsRefineEndpoint: verify API call with correct payload
+      - highlightRefine_QuickAction_AutoSubmits: verify quick action chip submits refinement
+    </step>
+    <step order="3">
+      Create frontend integration tests for diff mode path:
+      - diffMode_SelectionRevision_ShowsDiffView: verify DiffCompareView appears with original vs revised
+      - diffMode_Accept_ReplacesEditorContent: verify Accept updates editor and pushes undo
+      - diffMode_Reject_RestoresOriginal: verify Reject dismisses diff and keeps original
+      - diffMode_Edit_AllowsModification: verify Edit enables editing before accepting
+      - diffMode_Escape_DismissesDiffView: verify keyboard dismiss
+    </step>
+    <step order="4">
+      Create frontend integration tests for stream mode path:
+      - streamMode_SelectionRevision_StreamsDirectly: verify tokens stream into editor
+      - streamMode_StreamEnd_FinalizesReplacement: verify replacement completes
+      - streamMode_UndoAfterStream_RestoresOriginal: verify undo stack works after stream replacement
+    </step>
+    <step order="5">
+      Create BFF API integration tests for the refine endpoint:
+      - Refine_ValidRequest_ReturnsSSEStream: POST with selectedText and instruction returns SSE
+      - Refine_MissingSelectedText_Returns400: validation error for missing required field
+      - Refine_InvalidSessionId_Returns404: unknown session returns ProblemDetails 404
+      - Refine_Unauthenticated_Returns401: no auth token returns 401
+      - Refine_RateLimited_Returns429: rate limit exceeded returns ProblemDetails 429
+    </step>
+    <step order="6">
+      Create edge case tests:
+      - edgeCase_ApiError_ShowsErrorInChat: API 500 shows error message
+      - edgeCase_StreamInterruption_ShowsPartialResult: network disconnect during stream
+      - edgeCase_NewMessageDuringDiff_AutoRejects: new chat message while reviewing diff
+      - edgeCase_EmptyRefinementResult_ShowsNoChanges: AI returns identical text
+    </step>
+    <step order="7">
+      Run all tests and verify:
+      - Frontend tests pass (npm test)
+      - Backend tests pass (dotnet test)
+      - Coverage meets 80%+ threshold for selection revision code
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review selection revision flow implementation</tool>
+    <tool>Write - Create test files</tool>
+    <tool>Bash - npm test, dotnet test, coverage reports</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/selectionRevision.test.tsx</file>
+    <file action="create">tests/Sprk.Bff.Api.Tests/Api/Ai/ChatEndpoints.Refine.Tests.cs</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatHighlightRefine.tsx</file>
+    <file action="reference">src/client/code-pages/AnalysisWorkspace/App.tsx</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+  </relevant-files>
+
+  <outputs>
+    <output>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/selectionRevision.test.tsx - Frontend integration tests</output>
+    <output>tests/Sprk.Bff.Api.Tests/Api/Ai/ChatEndpoints.Refine.Tests.cs - Backend integration tests</output>
+    <output>All tests pass with 80%+ coverage for selection revision flow</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Frontend integration tests cover the complete selection → refinement → replacement flow</criterion>
+    <criterion>Tests verify diff mode path: DiffCompareView appears, Accept replaces, Reject restores</criterion>
+    <criterion>Tests verify stream mode path: tokens stream directly into editor at selection position</criterion>
+    <criterion>Backend tests verify refine endpoint: valid requests, validation errors, auth, rate limiting</criterion>
+    <criterion>Edge case tests cover API errors, stream interruptions, concurrent operations, and empty results</criterion>
+    <criterion>All frontend tests pass (zero failures)</criterion>
+    <criterion>All backend tests pass (zero failures)</criterion>
+    <criterion>Line coverage is 80%+ for selection revision flow code paths</criterion>
+    <criterion>Test naming follows {Method}_{Scenario}_{ExpectedResult} convention</criterion>
+  </acceptance-criteria>
+
+  <placeholders />
+</task>

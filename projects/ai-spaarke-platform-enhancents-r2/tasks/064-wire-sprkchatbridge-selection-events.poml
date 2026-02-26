@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Wire SprkChatBridge for Selection Events (AW to SprkChat)</title>
+    <phase>2</phase>
+    <package>C: AW Migration</package>
+    <tags>code-page, frontend</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>032, 063</dependencies>
+    <parallel-group>sprint2-track1</parallel-group>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Emit `selection_changed` events from the AnalysisWorkspace Code Page editor to the SprkChat side
+      pane via SprkChatBridge when the user selects text in the RichTextEditor. The event payload
+      includes the selected text content and bounding rectangle for potential popover positioning.
+    </goal>
+    <context>
+      Task 032 added selection API methods to RichTextEditor: getSelectedHtml(), replaceSelection(),
+      and getSelectionRect(). This task wires the AnalysisWorkspace Code Page to emit selection
+      change events to SprkChat so the side pane can offer contextual actions on the selected text
+      (e.g., "Refine this paragraph", "Expand this section").
+
+      The flow is:
+      1. User selects text in the AnalysisWorkspace editor
+      2. RichTextEditor fires a selection change callback
+      3. The AW Code Page reads selectedText and boundingRect from the editor ref
+      4. AW emits `selection_changed` event via SprkChatBridge
+      5. SprkChat side pane receives the event and can show contextual refinement UI
+
+      This is the AW-to-SprkChat direction (outbound from AW). The SprkChat-to-AW direction
+      (inbound streaming) was wired in task 063.
+    </context>
+    <constraints>
+      - Follow ADR-012: Use SprkChatBridge from @spaarke/ui-components
+      - Debounce selection events (e.g., 300ms) to avoid flooding the channel on drag-select
+      - Only emit when selectedText is non-empty (deselection clears, but emit a clear event)
+      - BoundingRect coordinates must be relative to viewport (for cross-pane popover positioning)
+      - Auth tokens must NEVER be included in selection events
+      - Must handle the case where SprkChat pane is not open (events are silently dropped)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatBridge.ts</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/RichTextEditor.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read the RichTextEditor selection API (from task 032) to understand:
+      - How selection change callbacks are exposed (onSelectionChange prop or ref method)
+      - getSelectedHtml() return type and behavior
+      - getSelectionRect() return type (DOMRect or similar)
+    </step>
+    <step order="2">
+      Read SprkChatBridge API to understand how to emit events:
+      - Method for sending selection_changed events
+      - Expected payload shape for selection events
+      - Channel context for the AnalysisWorkspace
+    </step>
+    <step order="3">
+      Create a useSelectionBroadcast hook:
+      - Accept: editorRef (ref to RichTextEditor), bridgeInstance (SprkChatBridge)
+      - Listen for editor selection change events
+      - Debounce by 300ms to prevent flood on drag-select
+      - Read selectedText and boundingRect from editor ref
+      - Emit selection_changed via bridge when text is selected
+      - Emit selection_cleared via bridge when selection becomes empty
+    </step>
+    <step order="4">
+      Define the selection event payload type:
+      - selectedText: string (plain text of selection)
+      - selectedHtml: string (HTML content of selection)
+      - boundingRect: { top, left, width, height } (viewport-relative)
+      - source: 'analysis-editor' (identifies the originating panel)
+    </step>
+    <step order="5">
+      Wire useSelectionBroadcast into the EditorPanel component:
+      - Pass editor ref and bridge instance to the hook
+      - No UI changes needed (selection events are emitted silently)
+    </step>
+    <step order="6">
+      Build and verify:
+      - npm run build compiles cleanly
+      - Hook correctly debounces selection events
+      - Cleanup on unmount removes selection listeners
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine RichTextEditor selection API and SprkChatBridge</tool>
+    <tool>Write - Create useSelectionBroadcast hook</tool>
+    <tool>Edit - Wire hook into EditorPanel</tool>
+    <tool>Bash - npm run build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/AnalysisWorkspace/hooks/useSelectionBroadcast.ts — Selection event broadcasting hook</output>
+    <output>src/client/code-pages/AnalysisWorkspace/components/EditorPanel.tsx — Updated with selection broadcast wiring</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>useSelectionBroadcast emits selection_changed when user selects text in the editor</criterion>
+    <criterion>Events are debounced by 300ms to prevent flooding on drag-select</criterion>
+    <criterion>Event payload includes selectedText, selectedHtml, and viewport-relative boundingRect</criterion>
+    <criterion>selection_cleared event emitted when selection becomes empty</criterion>
+    <criterion>No auth tokens included in selection events</criterion>
+    <criterion>Hook cleans up listeners on unmount (no memory leaks)</criterion>
+    <criterion>Events are silently dropped when SprkChat pane is not open</criterion>
+    <criterion>npm run build completes without errors</criterion>
+  </acceptance-criteria>
+
+  <placeholders>
+    <!-- No placeholders — this task wires real APIs from tasks 032 and 011 -->
+  </placeholders>
+</task>
