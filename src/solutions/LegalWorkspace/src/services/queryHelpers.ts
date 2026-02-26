@@ -297,6 +297,8 @@ export const TODO_SELECT_FIELDS: string[] = [
   '_sprk_regardingrecordtype_value',  // Lookup → sprk_recordtype_ref (display via formatted value)
   '_sprk_assignedto_value',  // Lookup → contact (display name via formatted value)
   'sprk_duedate',
+  'sprk_todocolumn',
+  'sprk_todopinned',
   'createdon',
   'modifiedon',
 ];

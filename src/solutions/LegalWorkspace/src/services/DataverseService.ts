@@ -16,7 +16,7 @@
  */
 
 import { IResult, ok, fail, tryCatch } from '../types/result';
-import { IMatter, IEvent, IProject, IDocument } from '../types/entities';
+import { IMatter, IEvent, IProject, IDocument, IUserPreference } from '../types/entities';
 import { TodoStatus, EventFilterCategory } from '../types/enums';
 import type { IWebApi, WebApiEntity } from '../types/xrm';
 import {
@@ -393,6 +393,165 @@ export class DataverseService {
     return tryCatch(async () => {
       await this._webApi.deleteRecord('sprk_event', eventId);
     }, 'TODO_DELETE_ERROR');
+  }
+
+  // -------------------------------------------------------------------------
+  // Kanban & User Preference operations
+  // -------------------------------------------------------------------------
+
+  /**
+   * Retrieve user preferences by type.
+   * Queries sprk_userpreference filtered by user and preference type.
+   *
+   * @param userId - The GUID of the current user
+   * @param preferenceType - The preference type choice value (e.g., 100000000 for TodoKanbanThresholds)
+   * @returns IResult<IUserPreference[]>
+   */
+  async getUserPreferences(
+    userId: string,
+    preferenceType: number
+  ): Promise<IResult<IUserPreference[]>> {
+    const select = [
+      'sprk_userpreferenceid',
+      'sprk_preferencetype',
+      'sprk_preferencevalue',
+      '_sprk_user_value',
+      'createdon',
+      'modifiedon',
+    ].join(',');
+
+    const filter = `_sprk_user_value eq ${userId} and sprk_preferencetype eq ${preferenceType}`;
+    const query = `?$select=${select}&$filter=${filter}&$top=1`;
+
+    return tryCatch(async () => {
+      const result = await this._webApi.retrieveMultipleRecords('sprk_userpreference', query, 1);
+      return toTypedArray<IUserPreference>(result.entities);
+    }, 'USER_PREFERENCES_FETCH_ERROR');
+  }
+
+  /**
+   * Create or update a user preference record.
+   * If a record already exists for this user + type, updates it; otherwise creates a new one.
+   *
+   * @param userId - The GUID of the current user
+   * @param preferenceType - The preference type choice value
+   * @param value - The JSON string to store in sprk_preferencevalue
+   * @param existingId - Optional existing record ID (if known, avoids a query)
+   * @returns IResult<string> — the preference record ID
+   */
+  async saveUserPreferences(
+    userId: string,
+    preferenceType: number,
+    value: string,
+    existingId?: string
+  ): Promise<IResult<string>> {
+    // If we already know the record ID, just update
+    if (existingId) {
+      return tryCatch(async () => {
+        await this._webApi.updateRecord('sprk_userpreference', existingId, {
+          sprk_preferencevalue: value,
+        });
+        return existingId;
+      }, 'USER_PREFERENCES_SAVE_ERROR');
+    }
+
+    // Check if a record exists for this user + type
+    const existing = await this.getUserPreferences(userId, preferenceType);
+    if (existing.success && existing.data.length > 0) {
+      const id = existing.data[0].sprk_userpreferenceid;
+      return tryCatch(async () => {
+        await this._webApi.updateRecord('sprk_userpreference', id, {
+          sprk_preferencevalue: value,
+        });
+        return id;
+      }, 'USER_PREFERENCES_SAVE_ERROR');
+    }
+
+    // Create new preference record
+    return tryCatch(async () => {
+      const record: WebApiEntity = {
+        sprk_preferencetype: preferenceType,
+        sprk_preferencevalue: value,
+        'sprk_User@odata.bind': `/systemusers(${userId})`,
+      };
+      const result = await this._webApi.createRecord('sprk_userpreference', record);
+      return result.id;
+    }, 'USER_PREFERENCES_CREATE_ERROR');
+  }
+
+  /**
+   * Update the Kanban column assignment for a to-do event.
+   *
+   * @param eventId - The sprk_eventid GUID
+   * @param column - The column choice value (0=Today, 1=Tomorrow, 2=Future)
+   * @returns IResult<void>
+   */
+  async updateEventColumn(eventId: string, column: number): Promise<IResult<void>> {
+    return tryCatch(async () => {
+      await this._webApi.updateRecord('sprk_event', eventId, {
+        sprk_todocolumn: column,
+      });
+    }, 'EVENT_COLUMN_UPDATE_ERROR');
+  }
+
+  /**
+   * Update the pin/lock state for a to-do event.
+   *
+   * @param eventId - The sprk_eventid GUID
+   * @param pinned - true to pin (lock in current column), false to unpin
+   * @returns IResult<void>
+   */
+  async updateEventPinned(eventId: string, pinned: boolean): Promise<IResult<void>> {
+    return tryCatch(async () => {
+      await this._webApi.updateRecord('sprk_event', eventId, {
+        sprk_todopinned: pinned,
+      });
+    }, 'EVENT_PIN_UPDATE_ERROR');
+  }
+
+  /**
+   * Batch update Kanban column assignments for multiple events.
+   * Used by the Recalculate action to reassign unpinned items.
+   *
+   * Executes sequential updateRecord calls (Xrm.WebApi has no $batch support).
+   * Returns count of successes and failures.
+   *
+   * @param updates - Array of { eventId, column } pairs
+   * @returns IResult<{ succeeded: number; failed: number }>
+   */
+  async batchUpdateEventColumns(
+    updates: Array<{ eventId: string; column: number }>
+  ): Promise<IResult<{ succeeded: number; failed: number }>> {
+    let succeeded = 0;
+    let failed = 0;
+
+    for (const update of updates) {
+      try {
+        await this._webApi.updateRecord('sprk_event', update.eventId, {
+          sprk_todocolumn: update.column,
+        });
+        succeeded++;
+      } catch {
+        failed++;
+      }
+    }
+
+    return ok({ succeeded, failed });
+  }
+
+  /**
+   * Update the description of a to-do event.
+   *
+   * @param eventId - The sprk_eventid GUID
+   * @param description - The new description text
+   * @returns IResult<void>
+   */
+  async updateEventDescription(eventId: string, description: string): Promise<IResult<void>> {
+    return tryCatch(async () => {
+      await this._webApi.updateRecord('sprk_event', eventId, {
+        sprk_description: description,
+      });
+    }, 'EVENT_DESCRIPTION_UPDATE_ERROR');
   }
 
   // -------------------------------------------------------------------------
