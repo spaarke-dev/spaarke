@@ -17,7 +17,7 @@ import {
   Text,
   Textarea,
   Input,
-  SpinButton,
+  Slider,
   Combobox,
   Option,
   Button,
@@ -27,8 +27,7 @@ import {
   MessageBarBody,
 } from "@fluentui/react-components";
 import type {
-  SpinButtonChangeEvent,
-  SpinButtonOnChangeData,
+  SliderOnChangeData,
   ComboboxProps,
 } from "@fluentui/react-components";
 import { SaveRegular } from "@fluentui/react-icons";
@@ -124,6 +123,19 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
+  },
+  sliderLabelRow: {
+    display: "flex",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  sliderValue: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+    minWidth: "24px",
+    textAlign: "right" as const,
   },
   scoreRow: {
     display: "flex",
@@ -277,17 +289,15 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     );
 
     const handlePriorityChange = React.useCallback(
-      (_ev: SpinButtonChangeEvent, data: SpinButtonOnChangeData) => {
-        const val = data.value ?? (data.displayValue ? Number(data.displayValue) : 0);
-        setPriority(Math.max(0, Math.min(100, val)));
+      (_ev: React.ChangeEvent<HTMLInputElement>, data: SliderOnChangeData) => {
+        setPriority(data.value);
       },
       []
     );
 
     const handleEffortChange = React.useCallback(
-      (_ev: SpinButtonChangeEvent, data: SpinButtonOnChangeData) => {
-        const val = data.value ?? (data.displayValue ? Number(data.displayValue) : 0);
-        setEffort(Math.max(0, Math.min(100, val)));
+      (_ev: React.ChangeEvent<HTMLInputElement>, data: SliderOnChangeData) => {
+        setEffort(data.value);
       },
       []
     );
@@ -434,8 +444,11 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
             </div>
 
             <div className={styles.fieldRow}>
-              <label className={styles.fieldLabel}>Priority Score</label>
-              <SpinButton
+              <div className={styles.sliderLabelRow}>
+                <label className={styles.fieldLabel}>Priority Score</label>
+                <span className={styles.sliderValue}>{priority}</span>
+              </div>
+              <Slider
                 value={priority}
                 onChange={handlePriorityChange}
                 min={0}
@@ -445,8 +458,11 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
             </div>
 
             <div className={styles.fieldRow}>
-              <label className={styles.fieldLabel}>Effort Score</label>
-              <SpinButton
+              <div className={styles.sliderLabelRow}>
+                <label className={styles.fieldLabel}>Effort Score</label>
+                <span className={styles.sliderValue}>{effort}</span>
+              </div>
+              <Slider
                 value={effort}
                 onChange={handleEffortChange}
                 min={0}
