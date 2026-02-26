@@ -117,8 +117,37 @@ export const KanbanHeader: React.FC<IKanbanHeaderProps> = React.memo(
   }) => {
     const styles = useStyles();
 
+    // In embedded mode, show only compact action buttons (no title/add bar)
     if (embedded) {
-      return null;
+      return (
+        <div className={styles.header} role="banner" style={{ justifyContent: "flex-end" }}>
+          <div className={styles.rightGroup}>
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={
+                isRecalculating ? (
+                  <Spinner size="tiny" />
+                ) : (
+                  <ArrowClockwiseRegular />
+                )
+              }
+              disabled={isRecalculating}
+              onClick={onRecalculate}
+              aria-label="Recalculate column assignments"
+              title="Recalculate — reassign unpinned items by score"
+            />
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<SettingsRegular />}
+              onClick={onSettingsOpen}
+              aria-label="Threshold settings"
+              title="Settings"
+            />
+          </div>
+        </div>
+      );
     }
 
     return (

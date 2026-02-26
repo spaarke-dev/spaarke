@@ -2,14 +2,14 @@
  * TodoDetail — Main content component for the To Do Detail side pane.
  *
  * Layout (top to bottom):
- *   1. Description (editable, fully expanded textarea — no scroll)
+ *   1. Description (editable, auto-expands up to 15 lines, then scrolls)
  *   2. Details: Due Date, Assigned To
  *   3. To Do Score section:
  *      - Priority Score slider (editable)
  *      - Effort Score slider (editable)
  *      - Urgency Score slider (read-only, computed from due date)
  *      - Total score circle
- *   4. Sticky footer Save button
+ *   4. Sticky footer: Save + Save & Close buttons
  *
  * All colours from Fluent UI v9 semantic tokens (ADR-021).
  */
@@ -27,6 +27,7 @@ import {
   Button,
   Divider,
   Spinner,
+  Tooltip,
   MessageBar,
   MessageBarBody,
 } from "@fluentui/react-components";
@@ -34,7 +35,7 @@ import type {
   SliderOnChangeData,
   ComboboxProps,
 } from "@fluentui/react-components";
-import { SaveRegular } from "@fluentui/react-icons";
+import { SaveRegular, DismissRegular, InfoRegular } from "@fluentui/react-icons";
 import { ITodoRecord } from "../types/TodoRecord";
 import { searchContacts } from "../services/todoService";
 import type { ITodoFieldUpdates, IContactOption } from "../services/todoService";
@@ -101,18 +102,24 @@ const useStyles = makeStyles({
   content: {
     flex: "1 1 0",
     overflowY: "auto",
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalM,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalL,
+    gap: tokens.spacingVerticalM,
   },
   section: {
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalS,
+    gap: tokens.spacingVerticalXS,
+  },
+  sectionTitleRow: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
   },
   sectionTitle: {
     fontWeight: tokens.fontWeightSemibold,
@@ -127,6 +134,11 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
+  },
+  helpText: {
+    color: tokens.colorNeutralForeground4,
+    fontSize: tokens.fontSizeBase100,
+    fontStyle: "italic",
   },
   sliderRow: {
     display: "flex",
@@ -173,6 +185,7 @@ const useStyles = makeStyles({
   footer: {
     display: "flex",
     justifyContent: "flex-end",
+    gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalL,
@@ -214,6 +227,8 @@ export interface ITodoDetailProps {
     eventId: string,
     fields: ITodoFieldUpdates
   ) => Promise<{ success: boolean; error?: string }>;
+  /** Close the side pane (called after Save & Close). */
+  onClose?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -221,8 +236,11 @@ export interface ITodoDetailProps {
 // ---------------------------------------------------------------------------
 
 export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
-  ({ record, isLoading, error, onSaveFields }) => {
+  ({ record, isLoading, error, onSaveFields, onClose }) => {
     const styles = useStyles();
+
+    // Auto-expand textarea ref (grows up to 15 lines, then scrolls)
+    const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
 
     // Editable field values
     const [description, setDescription] = React.useState("");
@@ -292,9 +310,31 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     // --- Handlers ---
 
     const handleDescriptionChange = React.useCallback(
-      (_ev: unknown, data: { value: string }) => setDescription(data.value),
+      (_ev: unknown, data: { value: string }) => {
+        setDescription(data.value);
+        // Auto-resize after React updates the DOM
+        requestAnimationFrame(() => {
+          const el = textareaRef.current;
+          if (!el) return;
+          el.style.height = "auto";
+          // 15 lines * ~20px line height = 300px max
+          const maxH = 300;
+          el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
+          el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";
+        });
+      },
       []
     );
+
+    // Auto-resize textarea on initial load
+    React.useEffect(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.style.height = "auto";
+      const maxH = 300;
+      el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
+      el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";
+    }, [description]);
 
     const handleDueDateChange = React.useCallback(
       (ev: React.ChangeEvent<HTMLInputElement>) => setDueDate(ev.target.value),
@@ -402,6 +442,14 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       onSaveFields,
     ]);
 
+    // Save & Close: save dirty fields then close the pane
+    const handleSaveAndClose = React.useCallback(async () => {
+      if (record && isDirty) {
+        await handleSave();
+      }
+      onClose?.();
+    }, [record, isDirty, handleSave, onClose]);
+
     // --- Render states ---
 
     if (isLoading) {
@@ -450,8 +498,11 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               value={description}
               onChange={handleDescriptionChange}
               placeholder="Add a description..."
-              resize="vertical"
-              textarea={{ rows: 6 }}
+              resize="none"
+              textarea={{
+                ref: textareaRef,
+                style: { minHeight: "60px", maxHeight: "300px" },
+              }}
             />
           </div>
 
@@ -505,9 +556,19 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
           {/* ── To Do Score: sliders + urgency + total ────────────────── */}
           <div className={styles.section}>
-            <Text className={styles.sectionTitle} size={300}>
-              To Do Score
-            </Text>
+            <div className={styles.sectionTitleRow}>
+              <Text className={styles.sectionTitle} size={300}>
+                To Do Score
+              </Text>
+              <Tooltip
+                content="Score = Priority (50%) + Inverted Effort (20%) + Urgency (30%). Higher score = higher priority in the Kanban board."
+                relationship="description"
+              >
+                <InfoRegular
+                  style={{ fontSize: "14px", color: tokens.colorNeutralForeground3, cursor: "help" }}
+                />
+              </Tooltip>
+            </div>
 
             <div className={styles.sliderRow}>
               <div className={styles.sliderLabelRow}>
@@ -548,6 +609,9 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                 max={100}
                 disabled
               />
+              <Text className={styles.helpText}>
+                Auto-calculated from due date: Overdue = 100, within 3 days = 80, within 7 days = 50, within 10 days = 25
+              </Text>
             </div>
 
             <div className={styles.totalRow}>
@@ -559,8 +623,16 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
           </div>
         </div>
 
-        {/* ── Sticky footer Save ──────────────────────────────────────── */}
+        {/* ── Sticky footer: Save + Save & Close ──────────────────────── */}
         <div className={styles.footer}>
+          <Button
+            appearance="secondary"
+            icon={<DismissRegular />}
+            onClick={handleSaveAndClose}
+            disabled={isSaving}
+          >
+            {isDirty ? "Save & Close" : "Close"}
+          </Button>
           <Button
             appearance="primary"
             icon={<SaveRegular />}

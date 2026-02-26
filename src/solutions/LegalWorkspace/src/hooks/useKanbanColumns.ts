@@ -129,9 +129,9 @@ function buildColumns(
   }
 
   return [
-    { id: 'Today', title: 'Today', items: today, accentColor: tokens.colorPaletteRedBorder2 },
-    { id: 'Tomorrow', title: 'Tomorrow', items: tomorrow, accentColor: tokens.colorPaletteDarkOrangeBorder2 },
-    { id: 'Future', title: 'Future', items: future, accentColor: tokens.colorPaletteGreenBorder2 },
+    { id: 'Today', title: 'Today', subtitle: `Score \u2265 ${todayThreshold}`, items: today, accentColor: tokens.colorPaletteRedBorder2 },
+    { id: 'Tomorrow', title: 'Tomorrow', subtitle: `Score ${tomorrowThreshold}\u2013${todayThreshold - 1}`, items: tomorrow, accentColor: tokens.colorPaletteDarkOrangeBorder2 },
+    { id: 'Future', title: 'Future', subtitle: `Score < ${tomorrowThreshold}`, items: future, accentColor: tokens.colorPaletteGreenBorder2 },
   ];
 }
 

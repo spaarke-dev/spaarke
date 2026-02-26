@@ -39,6 +39,8 @@ export interface IKanbanColumn<T> {
   id: string;
   /** Display title for the column header. */
   title: string;
+  /** Optional subtitle shown below the title (e.g., score criteria). */
+  subtitle?: string;
   /** Items assigned to this column. */
   items: T[];
   /** Optional CSS colour for the column's top accent border. */
@@ -99,6 +101,10 @@ const useStyles = makeStyles({
   columnCount: {
     color: tokens.colorNeutralForeground3,
   },
+  columnSubtitle: {
+    color: tokens.colorNeutralForeground4,
+    fontSize: tokens.fontSizeBase100,
+  },
   cardList: {
     flex: "1 1 0",
     overflowY: "auto",
@@ -155,7 +161,12 @@ function KanbanBoardInner<T>(
           >
             {/* Column header */}
             <div className={styles.columnHeader}>
-              <span className={styles.columnTitle}>{column.title}</span>
+              <div>
+                <span className={styles.columnTitle}>{column.title}</span>
+                {column.subtitle && (
+                  <div className={styles.columnSubtitle}>{column.subtitle}</div>
+                )}
+              </div>
               <span className={styles.columnCount} aria-label={`${column.items.length} items`}>
                 {column.items.length}
               </span>

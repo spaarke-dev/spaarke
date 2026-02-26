@@ -605,11 +605,15 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   }, [refetch]);
 
   // -------------------------------------------------------------------------
-  // Close side pane on navigation away.
+  // Close side pane on navigation away or when SmartToDo becomes hidden.
   // Matches EventsPage pattern: beforeunload + pagehide + parent hashchange/
   // popstate + 200ms URL polling (Dataverse SPA navigation doesn't fire
-  // unload events). React cleanup for component unmount.
+  // unload events). Also uses IntersectionObserver to detect when the
+  // SmartToDo panel is hidden via display:none (tab switching).
+  // React cleanup for component unmount.
   // -------------------------------------------------------------------------
+
+  const rootRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     const closeTodoPane = () => {
@@ -648,8 +652,26 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       window.parent?.addEventListener("popstate", handleParentNav);
     } catch { /* cross-origin — ignore */ }
 
+    // IntersectionObserver: detect when SmartToDo is hidden (e.g. tab switch
+    // sets display:none on the parent tab panel, or workspace navigation)
+    let observer: IntersectionObserver | undefined;
+    if (rootRef.current) {
+      observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) {
+              closeTodoPane();
+            }
+          }
+        },
+        { threshold: 0 }
+      );
+      observer.observe(rootRef.current);
+    }
+
     return () => {
       clearInterval(navCheckInterval);
+      observer?.disconnect();
       window.removeEventListener("beforeunload", closeTodoPane);
       window.removeEventListener("pagehide", closeTodoPane);
       try {
@@ -721,6 +743,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
 
   return (
     <div
+      ref={rootRef}
       className={embedded ? styles.embeddedRoot : styles.card}
       role="region"
       aria-label={`Smart To Do Kanban, ${totalCount} item${totalCount === 1 ? "" : "s"}`}

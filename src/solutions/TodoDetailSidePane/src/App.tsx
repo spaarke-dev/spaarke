@@ -163,6 +163,26 @@ export function App() {
     };
   }, [eventId]);
 
+  // Close handler — closes the Xrm side pane
+  const handleClose = React.useCallback(() => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm: any =
+        (window as any)?.Xrm ??
+        (window.parent as any)?.Xrm ??
+        (window.top as any)?.Xrm;
+      const pane = xrm?.App?.sidePanes?.getPane("todoDetailPane");
+      if (pane) {
+        pane.close();
+        return;
+      }
+    } catch {
+      // Xrm unavailable
+    }
+    // Fallback: try closing window
+    try { window.close(); } catch { /* ignore */ }
+  }, []);
+
   // Save fields handler — updates one or more fields on the event record
   const handleSaveFields = React.useCallback(
     async (evtId: string, fields: ITodoFieldUpdates) => {
@@ -201,6 +221,7 @@ export function App() {
             isLoading={isLoading}
             error={error}
             onSaveFields={handleSaveFields}
+            onClose={handleClose}
           />
         </div>
       </div>
