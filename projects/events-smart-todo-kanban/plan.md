@@ -1,6 +1,6 @@
 # Implementation Plan — Smart To Do Kanban Board
 
-> **Project**: smart-todo-kanban
+> **Project**: events-smart-todo-kanban
 > **Module**: LegalWorkspace
 > **Phases**: 4 (Foundation → Components → Integration → Polish)
 

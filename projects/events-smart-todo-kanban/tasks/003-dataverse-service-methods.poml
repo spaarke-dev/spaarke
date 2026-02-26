@@ -1,4 +1,4 @@
-<task id="003" project="smart-todo-kanban">
+<task id="003" project="events-smart-todo-kanban">
   <metadata>
     <title>Add DataverseService methods for preferences and Kanban operations</title>
     <phase>1 — Foundation</phase>

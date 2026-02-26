@@ -1,4 +1,4 @@
-<task id="032" project="smart-todo-kanban">
+<task id="032" project="events-smart-todo-kanban">
   <metadata>
     <title>Project wrap-up</title>
     <phase>4 — Polish</phase>
@@ -14,7 +14,7 @@
 
   <knowledge>
     <files>
-      <file>projects/smart-todo-kanban/README.md</file>
+      <file>projects/events-smart-todo-kanban/README.md</file>
     </files>
   </knowledge>
 

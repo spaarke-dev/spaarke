@@ -1,4 +1,4 @@
-<task id="024" project="smart-todo-kanban">
+<task id="024" project="events-smart-todo-kanban">
   <metadata>
     <title>Rewire SmartToDo container with Kanban board</title>
     <phase>3 — Smart To Do Kanban Components</phase>

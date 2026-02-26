@@ -1,6 +1,6 @@
 # Smart To Do Kanban Board
 
-> **Project**: smart-todo-kanban
+> **Project**: events-smart-todo-kanban
 > **Module**: LegalWorkspace (Code Page — React 18 SPA)
 > **Created**: 2026-02-26
 

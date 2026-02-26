@@ -1,6 +1,6 @@
 # Task Index — Smart To Do Kanban Board
 
-> **Project**: smart-todo-kanban
+> **Project**: events-smart-todo-kanban
 > **Total Tasks**: 15
 > **Last Updated**: 2026-02-26
 

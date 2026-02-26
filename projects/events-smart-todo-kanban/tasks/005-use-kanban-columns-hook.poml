@@ -1,4 +1,4 @@
-<task id="005" project="smart-todo-kanban">
+<task id="005" project="events-smart-todo-kanban">
   <metadata>
     <title>Create useKanbanColumns hook</title>
     <phase>1 — Foundation</phase>

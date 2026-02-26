@@ -1,4 +1,4 @@
-<task id="010" project="smart-todo-kanban">
+<task id="010" project="events-smart-todo-kanban">
   <metadata>
     <title>Create generic KanbanBoard component</title>
     <phase>2 — Reusable DnD Components</phase>

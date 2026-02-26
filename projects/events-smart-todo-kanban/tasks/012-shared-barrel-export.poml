@@ -1,4 +1,4 @@
-<task id="012" project="smart-todo-kanban">
+<task id="012" project="events-smart-todo-kanban">
   <metadata>
     <title>Create shared components barrel export</title>
     <phase>2 — Reusable DnD Components</phase>

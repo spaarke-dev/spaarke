@@ -1,4 +1,4 @@
-<task id="023" project="smart-todo-kanban">
+<task id="023" project="events-smart-todo-kanban">
   <metadata>
     <title>Create TodoDetailPane component</title>
     <phase>3 — Smart To Do Kanban Components</phase>

@@ -1,6 +1,6 @@
 # CLAUDE.md — Smart To Do Kanban Board
 
-> **Project**: smart-todo-kanban
+> **Project**: events-smart-todo-kanban
 > **Module**: LegalWorkspace (React 18 Code Page)
 
 ---

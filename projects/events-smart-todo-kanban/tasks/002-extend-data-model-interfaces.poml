@@ -1,4 +1,4 @@
-<task id="002" project="smart-todo-kanban">
+<task id="002" project="events-smart-todo-kanban">
   <metadata>
     <title>Extend data model interfaces for Kanban fields</title>
     <phase>1 — Foundation</phase>

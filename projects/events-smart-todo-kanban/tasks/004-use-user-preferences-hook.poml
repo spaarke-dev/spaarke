@@ -1,4 +1,4 @@
-<task id="004" project="smart-todo-kanban">
+<task id="004" project="events-smart-todo-kanban">
   <metadata>
     <title>Create useUserPreferences hook</title>
     <phase>1 — Foundation</phase>

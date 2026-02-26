@@ -1,4 +1,4 @@
-<task id="031" project="smart-todo-kanban">
+<task id="031" project="events-smart-todo-kanban">
   <metadata>
     <title>Accessibility review — keyboard DnD, screen reader, focus</title>
     <phase>4 — Polish</phase>
