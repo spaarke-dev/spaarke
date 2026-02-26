@@ -605,12 +605,15 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   }, [refetch]);
 
   // -------------------------------------------------------------------------
-  // Close side pane on navigation away or when SmartToDo becomes hidden.
-  // Matches EventsPage pattern: beforeunload + pagehide + parent hashchange/
-  // popstate + 200ms URL polling (Dataverse SPA navigation doesn't fire
-  // unload events). Also uses IntersectionObserver to detect when the
-  // SmartToDo panel is hidden via display:none (tab switching).
-  // React cleanup for component unmount.
+  // Close side pane on navigation away or when user interacts elsewhere.
+  //
+  // Strategies (layered):
+  //   1. URL polling (200ms) — Dataverse SPA navigation doesn't fire unload
+  //   2. beforeunload / pagehide — standard browser navigation
+  //   3. Parent frame hashchange / popstate — SPA route changes
+  //   4. IntersectionObserver — tab switch sets display:none
+  //   5. Document mousedown — user clicks outside SmartToDo (flat grid nav)
+  //   6. React cleanup — component unmount
   // -------------------------------------------------------------------------
 
   const rootRef = React.useRef<HTMLDivElement>(null);
@@ -653,7 +656,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     } catch { /* cross-origin — ignore */ }
 
     // IntersectionObserver: detect when SmartToDo is hidden (e.g. tab switch
-    // sets display:none on the parent tab panel, or workspace navigation)
+    // sets display:none on the parent tab panel)
     let observer: IntersectionObserver | undefined;
     if (rootRef.current) {
       observer = new IntersectionObserver(
@@ -669,9 +672,22 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       observer.observe(rootRef.current);
     }
 
+    // Document mousedown: close pane when user clicks outside SmartToDo.
+    // In a flat-grid workspace, all sections are always visible — this
+    // detects when the user interacts with another part of the page.
+    const handleDocumentMouseDown = (ev: MouseEvent) => {
+      if (!rootRef.current) return;
+      const target = ev.target as Node | null;
+      if (target && !rootRef.current.contains(target)) {
+        closeTodoPane();
+      }
+    };
+    document.addEventListener("mousedown", handleDocumentMouseDown, true);
+
     return () => {
       clearInterval(navCheckInterval);
       observer?.disconnect();
+      document.removeEventListener("mousedown", handleDocumentMouseDown, true);
       window.removeEventListener("beforeunload", closeTodoPane);
       window.removeEventListener("pagehide", closeTodoPane);
       try {

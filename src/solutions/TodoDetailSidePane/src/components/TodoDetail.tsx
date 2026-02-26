@@ -25,7 +25,6 @@ import {
   Combobox,
   Option,
   Button,
-  Divider,
   Spinner,
   Tooltip,
   MessageBar,
@@ -44,6 +43,13 @@ import type { ITodoFieldUpdates, IContactOption } from "../services/todoService"
 // To Do Score computation (self-contained — no cross-solution imports)
 // ---------------------------------------------------------------------------
 
+/**
+ * Compute To Do Score — mirrors LegalWorkspace computeTodoScore() exactly.
+ *
+ * Formula: priority*0.50 + invertedEffort*0.20 + urgencyRaw*0.30
+ * Uses Math.ceil for diffDays and Math.round for the final score
+ * to match the Kanban card computation.
+ */
 function computeScore(
   priority: number,
   effort: number,
@@ -60,22 +66,22 @@ function computeScore(
   let urgencyRaw = 0;
   if (duedate) {
     const due = new Date(duedate);
-    const now = new Date();
-    const diffMs = due.getTime() - now.getTime();
-    const diffDays = diffMs / (1000 * 60 * 60 * 24);
-    if (diffDays < 0) urgencyRaw = 100;
-    else if (diffDays <= 3) urgencyRaw = 80;
-    else if (diffDays <= 7) urgencyRaw = 50;
-    else if (diffDays <= 10) urgencyRaw = 25;
+    if (!isNaN(due.getTime())) {
+      const now = new Date();
+      const diffMs = due.getTime() - now.getTime();
+      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      if (diffDays < 0) urgencyRaw = 100;
+      else if (diffDays <= 3) urgencyRaw = 80;
+      else if (diffDays <= 7) urgencyRaw = 50;
+      else if (diffDays <= 10) urgencyRaw = 25;
+    }
   }
 
   const priorityComponent = priority * 0.5;
   const effortComponent = invertedEffort * 0.2;
   const urgencyComponent = urgencyRaw * 0.3;
-  const todoScore = Math.max(
-    0,
-    Math.min(100, priorityComponent + effortComponent + urgencyComponent)
-  );
+  const raw = priorityComponent + effortComponent + urgencyComponent;
+  const todoScore = Math.max(0, Math.min(100, Math.round(raw)));
 
   return { todoScore, priorityComponent, effortComponent, urgencyRaw, urgencyComponent };
 }
@@ -109,6 +115,11 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     gap: tokens.spacingVerticalM,
+  },
+  divider: {
+    height: "1px",
+    backgroundColor: tokens.colorNeutralStroke2,
+    flexShrink: 0,
   },
   section: {
     display: "flex",
@@ -245,8 +256,8 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     // Editable field values
     const [description, setDescription] = React.useState("");
     const [dueDate, setDueDate] = React.useState("");
-    const [priority, setPriority] = React.useState<number>(0);
-    const [effort, setEffort] = React.useState<number>(0);
+    const [priority, setPriority] = React.useState<number>(50);
+    const [effort, setEffort] = React.useState<number>(50);
 
     // Assigned To state
     const [assignedToId, setAssignedToId] = React.useState<string | null>(null);
@@ -263,8 +274,8 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     const origRef = React.useRef({
       description: "",
       dueDate: "",
-      priority: 0,
-      effort: 0,
+      priority: 50,
+      effort: 50,
       assignedToId: null as string | null,
     });
 
@@ -273,8 +284,8 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       if (record) {
         const desc = record.sprk_description ?? "";
         const dd = toDateInputValue(record.sprk_duedate);
-        const pri = record.sprk_priorityscore ?? 0;
-        const eff = record.sprk_effortscore ?? 0;
+        const pri = record.sprk_priorityscore ?? 50;
+        const eff = record.sprk_effortscore ?? 50;
         const aId = record._sprk_assignedto_value ?? null;
         const aName =
           record[
@@ -506,7 +517,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
             />
           </div>
 
-          <Divider />
+          <div className={styles.divider} role="separator" />
 
           {/* ── Details: Due Date + Assigned To ────────────────────────── */}
           <div className={styles.section}>
@@ -552,7 +563,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
             </div>
           </div>
 
-          <Divider />
+          <div className={styles.divider} role="separator" />
 
           {/* ── To Do Score: sliders + urgency + total ────────────────── */}
           <div className={styles.section}>
