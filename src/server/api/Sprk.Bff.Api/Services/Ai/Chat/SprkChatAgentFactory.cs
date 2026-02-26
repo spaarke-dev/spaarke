@@ -84,9 +84,9 @@ public sealed class SprkChatAgentFactory
             hostContext,
             cancellationToken);
 
-        // Resolve registered AIFunction tools from DI, passing knowledge scope
-        // so search tools can constrain queries to the playbook's knowledge sources.
-        var tools = ResolveTools(scope.ServiceProvider, context.KnowledgeScope);
+        // Resolve registered AIFunction tools from DI, passing tenant ID and knowledge scope
+        // so search tools can constrain queries to the correct tenant and playbook's knowledge sources.
+        var tools = ResolveTools(scope.ServiceProvider, tenantId, context.KnowledgeScope);
 
         _logger.LogInformation(
             "SprkChatAgent created: playbook={PlaybookId}, toolCount={ToolCount}, hasDocSummary={HasDocSummary}",
@@ -148,6 +148,7 @@ public sealed class SprkChatAgentFactory
     /// registered in DI and are resolved here from <paramref name="scopedProvider"/>.
     /// </summary>
     /// <param name="scopedProvider">The scoped DI provider for this agent creation call.</param>
+    /// <param name="tenantId">Tenant ID from the authenticated session — injected into tool constructors (ADR-014).</param>
     /// <param name="knowledgeScope">
     /// Knowledge scope from the playbook, containing RAG source IDs for search filtering.
     /// Null when the playbook has no knowledge sources configured.
@@ -155,6 +156,7 @@ public sealed class SprkChatAgentFactory
     /// <returns>List of registered <see cref="AIFunction"/> instances, or empty list on failure.</returns>
     private IReadOnlyList<AIFunction> ResolveTools(
         IServiceProvider scopedProvider,
+        string tenantId,
         ChatKnowledgeScope? knowledgeScope)
     {
         try
@@ -170,7 +172,7 @@ public sealed class SprkChatAgentFactory
             // DocumentSearchTools — requires IRagService, accepts knowledge scope for domain filtering
             if (ragService != null)
             {
-                var documentSearchTools = new DocumentSearchTools(ragService, knowledgeScope);
+                var documentSearchTools = new DocumentSearchTools(ragService, tenantId, knowledgeScope);
                 tools.Add(AIFunctionFactory.Create(
                     documentSearchTools.SearchDocumentsAsync,
                     name: "SearchDocuments",
@@ -188,7 +190,7 @@ public sealed class SprkChatAgentFactory
             // AnalysisQueryTools — requires IAnalysisOrchestrationService
             if (analysisService != null)
             {
-                var analysisQueryTools = new AnalysisQueryTools(analysisService);
+                var analysisQueryTools = new AnalysisQueryTools(analysisService, tenantId);
                 tools.Add(AIFunctionFactory.Create(
                     analysisQueryTools.GetAnalysisResultAsync,
                     name: "GetAnalysisResult",
@@ -206,7 +208,7 @@ public sealed class SprkChatAgentFactory
             // KnowledgeRetrievalTools — requires IRagService, accepts knowledge scope for domain filtering
             if (ragService != null)
             {
-                var knowledgeRetrievalTools = new KnowledgeRetrievalTools(ragService, knowledgeScope);
+                var knowledgeRetrievalTools = new KnowledgeRetrievalTools(ragService, tenantId, knowledgeScope);
                 tools.Add(AIFunctionFactory.Create(
                     knowledgeRetrievalTools.GetKnowledgeSourceAsync,
                     name: "GetKnowledgeSource",

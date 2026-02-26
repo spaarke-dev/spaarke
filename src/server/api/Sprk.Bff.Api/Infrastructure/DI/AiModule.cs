@@ -69,10 +69,18 @@ public static class AiModule
         var azureOpenAiChatModel = configuration["AzureOpenAI:ChatModelName"];
         if (!string.IsNullOrEmpty(azureOpenAiEndpoint) && !string.IsNullOrEmpty(azureOpenAiChatModel))
         {
-            services.AddChatClient(
-                new AzureOpenAIClient(new Uri(azureOpenAiEndpoint), new DefaultAzureCredential())
-                    .GetChatClient(azureOpenAiChatModel)
-                    .AsIChatClient());
+            var innerClient = new AzureOpenAIClient(
+                    new Uri(azureOpenAiEndpoint), new DefaultAzureCredential())
+                .GetChatClient(azureOpenAiChatModel)
+                .AsIChatClient();
+
+            // UseFunctionInvocation enables automatic tool-call execution:
+            // when the LLM requests a tool call, the pipeline executes the AIFunction,
+            // feeds the result back into the conversation, and continues until the LLM
+            // produces a text response.  Without this, tool calls go unexecuted and
+            // the streaming response contains only FunctionCallContent (no text tokens).
+            services.AddChatClient(innerClient)
+                .UseFunctionInvocation();
         }
 
         // LlamaParseClient — registered via IHttpClientFactory (ADR-010).

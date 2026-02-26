@@ -71,10 +71,10 @@ public class DocumentSearchToolsTests
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateEmptyResponse(TestQuery));
 
-        var sut = new DocumentSearchTools(ragServiceMock.Object);
+        var sut = new DocumentSearchTools(ragServiceMock.Object, TestTenantId);
 
         // Act
-        await sut.SearchDocumentsAsync(TestQuery, TestTenantId);
+        await sut.SearchDocumentsAsync(TestQuery);
 
         // Assert — tenantId must be passed through to RagService (ADR-014)
         ragServiceMock.Verify(
@@ -94,10 +94,10 @@ public class DocumentSearchToolsTests
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateEmptyResponse(TestQuery));
 
-        var sut = new DocumentSearchTools(ragServiceMock.Object);
+        var sut = new DocumentSearchTools(ragServiceMock.Object, TestTenantId);
 
         // Act
-        await sut.SearchDocumentsAsync(TestQuery, TestTenantId);
+        await sut.SearchDocumentsAsync(TestQuery);
 
         // Assert — default topK is 5
         ragServiceMock.Verify(
@@ -117,10 +117,10 @@ public class DocumentSearchToolsTests
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateEmptyResponse(TestQuery));
 
-        var sut = new DocumentSearchTools(ragServiceMock.Object);
+        var sut = new DocumentSearchTools(ragServiceMock.Object, TestTenantId);
 
         // Act
-        await sut.SearchDocumentsAsync(TestQuery, TestTenantId, topK: 10);
+        await sut.SearchDocumentsAsync(TestQuery, topK: 10);
 
         // Assert
         ragServiceMock.Verify(
@@ -140,10 +140,10 @@ public class DocumentSearchToolsTests
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateEmptyResponse(TestQuery));
 
-        var sut = new DocumentSearchTools(ragServiceMock.Object);
+        var sut = new DocumentSearchTools(ragServiceMock.Object, TestTenantId);
 
         // Act
-        var result = await sut.SearchDocumentsAsync(TestQuery, TestTenantId);
+        var result = await sut.SearchDocumentsAsync(TestQuery);
 
         // Assert
         result.Should().Contain("No relevant documents found");
@@ -158,10 +158,10 @@ public class DocumentSearchToolsTests
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateResponseWithResult("Contract Agreement.pdf", "This contract stipulates renewal terms."));
 
-        var sut = new DocumentSearchTools(ragServiceMock.Object);
+        var sut = new DocumentSearchTools(ragServiceMock.Object, TestTenantId);
 
         // Act
-        var result = await sut.SearchDocumentsAsync(TestQuery, TestTenantId);
+        var result = await sut.SearchDocumentsAsync(TestQuery);
 
         // Assert
         result.Should().Contain("Contract Agreement.pdf");
@@ -174,23 +174,22 @@ public class DocumentSearchToolsTests
     {
         // Arrange
         var ragServiceMock = new Mock<IRagService>();
-        var sut = new DocumentSearchTools(ragServiceMock.Object);
+        var sut = new DocumentSearchTools(ragServiceMock.Object, TestTenantId);
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(
-            () => sut.SearchDocumentsAsync(string.Empty, TestTenantId));
+            () => sut.SearchDocumentsAsync(string.Empty));
     }
 
     [Fact]
-    public async Task SearchDocumentsAsync_ThrowsArgumentException_WhenTenantIdIsEmpty()
+    public void Constructor_ThrowsArgumentNullException_WhenTenantIdIsNull()
     {
         // Arrange
         var ragServiceMock = new Mock<IRagService>();
-        var sut = new DocumentSearchTools(ragServiceMock.Object);
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(
-            () => sut.SearchDocumentsAsync(TestQuery, string.Empty));
+        var action = () => new DocumentSearchTools(ragServiceMock.Object, null!);
+        action.Should().Throw<ArgumentNullException>().WithParameterName("tenantId");
     }
 
     // === SearchDiscoveryAsync service call tests ===
@@ -204,10 +203,10 @@ public class DocumentSearchToolsTests
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateEmptyResponse(TestQuery));
 
-        var sut = new DocumentSearchTools(ragServiceMock.Object);
+        var sut = new DocumentSearchTools(ragServiceMock.Object, TestTenantId);
 
         // Act
-        await sut.SearchDiscoveryAsync(TestQuery, TestTenantId);
+        await sut.SearchDiscoveryAsync(TestQuery);
 
         // Assert — tenantId must be passed through to RagService (ADR-014)
         ragServiceMock.Verify(
@@ -227,10 +226,10 @@ public class DocumentSearchToolsTests
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateEmptyResponse(TestQuery));
 
-        var sut = new DocumentSearchTools(ragServiceMock.Object);
+        var sut = new DocumentSearchTools(ragServiceMock.Object, TestTenantId);
 
         // Act
-        await sut.SearchDiscoveryAsync(TestQuery, TestTenantId);
+        await sut.SearchDiscoveryAsync(TestQuery);
 
         // Assert — discovery default is 10 (broader search)
         ragServiceMock.Verify(
@@ -250,10 +249,10 @@ public class DocumentSearchToolsTests
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateEmptyResponse(TestQuery));
 
-        var sut = new DocumentSearchTools(ragServiceMock.Object);
+        var sut = new DocumentSearchTools(ragServiceMock.Object, TestTenantId);
 
         // Act
-        await sut.SearchDiscoveryAsync(TestQuery, TestTenantId);
+        await sut.SearchDiscoveryAsync(TestQuery);
 
         // Assert — discovery uses lower threshold (0.5) vs knowledge search (0.7)
         ragServiceMock.Verify(
@@ -273,10 +272,10 @@ public class DocumentSearchToolsTests
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateResponseWithResult("Policy Document.pdf", "Employee handbook policy text."));
 
-        var sut = new DocumentSearchTools(ragServiceMock.Object);
+        var sut = new DocumentSearchTools(ragServiceMock.Object, TestTenantId);
 
         // Act
-        var result = await sut.SearchDiscoveryAsync(TestQuery, TestTenantId);
+        var result = await sut.SearchDiscoveryAsync(TestQuery);
 
         // Assert
         result.Should().Contain("Discovery search found 1 document");
@@ -297,10 +296,10 @@ public class DocumentSearchToolsTests
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateEmptyResponse(TestQuery));
 
-        var sut = new DocumentSearchTools(ragServiceMock.Object, scope);
+        var sut = new DocumentSearchTools(ragServiceMock.Object, TestTenantId, scope);
 
         // Act
-        await sut.SearchDocumentsAsync(TestQuery, TestTenantId);
+        await sut.SearchDocumentsAsync(TestQuery);
 
         // Assert — knowledge source IDs from scope should be passed to search
         ragServiceMock.Verify(
@@ -324,10 +323,10 @@ public class DocumentSearchToolsTests
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateEmptyResponse(TestQuery));
 
-        var sut = new DocumentSearchTools(ragServiceMock.Object); // No scope
+        var sut = new DocumentSearchTools(ragServiceMock.Object, TestTenantId); // No scope
 
         // Act
-        await sut.SearchDocumentsAsync(TestQuery, TestTenantId);
+        await sut.SearchDocumentsAsync(TestQuery);
 
         // Assert — no knowledge source filtering when scope is null
         ragServiceMock.Verify(
@@ -350,10 +349,10 @@ public class DocumentSearchToolsTests
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateEmptyResponse(TestQuery));
 
-        var sut = new DocumentSearchTools(ragServiceMock.Object, scope);
+        var sut = new DocumentSearchTools(ragServiceMock.Object, TestTenantId, scope);
 
         // Act
-        await sut.SearchDiscoveryAsync(TestQuery, TestTenantId);
+        await sut.SearchDiscoveryAsync(TestQuery);
 
         // Assert — discovery search must remain tenant-wide
         ragServiceMock.Verify(
@@ -383,10 +382,10 @@ public class DocumentSearchToolsTests
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateEmptyResponse(TestQuery));
 
-        var sut = new DocumentSearchTools(ragServiceMock.Object, scope);
+        var sut = new DocumentSearchTools(ragServiceMock.Object, TestTenantId, scope);
 
         // Act
-        await sut.SearchDiscoveryAsync(TestQuery, TestTenantId);
+        await sut.SearchDiscoveryAsync(TestQuery);
 
         // Assert — entity scope fields must be passed through to RagSearchOptions
         ragServiceMock.Verify(
@@ -408,10 +407,10 @@ public class DocumentSearchToolsTests
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateEmptyResponse(TestQuery));
 
-        var sut = new DocumentSearchTools(ragServiceMock.Object); // No scope
+        var sut = new DocumentSearchTools(ragServiceMock.Object, TestTenantId); // No scope
 
         // Act
-        await sut.SearchDiscoveryAsync(TestQuery, TestTenantId);
+        await sut.SearchDiscoveryAsync(TestQuery);
 
         // Assert — without scope, entity fields should be null
         ragServiceMock.Verify(
@@ -430,7 +429,7 @@ public class DocumentSearchToolsTests
     public void Constructor_ThrowsArgumentNullException_WhenRagServiceIsNull()
     {
         // Act & Assert
-        var action = () => new DocumentSearchTools(null!);
+        var action = () => new DocumentSearchTools(null!, TestTenantId);
         action.Should().Throw<ArgumentNullException>().WithParameterName("ragService");
     }
 
