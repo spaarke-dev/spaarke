@@ -45,8 +45,8 @@ export interface ITodoFieldUpdates {
   sprk_duedate?: string | null;
   sprk_priorityscore?: number;
   sprk_effortscore?: number;
-  sprk_completed?: boolean;
-  sprk_completedate?: string | null;
+  /** Boolean flag — set to false to remove event from To Do board. */
+  sprk_todoflag?: boolean;
   /** OData bind for the Assigned To lookup (sprk_contact). */
   "sprk_AssignedTo@odata.bind"?: string | null;
 }

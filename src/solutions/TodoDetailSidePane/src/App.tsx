@@ -200,6 +200,20 @@ export function App() {
     []
   );
 
+  // Remove from To Do — sets sprk_todoflag = false, notifies Kanban, closes pane
+  const handleRemoveTodo = React.useCallback(
+    async (evtId: string) => {
+      const result = await saveTodoFields(evtId, { sprk_todoflag: false });
+      if (result.success) {
+        sendTodoSaved(evtId);
+        handleClose();
+      } else {
+        throw new Error(result.error ?? "Failed to remove from To Do");
+      }
+    },
+    [handleClose]
+  );
+
   return (
     <FluentProvider theme={theme}>
       <div className={styles.root}>
@@ -221,6 +235,7 @@ export function App() {
             isLoading={isLoading}
             error={error}
             onSaveFields={handleSaveFields}
+            onRemoveTodo={handleRemoveTodo}
             onClose={handleClose}
           />
         </div>

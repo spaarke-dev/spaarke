@@ -4,12 +4,12 @@
  * Layout (top to bottom):
  *   1. Description (editable, auto-expands up to 15 lines, then scrolls)
  *   2. Details: Due Date, Assigned To
- *   3. Status: Completed (boolean), Completed Date
- *   4. To Do Score section:
+ *   3. To Do Score section:
  *      - Title row with score circle + info button (Popover)
  *      - Priority Score slider (editable)
  *      - Effort Score slider (editable)
  *      - Urgency Score slider (read-only, computed from due date)
+ *   4. Remove from To Do button
  *   5. Sticky footer: Save + Save & Close buttons
  *
  * All colours from Fluent UI v9 semantic tokens (ADR-021).
@@ -25,7 +25,6 @@ import {
   Slider,
   Combobox,
   Option,
-  Switch,
   Button,
   Popover,
   PopoverTrigger,
@@ -37,9 +36,8 @@ import {
 import type {
   SliderOnChangeData,
   ComboboxProps,
-  SwitchOnChangeData,
 } from "@fluentui/react-components";
-import { SaveRegular, DismissRegular, InfoRegular } from "@fluentui/react-icons";
+import { SaveRegular, DismissRegular, InfoRegular, DeleteRegular } from "@fluentui/react-icons";
 import { ITodoRecord } from "../types/TodoRecord";
 import { searchContacts } from "../services/todoService";
 import type { ITodoFieldUpdates, IContactOption } from "../services/todoService";
@@ -259,6 +257,8 @@ export interface ITodoDetailProps {
     eventId: string,
     fields: ITodoFieldUpdates
   ) => Promise<{ success: boolean; error?: string }>;
+  /** Remove from To Do (sets sprk_todoflag=false, then closes pane). */
+  onRemoveTodo?: (eventId: string) => Promise<void>;
   /** Close the side pane (called after Save & Close). */
   onClose?: () => void;
 }
@@ -268,7 +268,7 @@ export interface ITodoDetailProps {
 // ---------------------------------------------------------------------------
 
 export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
-  ({ record, isLoading, error, onSaveFields, onClose }) => {
+  ({ record, isLoading, error, onSaveFields, onRemoveTodo, onClose }) => {
     const styles = useStyles();
 
     // Auto-expand textarea ref (grows up to 15 lines, then scrolls)
@@ -279,8 +279,6 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     const [dueDate, setDueDate] = React.useState("");
     const [priority, setPriority] = React.useState<number>(50);
     const [effort, setEffort] = React.useState<number>(50);
-    const [completed, setCompleted] = React.useState(false);
-    const [completedDate, setCompletedDate] = React.useState("");
 
     // Assigned To state
     const [assignedToId, setAssignedToId] = React.useState<string | null>(null);
@@ -292,6 +290,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
     // Save state
     const [isSaving, setIsSaving] = React.useState(false);
+    const [isRemoving, setIsRemoving] = React.useState(false);
     const [saveError, setSaveError] = React.useState<string | null>(null);
 
     // Snapshot of original values (for dirty detection)
@@ -300,8 +299,6 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       dueDate: "",
       priority: 50,
       effort: 50,
-      completed: false,
-      completedDate: "",
       assignedToId: null as string | null,
     });
 
@@ -312,8 +309,6 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
         const dd = toDateInputValue(record.sprk_duedate);
         const pri = record.sprk_priorityscore ?? 50;
         const eff = record.sprk_effortscore ?? 50;
-        const comp = record.sprk_completed ?? false;
-        const compDate = toDateInputValue(record.sprk_completedate);
         const aId = record._sprk_assignedto_value ?? null;
         const aName =
           record[
@@ -323,8 +318,6 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
         setDueDate(dd);
         setPriority(pri);
         setEffort(eff);
-        setCompleted(comp);
-        setCompletedDate(compDate);
         setAssignedToId(aId);
         setAssignedToName(aName);
         setContactQuery("");
@@ -336,8 +329,6 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
           dueDate: dd,
           priority: pri,
           effort: eff,
-          completed: comp,
-          completedDate: compDate,
           assignedToId: aId,
         };
       }
@@ -349,8 +340,6 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       dueDate !== origRef.current.dueDate ||
       priority !== origRef.current.priority ||
       effort !== origRef.current.effort ||
-      completed !== origRef.current.completed ||
-      completedDate !== origRef.current.completedDate ||
       assignedToId !== origRef.current.assignedToId;
 
     // --- Handlers ---
@@ -397,21 +386,6 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       (_ev: React.ChangeEvent<HTMLInputElement>, data: SliderOnChangeData) => {
         setEffort(data.value);
       },
-      []
-    );
-
-    const handleCompletedChange = React.useCallback(
-      (_ev: React.ChangeEvent<HTMLInputElement>, data: SwitchOnChangeData) => {
-        setCompleted(data.checked);
-        if (data.checked && !completedDate) {
-          setCompletedDate(new Date().toISOString().split("T")[0]);
-        }
-      },
-      [completedDate]
-    );
-
-    const handleCompletedDateChange = React.useCallback(
-      (ev: React.ChangeEvent<HTMLInputElement>) => setCompletedDate(ev.target.value),
       []
     );
 
@@ -468,12 +442,6 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       if (effort !== origRef.current.effort) {
         updates.sprk_effortscore = effort;
       }
-      if (completed !== origRef.current.completed) {
-        updates.sprk_completed = completed;
-      }
-      if (completedDate !== origRef.current.completedDate) {
-        updates.sprk_completedate = completedDate || null;
-      }
       if (assignedToId !== origRef.current.assignedToId) {
         updates["sprk_AssignedTo@odata.bind"] = assignedToId
           ? `/sprk_contacts(${assignedToId})`
@@ -488,8 +456,6 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
             dueDate,
             priority,
             effort,
-            completed,
-            completedDate,
             assignedToId,
           };
         } else {
@@ -507,11 +473,22 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       dueDate,
       priority,
       effort,
-      completed,
-      completedDate,
       assignedToId,
       onSaveFields,
     ]);
+
+    // Remove from To Do: sets sprk_todoflag = false, notifies Kanban, closes pane
+    const handleRemoveTodo = React.useCallback(async () => {
+      if (!record || !onRemoveTodo) return;
+      setIsRemoving(true);
+      setSaveError(null);
+      try {
+        await onRemoveTodo(record.sprk_eventid);
+      } catch {
+        setSaveError("Failed to remove from To Do");
+        setIsRemoving(false);
+      }
+    }, [record, onRemoveTodo]);
 
     // Save & Close: save dirty fields then close the pane
     const handleSaveAndClose = React.useCallback(async () => {
@@ -638,34 +615,6 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
           <div className={styles.divider} role="separator" />
 
-          {/* ── Status: Completed + Completed Date ─────────────────────── */}
-          <div className={styles.section}>
-            <Text className={styles.sectionTitle} size={300}>
-              Status
-            </Text>
-
-            <div className={styles.fieldRow}>
-              <Switch
-                checked={completed}
-                onChange={handleCompletedChange}
-                label="Completed"
-              />
-            </div>
-
-            {completed && (
-              <div className={styles.fieldRow}>
-                <label className={styles.fieldLabel}>Completed Date</label>
-                <Input
-                  type="date"
-                  value={completedDate}
-                  onChange={handleCompletedDateChange}
-                />
-              </div>
-            )}
-          </div>
-
-          <div className={styles.divider} role="separator" />
-
           {/* ── To Do Score: title row with circle + info, then sliders ── */}
           <div className={styles.section}>
             <div className={styles.sectionTitleRow}>
@@ -762,6 +711,21 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               />
             </div>
           </div>
+
+          <div className={styles.divider} role="separator" />
+
+          {/* ── Remove from To Do ───────────────────────────────────────── */}
+          {onRemoveTodo && (
+            <Button
+              appearance="subtle"
+              icon={<DeleteRegular />}
+              onClick={handleRemoveTodo}
+              disabled={isRemoving || isSaving}
+              style={{ color: tokens.colorPaletteRedForeground1, justifyContent: "flex-start" }}
+            >
+              {isRemoving ? "Removing..." : "Remove from To Do"}
+            </Button>
+          )}
         </div>
 
         {/* ── Sticky footer: Save + Save & Close ──────────────────────── */}

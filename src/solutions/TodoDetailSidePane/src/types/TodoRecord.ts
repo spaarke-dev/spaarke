@@ -12,8 +12,6 @@ export interface ITodoRecord {
   sprk_todostatus?: number;
   sprk_todocolumn?: number;
   sprk_todopinned?: boolean;
-  sprk_completed?: boolean;
-  sprk_completedate?: string;
   /** Formatted value from OData for assigned-to lookup. */
   "_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue"?: string;
   _sprk_assignedto_value?: string;
@@ -30,7 +28,5 @@ export const TODO_DETAIL_SELECT = [
   "sprk_todostatus",
   "sprk_todocolumn",
   "sprk_todopinned",
-  "sprk_completed",
-  "sprk_completedate",
   "_sprk_assignedto_value",
 ].join(",");
