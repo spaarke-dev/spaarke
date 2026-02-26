@@ -1,0 +1,64 @@
+<task id="003" project="smart-todo-kanban">
+  <metadata>
+    <title>Add DataverseService methods for preferences and Kanban operations</title>
+    <phase>1 — Foundation</phase>
+    <estimate>45min</estimate>
+    <tags>dataverse, service</tags>
+    <dependencies>002</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Add CRUD methods to DataverseService for user preferences (sprk_userpreference) and Kanban-specific event updates (column assignment, pin toggle).</goal>
+    <context>
+      DataverseService.ts already has methods for getActiveTodos, createTodo, updateTodoStatus, dismissTodo.
+      We need new methods for:
+      1. getUserPreferences(userId, preferenceType) — query sprk_userpreference filtered by user + type
+      2. saveUserPreferences(userId, preferenceType, value) — upsert sprk_userpreference
+      3. updateEventColumn(eventId, column) — update sprk_todocolumn choice
+      4. updateEventPinned(eventId, pinned) — update sprk_todopinned boolean
+      5. batchUpdateEventColumns(updates: {eventId, column}[]) — batch column updates for recalculate
+
+      Follow existing patterns: IResult return type, try/catch, console logging.
+    </context>
+    <constraints>
+      - Follow existing DataverseService patterns (IResult, error handling)
+      - Use webApi.updateRecord for single updates
+      - Use webApi.retrieveMultipleRecords for queries
+      - Use webApi.createRecord for new preferences
+      - Batch updates: sequential updateRecord calls (no OData $batch from WebApi)
+      - All methods async, return IResult
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/services/DataverseService.ts</file>
+      <file>src/solutions/LegalWorkspace/src/types/entities.ts</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/pcf/dataverse-queries.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read existing DataverseService.ts to understand patterns</step>
+    <step>Add getUserPreferences method — query sprk_userpreference with $filter on _sprk_user_value and sprk_preferencetype</step>
+    <step>Add saveUserPreferences method — check if preference exists (update) or create new</step>
+    <step>Add updateEventColumn method — webApi.updateRecord for sprk_todocolumn</step>
+    <step>Add updateEventPinned method — webApi.updateRecord for sprk_todopinned</step>
+    <step>Add batchUpdateEventColumns method — sequential updateRecord calls with error collection</step>
+    <step>Verify npm run build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Updated DataverseService.ts with 5 new methods</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 5 methods implemented following existing IResult pattern</criterion>
+    <criterion>getUserPreferences returns IResult with IUserPreference data</criterion>
+    <criterion>saveUserPreferences handles both create and update (upsert)</criterion>
+    <criterion>batchUpdateEventColumns returns count of successful/failed updates</criterion>
+    <criterion>npm run build succeeds</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,38 @@
+<task id="012" project="smart-todo-kanban">
+  <metadata>
+    <title>Create shared components barrel export</title>
+    <phase>2 — Reusable DnD Components</phase>
+    <estimate>10min</estimate>
+    <tags>export, reusable</tags>
+    <dependencies>011</dependencies>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create index.ts barrel export for the shared KanbanBoard and KanbanColumn components.</goal>
+    <context>
+      The shared/ directory needs a barrel export so consumers can import as:
+      import { KanbanBoard, KanbanColumn } from '../shared';
+    </context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/SmartToDo/index.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create components/shared/index.ts with exports for KanbanBoard, KanbanColumn, and their prop types</step>
+    <step>Verify npm run build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>New file: components/shared/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Barrel export works for both components and their type interfaces</criterion>
+    <criterion>npm run build succeeds</criterion>
+  </acceptance-criteria>
+</task>

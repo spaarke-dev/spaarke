@@ -1,0 +1,45 @@
+<task id="031" project="smart-todo-kanban">
+  <metadata>
+    <title>Accessibility review — keyboard DnD, screen reader, focus</title>
+    <phase>4 — Polish</phase>
+    <estimate>30min</estimate>
+    <tags>accessibility, verification</tags>
+    <dependencies>026</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Review and improve keyboard accessibility for the Kanban board, including DnD keyboard support, screen reader labels, and focus management.</goal>
+    <context>
+      @hello-pangea/dnd provides built-in keyboard DnD support (Space to grab, arrow keys to move).
+      Verify this works correctly and add any missing aria attributes.
+    </context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Test keyboard navigation: Tab between columns and cards</step>
+    <step>Test keyboard DnD: Space to pick up, arrows to move, Space to drop</step>
+    <step>Verify all interactive elements have aria-labels</step>
+    <step>Verify focus returns to appropriate element after operations</step>
+    <step>Verify screen reader announcements for DnD operations</step>
+    <step>Fix any accessibility issues found</step>
+  </steps>
+
+  <outputs>
+    <output>Accessibility review report</output>
+    <output>Any component fixes for a11y issues</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Tab navigation works through all interactive elements</criterion>
+    <criterion>Keyboard DnD works (pick up, move, drop)</criterion>
+    <criterion>All interactive elements have appropriate aria-labels</criterion>
+    <criterion>Screen reader announces DnD operations</criterion>
+  </acceptance-criteria>
+</task>

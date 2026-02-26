@@ -1,0 +1,62 @@
+<task id="022" project="smart-todo-kanban">
+  <metadata>
+    <title>Create ThresholdSettingsPopover component</title>
+    <phase>3 — Smart To Do Kanban Components</phase>
+    <estimate>45min</estimate>
+    <tags>component, preferences, fluent-ui</tags>
+    <dependencies>004</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create a Fluent v9 Popover that lets users configure the Today and Tomorrow score thresholds for Kanban column assignment.</goal>
+    <context>
+      The popover opens from the settings gear in KanbanHeader. It shows:
+      - "Today" threshold: SpinButton or Input (number, 0-100)
+      - "Tomorrow" threshold: SpinButton or Input (number, 0-100)
+      - "Reset to defaults" button (60, 30)
+      - "Save" button (writes to Dataverse via useUserPreferences)
+      - Brief explanation text
+
+      Validation: Today threshold must be greater than Tomorrow threshold.
+    </context>
+    <constraints>
+      - Use Fluent v9 Popover, PopoverTrigger, PopoverSurface
+      - Use SpinButton from @fluentui/react-components for numeric inputs
+      - Validate: todayThreshold > tomorrowThreshold
+      - Show validation error inline
+      - Fluent v9 tokens for all styling
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/hooks/useUserPreferences.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create components/SmartToDo/ThresholdSettings.tsx</step>
+    <step>Define IThresholdSettingsProps: open, onOpenChange, preferences, onSave</step>
+    <step>Implement Popover with two SpinButton inputs for thresholds</step>
+    <step>Add validation: todayThreshold must be > tomorrowThreshold</step>
+    <step>Add Reset to Defaults button</step>
+    <step>Add Save button that calls onSave with new values</step>
+    <step>Add Griffel styles</step>
+    <step>Verify npm run build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>New file: components/SmartToDo/ThresholdSettings.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Popover opens/closes properly</criterion>
+    <criterion>SpinButton inputs accept values 0-100</criterion>
+    <criterion>Validation prevents todayThreshold &lt;= tomorrowThreshold</criterion>
+    <criterion>Reset restores defaults (60, 30)</criterion>
+    <criterion>Save triggers callback with new values</criterion>
+    <criterion>npm run build succeeds</criterion>
+  </acceptance-criteria>
+</task>

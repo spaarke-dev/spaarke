@@ -1,0 +1,36 @@
+<task id="026" project="smart-todo-kanban">
+  <metadata>
+    <title>Build verification and bundle size check</title>
+    <phase>3 — Smart To Do Kanban Components</phase>
+    <estimate>15min</estimate>
+    <tags>verification, build</tags>
+    <dependencies>025</dependencies>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Run npm run build to verify zero errors and check that @hello-pangea/dnd bundle impact is acceptable.</goal>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/package.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>cd src/solutions/LegalWorkspace && npm run build</step>
+    <step>Verify zero TypeScript errors</step>
+    <step>Check dist/ output size — compare before/after for bundle impact</step>
+    <step>If bundle is too large, consider lazy-loading KanbanBoard</step>
+  </steps>
+
+  <outputs>
+    <output>Build verification report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>npm run build succeeds with zero errors</criterion>
+    <criterion>Bundle size increase documented</criterion>
+  </acceptance-criteria>
+</task>

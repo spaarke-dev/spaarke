@@ -1,0 +1,46 @@
+<task id="001" project="smart-todo-kanban">
+  <metadata>
+    <title>Install @hello-pangea/dnd dependency</title>
+    <phase>1 — Foundation</phase>
+    <estimate>15min</estimate>
+    <tags>dependency, setup</tags>
+    <dependencies>none</dependencies>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Install the @hello-pangea/dnd package in the LegalWorkspace project for drag-and-drop Kanban board functionality.</goal>
+    <context>
+      The LegalWorkspace is a React 18 Code Page at src/solutions/LegalWorkspace/.
+      @hello-pangea/dnd is the maintained fork of react-beautiful-dnd, MIT-licensed, React 18 compatible.
+      TypeScript types are included in the package.
+    </context>
+    <constraints>
+      - Install in src/solutions/LegalWorkspace/ (not root)
+      - Verify the package resolves correctly with TypeScript
+      - Verify bundle size impact is acceptable (< 30KB gzipped)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/package.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>cd src/solutions/LegalWorkspace && npm install @hello-pangea/dnd</step>
+    <step>Verify package.json has @hello-pangea/dnd in dependencies</step>
+    <step>Run npm run build to verify no TypeScript errors</step>
+  </steps>
+
+  <outputs>
+    <output>Updated package.json with @hello-pangea/dnd</output>
+    <output>Updated package-lock.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>@hello-pangea/dnd appears in package.json dependencies</criterion>
+    <criterion>npm run build succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,77 @@
+<task id="023" project="smart-todo-kanban">
+  <metadata>
+    <title>Create TodoDetailPane component</title>
+    <phase>3 — Smart To Do Kanban Components</phase>
+    <estimate>1hr</estimate>
+    <tags>component, side-pane, fluent-ui</tags>
+    <dependencies>002, 003</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create the TodoDetailPane component — content for the expandable side pane showing full event details with editable description.</goal>
+    <context>
+      When a user clicks a KanbanCard body, a side pane opens with:
+      - Event name (read-only header)
+      - Description (sprk_description) — editable Textarea
+      - Priority badge + Effort badge + Due date badge
+      - Assigned to name
+      - To Do Score breakdown (priority component, effort component, urgency component)
+      - Action buttons: Email (stub), Teams (stub), Edit (navigateToEntity), AI Summary
+      - Save button for description changes
+
+      Primary strategy: Render inside Xrm.App.sidePanes.createPane().
+      Fallback: Render inside a Fluent v9 DrawerOverlay (Drawer component).
+
+      The component itself renders the CONTENT — the pane/drawer wrapper is handled by
+      the parent (SmartToDo) based on Xrm availability.
+    </context>
+    <constraints>
+      - Content component only — not responsible for pane/drawer opening
+      - Use Textarea from @fluentui/react-components for description editing
+      - Reuse InlineBadge pattern for badges
+      - Reuse computeTodoScore for score breakdown
+      - Use navigateToEntity for Edit action
+      - Email and Teams actions are stubs (console.info)
+      - Save writes sprk_description to Dataverse via DataverseService
+      - Fluent v9 tokens, makeStyles
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/SmartToDo/TodoItem.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/utils/todoScoreUtils.ts</file>
+      <file>src/solutions/LegalWorkspace/src/utils/navigation.ts</file>
+      <file>src/solutions/LegalWorkspace/src/services/DataverseService.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create components/SmartToDo/TodoDetailPane.tsx</step>
+    <step>Define ITodoDetailPaneProps: event, onSaveDescription, onClose</step>
+    <step>Implement header section: event name, close button</step>
+    <step>Implement description section: Textarea with controlled state</step>
+    <step>Implement badges section: priority, effort, due date (reuse InlineBadge)</step>
+    <step>Implement score breakdown: table showing priority/effort/urgency components and total</step>
+    <step>Implement action buttons: Email (stub), Teams (stub), Edit (navigateToEntity), AI Summary</step>
+    <step>Implement save button for description changes</step>
+    <step>Add Griffel styles with semantic tokens</step>
+    <step>Verify npm run build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>New file: components/SmartToDo/TodoDetailPane.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Displays all event fields: name, description, badges, assigned to, score breakdown</criterion>
+    <criterion>Description is editable via Textarea</criterion>
+    <criterion>Save button writes description to Dataverse</criterion>
+    <criterion>Edit button calls navigateToEntity</criterion>
+    <criterion>Email/Teams buttons log stub messages</criterion>
+    <criterion>All styles use Fluent v9 semantic tokens</criterion>
+    <criterion>npm run build succeeds</criterion>
+  </acceptance-criteria>
+</task>

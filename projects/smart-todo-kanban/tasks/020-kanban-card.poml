@@ -1,0 +1,76 @@
+<task id="020" project="smart-todo-kanban">
+  <metadata>
+    <title>Create KanbanCard component</title>
+    <phase>3 — Smart To Do Kanban Components</phase>
+    <estimate>1hr</estimate>
+    <tags>component, kanban, fluent-ui</tags>
+    <dependencies>002, 012</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create the KanbanCard component — a draggable card displaying event name, checkbox, due date, assigned to, To Do Score badge, and pin toggle.</goal>
+    <context>
+      KanbanCard is the domain-specific card rendered inside KanbanColumn via the renderCard prop.
+      It displays:
+        Row 1: [Checkbox] Event name (truncated) ... [Pin toggle]
+        Row 2: Due date label · Assigned to name ... [Score badge]
+
+      Visual treatment:
+      - Left border accent colour (inherited from column)
+      - Completed items: strikethrough + opacity 0.6
+      - Pinned items: filled pin icon + subtle indicator
+      - Rounded corners, subtle shadow (matching FeedItemCard pattern)
+      - Click on card body opens detail pane (handled by parent via onClick prop)
+    </context>
+    <constraints>
+      - Fluent v9 makeStyles, semantic tokens only
+      - Reuse InlineBadge pattern from TodoItem.tsx
+      - Reuse computeTodoScore from todoScoreUtils.ts
+      - Reuse computeDueLabel from dueLabelUtils.ts
+      - PinRegular / PinFilled from @fluentui/react-icons
+      - Checkbox from @fluentui/react-components
+      - ADR-021: Dark mode, high-contrast
+      - React.memo for performance (many cards in Kanban)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/SmartToDo/TodoItem.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/utils/todoScoreUtils.ts</file>
+      <file>src/solutions/LegalWorkspace/src/utils/dueLabelUtils.ts</file>
+      <file>src/solutions/LegalWorkspace/src/types/entities.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create components/SmartToDo/KanbanCard.tsx</step>
+    <step>Define IKanbanCardProps: event, onToggleComplete, onPinToggle, onClick, accentColor, isPinned</step>
+    <step>Implement card layout: 2 rows with checkbox, title, pin, due date, assigned to, score</step>
+    <step>Add left border accent colour (passed from column via accentColor prop)</step>
+    <step>Add pin toggle button with PinRegular/PinFilled icons</step>
+    <step>Add To Do Score badge using InlineBadge pattern</step>
+    <step>Add completed visual state (strikethrough + opacity)</step>
+    <step>Add click handler on card body (not checkbox/pin) for detail pane</step>
+    <step>Wrap in React.memo with displayName</step>
+    <step>Add Griffel styles with semantic tokens</step>
+    <step>Verify npm run build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>New file: components/SmartToDo/KanbanCard.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Card displays event name, checkbox, pin, due date, assigned to, score badge</criterion>
+    <criterion>Left border accent colour applied</criterion>
+    <criterion>Pin toggle works (PinRegular ↔ PinFilled)</criterion>
+    <criterion>Completed state: strikethrough + reduced opacity</criterion>
+    <criterion>Click on card body calls onClick (not triggered by checkbox/pin)</criterion>
+    <criterion>All styles use Fluent v9 semantic tokens</criterion>
+    <criterion>React.memo wrapper for performance</criterion>
+    <criterion>npm run build succeeds</criterion>
+  </acceptance-criteria>
+</task>
