@@ -711,25 +711,21 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               />
             </div>
           </div>
+        </div>
 
-          <div className={styles.divider} role="separator" />
-
-          {/* ── Remove from To Do ───────────────────────────────────────── */}
+        {/* ── Sticky footer ────────────────────────────────────────────── */}
+        <div className={styles.footer}>
           {onRemoveTodo && (
             <Button
               appearance="subtle"
               icon={<DeleteRegular />}
               onClick={handleRemoveTodo}
               disabled={isRemoving || isSaving}
-              style={{ color: tokens.colorPaletteRedForeground1, justifyContent: "flex-start" }}
+              style={{ color: tokens.colorPaletteRedForeground1, marginRight: "auto" }}
             >
-              {isRemoving ? "Removing..." : "Remove from To Do"}
+              {isRemoving ? "Removing..." : "Remove"}
             </Button>
           )}
-        </div>
-
-        {/* ── Sticky footer: Save + Save & Close ──────────────────────── */}
-        <div className={styles.footer}>
           <Button
             appearance="secondary"
             icon={<DismissRegular />}
