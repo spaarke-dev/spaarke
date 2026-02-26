@@ -129,6 +129,7 @@ export const EVENT_SELECT_FIELDS: string[] = [
   'sprk_regardingrecordid',
   'sprk_regardingrecordname',
   '_sprk_regardingrecordtype_value',  // Lookup → sprk_recordtype_ref (display via formatted value)
+  '_sprk_assignedto_value',  // Lookup → contact (display name via formatted value)
   'sprk_duedate',
   'createdon',
   'modifiedon',
@@ -294,6 +295,7 @@ export const TODO_SELECT_FIELDS: string[] = [
   'sprk_regardingrecordid',
   'sprk_regardingrecordname',
   '_sprk_regardingrecordtype_value',  // Lookup → sprk_recordtype_ref (display via formatted value)
+  '_sprk_assignedto_value',  // Lookup → contact (display name via formatted value)
   'sprk_duedate',
   'createdon',
   'modifiedon',

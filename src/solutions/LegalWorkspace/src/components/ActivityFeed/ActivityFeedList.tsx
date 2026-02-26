@@ -44,7 +44,7 @@ const INITIAL_WINDOW_SIZE = 25;
 /** How many more items to render when the bottom sentinel fires */
 const LOAD_BATCH_SIZE = 20;
 /** Approximate pixel height of a single feed item (used for spacer calculation) */
-const APPROX_ITEM_HEIGHT_PX = 112;
+const APPROX_ITEM_HEIGHT_PX = 88;
 
 // ---------------------------------------------------------------------------
 // Styles

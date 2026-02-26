@@ -71,6 +71,7 @@ function mapEventFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
     ...e,
     eventTypeName: (e[`_sprk_eventtype_ref_value${FV}`] as string) ?? '',
     regardingRecordTypeName: (e[`_sprk_regardingrecordtype_value${FV}`] as string) ?? '',
+    assignedToName: (e[`_sprk_assignedto_value${FV}`] as string) ?? '',
   }));
 }
 

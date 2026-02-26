@@ -2,15 +2,12 @@
  * FeedItemCard — interactive card component for a single Updates Feed event.
  *
  * Layout (redesigned for spacious 2-row cards):
- *   ┌──────────────────────────────────────────────────────────────────┐
- *   │▌                                                                 │
- *   │▌  [Icon 40px]  [Type badge]  Event Name          [Flag]        │
- *   │▌               [Priority] [Matter ref] · Due date    [Email]   │
- *   │▌                                                     [Teams]   │
- *   │▌                                                     [Edit]    │
- *   │▌                                                     [AI]      │
- *   │▌                                                                 │
- *   └──────────────────────────────────────────────────────────────────┘
+ *   ┌────────────────────────────────────────────────────────────────────────────┐
+ *   │▌                                                                           │
+ *   │▌  [Icon 40px]  [Type badge] Event Name  Description…     [To Do] [⋮ More] │
+ *   │▌               [Priority] [Record Type] Matter ref (link) · Due date      │
+ *   │▌                                                                           │
+ *   └────────────────────────────────────────────────────────────────────────────┘
  *     ↑ 3px left border (red=overdue, amber=soon, green=on track, neutral)
  *
  * Design constraints:
@@ -19,7 +16,7 @@
  *   - Icon-only buttons MUST have aria-label
  *   - Generous white space: L/XL padding tokens
  *   - Dark mode + high-contrast supported automatically via token system
- *   - Action buttons: medium size (24px+ touch targets), vertical stack
+ *   - Two action controls: To Do toggle + overflow (⋮) menu for Email, Teams, Edit, AI
  *
  * Flag behaviour (task 012):
  *   - Reads flag state from FeedTodoSyncContext (optimistic updates).
@@ -36,15 +33,20 @@ import {
   Tooltip,
   Spinner,
   mergeClasses,
+  Menu,
+  MenuTrigger,
+  MenuPopover,
+  MenuList,
+  MenuItem,
 } from "@fluentui/react-components";
 import {
-  FlagRegular,
-  FlagFilled,
+  MoreVerticalRegular,
   SparkleRegular,
   MailRegular,
   ChatRegular,
   EditRegular,
 } from "@fluentui/react-icons";
+import { MicrosoftToDoIcon } from "../../icons/MicrosoftToDoIcon";
 import { IEvent } from "../../types/entities";
 import { PriorityLevel } from "../../types/enums";
 import { formatRelativeTime } from "../../utils/formatRelativeTime";
@@ -113,10 +115,10 @@ const useStyles = makeStyles({
   card: {
     display: "flex",
     flexDirection: "column",
-    paddingTop: tokens.spacingVerticalL,
-    paddingBottom: tokens.spacingVerticalL,
-    paddingLeft: tokens.spacingHorizontalXL,
-    paddingRight: tokens.spacingHorizontalXL,
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalM,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
     backgroundColor: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusMedium,
     boxShadow: tokens.shadow2,
@@ -195,12 +197,21 @@ const useStyles = makeStyles({
     minWidth: 0,
   },
   title: {
-    display: "block",
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     color: tokens.colorNeutralForeground1,
     fontWeight: tokens.fontWeightSemibold,
+    flexShrink: 0,
+    maxWidth: "50%",
+  },
+  description: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: tokens.colorNeutralForeground3,
+    flex: "1 1 0",
+    minWidth: 0,
   },
 
   // Row 2: priority badge + matter ref + due date
@@ -217,6 +228,17 @@ const useStyles = makeStyles({
     overflow: "hidden",
     textOverflow: "ellipsis",
   },
+  regardingLink: {
+    color: tokens.colorBrandForeground1,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    cursor: "pointer",
+    textDecorationLine: "none",
+    ":hover": {
+      textDecorationLine: "underline",
+    },
+  },
   metaDivider: {
     color: tokens.colorNeutralForeground4,
   },
@@ -230,31 +252,31 @@ const useStyles = makeStyles({
     whiteSpace: "nowrap",
   },
 
-  // ── Right: action buttons (vertical stack) ────────────────────────────
+  // ── Right: action controls (To Do + overflow menu) ───────────────────
   actionsColumn: {
     display: "flex",
-    flexDirection: "column",
+    flexDirection: "row",
     alignItems: "center",
-    gap: tokens.spacingVerticalXS,
+    gap: tokens.spacingHorizontalXXS,
     flexShrink: 0,
-    paddingTop: "2px",
+    marginLeft: tokens.spacingHorizontalL,
   },
 
-  // Flag states
-  flagButtonActive: {
+  // To Do toggle states
+  todoButtonActive: {
     color: tokens.colorBrandForeground1,
   },
-  flagButtonWrapper: {
+  todoButtonWrapper: {
     position: "relative",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
   },
-  flagPendingSpinner: {
+  todoPendingSpinner: {
     position: "absolute",
     pointerEvents: "none",
   },
-  flagButtonError: {
+  todoButtonError: {
     color: tokens.colorPaletteRedForeground3,
   },
 });
@@ -363,6 +385,20 @@ const RecordTypeBadge: React.FC<IRecordTypeBadgeProps> = ({ typeName }) => (
 );
 
 // ---------------------------------------------------------------------------
+// Regarding record type → entity logical name mapping
+// ---------------------------------------------------------------------------
+
+/** Map display name from sprk_regardingrecordtype lookup to Dataverse entity logical name. */
+function resolveRegardingEntityName(displayName: string | undefined): string | null {
+  if (!displayName) return null;
+  const lower = displayName.toLowerCase();
+  if (lower === "matter") return "sprk_matter";
+  if (lower === "project") return "sprk_project";
+  // Fallback: assume sprk_ prefix + lowercase display name
+  return `sprk_${lower}`;
+}
+
+// ---------------------------------------------------------------------------
 // Urgency class selector
 // ---------------------------------------------------------------------------
 
@@ -448,6 +484,17 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
       }
     }, [onTeams, event.sprk_eventid]);
 
+    const handleRegardingClick = React.useCallback(() => {
+      const entityName = resolveRegardingEntityName(event.regardingRecordTypeName);
+      if (entityName && event.sprk_regardingrecordid) {
+        navigateToEntity({
+          action: "openRecord",
+          entityName,
+          entityId: event.sprk_regardingrecordid,
+        });
+      }
+    }, [event.regardingRecordTypeName, event.sprk_regardingrecordid]);
+
     const handleEdit = React.useCallback(() => {
       if (onEdit) {
         onEdit(event.sprk_eventid);
@@ -469,28 +516,29 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
       event.regardingRecordTypeName || "",
       event.sprk_regardingrecordname || "",
       dueDateText || "",
+      event.assignedToName ? `Assigned to: ${event.assignedToName}.` : "",
       flagged ? "Flagged as to-do." : "",
     ]
       .filter(Boolean)
       .join(" ");
 
-    // Flag button tooltip / aria
-    const flagTooltip = flagError
+    // To Do button tooltip / aria
+    const todoTooltip = flagError
       ? `Error: ${flagError} — click to retry`
       : flagged
-      ? "Remove flag"
-      : "Flag as to-do";
+      ? "Remove from To Do"
+      : "Add to To Do";
 
-    const flagAriaLabel = flagError
-      ? `Flag error: ${flagError}`
+    const todoAriaLabel = flagError
+      ? `To Do error: ${flagError}`
       : flagged
-      ? "Remove flag"
-      : "Flag as to-do";
+      ? "Remove from To Do"
+      : "Add to To Do";
 
-    const flagButtonClass = flagError
-      ? mergeClasses(styles.flagButtonError)
+    const todoButtonClass = flagError
+      ? mergeClasses(styles.todoButtonError)
       : flagged
-      ? styles.flagButtonActive
+      ? styles.todoButtonActive
       : undefined;
 
     return (
@@ -512,7 +560,7 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
 
           {/* Content: 2 rows */}
           <div className={styles.contentColumn}>
-            {/* Row 1: Type badge + Event Name */}
+            {/* Row 1: Type badge + Event Name + Description */}
             <div className={styles.primaryRow}>
               {event.eventTypeName && (
                 <TypeBadge typeName={event.eventTypeName} />
@@ -524,6 +572,15 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
               >
                 {event.sprk_eventname}
               </Text>
+              {event.sprk_description && (
+                <Text
+                  as="span"
+                  size={300}
+                  className={styles.description}
+                >
+                  {event.sprk_description}
+                </Text>
+              )}
             </div>
 
             {/* Row 2: Priority + record type + matter ref + due date */}
@@ -532,7 +589,26 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
               {event.regardingRecordTypeName && (
                 <RecordTypeBadge typeName={event.regardingRecordTypeName} />
               )}
-              {event.sprk_regardingrecordname && (
+              {event.sprk_regardingrecordname && event.sprk_regardingrecordid && (
+                <Text
+                  as="span"
+                  size={200}
+                  className={styles.regardingLink}
+                  role="link"
+                  tabIndex={0}
+                  onClick={handleRegardingClick}
+                  onKeyDown={(e: React.KeyboardEvent) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleRegardingClick();
+                    }
+                  }}
+                  aria-label={`Open ${event.regardingRecordTypeName ?? "record"}: ${event.sprk_regardingrecordname}`}
+                >
+                  {event.sprk_regardingrecordname}
+                </Text>
+              )}
+              {event.sprk_regardingrecordname && !event.sprk_regardingrecordid && (
                 <Text size={200} className={styles.metaText}>
                   {event.sprk_regardingrecordname}
                 </Text>
@@ -550,80 +626,84 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
                   </Text>
                 </>
               )}
+              {event.assignedToName && (
+                <>
+                  <Text size={200} className={styles.metaDivider} aria-hidden="true">
+                    ·
+                  </Text>
+                  <Text size={200} className={styles.metaText}>
+                    {event.assignedToName}
+                  </Text>
+                </>
+              )}
             </div>
           </div>
 
-          {/* Action buttons — vertical stack, medium size */}
+          {/* Action controls: To Do toggle + overflow menu */}
           <div className={styles.actionsColumn}>
-            {/* Flag toggle */}
-            <Tooltip content={flagTooltip} relationship="label">
-              <div className={styles.flagButtonWrapper}>
+            {/* To Do toggle (Microsoft To Do icon) */}
+            <Tooltip content={todoTooltip} relationship="label">
+              <div className={styles.todoButtonWrapper}>
                 <Button
                   appearance="subtle"
                   size="medium"
-                  icon={
-                    flagged
-                      ? <FlagFilled aria-hidden="true" />
-                      : <FlagRegular aria-hidden="true" />
-                  }
-                  aria-label={flagAriaLabel}
+                  icon={<MicrosoftToDoIcon size={20} active={flagged} />}
+                  aria-label={todoAriaLabel}
                   aria-pressed={flagged}
                   aria-busy={pending}
-                  className={flagButtonClass}
+                  className={todoButtonClass}
                   onClick={handleFlagToggle}
                   disabled={pending}
                 />
                 {pending && (
-                  <span className={styles.flagPendingSpinner} aria-hidden="true">
+                  <span className={styles.todoPendingSpinner} aria-hidden="true">
                     <Spinner size="extra-tiny" />
                   </span>
                 )}
               </div>
             </Tooltip>
 
-            {/* Email (stub) */}
-            <Tooltip content="Send email" relationship="label">
-              <Button
-                appearance="subtle"
-                size="medium"
-                icon={<MailRegular aria-hidden="true" />}
-                aria-label="Send email about this event"
-                onClick={handleEmail}
-              />
-            </Tooltip>
-
-            {/* Teams (stub) */}
-            <Tooltip content="Start Teams chat" relationship="label">
-              <Button
-                appearance="subtle"
-                size="medium"
-                icon={<ChatRegular aria-hidden="true" />}
-                aria-label="Start Teams chat about this event"
-                onClick={handleTeams}
-              />
-            </Tooltip>
-
-            {/* Edit */}
-            <Tooltip content="Edit event" relationship="label">
-              <Button
-                appearance="subtle"
-                size="medium"
-                icon={<EditRegular aria-hidden="true" />}
-                aria-label="Edit this event"
-                onClick={handleEdit}
-              />
-            </Tooltip>
-
-            {/* AI Summary */}
-            <Tooltip content="Generate AI summary" relationship="label">
-              <Button
-                appearance="subtle"
-                size="medium"
-                icon={<SparkleRegular aria-hidden="true" />}
-                aria-label="Generate AI summary"
-                onClick={handleAISummary}
-              />
-            </Tooltip>
+            {/* Overflow menu (⋮) */}
+            <Menu>
+              <MenuTrigger disableButtonEnhancement>
+                <Tooltip content="More actions" relationship="label">
+                  <Button
+                    appearance="subtle"
+                    size="medium"
+                    icon={<MoreVerticalRegular aria-hidden="true" />}
+                    aria-label="More actions"
+                  />
+                </Tooltip>
+              </MenuTrigger>
+              <MenuPopover>
+                <MenuList>
+                  <MenuItem
+                    icon={<MailRegular />}
+                    onClick={handleEmail}
+                  >
+                    Email
+                  </MenuItem>
+                  <MenuItem
+                    icon={<ChatRegular />}
+                    onClick={handleTeams}
+                  >
+                    Teams Chat
+                  </MenuItem>
+                  <MenuItem
+                    icon={<EditRegular />}
+                    onClick={handleEdit}
+                  >
+                    Edit
+                  </MenuItem>
+                  <MenuItem
+                    icon={<SparkleRegular />}
+                    onClick={handleAISummary}
+                  >
+                    AI Summary
+                  </MenuItem>
+                </MenuList>
+              </MenuPopover>
+            </Menu>
           </div>
         </div>
       </div>

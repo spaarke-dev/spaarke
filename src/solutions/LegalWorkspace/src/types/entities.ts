@@ -39,6 +39,8 @@ export interface IEvent {
   sprk_regardingrecordname?: string; // Text field: display name of associated matter/project
   /** Display name from sprk_regardingrecordtype lookup (populated via formatted value mapping). */
   regardingRecordTypeName?: string;
+  /** Display name from sprk_assignedto contact lookup (populated via formatted value mapping). */
+  assignedToName?: string;
   sprk_duedate?: string;  // ISO date
   createdon: string;
   modifiedon: string;
