@@ -128,21 +128,47 @@ public sealed class SprkChatAgent : ISprkChatAgent
     }
 
     /// <summary>
-    /// Composes the system message content from the system prompt and optional document summary.
+    /// Composes the system message content from the system prompt, document identity,
+    /// analysis metadata, and optional document summary.
+    ///
+    /// Always includes a "Current Document Context" block when an active document ID
+    /// is available — even when DocumentSummary is null — so the LLM knows which
+    /// document it's working with and can call tools like GetAnalysisResult.
     /// </summary>
     private string BuildSystemContent()
     {
-        if (string.IsNullOrWhiteSpace(_context.DocumentSummary))
+        var sb = new System.Text.StringBuilder(_context.SystemPrompt);
+
+        // Gather document identity from KnowledgeScope and AnalysisMetadata
+        var activeDocumentId = _context.KnowledgeScope?.ActiveDocumentId;
+        var documentName = _context.AnalysisMetadata?.GetValueOrDefault("documentName");
+        var documentType = _context.AnalysisMetadata?.GetValueOrDefault("documentType");
+
+        var hasDocumentContext = activeDocumentId != null
+            || documentName != null
+            || !string.IsNullOrWhiteSpace(_context.DocumentSummary);
+
+        if (hasDocumentContext)
         {
-            return _context.SystemPrompt;
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.AppendLine("## Current Document Context");
+
+            if (!string.IsNullOrWhiteSpace(documentName))
+                sb.AppendLine($"**Document**: {documentName}");
+            if (!string.IsNullOrWhiteSpace(activeDocumentId))
+                sb.AppendLine($"**Document ID**: {activeDocumentId}");
+            if (!string.IsNullOrWhiteSpace(documentType))
+                sb.AppendLine($"**Type**: {documentType}");
+
+            if (!string.IsNullOrWhiteSpace(_context.DocumentSummary))
+            {
+                sb.AppendLine();
+                sb.AppendLine(_context.DocumentSummary);
+            }
         }
 
-        return $"""
-            {_context.SystemPrompt}
-
-            ## Current Document Context
-            {_context.DocumentSummary}
-            """;
+        return sb.ToString();
     }
 
     /// <summary>

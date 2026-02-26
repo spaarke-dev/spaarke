@@ -3212,6 +3212,255 @@ public async Task<string> GetBuilderPromptAsync(string scopeId, CancellationToke
 
 ---
 
+## 18. SprkChat System — Conversational AI with RAG Scoping (2026-02-24)
+
+SprkChat is the platform-wide conversational AI component that serves as the Spaarke "Copilot". It supports playbook-driven context, entity-scoped RAG search, and host context awareness for embedding in any workspace.
+
+### 18.1 Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      SprkChat System Architecture                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Client (SprkChat React Component)                                          │
+│  ─────────────────────────────────                                          │
+│  SprkChat.tsx              ← Main chat UI, playbook chips, message stream   │
+│  hooks/useChatSession.ts   ← Session create/switch/send with hostContext    │
+│  hooks/useChatPlaybooks.ts ← Fetches available playbooks from API           │
+│  types.ts                  ← IHostContext, IPlaybookOption, ISprkChatProps  │
+│         │                                                                   │
+│         ▼                                                                   │
+│  API (ChatEndpoints.cs)                                                     │
+│  ──────────────────────                                                     │
+│  POST /api/ai/chat/sessions         → Create session (with HostContext)     │
+│  POST /api/ai/chat/sessions/{id}/switch → Switch context/playbook          │
+│  POST /api/ai/chat/sessions/{id}/messages → Send message (SSE streaming)   │
+│  GET  /api/ai/chat/playbooks        → List available playbooks (pre-session)│
+│         │                                                                   │
+│         ▼                                                                   │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ ChatSessionManager                                                   │   │
+│  │ • Creates/manages ChatSession records                                │   │
+│  │ • Stores HostContext on session for lifetime                         │   │
+│  └──────────────────────────────────┬──────────────────────────────────┘   │
+│                                      │                                      │
+│                                      ▼                                      │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ SprkChatAgentFactory                                                 │   │
+│  │ • Creates agent instances with context from provider                 │   │
+│  │ • Passes HostContext to context provider                             │   │
+│  └──────────────────────────────────┬──────────────────────────────────┘   │
+│                                      │                                      │
+│                                      ▼                                      │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ IChatContextProvider (PlaybookChatContextProvider)                    │   │
+│  │ • Resolves system prompt from playbook                               │   │
+│  │ • Resolves ChatKnowledgeScope from playbook knowledge sources        │   │
+│  │ • Populates ParentEntityType/Id from HostContext                     │   │
+│  └──────────────────────────────────┬──────────────────────────────────┘   │
+│                                      │                                      │
+│                                      ▼                                      │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Chat Tools (constructed with knowledge scope)                        │   │
+│  │ ├── KnowledgeRetrievalTools → scoped to knowledge source IDs         │   │
+│  │ └── DocumentSearchTools     → scoped to entity (parentEntityType/Id) │   │
+│  │     Uses RagSearchOptions with boolean filter logic                   │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 18.2 ChatHostContext — Entity-Aware Embedding
+
+ChatHostContext describes WHERE SprkChat is embedded, enabling entity-scoped search:
+
+```csharp
+// Models/Ai/Chat/ChatHostContext.cs
+public sealed record ChatHostContext(
+    string EntityType,     // "matter", "project", "invoice", "account", "contact"
+    string EntityId,       // Dataverse record GUID
+    string? EntityName = null,       // Display name (for UI)
+    string? WorkspaceType = null)    // "analysis", "financial", "legal", etc.
+{
+    public bool IsValid() =>
+        !string.IsNullOrWhiteSpace(EntityType) &&
+        !string.IsNullOrWhiteSpace(EntityId) &&
+        ParentEntityContext.EntityTypes.IsValid(EntityType);
+}
+```
+
+**When HostContext is provided:**
+- SearchDiscovery filters by `parentEntityType` and `parentEntityId` in Azure AI Search
+- Knowledge scope is enriched with entity type/id for domain-specific retrieval
+- Search results are limited to the entity's document scope (no cross-workspace leakage)
+
+**When HostContext is null (backward compatible):**
+- Search remains tenant-wide (existing behavior preserved)
+- No entity filtering applied
+
+### 18.3 Chat Knowledge Scoping Pipeline
+
+The knowledge scoping chain flows HostContext from the client through every layer:
+
+```
+Client (IHostContext)
+  → ChatEndpoints (ChatCreateSessionRequest.HostContext)
+    → ChatSessionManager (stored on ChatSession)
+      → SprkChatAgentFactory (passed to context provider)
+        → PlaybookChatContextProvider (resolves ChatKnowledgeScope)
+          → ChatKnowledgeScope.ParentEntityType / ParentEntityId
+            → DocumentSearchTools (RagSearchOptions.ParentEntityType/Id)
+              → Azure AI Search OData filter
+```
+
+**ChatKnowledgeScope** carries all scoping data for tool construction:
+
+```csharp
+// Models/Ai/Chat/ChatContext.cs
+public record ChatKnowledgeScope(
+    IReadOnlyList<string> RagKnowledgeSourceIds,  // From playbook
+    string? InlineContent,
+    string? SkillInstructions,
+    string? ActiveDocumentId,
+    string? ParentEntityType = null,   // From HostContext
+    string? ParentEntityId = null);    // From HostContext
+```
+
+### 18.4 Playbook Discovery Endpoint
+
+Pre-session endpoint that returns available playbooks for the current user:
+
+```
+GET /api/ai/chat/playbooks
+Authorization: Bearer {token}
+
+Response:
+{
+  "playbooks": [
+    { "id": "guid", "name": "NDA Review", "description": "...", "isPublic": true },
+    { "id": "guid", "name": "My Custom Analysis", "description": "...", "isPublic": false }
+  ]
+}
+```
+
+**Implementation**: Merges results from `IPlaybookService.ListUserPlaybooksAsync()` and `ListPublicPlaybooksAsync()`, deduplicates by ID. No new DI registrations (ADR-010 compliant).
+
+**Client integration**: The `useChatPlaybooks` hook fetches this endpoint and renders playbook quick-action chips in the chat UI when multiple playbooks are available.
+
+### 18.5 RagSearchOptions — Extended Boolean Filter Logic
+
+The `RagSearchOptions` record supports comprehensive filtering with AND/OR/NOT semantics:
+
+```csharp
+// Services/Ai/IRagService.cs
+public record RagSearchOptions
+{
+    // ... existing properties (TenantId, TopK, MinScore, etc.)
+
+    // Include — OR semantics (chunks from ANY of these sources)
+    public IReadOnlyList<string>? KnowledgeSourceIds { get; init; }
+
+    // Exclude — NOT semantics (exclude chunks from these sources)
+    public IReadOnlyList<string>? ExcludeKnowledgeSourceIds { get; init; }
+
+    // Required tags — AND semantics (chunk must have ALL tags)
+    public IReadOnlyList<string>? RequiredTags { get; init; }
+
+    // Include tags — OR semantics (chunk has ANY of these tags)
+    public IReadOnlyList<string>? Tags { get; init; }
+
+    // Exclude tags — NOT semantics
+    public IReadOnlyList<string>? ExcludeTags { get; init; }
+
+    // Entity scope — both must be set for filter to apply
+    public string? ParentEntityType { get; init; }
+    public string? ParentEntityId { get; init; }
+}
+```
+
+**OData Filter Generation** (`RagService.BuildSearchOptions`):
+
+| Property | Filter Pattern | Threshold |
+|----------|---------------|-----------|
+| KnowledgeSourceIds (≤10) | `(knowledgeSourceId eq 'a' or knowledgeSourceId eq 'b')` | Readability |
+| KnowledgeSourceIds (>10) | `search.in(knowledgeSourceId, 'a,b,c,...', ',')` | Performance |
+| ExcludeKnowledgeSourceIds | `not search.in(knowledgeSourceId, ...)` | — |
+| RequiredTags (AND) | `tags/any(t: t eq 'x') and tags/any(t: t eq 'y')` | Per-tag clause |
+| Tags (OR) | `tags/any(t: search.in(t, 'x,y,z', ','))` | — |
+| ExcludeTags | `not tags/any(t: search.in(t, 'x,y', ','))` | — |
+| ParentEntityType + Id | `parentEntityType eq 'matter' and parentEntityId eq 'guid'` | Both required |
+
+### 18.6 Client-Side SprkChat Component
+
+**SprkChat** is a reusable React component designed for platform-wide embedding:
+
+```typescript
+// Usage in any workspace
+<SprkChat
+  apiBaseUrl="/api/ai/chat"
+  documentId={activeDocId}
+  playbookId={defaultPlaybookId}
+  hostContext={{
+    entityType: "matter",
+    entityId: matterId,
+    entityName: "Smith v. Jones",
+    workspaceType: "analysis"
+  }}
+  playbooks={[/* optional pre-configured list */]}
+/>
+```
+
+**Key features:**
+- **Playbook chips**: When multiple playbooks are available and no messages have been sent, quick-action Fluent UI v9 buttons appear above predefined prompts
+- **Dynamic playbook discovery**: `useChatPlaybooks` hook fetches available playbooks from the API and merges with any passed-in playbooks (deduplicated by ID)
+- **Host context flow**: `IHostContext` is passed to `createSession` and `switchContext` calls, flowing through to entity-scoped search
+
+**Exports** (from `@spaarke/ui-components`):
+- `SprkChat` — Main component
+- `useChatSession` — Session management hook
+- `useChatPlaybooks` — Playbook discovery hook
+- `IHostContext`, `ISprkChatProps`, `IPlaybookOption`, `IUseChatPlaybooksResult` — Types
+
+### 18.7 File Structure
+
+```
+Sprk.Bff.Api/
+├── Api/Ai/
+│   └── ChatEndpoints.cs              ← /api/ai/chat/* endpoints
+├── Models/Ai/Chat/
+│   ├── ChatSession.cs                ← Session record (includes HostContext)
+│   ├── ChatContext.cs                ← ChatContext + ChatKnowledgeScope
+│   └── ChatHostContext.cs            ← Entity-aware host context
+├── Services/Ai/Chat/
+│   ├── ChatSessionManager.cs         ← Session lifecycle
+│   ├── IChatContextProvider.cs        ← Context resolution interface
+│   ├── PlaybookChatContextProvider.cs ← Playbook-driven context + scope
+│   ├── SprkChatAgentFactory.cs        ← Agent construction with context
+│   └── Tools/
+│       ├── DocumentSearchTools.cs     ← Entity-scoped search discovery
+│       └── KnowledgeRetrievalTools.cs ← Knowledge source-scoped retrieval
+
+Spaarke.UI.Components/src/components/SprkChat/
+├── SprkChat.tsx                       ← Main component + playbook chips
+├── types.ts                           ← IHostContext, ISprkChatProps, etc.
+├── index.ts                           ← Barrel exports
+└── hooks/
+    ├── useChatSession.ts              ← Session create/switch/send
+    └── useChatPlaybooks.ts            ← Playbook discovery hook
+```
+
+### 18.8 Test Coverage
+
+| Test Class | Tests | Coverage Area |
+|------------|-------|---------------|
+| `SprkChatAgentFactoryTests` | 4 | Agent creation, context provider integration |
+| `PlaybookChatContextProviderTests` | 9 | Knowledge scoping, host context, inline content |
+| `DocumentSearchToolsTests` | 4+ | Entity scope filtering, search discovery |
+| `RagServiceTests` | 30+ | Extended properties, filter generation |
+
+---
+
 ## Related Documents
 
 - [SPAARKE-AI-STRATEGY.md](../../reference/architecture/SPAARKE-AI-STRATEGY.md) - Strategic context, Microsoft Foundry, use cases
@@ -3226,8 +3475,9 @@ public async Task<string> GetBuilderPromptAsync(string scopeId, CancellationToke
 ---
 
 *Document Owner: Spaarke Engineering*
-*Last Updated: January 20, 2026*
+*Last Updated: February 24, 2026*
 *R3 Updates: RAG Deployment Models (Section 8), Knowledge Index Schema (Section 9.2), Tool Framework (Section 10), Playbook System (Section 11), Export Services (Section 12)*
 *2026-01-12: Document Relationship Visualization (Section 16)*
 *2026-01-19: Playbook Builder AI Assistant Scope Patterns (Section 17)*
 *2026-01-20: Semantic Search Foundation R1 - See [RAG-ARCHITECTURE.md](RAG-ARCHITECTURE.md#semantic-search-api) for details*
+*2026-02-24: SprkChat System — Conversational AI with RAG Scoping (Section 18)*

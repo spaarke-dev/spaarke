@@ -46,7 +46,7 @@ import { SprkChat } from "@spaarke/ui-components/dist/components/SprkChat";
 import type { IChatSession } from "@spaarke/ui-components/dist/components/SprkChat";
 
 // Build info for version footer
-const VERSION = "1.3.4";
+const VERSION = "1.3.5";
 const BUILD_DATE = "2026-02-24";
 
 // ─────────────────────────────────────────────────────────────────────────────

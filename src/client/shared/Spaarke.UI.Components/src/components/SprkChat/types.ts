@@ -71,6 +71,26 @@ export interface IPlaybookOption {
     id: string;
     /** Display name */
     name: string;
+    /** Optional description */
+    description?: string;
+    /** Whether this playbook is public/shared */
+    isPublic?: boolean;
+}
+
+/**
+ * Host context describing WHERE SprkChat is embedded.
+ * Enables entity-scoped search and playbook discovery without
+ * coupling SprkChat to any specific host workspace.
+ */
+export interface IHostContext {
+    /** Business entity type (e.g., "matter", "project", "invoice", "account", "contact") */
+    entityType: string;
+    /** GUID of the parent entity record */
+    entityId: string;
+    /** Display name of the parent entity (for logging/UI) */
+    entityName?: string;
+    /** Workspace hosting SprkChat (e.g., "LegalWorkspace", "AnalysisWorkspace") */
+    workspaceType?: string;
 }
 
 /** A predefined prompt suggestion shown before the first message. */
@@ -113,6 +133,8 @@ export interface ISprkChatProps {
     contentRef?: React.RefObject<HTMLElement>;
     /** Maximum character count for input (default 2000) */
     maxCharCount?: number;
+    /** Host context describing where SprkChat is embedded (entity type, entity ID, workspace) */
+    hostContext?: IHostContext;
 }
 
 /** Props for SprkChatMessage sub-component. */
@@ -204,11 +226,11 @@ export interface IUseChatSessionResult {
     /** Error from the last session operation */
     error: Error | null;
     /** Create a new session */
-    createSession: (documentId?: string, playbookId?: string) => Promise<IChatSession | null>;
+    createSession: (documentId?: string, playbookId?: string, hostContext?: IHostContext) => Promise<IChatSession | null>;
     /** Load message history for the current session */
     loadHistory: () => Promise<void>;
     /** Switch document/playbook context */
-    switchContext: (documentId?: string, playbookId?: string) => Promise<void>;
+    switchContext: (documentId?: string, playbookId?: string, hostContext?: IHostContext) => Promise<void>;
     /** Delete the current session */
     deleteSession: () => Promise<void>;
     /** Add a message to the local history (used by streaming) */

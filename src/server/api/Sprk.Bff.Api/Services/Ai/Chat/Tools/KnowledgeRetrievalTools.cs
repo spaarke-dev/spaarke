@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
@@ -9,12 +10,12 @@ namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
 /// Exposes two methods:
 ///   - <see cref="GetKnowledgeSourceAsync"/> — retrieves all indexed content for a specific
 ///     knowledge source ID (queries the knowledge index filtered by knowledgeSourceId)
-///   - <see cref="SearchKnowledgeBaseAsync"/> — semantic search limited to a specific knowledge
-///     source, or across all knowledge sources for the tenant
+///   - <see cref="SearchKnowledgeBaseAsync"/> — semantic search scoped to the playbook's
+///     knowledge sources, or across all sources for the tenant when no scope is configured
 ///
-/// Both methods enforce ADR-014 tenant isolation by passing <paramref name="tenantId"/>
-/// to <see cref="IRagService.SearchAsync(string, RagSearchOptions, System.Threading.CancellationToken)"/>
-/// as a required filter.
+/// Both methods enforce ADR-014 tenant isolation via a tenant ID captured at construction
+/// time and passed to <see cref="IRagService.SearchAsync(string, RagSearchOptions, System.Threading.CancellationToken)"/>
+/// as a required filter. The tenant ID is NOT exposed as an LLM tool parameter.
 ///
 /// Instantiated by <see cref="SprkChatAgentFactory"/>. Not registered in DI — the factory
 /// creates instances and registers methods as <see cref="Microsoft.Extensions.AI.AIFunction"/>
@@ -23,10 +24,16 @@ namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
 public sealed class KnowledgeRetrievalTools
 {
     private readonly IRagService _ragService;
+    private readonly string _tenantId;
+    private readonly IReadOnlyList<string>? _knowledgeSourceIds;
 
-    public KnowledgeRetrievalTools(IRagService ragService)
+    public KnowledgeRetrievalTools(IRagService ragService, string tenantId, ChatKnowledgeScope? knowledgeScope = null)
     {
         _ragService = ragService ?? throw new ArgumentNullException(nameof(ragService));
+        _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
+        _knowledgeSourceIds = knowledgeScope?.RagKnowledgeSourceIds is { Count: > 0 }
+            ? knowledgeScope.RagKnowledgeSourceIds
+            : null;
     }
 
     /// <summary>
@@ -37,49 +44,71 @@ public sealed class KnowledgeRetrievalTools
     /// <param name="knowledgeSourceId">Retrieve a specific knowledge source by ID</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Formatted string of all content chunks for the specified knowledge source.</returns>
-    /// <remarks>
-    /// This method searches for all content associated with the given knowledge source ID.
-    /// Returns up to 10 content chunks sorted by relevance. If more chunks exist, a note
-    /// is appended indicating truncation.
-    /// </remarks>
-    public Task<string> GetKnowledgeSourceAsync(
+    public async Task<string> GetKnowledgeSourceAsync(
         [Description("Retrieve a specific knowledge source by ID")] string knowledgeSourceId,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(knowledgeSourceId, nameof(knowledgeSourceId));
 
-        // ADR-014: Retrieving a knowledge source by ID requires a tenantId for index scoping.
-        // This method delegates to SearchKnowledgeBaseAsync which enforces tenant isolation.
-        // The agent should call SearchKnowledgeBaseAsync directly when a tenant context is available.
-        return Task.FromResult(
-            $"To retrieve content for knowledge source '{knowledgeSourceId}', use SearchKnowledgeBaseAsync " +
-            $"with the source ID as the search query and your tenant ID. " +
-            $"Example: SearchKnowledgeBaseAsync(query: '{knowledgeSourceId}', tenantId: <your-tenant-id>)");
+        var options = new RagSearchOptions
+        {
+            TenantId = _tenantId,
+            KnowledgeSourceId = knowledgeSourceId,
+            TopK = 10,
+            MinScore = 0.0f, // Return all content for this source
+            UseSemanticRanking = false,
+            UseVectorSearch = false,
+            UseKeywordSearch = true
+        };
+
+        var response = await _ragService.SearchAsync("*", options, cancellationToken);
+
+        if (response.Results.Count == 0)
+        {
+            return $"No content found for knowledge source '{knowledgeSourceId}'.";
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Knowledge source '{knowledgeSourceId}' contains {response.Results.Count} chunk(s):");
+        sb.AppendLine();
+
+        foreach (var (result, idx) in response.Results.Select((r, i) => (r, i + 1)))
+        {
+            sb.AppendLine($"[{idx}] {result.DocumentName} (Chunk {result.ChunkIndex + 1}/{result.ChunkCount})");
+            sb.AppendLine($"    {result.Content}");
+            sb.AppendLine();
+        }
+
+        if (response.TotalCount > response.Results.Count)
+        {
+            sb.AppendLine($"Note: Showing {response.Results.Count} of {response.TotalCount} total chunks.");
+        }
+
+        return sb.ToString().TrimEnd();
     }
 
     /// <summary>
     /// Searches the knowledge base for reference information relevant to the query.
     /// Use this to find policies, procedures, standards, or reference materials
-    /// that apply to the user's question. Results are scoped to the tenant's knowledge base.
+    /// that apply to the user's question. Results are scoped to the playbook's knowledge
+    /// sources when configured, or across all sources for the tenant otherwise.
     /// </summary>
     /// <param name="query">Search knowledge base for reference information</param>
-    /// <param name="tenantId">Tenant identifier for index routing (ADR-014 — required).</param>
     /// <param name="topK">Maximum number of results to return (default: 5).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Formatted string of matching knowledge base entries with relevance scores.</returns>
     public async Task<string> SearchKnowledgeBaseAsync(
         [Description("Search knowledge base for reference information")] string query,
-        string tenantId,
         int topK = 5,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(query, nameof(query));
-        ArgumentException.ThrowIfNullOrEmpty(tenantId, nameof(tenantId));
 
         var options = new RagSearchOptions
         {
-            TenantId = tenantId,
+            TenantId = _tenantId,
             TopK = Math.Clamp(topK, 1, 20),
+            KnowledgeSourceIds = _knowledgeSourceIds,
             UseSemanticRanking = true,
             UseVectorSearch = true,
             UseKeywordSearch = true

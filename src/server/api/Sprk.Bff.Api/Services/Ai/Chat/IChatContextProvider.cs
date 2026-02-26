@@ -23,11 +23,17 @@ public interface IChatContextProvider
     /// Playbook to resolve the Action (system prompt) from.  Passed explicitly so that
     /// context can be switched between documents without creating a new session.
     /// </param>
+    /// <param name="hostContext">
+    /// Optional host context describing where SprkChat is embedded.  When provided,
+    /// entity type and ID are propagated into <see cref="ChatKnowledgeScope"/> for
+    /// entity-scoped search filtering.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A fully composed <see cref="ChatContext"/>.</returns>
     Task<ChatContext> GetContextAsync(
         string documentId,
         string tenantId,
         Guid playbookId,
-        CancellationToken cancellationToken);
+        ChatHostContext? hostContext = null,
+        CancellationToken cancellationToken = default);
 }

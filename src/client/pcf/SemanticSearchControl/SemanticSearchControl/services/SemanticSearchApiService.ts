@@ -454,14 +454,22 @@ export class SemanticSearchApiService {
                 fileTypes: request.filters.fileTypes,
                 dateRange: request.filters.dateRange ? {
                     field: "createdAt",
-                    from: request.filters.dateRange.from,
-                    to: request.filters.dateRange.to,
+                    from: request.filters.dateRange.from
+                        ? `${request.filters.dateRange.from}T00:00:00Z`
+                        : undefined,
+                    to: request.filters.dateRange.to
+                        ? `${request.filters.dateRange.to}T23:59:59Z`
+                        : undefined,
                 } : undefined,
             } : undefined,
             options: request.options ? {
                 top: request.options.limit,
                 skip: request.options.offset,
                 includeHighlights: request.options.includeHighlights,
+                // Pass search mode (hybrid, vectorOnly, keywordOnly) to BFF
+                ...(request.filters?.searchMode && request.filters.searchMode !== "hybrid"
+                    ? { hybridMode: request.filters.searchMode }
+                    : {}),
             } : undefined,
         };
     }

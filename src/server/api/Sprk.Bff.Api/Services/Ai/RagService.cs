@@ -679,13 +679,44 @@ public partial class RagService : IRagService
         // Build filter expression
         var filters = new List<string>();
 
-        // Always filter by tenant for security
+        // Always filter by tenant for security (ADR-014)
         filters.Add($"tenantId eq '{EscapeFilterValue(options.TenantId)}'");
 
-        // Optional filters
-        if (!string.IsNullOrEmpty(options.KnowledgeSourceId))
+        // Include knowledge sources — KnowledgeSourceIds (plural) takes precedence over singular.
+        // Use search.in() for lists > 10 items to avoid OData clause limits; OR chain below 10 for log readability.
+        if (options.KnowledgeSourceIds is { Count: > 0 })
+        {
+            if (options.KnowledgeSourceIds.Count > 10)
+            {
+                var escaped = string.Join(",", options.KnowledgeSourceIds.Select(EscapeFilterValue));
+                filters.Add($"search.in(knowledgeSourceId, '{escaped}', ',')");
+            }
+            else
+            {
+                var sourceFilters = options.KnowledgeSourceIds
+                    .Select(id => $"knowledgeSourceId eq '{EscapeFilterValue(id)}'");
+                filters.Add($"({string.Join(" or ", sourceFilters)})");
+            }
+        }
+        else if (!string.IsNullOrEmpty(options.KnowledgeSourceId))
         {
             filters.Add($"knowledgeSourceId eq '{EscapeFilterValue(options.KnowledgeSourceId)}'");
+        }
+
+        // Exclude knowledge sources (NOT filter)
+        if (options.ExcludeKnowledgeSourceIds is { Count: > 0 })
+        {
+            if (options.ExcludeKnowledgeSourceIds.Count > 10)
+            {
+                var escaped = string.Join(",", options.ExcludeKnowledgeSourceIds.Select(EscapeFilterValue));
+                filters.Add($"not search.in(knowledgeSourceId, '{escaped}', ',')");
+            }
+            else
+            {
+                var excludeFilters = options.ExcludeKnowledgeSourceIds
+                    .Select(id => $"knowledgeSourceId eq '{EscapeFilterValue(id)}'");
+                filters.Add($"not ({string.Join(" or ", excludeFilters)})");
+            }
         }
 
         if (!string.IsNullOrEmpty(options.DocumentType))
@@ -693,10 +724,36 @@ public partial class RagService : IRagService
             filters.Add($"documentType eq '{EscapeFilterValue(options.DocumentType)}'");
         }
 
+        // Tags — OR semantics (existing): documents matching ANY of the specified tags
         if (options.Tags?.Count > 0)
         {
             var tagFilters = options.Tags.Select(t => $"tags/any(tag: tag eq '{EscapeFilterValue(t)}')");
             filters.Add($"({string.Join(" or ", tagFilters)})");
+        }
+
+        // Required tags — AND semantics: documents must have ALL of the specified tags
+        if (options.RequiredTags is { Count: > 0 })
+        {
+            foreach (var tag in options.RequiredTags)
+            {
+                filters.Add($"tags/any(tag: tag eq '{EscapeFilterValue(tag)}')");
+            }
+        }
+
+        // Exclude tags — NOT semantics: exclude documents with any of the specified tags
+        if (options.ExcludeTags is { Count: > 0 })
+        {
+            foreach (var tag in options.ExcludeTags)
+            {
+                filters.Add($"not tags/any(tag: tag eq '{EscapeFilterValue(tag)}')");
+            }
+        }
+
+        // Entity scope — filter by parent entity type and ID (both required)
+        if (!string.IsNullOrEmpty(options.ParentEntityType) && !string.IsNullOrEmpty(options.ParentEntityId))
+        {
+            filters.Add($"parentEntityType eq '{EscapeFilterValue(options.ParentEntityType)}'");
+            filters.Add($"parentEntityId eq '{EscapeFilterValue(options.ParentEntityId)}'");
         }
 
         searchOptions.Filter = string.Join(" and ", filters);

@@ -46,4 +46,5 @@ public record ChatSession(
     Guid PlaybookId,
     DateTimeOffset CreatedAt,
     DateTimeOffset LastActivity,
-    IReadOnlyList<ChatMessage> Messages);
+    IReadOnlyList<ChatMessage> Messages,
+    ChatHostContext? HostContext = null);

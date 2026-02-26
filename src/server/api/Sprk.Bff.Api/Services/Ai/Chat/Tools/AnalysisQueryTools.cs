@@ -12,8 +12,8 @@ namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
 ///
 /// Both methods call <see cref="IAnalysisOrchestrationService.GetAnalysisAsync"/> and project
 /// the result to a compact text representation suitable for agent context injection.
-/// The <paramref name="tenantId"/> parameter is threaded through to support future
-/// multi-tenant analysis store lookups per ADR-014.
+/// The tenant ID is captured at construction time (not exposed as an LLM tool parameter)
+/// to support future multi-tenant analysis store lookups per ADR-014.
 ///
 /// Instantiated by <see cref="SprkChatAgentFactory"/>. Not registered in DI — the factory
 /// creates instances and registers methods as <see cref="Microsoft.Extensions.AI.AIFunction"/>
@@ -22,10 +22,12 @@ namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
 public sealed class AnalysisQueryTools
 {
     private readonly IAnalysisOrchestrationService _analysisService;
+    private readonly string _tenantId;
 
-    public AnalysisQueryTools(IAnalysisOrchestrationService analysisService)
+    public AnalysisQueryTools(IAnalysisOrchestrationService analysisService, string tenantId)
     {
         _analysisService = analysisService ?? throw new ArgumentNullException(nameof(analysisService));
+        _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
     }
 
     /// <summary>
@@ -34,16 +36,13 @@ public sealed class AnalysisQueryTools
     /// Use this when the user asks about a previous analysis or wants to refer to analysis findings.
     /// </summary>
     /// <param name="documentId">Get analysis results for a specific document</param>
-    /// <param name="tenantId">Tenant identifier for scoping the lookup (ADR-014).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Formatted analysis result string, or a message if not found.</returns>
     public async Task<string> GetAnalysisResultAsync(
         [Description("Get analysis results for a specific document")] string documentId,
-        string tenantId,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(documentId, nameof(documentId));
-        ArgumentException.ThrowIfNullOrEmpty(tenantId, nameof(tenantId));
 
         if (!Guid.TryParse(documentId, out var analysisGuid))
         {
@@ -101,16 +100,13 @@ public sealed class AnalysisQueryTools
     /// without the full detailed output.
     /// </summary>
     /// <param name="documentId">Get executive summary of document analysis</param>
-    /// <param name="tenantId">Tenant identifier for scoping the lookup (ADR-014).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Extracted executive summary, or a condensed first section of the analysis.</returns>
     public async Task<string> GetAnalysisSummaryAsync(
         [Description("Get executive summary of document analysis")] string documentId,
-        string tenantId,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(documentId, nameof(documentId));
-        ArgumentException.ThrowIfNullOrEmpty(tenantId, nameof(tenantId));
 
         if (!Guid.TryParse(documentId, out var analysisGuid))
         {

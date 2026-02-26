@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="AnalysisWorkspace" version="1.3.4" display-name-key="Analysis Workspace" description-key="Bundle React 18 fully - no platform-library externalization (v1.3.4)" control-type="standard">
+  <control namespace="Spaarke.Controls" constructor="AnalysisWorkspace" version="1.3.5" display-name-key="Analysis Workspace" description-key="Bundle React 18 fully - no platform-library externalization (v1.3.5)" control-type="standard">
     <external-service-usage enabled="false">
     </external-service-usage>
 

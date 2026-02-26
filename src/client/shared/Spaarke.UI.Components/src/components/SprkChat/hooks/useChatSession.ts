@@ -13,6 +13,7 @@ import {
     IChatSession,
     IChatMessage,
     IUseChatSessionResult,
+    IHostContext,
 } from "../types";
 
 interface UseChatSessionOptions {
@@ -90,7 +91,7 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
      * POST /api/ai/chat/sessions
      */
     const createSession = useCallback(
-        async (documentId?: string, playbookId?: string): Promise<IChatSession | null> => {
+        async (documentId?: string, playbookId?: string, hostContext?: IHostContext): Promise<IChatSession | null> => {
             setIsLoading(true);
             setError(null);
 
@@ -102,6 +103,7 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
                         body: JSON.stringify({
                             documentId: documentId || null,
                             playbookId: playbookId || null,
+                            hostContext: hostContext || null,
                         }),
                     }
                 );
@@ -182,7 +184,7 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
      * PATCH /api/ai/chat/sessions/{sessionId}/context
      */
     const switchContext = useCallback(
-        async (documentId?: string, playbookId?: string): Promise<void> => {
+        async (documentId?: string, playbookId?: string, hostContext?: IHostContext): Promise<void> => {
             if (!session) {
                 return;
             }
@@ -198,6 +200,7 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
                         body: JSON.stringify({
                             documentId: documentId || null,
                             playbookId: playbookId || null,
+                            hostContext: hostContext || null,
                         }),
                     }
                 );

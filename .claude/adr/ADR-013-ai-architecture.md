@@ -2,7 +2,7 @@
 
 > **Status**: Accepted
 > **Domain**: AI/ML Integration
-> **Last Updated**: 2025-12-18
+> **Last Updated**: 2026-02-24
 
 ---
 
@@ -24,6 +24,8 @@ Extend **Sprk.Bff.Api** with AI endpoints following established patterns. Use Az
 - **MUST** use Job Contract for background AI work (ADR-004)
 - **MUST** access files through SpeFileStore only (ADR-007)
 - **MUST** apply rate limiting to all AI endpoints
+- **MUST** flow ChatHostContext through the full chat pipeline when provided (entity-scoped search)
+- **MUST** use RagSearchOptions boolean filters (AND/OR/NOT) for knowledge source scoping
 
 ### ❌ MUST NOT
 
@@ -39,13 +41,27 @@ Extend **Sprk.Bff.Api** with AI endpoints following established patterns. Use Az
 ```
 Sprk.Bff.Api/
 ├── Api/Ai/
+│   ├── ChatEndpoints.cs                  ← /api/ai/chat/* (sessions, messages, playbooks)
 │   ├── DocumentIntelligenceEndpoints.cs  ← /api/ai/document-intelligence/*
 │   ├── AnalysisEndpoints.cs              ← /api/ai/analysis/*
 │   └── RecordMatchEndpoints.cs           ← record matching
+├── Models/Ai/Chat/
+│   ├── ChatSession.cs                    ← session record with HostContext
+│   ├── ChatContext.cs                    ← context + ChatKnowledgeScope
+│   └── ChatHostContext.cs                ← entity-aware host context
 ├── Services/Ai/
+│   ├── IRagService.cs / RagService.cs    ← RAG search with boolean filter logic
 │   ├── DocumentIntelligenceService.cs    ← summarization/extraction
 │   ├── AnalysisOrchestrationService.cs   ← orchestration + SSE
-│   └── TextExtractorService.cs           ← text extraction
+│   ├── TextExtractorService.cs           ← text extraction
+│   └── Chat/
+│       ├── ChatSessionManager.cs          ← session lifecycle
+│       ├── IChatContextProvider.cs        ← context resolution interface
+│       ├── PlaybookChatContextProvider.cs ← playbook-driven context + entity scope
+│       ├── SprkChatAgentFactory.cs        ← agent construction
+│       └── Tools/
+│           ├── DocumentSearchTools.cs     ← entity-scoped search
+│           └── KnowledgeRetrievalTools.cs ← knowledge source-scoped retrieval
 └── Services/Jobs/Handlers/
     └── DocumentAnalysisJobHandler.cs     ← JobType: "ai-analyze"
 ```
@@ -54,6 +70,9 @@ Sprk.Bff.Api/
 
 | Endpoint | Purpose | Pattern |
 |----------|---------|---------|
+| `/chat/sessions` | Create chat session | Session + HostContext |
+| `/chat/sessions/{id}/messages` | Send chat message | SSE streaming |
+| `/chat/playbooks` | List available playbooks | Pre-session discovery |
 | `/analyze` | SSE streaming analysis | Sync + streaming |
 | `/enqueue` | Background analysis | Async job (ADR-004) |
 | `/enqueue-batch` | Batch processing | Async job (ADR-004) |

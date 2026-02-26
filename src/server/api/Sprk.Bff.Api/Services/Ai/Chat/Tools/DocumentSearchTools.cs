@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
@@ -7,12 +8,15 @@ namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
 /// AI tool class providing document vector search capabilities to the SprkChatAgent.
 ///
 /// Exposes two search methods:
-///   - <see cref="SearchDocumentsAsync"/> — targeted search against the knowledge index
+///   - <see cref="SearchDocumentsAsync"/> — targeted search against the knowledge index,
+///     scoped to the playbook's knowledge sources when available
 ///   - <see cref="SearchDiscoveryAsync"/> — broad discovery search across all documents
+///     (intentionally tenant-wide, not knowledge-scoped)
 ///
-/// Both methods enforce ADR-014 tenant isolation by passing <paramref name="tenantId"/>
-/// directly to <see cref="IRagService.SearchAsync(string, RagSearchOptions, System.Threading.CancellationToken)"/>
-/// as a required filter. The agent cannot bypass tenant scoping.
+/// Both methods enforce ADR-014 tenant isolation via a tenant ID captured at construction
+/// time and passed to <see cref="IRagService.SearchAsync(string, RagSearchOptions, System.Threading.CancellationToken)"/>
+/// as a required filter. The tenant ID is NOT exposed as an LLM tool parameter — it is
+/// injected by <see cref="SprkChatAgentFactory"/> from the authenticated session context.
 ///
 /// Instantiated by <see cref="SprkChatAgentFactory"/>. Not registered in DI — the factory
 /// creates instances and registers methods as <see cref="Microsoft.Extensions.AI.AIFunction"/>
@@ -21,10 +25,20 @@ namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
 public sealed class DocumentSearchTools
 {
     private readonly IRagService _ragService;
+    private readonly string _tenantId;
+    private readonly IReadOnlyList<string>? _knowledgeSourceIds;
+    private readonly string? _parentEntityType;
+    private readonly string? _parentEntityId;
 
-    public DocumentSearchTools(IRagService ragService)
+    public DocumentSearchTools(IRagService ragService, string tenantId, ChatKnowledgeScope? knowledgeScope = null)
     {
         _ragService = ragService ?? throw new ArgumentNullException(nameof(ragService));
+        _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
+        _knowledgeSourceIds = knowledgeScope?.RagKnowledgeSourceIds is { Count: > 0 }
+            ? knowledgeScope.RagKnowledgeSourceIds
+            : null;
+        _parentEntityType = knowledgeScope?.ParentEntityType;
+        _parentEntityId = knowledgeScope?.ParentEntityId;
     }
 
     /// <summary>
@@ -32,23 +46,21 @@ public sealed class DocumentSearchTools
     /// Use this when the user asks about specific topics, clauses, or information within documents.
     /// </summary>
     /// <param name="query">Search query for document knowledge</param>
-    /// <param name="tenantId">Tenant identifier for index routing (ADR-014 — required).</param>
     /// <param name="topK">Maximum number of results to return (default: 5).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Formatted string of matching document excerpts with relevance scores.</returns>
     public async Task<string> SearchDocumentsAsync(
         [Description("Search query for document knowledge")] string query,
-        string tenantId,
         int topK = 5,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(query, nameof(query));
-        ArgumentException.ThrowIfNullOrEmpty(tenantId, nameof(tenantId));
 
         var options = new RagSearchOptions
         {
-            TenantId = tenantId,
+            TenantId = _tenantId,
             TopK = Math.Clamp(topK, 1, 20),
+            KnowledgeSourceIds = _knowledgeSourceIds,
             UseSemanticRanking = true,
             UseVectorSearch = true,
             UseKeywordSearch = true
@@ -85,27 +97,28 @@ public sealed class DocumentSearchTools
     /// across the entire document corpus — not limited to a specific knowledge source.
     /// </summary>
     /// <param name="query">Broad discovery search across all documents</param>
-    /// <param name="tenantId">Tenant identifier for index routing (ADR-014 — required).</param>
     /// <param name="topK">Maximum number of results to return (default: 10).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Formatted string of discovered document excerpts with relevance scores.</returns>
     public async Task<string> SearchDiscoveryAsync(
         [Description("Broad discovery search across all documents")] string query,
-        string tenantId,
         int topK = 10,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(query, nameof(query));
-        ArgumentException.ThrowIfNullOrEmpty(tenantId, nameof(tenantId));
 
         var options = new RagSearchOptions
         {
-            TenantId = tenantId,
+            TenantId = _tenantId,
             TopK = Math.Clamp(topK, 1, 20),
             MinScore = 0.5f, // Lower threshold for discovery to cast a wider net
             UseSemanticRanking = true,
             UseVectorSearch = true,
-            UseKeywordSearch = true
+            UseKeywordSearch = true,
+            // Entity scope: when HostContext is set, constrain discovery to the parent entity boundary.
+            // When null, discovery remains tenant-wide (backward compatible).
+            ParentEntityType = _parentEntityType,
+            ParentEntityId = _parentEntityId
         };
 
         var response = await _ragService.SearchAsync(query, options, cancellationToken);

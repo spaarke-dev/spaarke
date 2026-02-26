@@ -15,6 +15,8 @@ describe("useFilters", () => {
             matterTypes: [],
             dateRange: null,
             fileTypes: [],
+            threshold: 0,
+            searchMode: "hybrid",
         });
         expect(result.current.hasActiveFilters).toBe(false);
     });
@@ -88,6 +90,8 @@ describe("useFilters", () => {
                 matterTypes: ["litigation"],
                 dateRange: { from: "2026-01-01", to: null },
                 fileTypes: ["pdf"],
+                threshold: 0,
+                searchMode: "hybrid",
             });
         });
 
@@ -103,6 +107,8 @@ describe("useFilters", () => {
             matterTypes: [],
             dateRange: null,
             fileTypes: [],
+            threshold: 0,
+            searchMode: "hybrid",
         });
         expect(result.current.hasActiveFilters).toBe(false);
     });
@@ -120,6 +126,8 @@ describe("useFilters", () => {
                 matterTypes: [],
                 dateRange: null,
                 fileTypes: [],
+                threshold: 0,
+                searchMode: "hybrid",
             });
         });
         expect(result.current.hasActiveFilters).toBe(false);

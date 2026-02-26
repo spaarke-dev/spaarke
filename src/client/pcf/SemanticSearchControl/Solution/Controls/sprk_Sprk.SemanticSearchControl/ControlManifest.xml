@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.0.36" display-name-key="Semantic Search Control" description-key="PCF control for semantic document search with natural language queries" control-type="virtual" api-version="1.3.18">
+  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.0.47" display-name-key="Semantic Search Control" description-key="PCF control for semantic document search with natural language queries" control-type="virtual" api-version="1.3.18">
     <external-service-usage enabled="true">
       <domain>spe-api-dev-67e2xz.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>
     </external-service-usage>
     <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL" of-type="SingleLine.Text" usage="input" required="false"/>
     <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD tenant ID" of-type="SingleLine.Text" usage="input" required="false"/>
-    <property name="searchScope" display-name-key="Search Scope" description-key="Search scope mode" of-type="Enum" usage="input" required="false">
+    <property name="searchScope" display-name-key="Search Scope" description-key="Search scope mode: all=system-wide, entity=auto-detect from form, custom=document IDs" of-type="Enum" usage="input" required="false">
       <value name="all" display-name-key="All">all</value>
-      <value name="matter" display-name-key="Matter">matter</value>
+      <value name="entity" display-name-key="Entity">entity</value>
       <value name="custom" display-name-key="Custom">custom</value>
     </property>
     <property name="scopeId" display-name-key="Scope ID" description-key="ID for scoped search (e.g., Matter ID)" of-type="SingleLine.Text" usage="bound" required="false"/>

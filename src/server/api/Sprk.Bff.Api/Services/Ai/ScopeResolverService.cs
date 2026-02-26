@@ -106,36 +106,30 @@ public class ScopeResolverService : IScopeResolverService
                 "Playbook '{PlaybookName}' has {ToolCount} tools, {SkillCount} skills, {KnowledgeCount} knowledge",
                 playbook.Name, playbook.ToolIds.Length, playbook.SkillIds.Length, playbook.KnowledgeIds.Length);
 
-            if (playbook.ToolIds.Length == 0)
+            if (playbook.ToolIds.Length == 0 && playbook.SkillIds.Length == 0 && playbook.KnowledgeIds.Length == 0)
             {
                 _logger.LogWarning(
-                    "Playbook '{PlaybookName}' (ID: {PlaybookId}) has no tools configured in N:N relationship",
+                    "Playbook '{PlaybookName}' (ID: {PlaybookId}) has no scopes configured",
                     playbook.Name, playbookId);
                 return new ResolvedScopes([], [], []);
             }
 
             // Load full AnalysisTool entities for each tool ID
-            _logger.LogInformation(
-                "[RESOLVE SCOPES] Loading full tool entities for {Count} tool IDs: {ToolIds}",
-                playbook.ToolIds.Length,
-                string.Join(", ", playbook.ToolIds));
+            var tools = Array.Empty<AnalysisTool>();
+            if (playbook.ToolIds.Length > 0)
+            {
+                _logger.LogDebug(
+                    "Loading {Count} tool entities for playbook '{PlaybookName}'",
+                    playbook.ToolIds.Length, playbook.Name);
 
-            var toolTasks = playbook.ToolIds.Select(toolId => GetToolAsync(toolId, cancellationToken));
-            var toolResults = await Task.WhenAll(toolTasks);
+                var toolTasks = playbook.ToolIds.Select(toolId => GetToolAsync(toolId, cancellationToken));
+                var toolResults = await Task.WhenAll(toolTasks);
 
-            _logger.LogInformation(
-                "[RESOLVE SCOPES] GetToolAsync returned {TotalCount} results, {NullCount} were null",
-                toolResults.Length,
-                toolResults.Count(t => t == null));
-
-            var tools = toolResults
-                .Where(t => t != null)
-                .Cast<AnalysisTool>()
-                .ToArray();
-
-            _logger.LogInformation(
-                "[RESOLVE SCOPES] After filtering nulls, {Count} valid tools remain",
-                tools.Length);
+                tools = toolResults
+                    .Where(t => t != null)
+                    .Cast<AnalysisTool>()
+                    .ToArray();
+            }
 
             _logger.LogDebug(
                 "Resolved {ToolCount} tools from playbook '{PlaybookName}' (ID: {PlaybookId}): {ToolNames}",
@@ -144,9 +138,43 @@ public class ScopeResolverService : IScopeResolverService
                 playbookId,
                 string.Join(", ", tools.Select(t => t.Name)));
 
-            // Return scopes with tools (Skills and Knowledge empty for now)
-            // TODO: Load skills and knowledge when needed (FR-14, FR-15)
-            return new ResolvedScopes([], [], tools);
+            // Load skills from playbook N:N relationships
+            var skills = Array.Empty<AnalysisSkill>();
+            if (playbook.SkillIds.Length > 0)
+            {
+                _logger.LogDebug(
+                    "Loading {Count} skill entities for playbook '{PlaybookName}'",
+                    playbook.SkillIds.Length, playbook.Name);
+
+                var skillTasks = playbook.SkillIds.Select(id => GetSkillAsync(id, cancellationToken));
+                var skillResults = await Task.WhenAll(skillTasks);
+                skills = skillResults.Where(s => s != null).Cast<AnalysisSkill>().ToArray();
+
+                _logger.LogDebug(
+                    "Resolved {SkillCount} skills from playbook '{PlaybookName}': {SkillNames}",
+                    skills.Length, playbook.Name,
+                    string.Join(", ", skills.Select(s => s.Name)));
+            }
+
+            // Load knowledge sources from playbook N:N relationships
+            var knowledge = Array.Empty<AnalysisKnowledge>();
+            if (playbook.KnowledgeIds.Length > 0)
+            {
+                _logger.LogDebug(
+                    "Loading {Count} knowledge entities for playbook '{PlaybookName}'",
+                    playbook.KnowledgeIds.Length, playbook.Name);
+
+                var knowledgeTasks = playbook.KnowledgeIds.Select(id => GetKnowledgeAsync(id, cancellationToken));
+                var knowledgeResults = await Task.WhenAll(knowledgeTasks);
+                knowledge = knowledgeResults.Where(k => k != null).Cast<AnalysisKnowledge>().ToArray();
+
+                _logger.LogDebug(
+                    "Resolved {KnowledgeCount} knowledge sources from playbook '{PlaybookName}': {KnowledgeNames}",
+                    knowledge.Length, playbook.Name,
+                    string.Join(", ", knowledge.Select(k => k.Name)));
+            }
+
+            return new ResolvedScopes(skills, knowledge, tools);
         }
         catch (Exception ex)
         {

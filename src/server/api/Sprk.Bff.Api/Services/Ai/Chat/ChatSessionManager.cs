@@ -49,12 +49,14 @@ public class ChatSessionManager
     /// <param name="tenantId">Tenant ID (multi-tenant isolation).</param>
     /// <param name="documentId">SPE document ID for the session context (may be null).</param>
     /// <param name="playbookId">Playbook that governs the agent's system prompt and tools.</param>
+    /// <param name="hostContext">Optional host context describing where SprkChat is embedded.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The newly created <see cref="ChatSession"/>.</returns>
     public async Task<ChatSession> CreateSessionAsync(
         string tenantId,
         string? documentId,
         Guid playbookId,
+        ChatHostContext? hostContext = null,
         CancellationToken ct = default)
     {
         var sessionId = Guid.NewGuid().ToString("N");
@@ -67,7 +69,8 @@ public class ChatSessionManager
             PlaybookId: playbookId,
             CreatedAt: now,
             LastActivity: now,
-            Messages: []);
+            Messages: [],
+            HostContext: hostContext);
 
         _logger.LogInformation(
             "Creating chat session {SessionId} for tenant={TenantId}, document={DocumentId}, playbook={PlaybookId}",

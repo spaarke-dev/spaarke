@@ -216,6 +216,7 @@ AI work frequently introduces **temporary shortcuts** (e.g., temporarily disable
 src/server/api/Sprk.Bff.Api/
 ├── Api/
 │   ├── Ai/
+│   │   ├── ChatEndpoints.cs                  # SprkChat: sessions, messages, playbook discovery
 │   │   ├── DocumentIntelligenceEndpoints.cs
 │   │   ├── AnalysisEndpoints.cs
 │   │   ├── RagEndpoints.cs              # R3 Phase 1: RAG search/indexing
@@ -225,14 +226,27 @@ src/server/api/Sprk.Bff.Api/
 │       ├── AiAuthorizationFilter.cs     # Document-level auth (oid claim)
 │       ├── TenantAuthorizationFilter.cs # R3: Tenant isolation (tid claim)
 │       └── Analysis*AuthorizationFilter.cs
+├── Models/Ai/Chat/
+│   ├── ChatSession.cs                   # Session record (includes HostContext)
+│   ├── ChatContext.cs                   # ChatContext + ChatKnowledgeScope
+│   └── ChatHostContext.cs               # Entity-aware host context record
 ├── Services/
 │   └── Ai/
 │       ├── DocumentIntelligenceService.cs
 │       ├── AnalysisOrchestrationService.cs
 │       ├── AnalysisContextBuilder.cs    # Prompt construction
-│       ├── RagService.cs                # R3: Hybrid search + embeddings
+│       ├── IRagService.cs / RagService.cs # Hybrid search + boolean OData filters
+│       ├── ScopeResolverService.cs      # Resolves knowledge source IDs from playbook
 │       ├── TextExtractorService.cs
 │       ├── OpenAiClient.cs              # Azure OpenAI with resilience
+│       ├── Chat/                        # SprkChat pipeline
+│       │   ├── ChatSessionManager.cs    # Session lifecycle + HostContext storage
+│       │   ├── IChatContextProvider.cs  # Context resolution interface
+│       │   ├── PlaybookChatContextProvider.cs # Playbook-driven context + entity scope
+│       │   ├── SprkChatAgentFactory.cs  # Agent construction with context
+│       │   └── Tools/
+│       │       ├── DocumentSearchTools.cs     # Entity-scoped search discovery
+│       │       └── KnowledgeRetrievalTools.cs # Knowledge source-scoped retrieval
 │       └── Export/                      # R3 Phase 3: Export services
 │           ├── IExportService.cs
 │           ├── DocxExportService.cs     # Open XML SDK
@@ -254,6 +268,14 @@ src/server/api/Sprk.Bff.Api/
     ├── DocumentIntelligenceOptions.cs
     ├── AnalysisOptions.cs               # R3: Export and context settings
     └── AiSearchResilienceOptions.cs     # R3: Circuit breaker config
+
+src/client/shared/Spaarke.UI.Components/src/components/SprkChat/
+├── SprkChat.tsx                         # Main component + playbook chips
+├── types.ts                             # IHostContext, ISprkChatProps, etc.
+├── index.ts                             # Barrel exports
+└── hooks/
+    ├── useChatSession.ts                # Session create/switch/send with HostContext
+    └── useChatPlaybooks.ts              # Playbook discovery hook
 
 src/client/pcf/
 ├── UniversalQuickCreate/               # Upload + AI summary + record match (SSE client)
@@ -539,6 +561,7 @@ public class AiIndexingJobHandler : IJobHandler<AiIndexingJob>
 |------|--------|--------|
 | 2025-12-05 | Spaarke Engineering | Initial ADR created |
 | 2026-01-02 | Spaarke Engineering | R3 Phases 1-5 complete: RAG, Export, Monitoring, Security |
+| 2026-02-24 | Spaarke Engineering | SprkChat system: ChatHostContext, entity-scoped RAG, playbook discovery, boolean filter logic |
 
 ---
 

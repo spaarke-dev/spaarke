@@ -109,8 +109,8 @@ const useStyles = makeStyles({
         flexShrink: 0,
     },
     previewPopover: {
-        width: "480px",
-        height: "640px",
+        width: "880px",
+        height: "85vh",
         padding: "0px",
         overflow: "hidden",
     },
@@ -121,12 +121,18 @@ const useStyles = makeStyles({
         display: "block",
     },
     summaryPopover: {
-        maxWidth: "420px",
-        maxHeight: "300px",
+        width: "480px",
+        height: "620px",
         overflowY: "auto",
         display: "flex",
         flexDirection: "column",
         gap: tokens.spacingVerticalS,
+    },
+    summaryHeader: {
+        fontWeight: tokens.fontWeightSemibold,
+        fontSize: tokens.fontSizeBase400,
+        paddingBottom: tokens.spacingVerticalXS,
+        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     },
 });
 
@@ -186,6 +192,7 @@ export const ResultCard: React.FC<IResultCardProps> = ({
     onOpenRecord,
     onFindSimilar,
     onPreview,
+    onSummary,
     compactMode,
 }) => {
     const styles = useStyles();
@@ -194,6 +201,11 @@ export const ResultCard: React.FC<IResultCardProps> = ({
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
     const [previewError, setPreviewError] = useState(false);
+
+    // Summary popover state — lazy-loaded from Dataverse via onSummary callback
+    const [summaryData, setSummaryData] = useState<{ summary: string | null; tldr: string | null } | null>(null);
+    const [summaryLoading, setSummaryLoading] = useState(false);
+    const [summaryError, setSummaryError] = useState(false);
 
     // Handle card click
     const handleCardClick = useCallback(
@@ -249,7 +261,6 @@ export const ResultCard: React.FC<IResultCardProps> = ({
         : styles.card;
 
     const formattedDate = formatDate(result.createdAt);
-    const hasSummary = Boolean(result.summary || result.tldr);
 
     return (
         <Card
@@ -407,31 +418,64 @@ export const ResultCard: React.FC<IResultCardProps> = ({
                     </PopoverSurface>
                 </Popover>
 
-                {/* Summary — AI summary popover */}
-                {hasSummary && (
-                    <Popover positioning="above" withArrow>
-                        <PopoverTrigger disableButtonEnhancement>
-                            <Tooltip content="View AI summary" relationship="label">
-                                <Button
-                                    appearance="subtle"
-                                    size="small"
-                                    icon={<Sparkle20Regular />}
-                                    onClick={(ev) => ev.stopPropagation()}
-                                >
-                                    Summary
-                                </Button>
-                            </Tooltip>
-                        </PopoverTrigger>
-                        <PopoverSurface className={styles.summaryPopover}>
-                            {result.tldr && (
-                                <Text weight="semibold">{result.tldr}</Text>
-                            )}
-                            {result.summary && (
-                                <Text style={{ whiteSpace: "pre-wrap" }}>{result.summary}</Text>
-                            )}
-                        </PopoverSurface>
-                    </Popover>
-                )}
+                {/* Summary — lazy-loads from Dataverse via onSummary callback */}
+                <Popover
+                    positioning="after"
+                    withArrow
+                    onOpenChange={(_ev, data) => {
+                        if (data.open && !summaryData && !summaryLoading) {
+                            setSummaryLoading(true);
+                            setSummaryError(false);
+                            void onSummary()
+                                .then((sd) => {
+                                    setSummaryData(sd);
+                                    setSummaryLoading(false);
+                                    return sd;
+                                })
+                                .catch(() => {
+                                    setSummaryError(true);
+                                    setSummaryLoading(false);
+                                });
+                        }
+                    }}
+                >
+                    <PopoverTrigger disableButtonEnhancement>
+                        <Tooltip content="View AI summary" relationship="label">
+                            <Button
+                                appearance="subtle"
+                                size="small"
+                                icon={<Sparkle20Regular />}
+                                onClick={(ev) => ev.stopPropagation()}
+                            >
+                                Summary
+                            </Button>
+                        </Tooltip>
+                    </PopoverTrigger>
+                    <PopoverSurface className={styles.summaryPopover}>
+                        <Text className={styles.summaryHeader}>Summary</Text>
+                        {summaryLoading && (
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", flex: 1 }}>
+                                <Spinner size="small" label="Loading summary..." />
+                            </div>
+                        )}
+                        {summaryError && (
+                            <Text>Summary not available for this document.</Text>
+                        )}
+                        {summaryData && !summaryLoading && (
+                            <>
+                                {summaryData.tldr && (
+                                    <Text weight="semibold">{summaryData.tldr}</Text>
+                                )}
+                                {summaryData.summary && (
+                                    <Text style={{ whiteSpace: "pre-wrap" }}>{summaryData.summary}</Text>
+                                )}
+                                {!summaryData.summary && !summaryData.tldr && (
+                                    <Text>No summary available for this document.</Text>
+                                )}
+                            </>
+                        )}
+                    </PopoverSurface>
+                </Popover>
             </div>
         </Card>
     );
