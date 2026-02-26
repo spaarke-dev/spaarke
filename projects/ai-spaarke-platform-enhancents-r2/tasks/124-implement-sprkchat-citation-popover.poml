@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="124" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Implement SprkChatCitationPopover Component</title>
+    <phase>3</phase>
+    <package>Package H: Suggestions + Citations</package>
+    <tags>frontend, fluent-ui</tags>
+    <estimate>4-5 hours</estimate>
+    <dependencies>Phase 2 complete</dependencies>
+    <parallel-group>sprint3-track3</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create the SprkChatCitationPopover component that renders as a popover when the user clicks
+      a citation superscript [1] in a chat message. The popover displays the source name, page
+      number, text excerpt, and an "Open Source" link.
+    </goal>
+    <context>
+      When the AI cites sources in its response (e.g., from document search or knowledge retrieval),
+      the response text contains citation markers like [1], [2], etc. These markers need to be
+      rendered as clickable superscript links that open a popover with citation details.
+
+      The popover shows:
+      - Source name: e.g., "Financial Report Q3 2025.pdf"
+      - Page number: e.g., "Page 14" (if available)
+      - Excerpt: a 2-3 sentence excerpt from the source that supports the cited claim
+      - "Open Source" link: opens the source document in a new pane/tab
+
+      The component is responsible only for the popover UI. Citation data (source, page, excerpt)
+      is provided via props from the parent SprkChatMessage component. The citation marker parsing
+      and data association is handled in task 125.
+
+      Use Fluent UI v9 Popover component for the popover behavior (positioning, dismiss on click
+      outside, arrow pointing to anchor).
+    </context>
+    <constraints>
+      - Follow ADR-012: Component MUST live in @spaarke/ui-components SprkChat directory
+      - Follow ADR-021: Fluent UI v9 exclusively; makeStyles + design tokens; dark mode support
+      - Use Fluent UI v9 Popover component for positioning and dismiss behavior
+      - Citation superscripts must be visually distinct (smaller font, raised, colored link)
+      - Popover must be accessible: focus trapped inside, Escape to close, screen reader support
+      - "Open Source" link must open source document without exposing internal IDs to the user
+      - Excerpt text in popover must be limited to 200 characters with ellipsis
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessage.tsx</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review Fluent UI v9 Popover component API:
+      - Popover, PopoverTrigger, PopoverSurface usage patterns
+      - Positioning options (above, below, auto)
+      - Dismiss behavior (click outside, Escape key)
+      - Arrow rendering
+    </step>
+    <step order="2">
+      Define TypeScript interfaces:
+      - Citation: { id: number, source: string, page?: number, excerpt: string,
+        chunkId: string, sourceUrl?: string }
+      - SprkChatCitationPopoverProps: { citation: Citation, anchorRef: React.RefObject,
+        open: boolean, onOpenChange: (open: boolean) => void }
+      - CitationMarkerProps: { citationId: number, onClick: (id: number) => void }
+    </step>
+    <step order="3">
+      Implement CitationMarker inline component:
+      - Renders as a superscript link: [1], [2], etc.
+      - Styled as a small, raised, colored text (colorBrandForeground1)
+      - Clickable — triggers popover open
+      - Accessible: role="button", aria-label="Citation 1", tabIndex for keyboard focus
+    </step>
+    <step order="4">
+      Implement SprkChatCitationPopover component:
+      - Uses Fluent UI v9 Popover + PopoverSurface
+      - Layout inside PopoverSurface:
+        - Header: source name (bold) + page number (if available)
+        - Body: excerpt text (truncated to 200 chars with ellipsis)
+        - Footer: "Open Source" link (opens document in new pane/tab)
+      - Popover positioning: prefer below the anchor, auto-flip if space is limited
+      - Dismiss: click outside, Escape key, or explicit close button
+    </step>
+    <step order="5">
+      Apply Fluent UI v9 styling:
+      - Use makeStyles with design tokens
+      - Popover surface: colorNeutralBackground1, subtle border
+      - Source name: typographyStyles.subtitle2, colorNeutralForeground1
+      - Page number: typographyStyles.caption1, colorNeutralForeground3
+      - Excerpt: typographyStyles.body1, colorNeutralForeground2, italic
+      - "Open Source" link: colorBrandForegroundLink, underline on hover
+      - Dark mode: all tokens auto-adapt
+    </step>
+    <step order="6">
+      Implement "Open Source" link behavior:
+      - If sourceUrl is provided: open in new browser tab
+      - If chunkId is available: construct SPE document URL and open via Xrm.Navigation.navigateTo
+        or window.open depending on context
+      - If no source URL available: hide the link, show "Source available in document library"
+    </step>
+    <step order="7">
+      Export components:
+      - Export SprkChatCitationPopover and CitationMarker from SprkChat barrel
+      - Export Citation type from types.ts
+    </step>
+    <step order="8">
+      Build verification:
+      - Run TypeScript compilation for Spaarke.UI.Components
+      - Verify no type errors
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review Fluent UI v9 Popover patterns and SprkChatMessage component</tool>
+    <tool>Write - Create SprkChatCitationPopover.tsx</tool>
+    <tool>Edit - Update SprkChat barrel exports and types</tool>
+    <tool>Bash - TypeScript compilation</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatCitationPopover.tsx</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/index.ts</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessage.tsx</file>
+  </relevant-files>
+
+  <outputs>
+    <output>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatCitationPopover.tsx - Citation popover + marker</output>
+    <output>Updated types.ts with Citation type definition</output>
+    <output>Updated SprkChat barrel exports</output>
+    <output>Successful TypeScript compilation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SprkChatCitationPopover.tsx exists in the SprkChat component directory</criterion>
+    <criterion>CitationMarker renders as clickable superscript [N] with brand color</criterion>
+    <criterion>Popover opens on CitationMarker click and shows source name, page, and excerpt</criterion>
+    <criterion>Popover uses Fluent UI v9 Popover component for positioning and dismiss behavior</criterion>
+    <criterion>Excerpt text is truncated to 200 characters with ellipsis</criterion>
+    <criterion>"Open Source" link opens the source document (or hides if URL unavailable)</criterion>
+    <criterion>Popover dismisses on click outside and Escape key</criterion>
+    <criterion>All colors use Fluent UI v9 design tokens — no hard-coded hex values</criterion>
+    <criterion>Component renders correctly in dark mode</criterion>
+    <criterion>Keyboard accessible: Tab to citation marker, Enter to open, Escape to close</criterion>
+    <criterion>Citation type exported from types.ts</criterion>
+    <criterion>TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+
+  <placeholders />
+</task>

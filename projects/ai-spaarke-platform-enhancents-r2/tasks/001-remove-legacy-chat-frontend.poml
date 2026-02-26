@@ -1,0 +1,101 @@
+<task id="R2-001" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Remove Legacy Chat Frontend Code</title>
+    <phase>Phase 0: Legacy Cleanup</phase>
+    <package>Package C</package>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>frontend, cleanup, pcf</tags>
+    <parallel-group>cleanup-frontend</parallel-group>
+  </metadata>
+
+  <prompt>
+    Remove all legacy chat code from the AnalysisWorkspace PCF control. This includes the
+    `useLegacyChat` feature flag and every conditional branch it guards, the inline legacy chat
+    panel (lines ~1404-1489 in AnalysisWorkspaceApp.tsx), the legacy `useSseStream.ts` hook inside
+    the AnalysisWorkspace hooks folder (NOT the shared SprkChat hook in Spaarke.UI.Components),
+    the `ResumeSessionDialog.tsx` component, the chat message badge, and the `MsalAuthProvider`
+    if it becomes unused after cleanup. This is prerequisite work that must be completed before
+    the Code Page migration (Package C) can begin.
+  </prompt>
+  <role>Senior full-stack developer with Spaarke platform expertise</role>
+  <goal>Eliminate all legacy chat artifacts from the AnalysisWorkspace PCF so the codebase is clean for the Code Page migration. Zero references to `useLegacyChat` or `ResumeSessionDialog` remain; the PCF builds and functions correctly without legacy chat code.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">PCF controls are for field-bound form controls only; standalone dialogs and pages must be Code Pages. Legacy JS web resources must not be created.</constraint>
+    <constraint source="ADR-022">PCF controls use React 16 platform-provided APIs. Do not introduce React 18+ APIs during cleanup.</constraint>
+    <constraint source="ADR-012">Shared components live in @spaarke/ui-components. Do NOT delete the shared SprkChat useSseStream hook — only delete the legacy AnalysisWorkspace-local copy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>PCF control architecture and legacy chat integration</topic>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The AnalysisWorkspace PCF contains a `useLegacyChat` feature flag that conditionally
+      renders an inline chat panel. This legacy chat code predates the shared SprkChat component
+      and is no longer needed. It includes a local `useSseStream.ts` hook (294 lines), a
+      `ResumeSessionDialog.tsx` component, a chat message badge, and MsalAuthProvider imports.
+      All of this must be removed before the Analysis Workspace can be migrated from PCF to a
+      Code Page (Package C). The shared SprkChat hook in Spaarke.UI.Components must NOT be
+      touched — only the AnalysisWorkspace-local legacy copy.
+    </background>
+    <dependencies>
+      <!-- No dependencies — this is a Phase 0 prerequisite -->
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx</file>
+    <file action="delete">src/client/pcf/AnalysisWorkspace/control/hooks/useSseStream.ts</file>
+    <file action="delete">src/client/pcf/AnalysisWorkspace/control/components/ResumeSessionDialog.tsx</file>
+    <file action="modify">src/client/pcf/AnalysisWorkspace/control/hooks/index.ts</file>
+    <file action="modify">src/client/pcf/AnalysisWorkspace/control/index.ts</file>
+    <file action="modify">src/client/pcf/AnalysisWorkspace/control/types/index.ts</file>
+    <file action="modify">src/client/pcf/AnalysisWorkspace/control/ControlManifest.Input.xml</file>
+    <file action="modify">src/client/pcf/AnalysisWorkspace/control/services/auth/MsalAuthProvider.ts</file>
+    <file action="modify">src/client/pcf/AnalysisWorkspace/control/services/auth/index.ts</file>
+    <file action="modify">src/client/pcf/AnalysisWorkspace/control/services/auth/msalConfig.ts</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholder code — this task only removes code -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Audit useLegacyChat references">Grep the AnalysisWorkspace PCF folder for all occurrences of `useLegacyChat`, `ResumeSessionDialog`, legacy `useSseStream`, chat badge, and `MsalAuthProvider`. Document every file and line number that needs modification.</step>
+    <step order="2" name="Remove useLegacyChat flag and branches">In `AnalysisWorkspaceApp.tsx`, remove the `useLegacyChat` flag declaration, all conditional branches guarded by it, and the legacy inline chat panel rendering (lines ~1404-1489). Preserve all non-legacy code paths as the default behavior.</step>
+    <step order="3" name="Delete ResumeSessionDialog">Delete `src/client/pcf/AnalysisWorkspace/control/components/ResumeSessionDialog.tsx` entirely. Remove all imports of `ResumeSessionDialog` from `AnalysisWorkspaceApp.tsx` and any barrel exports.</step>
+    <step order="4" name="Delete legacy useSseStream hook">Delete `src/client/pcf/AnalysisWorkspace/control/hooks/useSseStream.ts` (the 294-line legacy hook). Update `hooks/index.ts` to remove the re-export. Confirm the shared `SprkChat/hooks/useSseStream.ts` in Spaarke.UI.Components is untouched.</step>
+    <step order="5" name="Remove chat message badge">Remove the chat message badge component/rendering from `AnalysisWorkspaceApp.tsx`. Remove any associated state, styles, or imports.</step>
+    <step order="6" name="Evaluate MsalAuthProvider usage">Check if `MsalAuthProvider` in the AnalysisWorkspace auth folder is still referenced after legacy chat removal. If unused, delete the auth files (`MsalAuthProvider.ts`, `msalConfig.ts`, `index.ts`). If still used by non-legacy code, keep it.</step>
+    <step order="7" name="Clean up types and imports">Remove any types, interfaces, or constants from `types/index.ts` that were only used by legacy chat code. Remove orphaned imports across all modified files.</step>
+    <step order="8" name="Remove useLegacyChat from ControlManifest">If `useLegacyChat` is declared as a PCF property in `ControlManifest.Input.xml`, remove it. Update the control version if the manifest changes.</step>
+    <step order="9" name="Build verification">Run `cd src/client/pcf/AnalysisWorkspace && npm run build` to verify the PCF control compiles cleanly with no legacy code. Fix any compilation errors.</step>
+    <step order="10" name="Final grep verification">Grep the entire `src/client/pcf/AnalysisWorkspace/` directory for any remaining references to `useLegacyChat`, `ResumeSessionDialog`, legacy `useSseStream`, or orphaned imports. Confirm zero results.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero occurrences of `useLegacyChat` in the entire codebase (grep returns empty)</criterion>
+    <criterion testable="true">No `ResumeSessionDialog` import or file exists in the codebase</criterion>
+    <criterion testable="true">`src/client/pcf/AnalysisWorkspace/control/hooks/useSseStream.ts` is deleted</criterion>
+    <criterion testable="true">The shared `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts` is unchanged</criterion>
+    <criterion testable="true">`npm run build` in the AnalysisWorkspace PCF succeeds with zero errors</criterion>
+    <criterion testable="true">No chat message badge rendering remains in AnalysisWorkspaceApp.tsx</criterion>
+    <criterion testable="true">No orphaned imports or unused type declarations related to legacy chat</criterion>
+  </acceptance-criteria>
+</task>

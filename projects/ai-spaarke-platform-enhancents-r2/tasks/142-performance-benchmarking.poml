@@ -1,0 +1,99 @@
+<task id="R2-142" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Performance Benchmarking</title>
+    <phase>Phase 4: Deployment &amp; Validation</phase>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>testing, performance</tags>
+  </metadata>
+
+  <prompt>
+    Benchmark the performance of all critical R2 user flows against defined SLA targets. Measure
+    streaming write latency (SSE token → editor insert must be &lt;100ms per token), side pane load
+    time (&lt;2 seconds from createPane() call to interactive), action menu response (&lt;200ms from
+    `/` keystroke to menu rendered), BroadcastChannel message delivery (&lt;10ms per message), and
+    Code Page bundle size (&lt;500KB gzipped for each Code Page). Profile each flow, identify
+    bottlenecks, and optimize any metrics that exceed their SLA thresholds.
+  </prompt>
+  <role>Senior performance engineer with Spaarke platform expertise</role>
+  <goal>All R2 performance SLAs are met or exceeded. Each metric is documented with measurement methodology, baseline reading, and final result. Any bottlenecks discovered are resolved.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-014">Streaming tokens MUST NOT be cached — performance optimization cannot introduce token caching.</constraint>
+    <constraint source="ADR-009">If caching is used for optimization, it MUST be Redis-first. No hybrid L1 cache unless profiling proves need.</constraint>
+    <constraint source="ADR-010">Performance optimizations MUST NOT add new DI registrations (budget: ≤15).</constraint>
+    <constraint source="spec">Bundle sizes must remain under 500KB gzipped per Code Page web resource.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Performance profiling, SSE streaming latency, webpack bundle analysis, Code Page load performance</topic>
+    <files>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The SprkChat R2 spec defines five performance SLA targets that must be validated before
+      deployment. These targets ensure a responsive, production-quality user experience:
+      (1) Streaming write latency &lt;100ms — the time from an SSE token event arriving at the
+      browser to the token being inserted into the Lexical editor; (2) Side pane load &lt;2s —
+      the time from Xrm.App.sidePanes.createPane() call to the SprkChatPane being interactive;
+      (3) Action menu response &lt;200ms — the time from the user pressing `/` to the action menu
+      being fully rendered with filtered options; (4) BroadcastChannel delivery &lt;10ms — the
+      time for a message to traverse SprkChatBridge between panes; (5) Bundle size &lt;500KB —
+      each Code Page (SprkChatPane, AnalysisWorkspace) gzipped bundle must stay under 500KB to
+      ensure fast initial load in Dataverse.
+    </background>
+    <dependencies>
+      <dependency task="R2-012">SprkChat wired into SprkChatPane — required for side pane load timing</dependency>
+      <dependency task="R2-030">StreamingInsertPlugin — required for streaming write latency</dependency>
+      <dependency task="R2-050">SprkChatActionMenu — required for action menu response timing</dependency>
+      <dependency task="R2-011">SprkChatBridge — required for BroadcastChannel latency</dependency>
+      <dependency task="R2-072">AnalysisWorkspace Code Page — required for bundle size measurement</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="reference">src/client/code-pages/SprkChatPane/webpack.config.js</file>
+    <file action="reference">src/client/code-pages/AnalysisWorkspace/webpack.config.js</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatBridge.ts</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/plugins/StreamingInsertPlugin.ts</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatActionMenu.tsx</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task is benchmarking only -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Set up performance measurement tooling">Establish measurement methodology for each SLA. Use performance.now() for in-browser timing, Chrome DevTools Performance tab for profiling, webpack-bundle-analyzer for bundle sizes, and custom instrumentation for SSE latency.</step>
+    <step order="2" name="Measure streaming write latency">Instrument the SSE event handler and StreamingInsertPlugin to measure time from EventSource onmessage to Lexical editor insert completion. Run 100+ token streaming session and compute p50, p95, p99 latencies. Target: &lt;100ms p95.</step>
+    <step order="3" name="Measure side pane load time">Instrument Xrm.App.sidePanes.createPane() call and SprkChatPane first interactive render. Measure across 10 loads. Target: &lt;2 seconds p95. Profile main contributors (bundle download, parse, React hydration, API calls).</step>
+    <step order="4" name="Measure action menu response time">Instrument the `/` keystroke handler and SprkChatActionMenu render completion. Measure time from keydown event to menu fully rendered with filtered items. Target: &lt;200ms p95. Test with varying numbers of actions (5, 10, 20).</step>
+    <step order="5" name="Measure BroadcastChannel message delivery">Instrument SprkChatBridge send/receive to measure message transit time. Run 1000 messages and compute p50, p95, p99 latencies. Target: &lt;10ms p95. Test with varying payload sizes (small chat events, large selection events).</step>
+    <step order="6" name="Measure Code Page bundle sizes">Run webpack build with production config for both SprkChatPane and AnalysisWorkspace. Measure gzipped output size using gzip -c and wc -c. Run webpack-bundle-analyzer to identify largest dependencies. Target: &lt;500KB gzipped each.</step>
+    <step order="7" name="Identify and resolve bottlenecks">For any metric exceeding its SLA target: profile to identify the bottleneck, implement optimization (tree-shaking, lazy loading, memoization, reduced re-renders), and re-measure to confirm improvement.</step>
+    <step order="8" name="Document performance results">Create a performance benchmark report documenting: each metric, measurement methodology, p50/p95/p99 values, pass/fail against SLA, and any optimizations applied. Store in project notes/.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Streaming write latency: p95 &lt; 100ms per token (SSE event → editor insert)</criterion>
+    <criterion testable="true">Side pane load time: p95 &lt; 2 seconds (createPane() → interactive render)</criterion>
+    <criterion testable="true">Action menu response: p95 &lt; 200ms (/ keystroke → menu rendered)</criterion>
+    <criterion testable="true">BroadcastChannel message delivery: p95 &lt; 10ms (send → receive across panes)</criterion>
+    <criterion testable="true">SprkChatPane Code Page bundle: &lt; 500KB gzipped</criterion>
+    <criterion testable="true">AnalysisWorkspace Code Page bundle: &lt; 500KB gzipped</criterion>
+    <criterion testable="true">Performance benchmark report created in project notes/ with all metrics documented</criterion>
+  </acceptance-criteria>
+</task>

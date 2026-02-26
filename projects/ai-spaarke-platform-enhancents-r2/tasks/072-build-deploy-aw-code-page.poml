@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Build and Deploy AnalysisWorkspace Code Page</title>
+    <phase>2</phase>
+    <package>C: AW Migration</package>
+    <tags>deploy, code-page</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>067, 070</dependencies>
+    <parallel-group>sprint2-track1</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Build the AnalysisWorkspace Code Page using the two-step build pipeline (webpack bundle then
+      inline HTML via build-webresource.ps1), deploy it as `sprk_AnalysisWorkspace` web resource
+      to Dataverse, and verify it renders correctly on the Analysis form.
+    </goal>
+    <context>
+      Code Page deployment follows a two-step build pipeline:
+      1. `npm run build` — webpack produces a JS bundle in dist/
+      2. `build-webresource.ps1` — inlines the JS bundle into a self-contained HTML file
+
+      The resulting HTML file is deployed as a Dataverse web resource named `sprk_AnalysisWorkspace`.
+      The form launcher script (task 067) opens this web resource via `Xrm.Navigation.navigateTo()`.
+
+      Deployment to Dataverse uses pac CLI or the Dataverse deploy skill.
+
+      The code-page-deploy skill (.claude/skills/code-page-deploy/SKILL.md) provides the standard
+      deployment procedure for Code Pages.
+    </context>
+    <constraints>
+      - Follow the code-page-deploy skill procedure exactly
+      - Two-step build: npm run build -> build-webresource.ps1 -> deploy
+      - Web resource name must be sprk_AnalysisWorkspace (with publisher prefix)
+      - Web resource type: HTML (text/html)
+      - Verify rendering on the actual Analysis form in Dataverse
+      - Verify the form launcher (task 067) opens the Code Page correctly
+      - Verify SprkChat side pane can communicate with the Code Page via BroadcastChannel
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/code-pages/SemanticSearch/webpack.config.js</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read the code-page-deploy skill to understand the full deployment procedure:
+      - Build step details
+      - build-webresource.ps1 script usage
+      - Dataverse web resource deployment commands
+      - Verification steps
+    </step>
+    <step order="2">
+      Run the webpack build:
+      - cd src/client/code-pages/AnalysisWorkspace
+      - npm run build
+      - Verify dist/ contains the JS bundle
+      - Check bundle size (should be reasonable for a web resource)
+    </step>
+    <step order="3">
+      Run the inline HTML build:
+      - Execute build-webresource.ps1 with AnalysisWorkspace parameters
+      - Verify the output is a single self-contained HTML file
+      - Check that all JS is inlined (no external script references)
+    </step>
+    <step order="4">
+      Deploy to Dataverse:
+      - Use pac solution or web resource deployment
+      - Web resource name: sprk_AnalysisWorkspace
+      - Web resource type: text/html
+      - Deploy to the dev environment (https://spaarkedev1.crm.dynamics.com)
+    </step>
+    <step order="5">
+      Deploy the launcher script:
+      - Deploy sprk_AnalysisWorkspaceLauncher.js (from task 067) as a JS web resource
+      - Register it on the Analysis form (event handler or ribbon)
+    </step>
+    <step order="6">
+      Publish customizations:
+      - Publish all affected customizations in Dataverse
+      - Clear browser cache
+    </step>
+    <step order="7">
+      Verify rendering on the Analysis form:
+      - Open an Analysis record in Dataverse
+      - Trigger the Code Page launcher
+      - Verify the workspace opens at 95% viewport
+      - Verify the 2-panel layout renders correctly
+      - Verify the editor loads the analysis content
+      - Verify the source viewer shows the document
+    </step>
+    <step order="8">
+      Verify cross-pane communication:
+      - Open SprkChat side pane while the Analysis workspace is open
+      - Verify BroadcastChannel connection is established
+      - Verify events flow between panes (if both are deployed)
+    </step>
+    <step order="9">
+      Verify theme detection:
+      - Test with light Dataverse theme
+      - Test with dark Dataverse theme (if available)
+      - Verify the Code Page matches the host theme
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine code-page-deploy skill</tool>
+    <tool>Bash - npm run build, build-webresource.ps1, pac commands</tool>
+    <tool>Skill - code-page-deploy for deployment procedure</tool>
+  </tools>
+
+  <outputs>
+    <output>Built and deployed sprk_AnalysisWorkspace web resource to Dataverse</output>
+    <output>Built and deployed sprk_AnalysisWorkspaceLauncher.js web resource</output>
+    <output>Verification: Code Page renders on Analysis form</output>
+    <output>Verification: Cross-pane communication works (if SprkChat pane deployed)</output>
+    <output>Verification: Theme detection works</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>npm run build produces a JS bundle in dist/ without errors</criterion>
+    <criterion>build-webresource.ps1 produces a self-contained HTML file</criterion>
+    <criterion>sprk_AnalysisWorkspace web resource deployed to Dataverse dev environment</criterion>
+    <criterion>sprk_AnalysisWorkspaceLauncher.js deployed and registered on Analysis form</criterion>
+    <criterion>Code Page opens from the Analysis form at 95% viewport size</criterion>
+    <criterion>2-panel layout renders correctly (editor + source viewer)</criterion>
+    <criterion>Analysis content loads and displays in the editor</criterion>
+    <criterion>Theme detection matches the host Dataverse theme</criterion>
+    <criterion>No JavaScript console errors in the deployed Code Page</criterion>
+  </acceptance-criteria>
+
+  <placeholders>
+    <!-- No placeholders — deployment task produces fully deployed artifacts -->
+  </placeholders>
+</task>

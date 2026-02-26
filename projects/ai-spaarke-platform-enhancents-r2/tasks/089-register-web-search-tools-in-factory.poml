@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="089" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Register WebSearchTools in SprkChatAgentFactory</title>
+    <phase>2</phase>
+    <package>Package I: Web Search + Multi-Document</package>
+    <tags>bff-api, ai</tags>
+    <estimate>1-2 hours</estimate>
+    <dependencies>088</dependencies>
+    <parallel-group>sprint2-track3</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Register WebSearchTools in SprkChatAgentFactory.ResolveTools(), gated behind the playbook
+      capability "web_search". When a playbook declares the "web_search" capability, the
+      SearchWebAsync tool becomes available to the AI agent.
+    </goal>
+    <context>
+      SprkChatAgentFactory.ResolveTools() is the central integration point for tool registration.
+      WebSearchTools should only be available when the playbook explicitly enables web search —
+      many playbooks deal with confidential internal documents and should not reach out to the
+      public internet. The "web_search" capability provides admin control over which contexts
+      allow external web queries.
+
+      The registration follows the same pattern as other tool registrations: check capability →
+      instantiate via AIFunctionFactory.Create → add to tool list.
+    </context>
+    <constraints>
+      - Follow ADR-010: No new DI registrations — factory instantiation only
+      - Follow ADR-013: Tool registration via SprkChatAgentFactory.ResolveTools()
+      - Gate behind "web_search" playbook capability
+      - Follow existing tool registration pattern in SprkChatAgentFactory.cs
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WebSearchTools.cs</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read SprkChatAgentFactory.cs to understand the current tool registration pattern,
+      especially any recently added registrations (e.g., AnalysisExecutionTools from task 079).
+    </step>
+    <step order="2">
+      Add WebSearchTools registration in ResolveTools():
+      - Check if playbook capabilities include "web_search"
+      - If yes, instantiate WebSearchTools via AIFunctionFactory.Create
+      - Pass ChatHostContext to constructor
+      - Add to tool list
+    </step>
+    <step order="3">
+      Ensure the capability string "web_search" is defined consistently with other
+      capability names (e.g., as a constant or following the existing naming convention).
+    </step>
+    <step order="4">
+      Build verification: Run dotnet build src/server/api/Sprk.Bff.Api/ to verify compilation.
+    </step>
+    <step order="5">
+      Verify no new DI registrations: grep Program.cs and AiModule.cs.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine SprkChatAgentFactory.cs</tool>
+    <tool>Edit - Add WebSearchTools registration</tool>
+    <tool>Bash - dotnet build verification</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WebSearchTools.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task wires existing code -->
+  </placeholders>
+
+  <outputs>
+    <output>Modified SprkChatAgentFactory.cs with WebSearchTools registration gated by "web_search" capability</output>
+    <output>Successful dotnet build with 0 errors</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SprkChatAgentFactory.ResolveTools() conditionally includes WebSearchTools</criterion>
+    <criterion>WebSearchTools only included when playbook has "web_search" capability</criterion>
+    <criterion>Tool instantiated via AIFunctionFactory.Create (not DI container)</criterion>
+    <criterion>0 new DI registrations in Program.cs or AiModule.cs</criterion>
+    <criterion>dotnet build src/server/api/Sprk.Bff.Api/ succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

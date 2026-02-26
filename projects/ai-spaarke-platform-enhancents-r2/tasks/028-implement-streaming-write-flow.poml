@@ -1,0 +1,100 @@
+<task id="R2-028" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Implement Streaming Write Flow (Inner LLM Call)</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package B: Streaming Write Engine</package>
+    <status>not-started</status>
+    <estimated-effort>8 hours</estimated-effort>
+    <tags>bff-api, ai, streaming</tags>
+    <parallel-group>sprint1-track2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Replace the placeholder streaming in WorkingDocumentTools with real IChatClient streaming.
+    Each tool method (EditWorkingDocumentAsync, AppendSectionAsync) must: (1) fetch the current
+    working document content via IAnalysisOrchestrationService, (2) construct a focused prompt
+    combining the current document content with the user's instruction, (3) stream tokens from
+    the inner LLM call via IChatClient, emitting each token as a `document_stream_token` SSE event,
+    and (4) handle cancellation gracefully — keep partial content emitted so far, emit
+    `document_stream_end` with `cancelled: true`. The prompt construction must NOT include the
+    full document in logs (ADR-015).
+  </prompt>
+  <role>Senior full-stack developer with Spaarke platform expertise</role>
+  <goal>WorkingDocumentTools performs real LLM-powered document editing with token-by-token streaming to the frontend. Cancellation preserves partial content. All placeholder code from task 026 is replaced.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">Inner LLM call MUST use IChatClient streaming API. ChatHostContext MUST flow through. Rate limiting applies to the outer endpoint (not the inner call).</constraint>
+    <constraint source="ADR-014">Streaming tokens MUST NOT be cached in Redis. Working document content is transient.</constraint>
+    <constraint source="ADR-015">Full document content and full prompts MUST NOT appear in log entries. Log operation metadata only (analysisId, operationType, tokenCount).</constraint>
+    <constraint source="ADR-016">Bounded concurrency — the outer chat endpoint already applies rate limiting. Inner LLM calls inherit the session's concurrency slot.</constraint>
+    <constraint source="ADR-019">On inner LLM failure, emit terminal `document_stream_end` with error details. Do NOT throw unhandled exceptions during streaming.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>IChatClient streaming API and prompt construction</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 026 created WorkingDocumentTools with hardcoded placeholder streaming. This task replaces
+      those placeholders with real IChatClient integration. The inner LLM call is a focused,
+      single-turn completion: the system prompt instructs the LLM to produce document content
+      (Markdown/HTML) based on the current document state and user instruction. Each streamed
+      token is immediately emitted as a `document_stream_token` SSE event to the frontend, where
+      the StreamingInsertPlugin will insert it into the Lexical editor. Cancellation is critical:
+      if the user cancels mid-stream, partial content already emitted must remain in the editor
+      (it is not rolled back), and the SSE sequence must terminate cleanly with `document_stream_end`.
+    </background>
+    <dependencies>
+      <dependency task="R2-026" status="complete">WorkingDocumentTools class with placeholder streaming must exist.</dependency>
+      <dependency task="R2-027" status="complete">WorkingDocumentTools must be registered in SprkChatAgentFactory.</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/TextRefinementTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DocumentStreamEvent.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- This task REMOVES placeholders from task 026 — no new placeholders introduced -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Study IChatClient streaming API">Read TextRefinementTools.cs (or other tool classes) to understand how IChatClient streaming is used: `CompleteStreamingAsync`, `IAsyncEnumerable` token iteration, and cancellation token propagation.</step>
+    <step order="2" name="Implement document fetching">In EditWorkingDocumentAsync, call `IAnalysisOrchestrationService` to fetch the current working document content for the given `analysisId`. Handle the case where no document exists (return early with an informative message).</step>
+    <step order="3" name="Construct focused prompt">Build a system prompt that instructs the LLM: "You are editing a document. Here is the current content: [content]. Apply the following instruction: [user instruction]. Output the modified content only." Ensure the prompt is not logged at INFO level (ADR-015).</step>
+    <step order="4" name="Replace placeholder in EditWorkingDocumentAsync">Remove the hardcoded token loop. Call `IChatClient.CompleteStreamingAsync` with the constructed prompt. Iterate the `IAsyncEnumerable` response, emitting each token as a `document_stream_token` SSE event. Track token count for the `document_stream_end` event.</step>
+    <step order="5" name="Replace placeholder in AppendSectionAsync">Same pattern as EditWorkingDocumentAsync but with an append-specific prompt: "Add a new section titled [title] to the document based on the following instruction: [instruction]."</step>
+    <step order="6" name="Implement cancellation handling">Wrap the streaming loop in try/catch for `OperationCanceledException`. On cancellation: emit `document_stream_end` with `cancelled: true` and the token count emitted so far. Do NOT attempt to roll back previously emitted tokens.</step>
+    <step order="7" name="Implement error handling">Catch non-cancellation exceptions during streaming. Emit `document_stream_end` with error details (stable errorCode, user-friendly message). Log the error with operation metadata only (no document content).</step>
+    <step order="8" name="Remove all PLACEHOLDER comments">Grep for `// PLACEHOLDER:` in WorkingDocumentTools.cs and verify all have been replaced with real implementations.</step>
+    <step order="9" name="Build verification">Run `dotnet build src/server/api/Sprk.Bff.Api/` to verify compilation succeeds.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">EditWorkingDocumentAsync fetches current document via IAnalysisOrchestrationService and streams real LLM tokens as document_stream_token events</criterion>
+    <criterion testable="true">AppendSectionAsync constructs section-specific prompt and streams real LLM tokens</criterion>
+    <criterion testable="true">Cancellation emits document_stream_end with cancelled=true and preserves partial token count</criterion>
+    <criterion testable="true">LLM failures emit document_stream_end with error details; no unhandled exceptions during streaming</criterion>
+    <criterion testable="true">Zero `// PLACEHOLDER:` comments remain in WorkingDocumentTools.cs</criterion>
+    <criterion testable="true">No document content or full prompts appear in log entries (ADR-015 compliance)</criterion>
+    <criterion testable="true">`dotnet build` succeeds for BFF API project with zero errors</criterion>
+  </acceptance-criteria>
+</task>

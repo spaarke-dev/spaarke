@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="128" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Suggestions and Citations Integration Tests</title>
+    <phase>3</phase>
+    <package>Package H: Suggestions + Citations</package>
+    <tags>testing, integration</tags>
+    <estimate>5-6 hours</estimate>
+    <dependencies>123, 125, 126</dependencies>
+    <parallel-group>sprint3-track3</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Write integration tests for the suggestions and citations SSE event flows end-to-end, covering
+      backend suggestion generation, backend citation collection, frontend event handling, and the
+      citation marker to popover interaction in the rendered chat UI.
+    </goal>
+    <context>
+      The suggestions and citations features span backend (SSE events, search tool metadata, LLM
+      suggestion generation) and frontend (event handling, rendering, interaction). Integration
+      tests must verify:
+
+      1. Suggestions SSE flow: backend generates suggestions → SSE event emitted → frontend receives
+        and displays chips → clicking chip sends as user message
+      2. Citations SSE flow: search tools return metadata → backend collects citations → SSE event
+        emitted → frontend receives, parses markers, renders clickable superscripts → clicking
+        opens popover with correct citation data
+      3. Event ordering: token* → citations → suggestions → done
+
+      Backend tests use WebApplicationFactory&lt;Program&gt; with mocked AI services.
+      Frontend tests use Jest with mocked SSE responses.
+    </context>
+    <constraints>
+      - Follow project testing conventions: {Method}_{Scenario}_{ExpectedResult} naming
+      - Backend tests: xUnit + WebApplicationFactory&lt;Program&gt; + NSubstitute
+      - Frontend tests: Jest + React Testing Library
+      - Mock AI service responses (do not call real LLM in tests)
+      - Mock Azure AI Search responses for citation metadata
+      - Test SSE event ordering is strictly: token* → citations → suggestions → done
+      - Achieve 80%+ line coverage for suggestion and citation SSE handling code
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>tests/</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review existing API integration test patterns:
+      - WebApplicationFactory setup in the test project
+      - How SSE responses are consumed in tests
+      - NSubstitute mock patterns for AI services
+    </step>
+    <step order="2">
+      Create backend suggestions integration tests:
+      - ChatEndpoints_SuggestionsEvent_EmittedAfterTokens: verify suggestions SSE event appears after token events
+      - ChatEndpoints_SuggestionsTimeout_SkippedGracefully: verify done event emits when suggestion gen exceeds 2s
+      - ChatEndpoints_SuggestionsFailure_NoErrorEvent: verify no error SSE event when suggestion gen fails
+      - ChatEndpoints_Suggestions_ContainsValidArray: verify payload is valid string[] with 1-3 items
+    </step>
+    <step order="3">
+      Create backend citations integration tests:
+      - ChatEndpoints_CitationsEvent_EmittedAfterTokens: verify citations SSE event with search tool results
+      - ChatEndpoints_NoSearchTools_NoCitationsEvent: verify no citations event when no search used
+      - ChatEndpoints_Citations_ContainMetadata: verify citation payload has source, page, excerpt, chunkId
+      - ChatEndpoints_Citations_Max10: verify at most 10 citations emitted
+      - ChatEndpoints_EventOrdering_TokensCitationsSuggestionsDone: verify strict event ordering
+    </step>
+    <step order="4">
+      Create frontend suggestions integration tests:
+      - sseFlow_SuggestionsEvent_DisplaysChips: mock SSE with suggestions event, verify chips render
+      - sseFlow_SuggestionClick_SendsAsMessage: click suggestion chip, verify new message sent
+      - sseFlow_NewMessage_ClearsSuggestions: send user message, verify suggestions clear
+      - sseFlow_NoSuggestionsEvent_NoChipsShown: SSE without suggestions event shows no chips
+    </step>
+    <step order="5">
+      Create frontend citations integration tests:
+      - sseFlow_CitationsEvent_RendersClickableMarkers: mock SSE with citations, verify [N] rendered as links
+      - sseFlow_CitationClick_OpensPopover: click citation marker, verify popover opens with correct data
+      - sseFlow_MultipleCitations_AllRendered: multiple [N] markers all become clickable
+      - sseFlow_CitationInCodeBlock_RemainsPlainText: [N] in code block not converted
+      - sseFlow_PopoverShowsSourceAndExcerpt: popover displays source name, page, and excerpt from citation data
+      - sseFlow_PopoverOpenSourceLink_Works: "Open Source" link in popover functions correctly
+    </step>
+    <step order="6">
+      Create combined flow tests:
+      - combinedFlow_BothEventsPresent_BothFeaturesWork: suggestions and citations in same response
+      - combinedFlow_SuggestionsOnly_CitationsAbsent: response with suggestions but no citations
+      - combinedFlow_CitationsOnly_SuggestionsAbsent: response with citations but no suggestions
+    </step>
+    <step order="7">
+      Run all tests and verify:
+      - All backend tests pass (dotnet test)
+      - All frontend tests pass (npm test)
+      - Coverage meets 80%+ threshold
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review existing test patterns and implementations</tool>
+    <tool>Write - Create test files</tool>
+    <tool>Bash - dotnet test, npm test, coverage reports</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">tests/Sprk.Bff.Api.Tests/Api/Ai/ChatEndpoints.Suggestions.Tests.cs</file>
+    <file action="create">tests/Sprk.Bff.Api.Tests/Api/Ai/ChatEndpoints.Citations.Tests.cs</file>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/suggestionsIntegration.test.tsx</file>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/citationsIntegration.test.tsx</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+  </relevant-files>
+
+  <outputs>
+    <output>tests/Sprk.Bff.Api.Tests/Api/Ai/ChatEndpoints.Suggestions.Tests.cs - Backend suggestions tests</output>
+    <output>tests/Sprk.Bff.Api.Tests/Api/Ai/ChatEndpoints.Citations.Tests.cs - Backend citations tests</output>
+    <output>src/client/shared/.../SprkChat/__tests__/suggestionsIntegration.test.tsx - Frontend suggestions tests</output>
+    <output>src/client/shared/.../SprkChat/__tests__/citationsIntegration.test.tsx - Frontend citations tests</output>
+    <output>All tests pass with 80%+ coverage</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Backend tests verify suggestions SSE event is emitted after tokens with valid string[] payload</criterion>
+    <criterion>Backend tests verify suggestions timeout and failure are handled gracefully (no error event)</criterion>
+    <criterion>Backend tests verify citations SSE event contains correct metadata from search tool results</criterion>
+    <criterion>Backend tests verify strict SSE event ordering: token* → citations → suggestions → done</criterion>
+    <criterion>Frontend tests verify suggestions chips render when suggestions SSE event received</criterion>
+    <criterion>Frontend tests verify clicking suggestion chip sends it as a user message</criterion>
+    <criterion>Frontend tests verify citation markers [N] become clickable after citations SSE event</criterion>
+    <criterion>Frontend tests verify citation popover shows correct source, page, and excerpt data</criterion>
+    <criterion>Frontend tests verify [N] markers in code blocks remain as plain text</criterion>
+    <criterion>All backend tests pass (zero failures in dotnet test)</criterion>
+    <criterion>All frontend tests pass (zero failures in npm test)</criterion>
+    <criterion>Line coverage is 80%+ for suggestion and citation SSE handling code</criterion>
+    <criterion>Test naming follows {Method}_{Scenario}_{ExpectedResult} convention</criterion>
+  </acceptance-criteria>
+
+  <placeholders />
+</task>

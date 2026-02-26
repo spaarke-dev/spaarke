@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="100" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Implement DiffCompareView Component</title>
+    <phase>3</phase>
+    <package>Package F: Diff Compare View</package>
+    <tags>frontend, ui-components, fluent-ui</tags>
+    <estimate>6-8 hours</estimate>
+    <dependencies>Phase 2 complete</dependencies>
+    <parallel-group>sprint3-track1</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create the DiffCompareView shared component in @spaarke/ui-components that renders side-by-side
+      and inline diff views with Accept, Reject, and Edit actions. This component is the foundation
+      for showing AI-proposed revisions against existing document content.
+    </goal>
+    <context>
+      When the AI proposes revisions to document content (e.g., rewriting a paragraph, refining a
+      conclusion), the user needs to see exactly what changed before accepting. The DiffCompareView
+      renders the original and proposed text with additions highlighted in green and deletions in red,
+      supporting both side-by-side (two-column) and inline (unified) display modes.
+
+      The component uses an existing diff library (jsdiff or diff-match-patch) to compute character-level
+      or word-level diffs. It provides three action buttons: Accept (applies the proposed version),
+      Reject (discards the proposal and keeps the original), and Edit (opens the proposed text in an
+      editable state so the user can manually adjust before accepting).
+
+      This component lives in the shared library so it can be used by both the Analysis Workspace
+      Code Page and the SprkChat side pane. It must support Fluent UI v9 theming including dark mode
+      and high-contrast.
+    </context>
+    <constraints>
+      - Follow ADR-012: Component MUST live in @spaarke/ui-components shared library
+      - Follow ADR-021: Fluent UI v9 exclusively; makeStyles + design tokens; dark mode + high-contrast support
+      - Use existing diff library (jsdiff preferred — already lightweight and well-maintained)
+      - No hard-coded colors — all diff highlighting via Fluent design tokens or semantic CSS custom properties
+      - Must render cleanly in both light and dark themes
+      - Accept/Reject/Edit callbacks must be strongly typed
+      - Component must be accessible (ARIA labels, keyboard navigation for actions)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/RichTextEditor.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review existing shared component patterns in @spaarke/ui-components:
+      - Component file structure, export conventions, barrel files
+      - Fluent UI v9 makeStyles usage and design token patterns
+      - Dark mode / high-contrast support patterns
+    </step>
+    <step order="2">
+      Install diff library dependency:
+      - Add `diff` (jsdiff) package to @spaarke/ui-components
+      - Add `@types/diff` for TypeScript support
+      - Verify no conflicting versions in the monorepo
+    </step>
+    <step order="3">
+      Define TypeScript interfaces for DiffCompareView:
+      - DiffCompareViewProps: originalText, proposedText, mode (side-by-side | inline),
+        onAccept, onReject, onEdit, title (optional), readOnly (optional)
+      - DiffSegment: type (added | removed | unchanged), value (string)
+      - DiffCompareViewMode: 'side-by-side' | 'inline'
+    </step>
+    <step order="4">
+      Implement DiffCompareView component:
+      - Compute diff using jsdiff (diffWords or diffChars based on content length)
+      - Side-by-side mode: two-column layout with original (left) and proposed (right),
+        deletions highlighted in left column, additions highlighted in right column
+      - Inline mode: single column with deletions (strikethrough + red background) and
+        additions (green background) interleaved
+      - Mode toggle button to switch between side-by-side and inline
+      - Scrollable content area with synchronized scrolling in side-by-side mode
+    </step>
+    <step order="5">
+      Implement action buttons:
+      - Accept: calls onAccept(proposedText) callback
+      - Reject: calls onReject() callback
+      - Edit: switches proposed text to editable textarea; shows Save/Cancel sub-actions;
+        Save calls onAccept(editedText)
+      - Use Fluent UI v9 Button and Toolbar components
+      - Keyboard shortcuts: Ctrl+Enter (Accept), Escape (Reject)
+    </step>
+    <step order="6">
+      Apply Fluent UI v9 styling with design tokens:
+      - Use makeStyles for all component styles
+      - Diff highlight colors via design tokens (colorPaletteGreenBackground2, colorPaletteRedBackground2)
+      - Dark mode: ensure highlight colors are readable against dark backgrounds
+      - High-contrast: use border outlines instead of background colors
+      - Typography: use Fluent typographyStyles for text rendering
+    </step>
+    <step order="7">
+      Export DiffCompareView from shared library barrel:
+      - Create src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/index.ts
+      - Add to main library barrel export
+    </step>
+    <step order="8">
+      Build verification:
+      - Run TypeScript compilation for Spaarke.UI.Components
+      - Verify no type errors or missing imports
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review existing component patterns and Fluent UI v9 usage</tool>
+    <tool>Write - Create DiffCompareView component files</tool>
+    <tool>Edit - Update barrel exports</tool>
+    <tool>Bash - npm install diff, TypeScript compilation</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/DiffCompareView.tsx</file>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/index.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/index.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/package.json</file>
+  </relevant-files>
+
+  <outputs>
+    <output>src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/DiffCompareView.tsx - Main component</output>
+    <output>src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/index.ts - Barrel export</output>
+    <output>Updated shared library barrel exports</output>
+    <output>Successful TypeScript compilation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>DiffCompareView.tsx exists at src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/</criterion>
+    <criterion>Component renders side-by-side diff with additions (green) and deletions (red) highlighted</criterion>
+    <criterion>Component renders inline diff with additions and deletions interleaved</criterion>
+    <criterion>Mode toggle switches between side-by-side and inline views</criterion>
+    <criterion>Accept button calls onAccept(proposedText) callback</criterion>
+    <criterion>Reject button calls onReject() callback</criterion>
+    <criterion>Edit button enables editable proposed text with Save/Cancel sub-actions</criterion>
+    <criterion>All colors use Fluent UI v9 design tokens — no hard-coded hex values</criterion>
+    <criterion>Component renders correctly in dark mode (no unreadable text or invisible highlights)</criterion>
+    <criterion>Keyboard shortcuts work: Ctrl+Enter (Accept), Escape (Reject)</criterion>
+    <criterion>Component is exported from shared library barrel</criterion>
+    <criterion>TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+
+  <placeholders />
+</task>

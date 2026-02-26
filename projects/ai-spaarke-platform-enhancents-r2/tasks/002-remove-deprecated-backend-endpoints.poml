@@ -1,0 +1,104 @@
+<task id="R2-002" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Remove Deprecated Backend Endpoints</title>
+    <phase>Phase 0: Legacy Cleanup</phase>
+    <package>Package C</package>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>bff-api, cleanup</tags>
+    <parallel-group>cleanup-backend</parallel-group>
+  </metadata>
+
+  <prompt>
+    Remove the deprecated `POST /api/ai/analysis/{id}/continue` and
+    `POST /api/ai/analysis/{id}/resume` endpoints from `AnalysisEndpoints.cs`. Stop writing
+    to the `sprk_chathistory` Dataverse field (the field itself remains in the schema — only
+    the write operations are removed). Remove any service methods, request/response models,
+    and orchestration logic that are exclusively used by these deprecated endpoints. This is
+    prerequisite cleanup before new AI tool classes and SSE events are introduced.
+  </prompt>
+  <role>Senior full-stack developer with Spaarke platform expertise</role>
+  <goal>Remove all deprecated analysis endpoints and their supporting code from the BFF API. The API builds and all tests pass. No deprecated endpoint routes are registered. The `sprk_chathistory` field remains in Dataverse schema but is no longer written to by the API.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">All API endpoints use Minimal API pattern. Removing endpoints must not break route registration or other endpoint groups.</constraint>
+    <constraint source="ADR-013">AI tools follow AIFunctionFactory.Create pattern. Removing deprecated orchestration methods must not break active tool pipelines.</constraint>
+    <constraint source="ADR-019">All error responses use ProblemDetails. Removing endpoints must not leave orphaned error-handling code.</constraint>
+    <constraint source="ADR-008">Endpoint filters for authorization. Removing endpoints must clean up any associated endpoint filter registrations.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF API architecture and AI endpoint patterns</topic>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The AnalysisEndpoints.cs file contains two deprecated endpoints: `/continue` (conversational
+      chat continuation) and `/resume` (session restoration). These were part of the original
+      embedded chat implementation that is being replaced by SprkChat side pane and the new AI
+      tool framework. The `sprk_chathistory` field was used to persist chat messages to Dataverse;
+      the field remains in the schema for data migration purposes but the API should no longer
+      write to it. Supporting service methods in `IAnalysisOrchestrationService` and
+      `AnalysisOrchestrationService` (e.g., `ContinueAnalysisAsync`, `ResumeAnalysisAsync`),
+      plus request models (`AnalysisContinueRequest`, `AnalysisResumeRequest`), should be
+      removed if they are exclusively used by these deprecated endpoints.
+    </background>
+    <dependencies>
+      <!-- No dependencies — this is a Phase 0 prerequisite -->
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</file>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisOrchestrationService.cs</file>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    <file action="delete">src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisContinueRequest.cs</file>
+    <file action="delete">src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisResumeRequest.cs</file>
+    <file action="modify">src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs</file>
+    <file action="modify">src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholder code — this task only removes code -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Audit deprecated endpoint usage">Grep the entire `src/server/` directory for references to `ContinueAnalysis`, `ResumeAnalysis`, `AnalysisContinueRequest`, `AnalysisResumeRequest`, and `sprk_chathistory`. Document every file that needs modification and identify which methods/types are exclusively used by the deprecated endpoints vs. shared with active code.</step>
+    <step order="2" name="Remove endpoint registrations">In `AnalysisEndpoints.cs`, remove the `MapPost("/{analysisId:guid}/continue", ContinueAnalysis)` and `MapPost("/{analysisId:guid}/resume", ResumeAnalysis)` route registrations including their fluent configuration chains (`.WithName()`, `.WithSummary()`, `.Produces()`, etc.).</step>
+    <step order="3" name="Remove endpoint handler methods">In `AnalysisEndpoints.cs`, remove the `ContinueAnalysis` and `ResumeAnalysis` static handler methods and all associated local helper logic.</step>
+    <step order="4" name="Remove request/response models">Delete `AnalysisContinueRequest.cs` and `AnalysisResumeRequest.cs` from `Models/Ai/`. Also delete `AnalysisResumeResult` if it exists as a separate file or remove it from wherever it is defined, provided no active code references it.</step>
+    <step order="5" name="Remove orchestration service methods">From `IAnalysisOrchestrationService.cs` and `AnalysisOrchestrationService.cs`, remove `ContinueAnalysisAsync` and `ResumeAnalysisAsync` methods. Verify no active endpoint or service still calls these methods before removing.</step>
+    <step order="6" name="Stop writing to sprk_chathistory">Search for all writes to `sprk_chathistory` in `DataverseWebApiService.cs`, `DataverseServiceClientImpl.cs`, and any other Dataverse service files. Remove or comment out the write operations. Do NOT remove the field from the Dataverse schema or entity definitions — only stop writing to it.</step>
+    <step order="7" name="Clean up orphaned imports and usings">Remove any `using` statements, imports, or type references that became orphaned after removing the deprecated code. Check for orphaned helper methods or constants in AnalysisEndpoints.cs.</step>
+    <step order="8" name="Update tests">Remove or update any unit/integration tests that specifically test the deprecated `/continue` or `/resume` endpoints. Ensure remaining analysis endpoint tests still pass.</step>
+    <step order="9" name="Build verification">Run `dotnet build src/server/api/Sprk.Bff.Api/` to verify the API compiles cleanly. Fix any compilation errors.</step>
+    <step order="10" name="Test verification">Run `dotnet test` to verify all tests pass. Fix any test failures caused by the removal.</step>
+    <step order="11" name="Final grep verification">Grep the entire `src/server/` directory for any remaining references to the deprecated endpoint names, request types, or handler methods. Confirm zero orphaned references.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">No `POST /api/ai/analysis/{id}/continue` endpoint registered in AnalysisEndpoints.cs</criterion>
+    <criterion testable="true">No `POST /api/ai/analysis/{id}/resume` endpoint registered in AnalysisEndpoints.cs</criterion>
+    <criterion testable="true">`AnalysisContinueRequest.cs` and `AnalysisResumeRequest.cs` model files are deleted</criterion>
+    <criterion testable="true">`ContinueAnalysisAsync` and `ResumeAnalysisAsync` do not exist in IAnalysisOrchestrationService or its implementation</criterion>
+    <criterion testable="true">No code writes to `sprk_chathistory` field (grep returns empty for write operations)</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with zero errors</criterion>
+    <criterion testable="true">`dotnet test` passes with zero failures</criterion>
+    <criterion testable="true">All remaining analysis endpoints (execute, status, etc.) continue to function correctly</criterion>
+  </acceptance-criteria>
+</task>

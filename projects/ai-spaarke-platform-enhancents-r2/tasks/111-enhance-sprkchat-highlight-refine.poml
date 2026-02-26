@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="111" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Enhance SprkChatHighlightRefine for Cross-Pane Selections</title>
+    <phase>3</phase>
+    <package>Package G: Selection-Based Revision</package>
+    <tags>frontend</tags>
+    <estimate>4-5 hours</estimate>
+    <dependencies>110</dependencies>
+    <parallel-group>sprint3-track2</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Enhance the SprkChatHighlightRefine component to accept text selections from both the editor
+      panel (via SprkChatBridge) and chat messages (inline selection), detect the source of the
+      selection, and show a refinement input with a preview of the selected text.
+    </goal>
+    <context>
+      The SprkChatHighlightRefine component currently supports inline selection within chat messages.
+      This task extends it to also handle selections coming from the Analysis Workspace editor panel
+      via the cross-pane SprkChatBridge.
+
+      The component needs to:
+      1. Detect the source of the selection — either 'editor' (from SprkChatBridge) or 'chat'
+        (from inline chat message selection)
+      2. Display a context-aware refinement UI:
+        - Editor selections: show "Refine selected text" header with a truncated preview of the
+          selected text and an input field for the refinement instruction
+        - Chat selections: show "Refine this passage" header with the selected chat text
+      3. The refinement input supports both free-text instructions ("make more formal") and
+        preset quick actions ("Simplify", "Expand", "Make Concise")
+      4. On submit, the component emits a refine event with the selected text, refinement
+        instruction, and source
+
+      The component appears as a floating panel anchored below the chat input area when a selection
+      is active, and dismisses when the selection is cleared.
+    </context>
+    <constraints>
+      - Follow ADR-012: Component lives in @spaarke/ui-components
+      - Follow ADR-021: Fluent UI v9 styling; dark mode support
+      - Must work with both editor selections (via bridge) and chat message selections (inline)
+      - Must show source indicator so user knows which content is being refined
+      - Selected text preview must be truncated to 150 characters with ellipsis for long selections
+      - Quick action presets must be configurable via props
+      - Component must be dismissible via Escape key or clicking outside
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatHighlightRefine.tsx</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review the existing SprkChatHighlightRefine component:
+      - Current props interface and functionality
+      - How it handles chat message selections
+      - Styling and layout patterns
+      - How it integrates with SprkChat parent component
+    </step>
+    <step order="2">
+      Extend the component props interface:
+      - Add selectionSource: 'editor' | 'chat' | null
+      - Add selectedText: string (the full selected text)
+      - Add boundingRect: DOMRect | null (for positioning, from editor selection)
+      - Add quickActions: string[] (preset quick action labels, default: ['Simplify', 'Expand', 'Make Concise', 'Make Formal'])
+      - Add onRefine: (request: RefineRequest) => void callback
+      - Add onDismiss: () => void callback
+      - Define RefineRequest type: { selectedText, instruction, source, quickAction? }
+    </step>
+    <step order="3">
+      Implement source detection and display logic:
+      - When selectionSource='editor': show "Refine selected text" header with document icon
+      - When selectionSource='chat': show "Refine this passage" header with chat icon
+      - Show truncated preview of selected text (150 chars max with "..." ellipsis)
+      - Show full text in a tooltip on hover over the preview
+    </step>
+    <step order="4">
+      Implement refinement input area:
+      - Text input field with placeholder "How should this be refined?"
+      - Below the input: row of quick action chips (Simplify, Expand, Make Concise, Make Formal)
+      - Clicking a quick action fills the input with the action text and auto-submits
+      - Enter key in input field submits the refinement
+      - Submit button (arrow icon) for mouse users
+    </step>
+    <step order="5">
+      Implement panel positioning and lifecycle:
+      - Panel appears as a floating card below the chat input area
+      - Animate in with a slide-up transition (200ms)
+      - Dismiss via: Escape key, clicking outside, clearing selection, or explicit close button
+      - When dismissed, call onDismiss callback
+      - Panel must not obscure the last chat message (scroll chat up if needed)
+    </step>
+    <step order="6">
+      Wire into SprkChat parent component:
+      - SprkChat passes selection state (from task 110) to SprkChatHighlightRefine
+      - On refine submission: SprkChat sends the refinement as a chat message with selection context
+      - Clear selection state after refinement is submitted
+    </step>
+    <step order="7">
+      Build verification:
+      - Run TypeScript compilation for Spaarke.UI.Components
+      - Verify no type errors
+      - Verify component renders in both light and dark themes
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review existing SprkChatHighlightRefine component</tool>
+    <tool>Edit - Enhance component with cross-pane selection support</tool>
+    <tool>Bash - TypeScript compilation</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatHighlightRefine.tsx</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+  </relevant-files>
+
+  <outputs>
+    <output>Enhanced SprkChatHighlightRefine.tsx with cross-pane selection support</output>
+    <output>Updated SprkChat.tsx to pass selection state to HighlightRefine</output>
+    <output>Updated types.ts with RefineRequest and extended selection types</output>
+    <output>Successful TypeScript compilation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SprkChatHighlightRefine accepts selections from both 'editor' and 'chat' sources</criterion>
+    <criterion>Editor selections show "Refine selected text" header with document icon</criterion>
+    <criterion>Chat selections show "Refine this passage" header with chat icon</criterion>
+    <criterion>Selected text preview is truncated to 150 characters with ellipsis</criterion>
+    <criterion>Full selected text is available in a tooltip on hover</criterion>
+    <criterion>Refinement input field accepts free-text instructions</criterion>
+    <criterion>Quick action chips (Simplify, Expand, Make Concise, Make Formal) auto-submit on click</criterion>
+    <criterion>Enter key submits the refinement instruction</criterion>
+    <criterion>Panel dismisses via Escape key, click outside, or close button</criterion>
+    <criterion>onRefine callback fires with { selectedText, instruction, source } on submission</criterion>
+    <criterion>Component renders correctly in both light and dark Fluent UI v9 themes</criterion>
+    <criterion>TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+
+  <placeholders />
+</task>

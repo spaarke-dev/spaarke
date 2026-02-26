@@ -1,0 +1,101 @@
+<task id="R2-141" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Dark Mode and Accessibility Validation</title>
+    <phase>Phase 4: Deployment &amp; Validation</phase>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>testing, accessibility, fluent-ui</tags>
+  </metadata>
+
+  <prompt>
+    Perform visual inspection and automated validation of all new R2 components across light mode,
+    dark mode, and high-contrast mode. Verify WCAG 2.1 AA compliance for all new UI components
+    including SprkChatPane, AnalysisWorkspace Code Page, DiffCompareView, SprkChatActionMenu,
+    SuggestionBar, and citation panels. Confirm that every component uses Fluent UI v9 design tokens
+    exclusively (no hardcoded colors, no Fluent v8 imports). Test keyboard navigation in all new
+    components to ensure full keyboard accessibility.
+  </prompt>
+  <role>Senior frontend developer with accessibility expertise and Fluent UI v9 knowledge</role>
+  <goal>All R2 components render correctly in light, dark, and high-contrast modes with zero hardcoded colors, full WCAG 2.1 AA compliance, and complete keyboard navigation support.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">All UI MUST use Fluent UI v9 exclusively. No hardcoded colors — use design tokens only. Dark mode and high-contrast support are mandatory. makeStyles must be used for all styling.</constraint>
+    <constraint source="ADR-012">Shared components in @spaarke/ui-components must work correctly in all theme modes.</constraint>
+    <constraint source="ADR-022">Code Pages bundle React 19 with FluentProvider theme wrapping. Theme detection must resolve 4-level hierarchy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fluent UI v9 theming, WCAG 2.1 AA compliance, dark mode implementation, accessibility testing</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      ADR-021 mandates Fluent UI v9 exclusively with full dark mode and high-contrast support.
+      All R2 components must use makeStyles with design tokens — no hardcoded hex colors, rgba
+      values, or Fluent v8 theme APIs. The theme detection system resolves through a 4-level
+      hierarchy (Dataverse system theme → user preference → OS media query → webLightTheme default).
+      This task validates that every new component adheres to these requirements across all three
+      theme modes: light, dark, and high-contrast. Keyboard navigation must work for all interactive
+      elements including the action menu (arrow keys, Enter, Escape), diff compare view (Accept/Reject
+      buttons), chat input, and streaming write controls.
+    </background>
+    <dependencies>
+      <dependency task="R2-010">SprkChatPane Code Page must be complete</dependency>
+      <dependency task="R2-072">AnalysisWorkspace Code Page must be complete</dependency>
+      <dependency task="R2-050">SprkChatActionMenu must be implemented</dependency>
+      <dependency task="R2-060">DiffCompareView must be implemented</dependency>
+      <dependency task="R2-080">SuggestionBar must be implemented</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="reference">src/client/code-pages/SprkChatPane/App.tsx</file>
+    <file action="reference">src/client/code-pages/AnalysisWorkspace/App.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatActionMenu.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/DiffCompareView.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SuggestionBar.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/CitationPanel.tsx</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task is validation only -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Grep for hardcoded colors">Search all R2-modified files for hardcoded color values: hex codes (#fff, #000, #rrggbb), rgb()/rgba() values, named CSS colors (color: red, background: white), and Fluent v8 theme references (theme.palette, ITheme). Document any violations.</step>
+    <step order="2" name="Grep for Fluent v8 imports">Search all R2-modified files for Fluent v8 imports (@fluentui/react, @fluentui/react-theme-provider, ITheme, createTheme). Only @fluentui/react-components (v9) imports should be present. Document any violations.</step>
+    <step order="3" name="Verify FluentProvider wrapping">Confirm every Code Page entry point (SprkChatPane/index.tsx, AnalysisWorkspace/index.tsx) wraps the app in FluentProvider with theme detection. Verify the 4-level theme hierarchy is implemented.</step>
+    <step order="4" name="Visual inspection — light mode">Load each component in light mode (webLightTheme). Verify: readable text contrast, correct button/icon colors, proper background hierarchy, no invisible elements, streaming indicator visibility.</step>
+    <step order="5" name="Visual inspection — dark mode">Load each component in dark mode (webDarkTheme). Verify: all text remains readable, backgrounds use correct dark tokens, no white flashes on load, editor content is readable, diff view highlights are distinguishable, action menu has correct contrast.</step>
+    <step order="6" name="Visual inspection — high-contrast mode">Load each component in high-contrast mode (teamsHighContrastTheme). Verify: all borders visible, focus indicators prominent, text meets 7:1 contrast ratio, interactive elements clearly distinguishable from static content.</step>
+    <step order="7" name="WCAG 2.1 AA compliance check">For each new component, verify: color contrast ratios meet 4.5:1 for normal text and 3:1 for large text (AA level), all interactive elements have visible focus indicators, no information conveyed by color alone, all images/icons have aria labels, form inputs have associated labels.</step>
+    <step order="8" name="Keyboard navigation — action menu">Test SprkChatActionMenu: Tab to open, arrow keys to navigate items, Enter to select, Escape to close, type-ahead filtering. Verify focus trap within open menu and focus return on close.</step>
+    <step order="9" name="Keyboard navigation — all components">Test keyboard navigation for: chat input (Enter to send, Shift+Enter for newline), diff compare view (Tab between Accept/Reject/Edit buttons), streaming write cancel button, suggestion bar items, citation panel links. Verify logical tab order throughout.</step>
+    <step order="10" name="Fix violations and re-validate">Address any violations found in steps 1-9. Replace hardcoded colors with Fluent v9 tokens, add missing aria attributes, fix keyboard navigation gaps. Re-run validation to confirm all issues resolved.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero hardcoded color values (hex, rgb, rgba, named) in any R2-modified component files</criterion>
+    <criterion testable="true">Zero Fluent v8 imports (@fluentui/react, ITheme, createTheme) in any R2-modified files</criterion>
+    <criterion testable="true">All components render correctly in light mode with no visual defects</criterion>
+    <criterion testable="true">All components render correctly in dark mode with no white flashes, invisible text, or contrast failures</criterion>
+    <criterion testable="true">All components render correctly in high-contrast mode with visible borders and prominent focus indicators</criterion>
+    <criterion testable="true">All text meets WCAG 2.1 AA contrast ratios (4.5:1 normal, 3:1 large)</criterion>
+    <criterion testable="true">All interactive elements are keyboard-accessible with visible focus indicators</criterion>
+    <criterion testable="true">SprkChatActionMenu supports full keyboard navigation (arrows, Enter, Escape, type-ahead)</criterion>
+    <criterion testable="true">Every Code Page has FluentProvider wrapping with 4-level theme detection</criterion>
+  </acceptance-criteria>
+</task>

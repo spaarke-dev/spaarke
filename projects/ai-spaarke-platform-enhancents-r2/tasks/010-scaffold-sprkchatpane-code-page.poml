@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Scaffold SprkChatPane Code Page Project</title>
+    <phase>1</phase>
+    <tags>code-page, frontend, scaffold</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>none</dependencies>
+    <parallel-group>sprint1-track1</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create the SprkChatPane Code Page project scaffold at src/client/code-pages/SprkChatPane/ with webpack config, tsconfig, package.json, and a placeholder App component wrapped in FluentProvider.
+    </goal>
+    <context>
+      SprkChat is being deployed as a standalone Dataverse side pane via a Code Page web resource.
+      Code Pages use React 19 with createRoot() — they are NOT PCF controls and do NOT use platform-provided React 16.
+      The webpack build produces a JS bundle that is then inlined into a single HTML web resource by build-webresource.ps1.
+
+      Use the SemanticSearch Code Page as the canonical reference implementation:
+      - src/client/code-pages/SemanticSearch/index.tsx (entry point with createRoot)
+      - src/client/code-pages/SemanticSearch/webpack.config.js (webpack configuration)
+      - src/client/code-pages/SemanticSearch/tsconfig.json (TypeScript configuration)
+      - src/client/code-pages/SemanticSearch/package.json (dependencies)
+
+      The side pane will be opened via Xrm.App.sidePanes.createPane() and will receive context
+      parameters (entityType, entityId, playbookId, sessionId) via the data query string.
+    </context>
+    <constraints>
+      - Follow ADR-006: Code Pages for standalone dialogs/pages (not PCF)
+      - Follow ADR-021: Fluent UI v9 exclusively; FluentProvider wrapping mandatory; dark mode support
+      - Follow ADR-022: Code Pages bundle React 19 with createRoot(); NOT platform-provided React 16
+      - Follow .claude/constraints/pcf.md Code Page section for build pipeline rules
+      - React 19 with createRoot() — DO NOT use ReactDOM.render()
+      - FluentProvider with theme detection must wrap the entire app
+      - Webpack config must produce a single bundle suitable for inlining
+      - Must compile and render the placeholder message without errors
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/code-pages/SemanticSearch/index.tsx</reference>
+    <reference>src/client/code-pages/SemanticSearch/webpack.config.js</reference>
+    <reference>src/client/code-pages/SemanticSearch/tsconfig.json</reference>
+    <reference>src/client/code-pages/SemanticSearch/package.json</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read the SemanticSearch Code Page project files to understand the scaffold pattern:
+      - index.tsx (React 19 createRoot entry point)
+      - webpack.config.js (bundle configuration)
+      - tsconfig.json (TypeScript compiler options)
+      - package.json (dependencies and scripts)
+    </step>
+    <step order="2">
+      Create src/client/code-pages/SprkChatPane/ directory structure:
+      - index.tsx (entry point)
+      - App.tsx (root component)
+      - webpack.config.js
+      - tsconfig.json
+      - package.json
+    </step>
+    <step order="3">
+      Create package.json with:
+      - React 19 and react-dom 19 as dependencies
+      - @fluentui/react-components and @fluentui/react-icons
+      - Webpack, ts-loader, and build tooling as devDependencies
+      - Scripts: build, build:dev, start
+      - Reference to @spaarke/ui-components (workspace link or relative path)
+    </step>
+    <step order="4">
+      Create webpack.config.js following SemanticSearch pattern:
+      - Entry: ./index.tsx
+      - Output: single bundle in dist/
+      - TypeScript loader
+      - Production optimization (minification, tree-shaking)
+      - Source maps for development
+    </step>
+    <step order="5">
+      Create tsconfig.json:
+      - Target ES2020+, module ESNext
+      - JSX react-jsx (React 19 automatic runtime)
+      - Strict mode enabled
+      - Path aliases if needed
+    </step>
+    <step order="6">
+      Create index.tsx entry point:
+      - Import createRoot from react-dom/client
+      - Parse URL parameters from window.location.search
+      - Create root and render App wrapped in FluentProvider
+      - Use webLightTheme as default (theme detection added in task 012)
+    </step>
+    <step order="7">
+      Create App.tsx placeholder component:
+      - Render "SprkChat Pane Loading..." message with Fluent UI Spinner
+      - Use makeStyles for basic full-viewport layout
+      - Include PLACEHOLDER comment indicating task 012 wires the real SprkChat component
+    </step>
+    <step order="8">
+      Run npm install and npm run build to verify the scaffold compiles:
+      - Fix any TypeScript or webpack errors
+      - Confirm dist/ output is produced
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine SemanticSearch Code Page reference files</tool>
+    <tool>Write - Create new project files</tool>
+    <tool>Bash - npm install, npm run build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/SprkChatPane/index.tsx — React 19 createRoot entry point</output>
+    <output>src/client/code-pages/SprkChatPane/App.tsx — Placeholder component with FluentProvider</output>
+    <output>src/client/code-pages/SprkChatPane/webpack.config.js — Webpack bundle configuration</output>
+    <output>src/client/code-pages/SprkChatPane/tsconfig.json — TypeScript configuration</output>
+    <output>src/client/code-pages/SprkChatPane/package.json — Dependencies and build scripts</output>
+    <output>Successful build output in dist/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SprkChatPane/ directory exists at src/client/code-pages/SprkChatPane/</criterion>
+    <criterion>npm install completes without errors</criterion>
+    <criterion>npm run build produces a bundle in dist/</criterion>
+    <criterion>index.tsx uses React 19 createRoot() — NOT ReactDOM.render()</criterion>
+    <criterion>App.tsx renders inside FluentProvider with Fluent v9 theme</criterion>
+    <criterion>App.tsx shows "SprkChat Pane Loading..." placeholder with Spinner</criterion>
+    <criterion>No Fluent v8 imports present</criterion>
+    <criterion>No React 16 APIs used (no ReactDOM.render, no unmountComponentAtNode)</criterion>
+  </acceptance-criteria>
+
+  <placeholders>
+    <placeholder id="PH-010-A">
+      <location>src/client/code-pages/SprkChatPane/App.tsx</location>
+      <type>hardcoded-return</type>
+      <description>App.tsx renders a FluentProvider + Spinner + "SprkChat Pane Loading..." text instead of the real SprkChat component</description>
+      <completed-by>012</completed-by>
+      <build-impact>Compiles and renders; no runtime errors</build-impact>
+    </placeholder>
+    <placeholder id="PH-010-B">
+      <location>src/client/code-pages/SprkChatPane/index.tsx</location>
+      <type>hardcoded-return</type>
+      <description>Theme detection uses webLightTheme only; full 4-level theme resolution added in task 012</description>
+      <completed-by>012</completed-by>
+      <build-impact>Compiles; renders in light theme only</build-impact>
+    </placeholder>
+  </placeholders>
+</task>

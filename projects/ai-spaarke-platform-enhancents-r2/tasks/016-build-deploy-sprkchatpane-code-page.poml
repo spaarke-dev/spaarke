@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Build and Deploy SprkChatPane Code Page</title>
+    <phase>1</phase>
+    <tags>deploy, code-page</tags>
+    <estimate>1-2 hours</estimate>
+    <dependencies>012, 013, 014, 015</dependencies>
+    <parallel-group>sprint1-track1</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Build the SprkChatPane Code Page via the two-step pipeline (webpack bundle + inline HTML), deploy the sprk_SprkChatPane web resource to Dataverse, deploy the launcher script, and verify the side pane loads successfully on a test form.
+    </goal>
+    <context>
+      Code Page deployment is a two-step process:
+      1. npm run build — produces webpack bundle (JS + CSS) in dist/
+      2. build-webresource.ps1 — inlines the bundle into a single self-contained HTML file
+
+      The resulting HTML file is deployed as a Dataverse web resource with the name sprk_SprkChatPane.
+      The launcher script (openSprkChatPane.ts) is deployed separately as sprk_/scripts/openSprkChatPane.js.
+
+      Deployment target: https://spaarkedev1.crm.dynamics.com (dev environment)
+
+      This task uses the code-page-deploy skill which orchestrates:
+      - Build pipeline (npm + inline)
+      - Web resource deployment (pac cli or API)
+      - Publish customizations
+      - Verification
+    </context>
+    <constraints>
+      - Follow .claude/skills/code-page-deploy/SKILL.md for deployment procedure
+      - Two-step build: webpack THEN inline HTML — do not skip the inline step
+      - Deploy to dev environment only (spaarkedev1.crm.dynamics.com)
+      - Verify side pane loads on at least one test form
+      - Web resource name: sprk_SprkChatPane (Code Page) and sprk_/scripts/openSprkChatPane (launcher)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">
+      Run the webpack build:
+      - cd src/client/code-pages/SprkChatPane/
+      - npm run build
+      - Verify dist/ output produced (check bundle size)
+      - Target: &lt;500KB gzipped
+    </step>
+    <step order="2">
+      Run the inline HTML build step:
+      - Execute build-webresource.ps1 (or equivalent script)
+      - Verify single self-contained HTML file produced
+      - Inspect HTML to confirm JS and CSS are inlined
+    </step>
+    <step order="3">
+      Deploy SprkChatPane web resource to Dataverse:
+      - Use pac CLI or Web API to create/update web resource
+      - Web resource name: sprk_SprkChatPane
+      - Type: HTML (webpage)
+      - Upload the inlined HTML file
+    </step>
+    <step order="4">
+      Deploy launcher script web resource:
+      - Compile openSprkChatPane.ts to JavaScript
+      - Upload as web resource: sprk_/scripts/openSprkChatPane
+      - Type: JavaScript (script)
+    </step>
+    <step order="5">
+      Publish customizations:
+      - Run pac solution publish or equivalent
+      - Wait for publish to complete
+    </step>
+    <step order="6">
+      Verify side pane on test form:
+      - Open a test form in Dataverse (e.g., Matter record)
+      - Trigger the launcher (console or ribbon button)
+      - Verify SprkChat side pane opens
+      - Verify SprkChat component renders (not just "Loading...")
+      - Verify theme applies correctly
+      - Check browser console for errors
+    </step>
+    <step order="7">
+      Document deployment:
+      - Record web resource IDs
+      - Note any issues encountered
+      - Document verification results
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Bash - npm run build, PowerShell scripts, pac CLI</tool>
+    <tool>Read - Check build output and deployment scripts</tool>
+  </tools>
+
+  <outputs>
+    <output>sprk_SprkChatPane web resource deployed to Dataverse dev environment</output>
+    <output>sprk_/scripts/openSprkChatPane web resource deployed</output>
+    <output>Verification that side pane loads on a test form</output>
+    <output>Deployment documentation in notes/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Webpack build produces bundle under 500KB gzipped</criterion>
+    <criterion>Inline HTML build produces single self-contained HTML file</criterion>
+    <criterion>sprk_SprkChatPane web resource deployed to spaarkedev1.crm.dynamics.com</criterion>
+    <criterion>Launcher script deployed as web resource</criterion>
+    <criterion>Side pane opens on a test form via launcher</criterion>
+    <criterion>SprkChat component renders inside the pane (not just loading placeholder)</criterion>
+    <criterion>No JavaScript errors in browser console on pane load</criterion>
+    <criterion>Customizations published successfully</criterion>
+  </acceptance-criteria>
+</task>

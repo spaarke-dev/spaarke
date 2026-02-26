@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="123" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Implement Suggestions SSE Event Handling</title>
+    <phase>3</phase>
+    <package>Package H: Suggestions + Citations</package>
+    <tags>bff-api, frontend, sse</tags>
+    <estimate>4-6 hours</estimate>
+    <dependencies>122</dependencies>
+    <parallel-group>sprint3-track3</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Add a new SSE event type 'suggestions' that delivers 2-3 contextual follow-up suggestions
+      after the main AI response completes. On the backend, implement a focused LLM call (~100 tokens)
+      that generates suggestions based on the conversation context. On the frontend, handle the
+      new event in SprkChat and pass suggestions to SprkChatSuggestions.
+    </goal>
+    <context>
+      The suggestions feature enhances the conversational experience by proactively offering relevant
+      follow-up actions after each AI response. The flow:
+
+      1. AI completes main response (all tokens streamed)
+      2. Backend makes a separate, focused LLM call: "Given this conversation, suggest 2-3
+        follow-up questions or actions the user might want to take next" (~100 output tokens)
+      3. Backend emits an SSE event: `event: suggestions\ndata: ["Suggestion 1", "Suggestion 2", "Suggestion 3"]\n\n`
+      4. This event arrives AFTER the main response tokens but BEFORE the `done` event
+      5. Frontend receives the event, stores suggestions in state, and renders SprkChatSuggestions
+      6. Suggestions clear when the user sends a new message
+
+      The suggestion generation is intentionally cheap (~100 tokens) and runs after the main
+      response is complete, so it doesn't add latency to the perceived response time. If the
+      suggestion call fails, the response still completes normally (suggestions are optional).
+
+      Event ordering: token* → suggestions → done
+    </context>
+    <constraints>
+      - Follow ADR-001: Minimal API pattern for any new endpoints
+      - Follow ADR-013: AI tool framework; use existing ChatHostContext for conversation access
+      - Follow ADR-015: No document content in suggestions (keep suggestions generic/actionable)
+      - Follow ADR-019: If suggestion generation fails, log warning but DO NOT emit error event — suggestions are optional
+      - SSE event must follow existing serialization pattern in ChatEndpoints.cs
+      - Suggestion generation must not delay the 'done' event by more than 2 seconds
+      - If suggestion generation exceeds 2s timeout, skip it and emit 'done' immediately
+      - Maximum 3 suggestions, minimum 1 (if generation succeeds)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-data-governance.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review existing SSE event serialization in ChatEndpoints.cs:
+      - How token, done, and error events are serialized and written
+      - Where in the streaming pipeline to insert the suggestions event
+      - How to make a secondary LLM call after the main response completes
+    </step>
+    <step order="2">
+      Add suggestions generation to the backend:
+      - After main AI response completes (all tokens emitted), make a focused LLM call
+      - System prompt: "Based on the conversation so far, suggest 2-3 brief follow-up questions
+        or actions. Return as a JSON array of strings. Be specific and actionable."
+      - Use a lightweight model or low max_tokens (100) for speed
+      - Wrap in a 2-second timeout — if exceeded, skip suggestions silently
+      - Parse response as string[] and validate (1-3 items, each under 80 chars)
+    </step>
+    <step order="3">
+      Emit suggestions SSE event:
+      - Event format: `event: suggestions\ndata: {"suggestions":["text1","text2","text3"]}\n\n`
+      - Emit after the last token event and before the done event
+      - If suggestion generation fails or times out, skip this event entirely (no error emitted)
+      - Log a warning if suggestion generation fails (for diagnostics)
+    </step>
+    <step order="4">
+      Add suggestions event type to TypeScript types:
+      - In types.ts: add SuggestionsEvent to the SSE event discriminated union
+      - SuggestionsEvent: { type: 'suggestions', suggestions: string[] }
+      - Add to the existing SseEvent union type
+    </step>
+    <step order="5">
+      Handle suggestions event in useSseStream hook:
+      - Add case for 'suggestions' event type in the event handler
+      - Store suggestions in hook state (cleared when new message sent)
+      - Expose suggestions in the hook's return value
+    </step>
+    <step order="6">
+      Wire SprkChat to display suggestions:
+      - Import SprkChatSuggestions component
+      - Pass suggestions from useSseStream to SprkChatSuggestions
+      - Show suggestions below the latest assistant message
+      - On suggestion click: clear suggestions, send suggestion text as new user message
+      - Clear suggestions when user manually types and sends a message
+    </step>
+    <step order="7">
+      Build verification:
+      - dotnet build src/server/api/Sprk.Bff.Api/
+      - TypeScript compilation for Spaarke.UI.Components
+      - Verify event ordering: token → suggestions → done
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review ChatEndpoints.cs SSE patterns, useSseStream hook, SprkChat component</tool>
+    <tool>Edit - Add suggestions generation and SSE emission, handle in frontend</tool>
+    <tool>Bash - dotnet build, TypeScript compilation</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatSuggestions.tsx</file>
+  </relevant-files>
+
+  <outputs>
+    <output>Updated ChatEndpoints.cs with suggestions generation and SSE emission</output>
+    <output>Updated types.ts with SuggestionsEvent type</output>
+    <output>Updated useSseStream.ts with suggestions event handling</output>
+    <output>Updated SprkChat.tsx to display SprkChatSuggestions with data from SSE</output>
+    <output>Successful build for both backend and frontend</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Backend generates 2-3 follow-up suggestions after main AI response completes</criterion>
+    <criterion>Suggestions SSE event is emitted after all token events and before done event</criterion>
+    <criterion>Suggestion generation is bounded by a 2-second timeout</criterion>
+    <criterion>If suggestion generation fails, no error is emitted — done event proceeds normally</criterion>
+    <criterion>TypeScript SuggestionsEvent type exists in the SSE event discriminated union</criterion>
+    <criterion>useSseStream hook stores and exposes suggestions from the suggestions event</criterion>
+    <criterion>SprkChat renders SprkChatSuggestions below latest assistant message with suggestions data</criterion>
+    <criterion>Clicking a suggestion sends it as a new user message and clears suggestions</criterion>
+    <criterion>Suggestions clear when user manually sends a new message</criterion>
+    <criterion>dotnet build succeeds with zero errors</criterion>
+    <criterion>TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+
+  <placeholders />
+</task>

@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="081" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Re-Analysis Progress Indicator (Frontend)</title>
+    <phase>2</phase>
+    <package>Package E: Re-Analysis Pipeline</package>
+    <tags>frontend, streaming</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>080, 063</dependencies>
+    <parallel-group>sprint2-track2</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Implement a progress indicator component in the Analysis Workspace Code Page that handles
+      "progress" SSE events during re-analysis, showing a progress bar/overlay in the editor pane.
+      On receipt of "document_replace", the editor content is replaced and the previous version
+      is pushed to the undo stack.
+    </goal>
+    <context>
+      Task 080 wired the backend to emit "progress" SSE events (with percent and message) and
+      "document_replace" SSE events during re-analysis. This task handles the frontend:
+
+      1. SprkChat side pane triggers re-analysis via the AI agent
+      2. SSE "progress" events flow through BroadcastChannel to the Analysis Workspace pane
+      3. The editor displays a semi-transparent overlay with a Fluent UI ProgressBar and status message
+      4. On "document_replace", the overlay is dismissed, previous content is snapshotted via
+         useDocumentHistory, and the editor is updated with new HTML
+
+      The progress indicator should be unobtrusive but clear — the user should see that re-analysis
+      is in progress and approximately how far along it is. The editor should remain visible
+      (not hidden) behind the overlay.
+
+      This component lives in the Analysis Workspace Code Page since it's specific to the editor
+      pane experience. It consumes SprkChatBridge events.
+    </context>
+    <constraints>
+      - Follow ADR-021: Fluent UI v9 exclusively; use ProgressBar from @fluentui/react-components
+      - Follow ADR-012: If the component is reusable across Code Pages, place in @spaarke/ui-components
+      - Use makeStyles and design tokens for styling — no custom CSS or hard-coded colors
+      - Support dark mode and high-contrast themes
+      - Must handle edge cases: progress event without prior start, multiple rapid updates, cancellation
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/code-pages/AnalysisWorkspace/</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.ts</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/RichTextEditor.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read the Analysis Workspace Code Page structure to understand:
+      - Where the editor component is rendered
+      - How SprkChatBridge events are currently consumed
+      - Where to integrate the progress overlay
+    </step>
+    <step order="2">
+      Create the ReAnalysisProgressOverlay component:
+      - Semi-transparent overlay positioned over the editor area
+      - Fluent UI ProgressBar showing percent completion
+      - Status message text below the progress bar
+      - Uses makeStyles with design tokens for all styling
+      - Supports light, dark, and high-contrast themes
+    </step>
+    <step order="3">
+      Implement SSE event handling:
+      - Subscribe to "progress" events from SprkChatBridge
+      - Update overlay visibility and progress percent on each event
+      - Subscribe to "document_replace" event
+      - On document_replace: dismiss overlay, snapshot current document via useDocumentHistory,
+        update editor content with new HTML
+    </step>
+    <step order="4">
+      Handle edge cases:
+      - Progress event received with no overlay showing → show overlay
+      - Multiple rapid progress updates → debounce or update immediately (no flicker)
+      - Cancellation → dismiss overlay without replacing document
+      - Error during re-analysis → dismiss overlay, show error notification
+    </step>
+    <step order="5">
+      Integrate the overlay into the Analysis Workspace editor panel:
+      - Render ReAnalysisProgressOverlay as a sibling/overlay to the RichTextEditor
+      - Wire up SprkChatBridge subscriptions with proper cleanup on unmount
+    </step>
+    <step order="6">
+      Build verification: Run npm run build in the Analysis Workspace Code Page directory.
+      Fix any compilation errors.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine Analysis Workspace structure and SprkChatBridge</tool>
+    <tool>Write - Create ReAnalysisProgressOverlay component</tool>
+    <tool>Edit - Integrate overlay into Analysis Workspace</tool>
+    <tool>Bash - npm run build verification</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">src/client/code-pages/AnalysisWorkspace/components/ReAnalysisProgressOverlay.tsx</file>
+    <file action="modify">src/client/code-pages/AnalysisWorkspace/App.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.ts</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/RichTextEditor.tsx</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task produces the real component -->
+  </placeholders>
+
+  <outputs>
+    <output>src/client/code-pages/AnalysisWorkspace/components/ReAnalysisProgressOverlay.tsx — Progress overlay component</output>
+    <output>Updated App.tsx with overlay integration and SprkChatBridge subscriptions</output>
+    <output>Successful npm run build with 0 errors</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ReAnalysisProgressOverlay component renders a semi-transparent overlay with Fluent UI ProgressBar</criterion>
+    <criterion>Overlay shows/hides based on "progress" SSE events received via SprkChatBridge</criterion>
+    <criterion>Progress bar displays percent completion (0-100) from SSE event data</criterion>
+    <criterion>Status message updates with human-readable text from SSE event</criterion>
+    <criterion>On "document_replace" event: overlay dismissed, previous document snapshotted, editor updated</criterion>
+    <criterion>Overlay uses makeStyles with design tokens — no hard-coded colors</criterion>
+    <criterion>Component renders correctly in light, dark, and high-contrast themes</criterion>
+    <criterion>SprkChatBridge subscriptions cleaned up on component unmount</criterion>
+    <criterion>npm run build succeeds in AnalysisWorkspace Code Page</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="112" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Implement Selection-Based Revision Flow</title>
+    <phase>3</phase>
+    <package>Package G: Selection-Based Revision</package>
+    <tags>frontend, bff-api, integration</tags>
+    <estimate>6-8 hours</estimate>
+    <dependencies>110, 111, 100</dependencies>
+    <parallel-group>sprint3-track2</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Implement the end-to-end selection-based revision flow: user selects text in the editor,
+      enters a refinement instruction in SprkChatHighlightRefine, the instruction is sent to
+      POST /sessions/{id}/refine on the BFF API, the SSE response streams revised text back,
+      and the editor applies the replacement via the bridge — showing a diff view if mode=diff
+      or applying directly if mode=stream.
+    </goal>
+    <context>
+      This task connects all the pieces from Package G and Package F into a complete selection-based
+      revision flow:
+
+      1. User selects text in the Analysis Workspace editor
+      2. SprkChatBridge emits selection_changed → SprkChat shows SprkChatHighlightRefine
+      3. User types refinement instruction (or clicks quick action) → onRefine fires
+      4. SprkChat sends POST /api/ai/chat/sessions/{sessionId}/refine with:
+        - selectedText: the selected editor content
+        - instruction: the refinement instruction from the user
+        - context: surrounding paragraphs for AI context
+      5. Backend processes the refinement via TextRefinementTools (existing)
+      6. SSE streams the revised text back to SprkChat
+      7. SprkChatBridge emits document_stream_* events to the Analysis Workspace
+      8. Based on useWriteMode:
+        - mode='diff': Collect tokens, show DiffCompareView with original selection vs revised text
+        - mode='stream': Stream tokens directly, replacing the selected text in the editor
+      9. On Accept (diff mode): editor replaces selection with revised text, pushes to undo stack
+      10. On Reject (diff mode): editor restores original selection, diff panel dismissed
+
+      The BFF API endpoint POST /sessions/{id}/refine may already exist from Phase 1/2 work. If so,
+      this task wires the frontend to call it with selection context. If not, a minimal endpoint is
+      created following the existing ChatEndpoints.cs pattern.
+    </context>
+    <constraints>
+      - Follow ADR-001: Any new API endpoint MUST use Minimal API pattern
+      - Follow ADR-008: Apply AiAuthorizationFilter via endpoint filter
+      - Follow ADR-013: AI tool framework; ChatHostContext flow
+      - Follow ADR-016: Rate limiting on AI endpoints
+      - Follow ADR-019: ProblemDetails for errors
+      - Follow ADR-012: Use shared components (SprkChatBridge, DiffCompareView, SprkChatHighlightRefine)
+      - Auth tokens MUST NOT flow through SprkChatBridge — each pane authenticates independently
+      - The refine endpoint must accept selectedText and instruction as POST body parameters
+      - SSE response must use existing document_stream_* event types (task 025)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/TextRefinementTools.cs</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.ts</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review existing refine endpoint and TextRefinementTools:
+      - Check if POST /sessions/{id}/refine already exists in ChatEndpoints.cs
+      - Review TextRefinementTools.cs for refinement capabilities
+      - Understand the SSE response format for refinement operations
+    </step>
+    <step order="2">
+      Ensure BFF API refine endpoint exists and supports selection context:
+      - If endpoint exists: extend request model to include selectedText, instruction, and context fields
+      - If endpoint doesn't exist: create it following ChatEndpoints.cs pattern with AiAuthorizationFilter
+        and ai-stream rate limiting
+      - Endpoint must accept: sessionId (route), selectedText (body), instruction (body),
+        surroundingContext (body, optional)
+      - Response: SSE stream using document_stream_* events with the revised text
+    </step>
+    <step order="3">
+      Wire SprkChatHighlightRefine submission to API call:
+      - When onRefine fires in SprkChat, call the refine endpoint via useSseStream
+      - Pass selectedText, instruction, and optionally surrounding context (2 paragraphs before/after)
+      - Show loading state in SprkChat while waiting for SSE response
+    </step>
+    <step order="4">
+      Route SSE response through SprkChatBridge:
+      - On receiving document_stream_start: emit via bridge to Analysis Workspace
+      - On receiving document_stream_token: emit via bridge to Analysis Workspace
+      - On receiving document_stream_end: emit via bridge to Analysis Workspace
+      - The Analysis Workspace listens for these events and routes to the appropriate handler
+    </step>
+    <step order="5">
+      Implement diff mode handling in Analysis Workspace:
+      - When useWriteMode returns 'diff' for selection-revision operations:
+      - Collect all document_stream_token payloads into a buffer
+      - On document_stream_end: open DiffCompareView with original selected text vs buffered revised text
+      - Accept: replace the selected range in editor with revised text, push undo
+      - Reject: dismiss diff view, restore original selection
+    </step>
+    <step order="6">
+      Implement stream mode handling in Analysis Workspace:
+      - When useWriteMode returns 'stream' for selection-revision operations:
+      - Delete the selected range in the editor
+      - Stream tokens directly into the editor at the selection start position
+      - On document_stream_end: finalize the insertion
+      - Push original selected text to undo stack for revert capability
+    </step>
+    <step order="7">
+      Handle error cases:
+      - API error (4xx/5xx): show error message in SprkChat, clear loading state
+      - SSE stream interruption: show partial result with retry option
+      - Selection no longer valid (user modified content while refining): warn and show diff against current content
+      - Empty refinement result: show "No changes suggested" message
+    </step>
+    <step order="8">
+      Build verification:
+      - dotnet build src/server/api/Sprk.Bff.Api/ (if backend changes made)
+      - npm run build for Analysis Workspace Code Page
+      - TypeScript compilation for Spaarke.UI.Components
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review ChatEndpoints, TextRefinementTools, SprkChatBridge, useSseStream</tool>
+    <tool>Edit - Wire refine flow in SprkChat, Analysis Workspace, and optionally ChatEndpoints</tool>
+    <tool>Bash - dotnet build, npm run build verification</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file action="modify">src/client/code-pages/AnalysisWorkspace/App.tsx</file>
+    <file action="modify">src/client/code-pages/AnalysisWorkspace/components/EditorPanel.tsx</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/TextRefinementTools.cs</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.ts</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/hooks/useWriteMode.ts</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/DiffCompareView.tsx</file>
+  </relevant-files>
+
+  <outputs>
+    <output>Updated ChatEndpoints.cs with selection-based refine support (if endpoint changes needed)</output>
+    <output>Updated SprkChat.tsx with refine submission → SSE → bridge flow</output>
+    <output>Updated Analysis Workspace with diff/stream mode handling for selection revisions</output>
+    <output>Successful build verification for API, Code Page, and shared library</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>User can select text in editor, enter refinement instruction, and receive revised text via SSE</criterion>
+    <criterion>Refine endpoint accepts selectedText and instruction in POST body</criterion>
+    <criterion>SSE response uses document_stream_* event types for the revised text</criterion>
+    <criterion>In diff mode: DiffCompareView shows original selection vs revised text with Accept/Reject</criterion>
+    <criterion>In diff mode: Accept replaces editor selection with revised text and pushes to undo stack</criterion>
+    <criterion>In diff mode: Reject dismisses diff and restores original selection</criterion>
+    <criterion>In stream mode: revised text streams directly into editor at selection position</criterion>
+    <criterion>API errors are shown as error messages in SprkChat</criterion>
+    <criterion>Auth tokens are NOT transmitted via SprkChatBridge</criterion>
+    <criterion>dotnet build succeeds (if backend modified)</criterion>
+    <criterion>Analysis Workspace Code Page builds successfully</criterion>
+  </acceptance-criteria>
+
+  <placeholders>
+    <placeholder id="PH-112-A">
+      <location>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</location>
+      <type>todo-comment</type>
+      <description>If surrounding context extraction is not yet available from the editor, the surroundingContext field is optional and the backend proceeds without it. Full context-aware refinement wired when available.</description>
+      <completed-by>future task</completed-by>
+      <build-impact>Compiles and works; refinement quality may be lower without surrounding context</build-impact>
+    </placeholder>
+  </placeholders>
+</task>

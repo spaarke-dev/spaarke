@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="083" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Re-Analysis Integration Tests</title>
+    <phase>2</phase>
+    <package>Package E: Re-Analysis Pipeline</package>
+    <tags>testing, integration</tags>
+    <estimate>4-5 hours</estimate>
+    <dependencies>080</dependencies>
+    <parallel-group>sprint2-track2</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Write integration tests for the full re-analysis flow using WebApplicationFactory, verifying
+      the SSE event sequence (progress events followed by document_replace followed by done),
+      CostControl middleware budget enforcement, and error handling.
+    </goal>
+    <context>
+      The re-analysis flow spans multiple layers: ChatEndpoints → SprkChatAgentFactory →
+      AnalysisExecutionTools → AnalysisOrchestrationService. Integration tests verify the full
+      pipeline works end-to-end using WebApplicationFactory&lt;Program&gt;, with real middleware
+      (including CostControl) and mocked external dependencies (Azure OpenAI, Dataverse).
+
+      Key SSE event sequence to verify:
+      1. progress: { percent: X, message: "..." } (one or more)
+      2. document_replace: { html: "...", metadata: {...} }
+      3. done: { }
+
+      Error scenarios to test:
+      - Budget exceeded → 429 ProblemDetails or terminal SSE error event
+      - Orchestration failure → terminal SSE error event
+      - Missing reanalyze capability → tool not invoked (agent does not have the tool)
+    </context>
+    <constraints>
+      - Follow .claude/constraints/testing.md for test conventions
+      - Use WebApplicationFactory&lt;Program&gt; for integration tests
+      - Mock external services (Azure OpenAI, Dataverse) but keep middleware real
+      - Test naming: {Method}_{Scenario}_{ExpectedResult}
+      - Verify SSE event ordering is deterministic
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>tests/integration/</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read existing integration test files to understand:
+      - How WebApplicationFactory&lt;Program&gt; is configured
+      - How external services are mocked for integration tests
+      - How SSE event streams are consumed and asserted in tests
+    </step>
+    <step order="2">
+      Create or extend integration test class for re-analysis:
+      - Configure WebApplicationFactory with mocked IAnalysisOrchestrationService
+      - Set up test playbook with "reanalyze" capability
+      - Create authenticated test client
+    </step>
+    <step order="3">
+      Write happy-path SSE event sequence test:
+      - Send chat message triggering re-analysis via the streaming endpoint
+      - Consume SSE event stream
+      - Assert at least one "progress" event with valid percent (0-100)
+      - Assert "document_replace" event with non-empty HTML and metadata
+      - Assert "done" event after document_replace
+      - Assert event ordering: progress* → document_replace → done
+    </step>
+    <step order="4">
+      Write CostControl middleware budget enforcement test:
+      - Configure test with low token budget
+      - Trigger re-analysis (expensive operation)
+      - Assert 429 status or terminal SSE error event with budget-exceeded error code
+    </step>
+    <step order="5">
+      Write error handling tests:
+      - Orchestration failure: mock ExecutePlaybookAsync to throw → assert terminal SSE error event
+      - Missing capability: use playbook without "reanalyze" → assert tool not invoked
+    </step>
+    <step order="6">
+      Run integration tests: dotnet test targeting the new test file. Fix any failures.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine existing integration test patterns</tool>
+    <tool>Write - Create integration test file</tool>
+    <tool>Bash - dotnet test execution</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">tests/integration/Sprk.Bff.Api.IntegrationTests/Ai/Chat/ReAnalysisFlowTests.cs</file>
+    <file action="reference">tests/integration/</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this is a test-only task -->
+  </placeholders>
+
+  <outputs>
+    <output>tests/integration/Sprk.Bff.Api.IntegrationTests/Ai/Chat/ReAnalysisFlowTests.cs — Integration tests</output>
+    <output>All integration tests pass</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Integration test file exists at tests/integration/Sprk.Bff.Api.IntegrationTests/Ai/Chat/</criterion>
+    <criterion>Tests use WebApplicationFactory&lt;Program&gt; with real middleware</criterion>
+    <criterion>Happy-path test verifies SSE event sequence: progress* → document_replace → done</criterion>
+    <criterion>CostControl test verifies budget enforcement returns 429 or terminal error</criterion>
+    <criterion>Error handling test verifies orchestration failure produces terminal SSE error</criterion>
+    <criterion>Capability gating test verifies tool unavailable without "reanalyze" capability</criterion>
+    <criterion>All tests use {Method}_{Scenario}_{ExpectedResult} naming convention</criterion>
+    <criterion>dotnet test passes with zero failures</criterion>
+  </acceptance-criteria>
+</task>

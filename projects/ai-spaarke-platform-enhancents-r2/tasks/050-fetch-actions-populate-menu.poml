@@ -1,0 +1,107 @@
+<task id="R2-050" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Fetch Actions from API and Populate Menu</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package D: Action Menu / Command Palette</package>
+    <status>not-started</status>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>frontend, api</tags>
+    <parallel-group>sprint1-track3</parallel-group>
+  </metadata>
+
+  <prompt>
+    Wire the SprkChatActionMenu to fetch available actions from the `GET /api/ai/chat/actions`
+    endpoint when the menu opens. Pass the current session context (active playbook, entity type,
+    entity ID) as query parameters. Cache the response for the duration of the session to avoid
+    redundant API calls. Transform the API response into the categorized ChatActionGroup format
+    expected by the SprkChatActionMenu component. Handle loading, error, and empty states gracefully.
+  </prompt>
+  <role>Senior React/TypeScript developer with API integration and state management expertise</role>
+  <goal>When the SprkChatActionMenu opens, it fetches actions from the API (or uses cached results), transforms the response into categorized groups, and renders them in the menu. Session-scoped caching avoids redundant API calls. Loading and error states are handled gracefully.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Loading and error states MUST use Fluent UI v9 components (Spinner, MessageBar). No hard-coded colors.</constraint>
+    <constraint source="ADR-012">Data fetching logic should live in a hook within the SprkChat hooks folder in @spaarke/ui-components.</constraint>
+    <constraint source="spec-FR-10">Action menu MUST respond to `/` in less than 200ms. Caching ensures subsequent openings are instant.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SprkChat hooks architecture, API data fetching, session-scoped caching, Fluent v9 loading states</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 045 created the `GET /api/ai/chat/actions` endpoint that returns categorized actions
+      filtered by playbook capabilities. Task 048 created the SprkChatActionMenu component that
+      renders these actions. Task 049 wired the `/` trigger into SprkChatInput. This task
+      connects the frontend to the backend by fetching actions when the menu opens.
+
+      The data flow:
+      1. User types `/` → SprkChatInput opens action menu
+      2. Action menu calls `useActionMenuData()` hook
+      3. Hook checks session cache → if cached, return immediately (< 200ms)
+      4. If not cached, call `GET /api/ai/chat/actions?sessionId={id}&entityType={type}`
+      5. Transform response into `ChatActionGroup[]` format
+      6. Cache result for session duration
+      7. Pass data to SprkChatActionMenu for rendering
+
+      The hook should be created in the SprkChat hooks folder and exported from the barrel.
+      The parent SprkChat component passes session context (sessionId, playbook, entityType)
+      as props to enable the API call.
+    </background>
+    <dependencies>
+      <dependency task="045">GET /api/ai/chat/actions endpoint must exist to fetch data from.</dependency>
+      <dependency task="048">SprkChatActionMenu component must exist to receive the fetched data.</dependency>
+      <dependency task="049">SprkChatInput must have the `/` trigger wired to open the menu.</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionMenuData.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/index.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatActionMenu.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types/ActionMenuTypes.ts</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — full implementation -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Review existing SprkChat hooks pattern">Read the SprkChat hooks folder to understand existing hook patterns (useSseStream, etc.), how they fetch data, and how they integrate with the parent SprkChat component.</step>
+    <step order="2" name="Create useActionMenuData hook">Create `useActionMenuData.ts` that accepts `sessionId` (string | undefined), `entityType` (string | undefined), and `apiBaseUrl` (string) as parameters. Returns: `{ actions: ChatActionGroup[], isLoading: boolean, error: string | null, refetch: () => void }`.</step>
+    <step order="3" name="Implement session-scoped caching">Use a `useRef` to store cached actions per session ID. On first call (or when session changes), fetch from API. On subsequent calls with the same session ID, return cached data immediately. Add a `refetch()` method that clears cache and re-fetches (for context changes like playbook switch).</step>
+    <step order="4" name="Implement API fetch logic">Build the GET request URL with query parameters: `${apiBaseUrl}/api/ai/chat/actions?sessionId=${sessionId}&entityType=${entityType}`. Use fetch with the appropriate auth headers (from Xrm context or passed via props). Parse the JSON response.</step>
+    <step order="5" name="Transform API response to ChatActionGroup format">Map the API `ChatActionsResponse` (from task 045 models) to the frontend `ChatActionGroup[]` format. Group by category, map fields (id, label, description, icon, shortcut) to ChatActionItem properties.</step>
+    <step order="6" name="Handle loading state">While the fetch is in progress, return `isLoading: true`. The SprkChatActionMenu should render a Fluent v9 `Spinner` in the popover during loading.</step>
+    <step order="7" name="Handle error state">If the fetch fails (network error, 401, 429, 500), return `error` with a user-friendly message. The SprkChatActionMenu should render a Fluent v9 `MessageBar` with the error. For 429 (rate limited), show "Please try again in a moment."</step>
+    <step order="8" name="Wire hook into SprkChat component">In `SprkChat.tsx`, call `useActionMenuData()` and pass the resulting `actions` array down to SprkChatInput via props. When the menu opens, pass actions to SprkChatActionMenu. Invalidate cache on playbook switch (refetch).</step>
+    <step order="9" name="Update barrel exports">Export `useActionMenuData` from `hooks/index.ts`.</step>
+    <step order="10" name="Build verification">Run the shared component library build to verify compilation and ensure all type references resolve correctly.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Opening the action menu triggers a fetch to GET /api/ai/chat/actions with sessionId and entityType query parameters</criterion>
+    <criterion testable="true">First menu open fetches from API; subsequent openings in the same session use cached data (no additional API call)</criterion>
+    <criterion testable="true">Switching playbook invalidates the cache and triggers a refetch on next menu open</criterion>
+    <criterion testable="true">While loading, the menu shows a Fluent v9 Spinner</criterion>
+    <criterion testable="true">On API error, the menu shows a Fluent v9 MessageBar with a user-friendly error message</criterion>
+    <criterion testable="true">API response is correctly transformed into ChatActionGroup[] format with proper category grouping</criterion>
+    <criterion testable="true">useActionMenuData hook is exported from the SprkChat hooks barrel</criterion>
+    <criterion testable="true">TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,116 @@
+<task id="R2-150" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Final Code Review and ADR Compliance Check</title>
+    <phase>Phase 4: Deployment &amp; Validation</phase>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>quality, code-review</tags>
+  </metadata>
+
+  <prompt>
+    Perform a comprehensive final code review and ADR compliance check across all files modified
+    during the R2 project. Run the code-review skill against all changed files to identify code
+    quality issues, security concerns, and maintainability problems. Run the adr-check skill
+    against all applicable ADRs to verify the implementation complies with every architectural
+    decision. Address any findings — fix code quality issues, resolve ADR violations, and update
+    documentation where needed. This is the final quality gate before project completion.
+  </prompt>
+  <role>Senior architect performing final quality review with ADR compliance authority</role>
+  <goal>All R2 code passes code review with zero critical or high-severity findings. All applicable ADRs are satisfied with zero violations. The codebase is production-quality and architecturally compliant.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="all-adrs">Every applicable ADR must be checked and verified. See project CLAUDE.md for the full list of applicable ADRs.</constraint>
+    <constraint source="skill:code-review">MUST invoke the code-review skill for systematic code quality review.</constraint>
+    <constraint source="skill:adr-check">MUST invoke the adr-check skill for systematic ADR compliance validation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Code review checklist, ADR compliance, architecture validation</topic>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the final quality gate for the R2 project. All implementation work (Phases 0-3) and
+      deployment/validation work (Phase 4 tasks 140-149) are complete. This task performs a
+      systematic review of all code changes to ensure production readiness. The code-review skill
+      checks for: code quality, error handling, security issues, naming conventions, test coverage,
+      documentation, and maintainability. The adr-check skill validates every applicable ADR:
+      Minimal API (ADR-001), thin plugins (ADR-002), PCF vs Code Page (ADR-006), SpeFileStore
+      (ADR-007), endpoint filters (ADR-008), DI minimalism (ADR-010), shared components (ADR-012),
+      AI architecture (ADR-013), caching (ADR-014), data governance (ADR-015), rate limits (ADR-016),
+      ProblemDetails (ADR-019), Fluent design (ADR-021), React versions (ADR-022). Any violations
+      must be resolved before project sign-off.
+    </background>
+    <dependencies>
+      <dependency task="R2-148">Placeholder audit must be complete (no stubs remaining)</dependency>
+      <dependency task="R2-147">Smoke tests must have passed</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="reference">src/client/code-pages/SprkChatPane/</file>
+    <file action="reference">src/client/code-pages/AnalysisWorkspace/</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Models/Ai/</file>
+    <file action="reference">tests/</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task is review only -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Identify all R2-modified files">Use git diff to identify every file modified, created, or deleted during the R2 project (compared to the base branch). Create a manifest of all changed files grouped by area (frontend Code Pages, shared components, BFF API, tests, solutions).</step>
+    <step order="2" name="Run code-review skill — frontend">Invoke the code-review skill against all frontend files: Code Pages (SprkChatPane, AnalysisWorkspace), shared components (SprkChat, RichTextEditor, DiffCompareView). Check: TypeScript best practices, React patterns, error handling, accessibility, naming conventions.</step>
+    <step order="3" name="Run code-review skill — backend">Invoke the code-review skill against all backend files: ChatEndpoints.cs, tool classes, models, services. Check: C# best practices, async/await patterns, error handling, ProblemDetails usage, security.</step>
+    <step order="4" name="Run code-review skill — tests">Invoke the code-review skill against all test files. Check: test naming conventions, coverage adequacy, assertion quality, test isolation, mock usage.</step>
+    <step order="5" name="Run adr-check — API ADRs">Invoke adr-check against ADR-001 (Minimal API), ADR-008 (endpoint filters), ADR-010 (DI minimalism), ADR-013 (AI architecture), ADR-016 (rate limits), ADR-019 (ProblemDetails). Verify all API code complies.</step>
+    <step order="6" name="Run adr-check — frontend ADRs">Invoke adr-check against ADR-006 (PCF vs Code Page), ADR-012 (shared components), ADR-021 (Fluent design), ADR-022 (React versions). Verify all frontend code complies.</step>
+    <step order="7" name="Run adr-check — cross-cutting ADRs">Invoke adr-check against ADR-007 (SpeFileStore), ADR-014 (caching), ADR-015 (data governance). Verify all code complies with cross-cutting constraints.</step>
+    <step order="8" name="Verify DI registration count">Count all DI registrations in Program.cs. Verify the total is still ≤15 (ADR-010). Document the current count and list all registrations.</step>
+    <step order="9" name="Address findings">For each code review or ADR finding: fix the issue, verify the fix compiles, and mark the finding as resolved. Track findings as critical/high/medium/low severity.</step>
+    <step order="10" name="Run final build and test">Run `dotnet build`, `dotnet test`, and `npm run build` for all affected projects. Verify zero errors and all tests pass after fixes.</step>
+    <step order="11" name="Document review results">Create a review summary documenting: total findings by severity, findings by area, ADR compliance status (pass/fail per ADR), and DI registration count. Store in project notes/.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero critical or high-severity code review findings remain unresolved</criterion>
+    <criterion testable="true">All 13 applicable ADRs pass compliance check with zero violations</criterion>
+    <criterion testable="true">DI registration count is ≤15 (ADR-010)</criterion>
+    <criterion testable="true">All API endpoints use Minimal API pattern (ADR-001)</criterion>
+    <criterion testable="true">All AI endpoints have endpoint authorization filters (ADR-008)</criterion>
+    <criterion testable="true">All UI components use Fluent v9 exclusively with makeStyles and design tokens (ADR-021)</criterion>
+    <criterion testable="true">Code Pages use React 19 createRoot; no React 16 APIs in Code Pages (ADR-022)</criterion>
+    <criterion testable="true">No document content appears in log statements (ADR-015)</criterion>
+    <criterion testable="true">All error responses use ProblemDetails format (ADR-019)</criterion>
+    <criterion testable="true">dotnet build, dotnet test, and npm run build all pass with zero errors after fixes</criterion>
+    <criterion testable="true">Review summary documented with findings, compliance status, and DI count</criterion>
+  </acceptance-criteria>
+</task>

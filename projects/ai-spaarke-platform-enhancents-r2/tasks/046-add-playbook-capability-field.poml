@@ -1,0 +1,99 @@
+<task id="R2-046" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Add Playbook Capability Field to Dataverse Schema</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package D: Action Menu / Command Palette</package>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>dataverse, schema</tags>
+    <parallel-group>sprint1-track3</parallel-group>
+  </metadata>
+
+  <prompt>
+    Add a new multi-select choice field `sprk_capabilities` to the Playbook entity in Dataverse.
+    The field stores which AI capabilities a given playbook supports: search, analyze, write_back,
+    reanalyze, selection_revise, web_search, summarize. This field governs which tools are registered
+    in SprkChatAgentFactory.ResolveTools() and which actions appear in the SprkChat command palette.
+    If the Dataverse schema update cannot be deployed immediately, hardcode a capability mapping in
+    SprkChatAgentFactory as a placeholder.
+  </prompt>
+  <role>Dataverse platform developer with schema design expertise</role>
+  <goal>The Playbook entity in Dataverse has a new multi-select choice field `sprk_capabilities` with seven predefined values. Admins can configure capabilities per playbook in the Dataverse form. If deployment is deferred, a hardcoded mapping exists in SprkChatAgentFactory.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec">Playbook capability declarations MUST be stored as a multi-select field on the Dataverse Playbook entity (FR-12).</constraint>
+    <constraint source="design">Admin-configurable per playbook; values must match tool class capability names.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse entity schema updates, multi-select choice fields, solution packaging</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The Package D action menu relies on playbook capability declarations to govern which actions
+      and tools are available. Capabilities are stored on the Dataverse Playbook entity as a
+      multi-select choice field (`sprk_capabilities`). Each value maps to a tool class capability:
+      - `search` (100000000) — DocumentSearchTools
+      - `analyze` (100000001) — AnalysisQueryTools
+      - `write_back` (100000002) — WorkingDocumentTools (Package B)
+      - `reanalyze` (100000003) — AnalysisExecutionTools (Package E)
+      - `selection_revise` (100000004) — TextRefinementTools (selection mode)
+      - `web_search` (100000005) — WebSearchTools (Package I)
+      - `summarize` (100000006) — KnowledgeRetrievalTools (summarize mode)
+
+      If the Dataverse schema update cannot be deployed during this sprint, a hardcoded
+      capability mapping in SprkChatAgentFactory serves as a placeholder. The placeholder
+      maps playbook display names to a default capability set until the schema is deployed.
+    </background>
+    <dependencies>
+      <!-- No blocking dependencies — parallel foundation task -->
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">src/solutions/LegalWorkspace/src/Entities/sprk_playbook/Entity.xml</file>
+    <file action="create">src/solutions/LegalWorkspace/src/OptionSets/sprk_playbookcapabilities.xml</file>
+    <file action="modify">src/solutions/LegalWorkspace/src/Other/Solution.xml</file>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <placeholder location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs" function="GetPlaybookCapabilities">
+      <stub-type>hardcoded-return</stub-type>
+      <real-implementation>Replace hardcoded capability mapping with Dataverse query reading sprk_capabilities multi-select field from playbook record. Use ChatDataverseRepository to fetch the record.</real-implementation>
+      <completed-by task="047">Task 047 implements Dataverse-backed capability lookup in ResolveTools().</completed-by>
+      <build-impact>compiles: yes | tests-pass: yes</build-impact>
+    </placeholder>
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Define option set values">Document the seven capability values with their integer codes: search (100000000), analyze (100000001), write_back (100000002), reanalyze (100000003), selection_revise (100000004), web_search (100000005), summarize (100000006).</step>
+    <step order="2" name="Create option set XML">Create `sprk_playbookcapabilities.xml` in the solution's OptionSets folder with the global option set definition containing all seven values.</step>
+    <step order="3" name="Add field to Playbook entity">Add `sprk_capabilities` as a multi-select picklist field to the Playbook entity XML. Reference the `sprk_playbookcapabilities` global option set.</step>
+    <step order="4" name="Update Solution.xml">Add the new option set and field to the Solution.xml component manifest so they are included in solution export/import.</step>
+    <step order="5" name="Add hardcoded capability mapping placeholder">In `SprkChatAgentFactory.cs`, add a private static method `GetPlaybookCapabilities(string playbookName)` that returns a `HashSet<string>` of capability names. Hardcode sensible defaults (e.g., "Legal Analysis" → search, analyze, summarize, write_back; "Quick Q&A" → search, summarize). Mark with `// PLACEHOLDER: Hardcoded capability mapping — Completed by task 047`.</step>
+    <step order="6" name="Add PlaybookCapability constants">Create a static class `PlaybookCapabilities` (in Models/Ai/Chat/ or inline) with string constants for each capability name to avoid magic strings throughout the codebase.</step>
+    <step order="7" name="Build verification">Run `dotnet build src/server/api/Sprk.Bff.Api/` to verify the placeholder compiles. Verify the solution XML is well-formed.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Option set XML defines seven values: search, analyze, write_back, reanalyze, selection_revise, web_search, summarize with correct integer codes</criterion>
+    <criterion testable="true">Playbook entity XML includes `sprk_capabilities` multi-select picklist field referencing the global option set</criterion>
+    <criterion testable="true">Solution.xml includes both the option set and the entity field as components</criterion>
+    <criterion testable="true">SprkChatAgentFactory contains a `GetPlaybookCapabilities` method returning hardcoded capability sets per playbook</criterion>
+    <criterion testable="true">PlaybookCapabilities constants class defines all seven capability string constants</criterion>
+    <criterion testable="true">`dotnet build` succeeds with zero errors related to new code</criterion>
+    <criterion testable="true">Placeholder comment `// PLACEHOLDER:` is present with task 047 reference</criterion>
+  </acceptance-criteria>
+</task>

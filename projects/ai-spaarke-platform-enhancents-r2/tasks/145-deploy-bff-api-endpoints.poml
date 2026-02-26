@@ -1,0 +1,100 @@
+<task id="R2-145" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Deploy BFF API with New Endpoints and Tool Classes</title>
+    <phase>Phase 4: Deployment &amp; Validation</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>deploy, bff-api</tags>
+  </metadata>
+
+  <prompt>
+    Build and deploy the Sprk.Bff.Api project with all new R2 endpoints and tool classes to the
+    Azure dev environment. This includes: the GET /api/ai/chat/actions endpoint (action menu),
+    document streaming SSE events (document_stream_start, document_stream_token, document_stream_end,
+    document_replace, progress), and all new AI tool classes (WorkingDocumentTools,
+    AnalysisExecutionTools, WebSearchTools, SelectionRevisionTools). Run the API health check to
+    verify deployment success. Validate each new endpoint is reachable and responds correctly.
+  </prompt>
+  <role>Senior DevOps engineer with Azure App Service and BFF API deployment expertise</role>
+  <goal>The BFF API is deployed to the Azure dev environment with all R2 endpoints functional. Health check passes. Each new endpoint responds correctly to test requests.</goal>
+
+  <inputs>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">All API endpoints use Minimal API pattern. Deployment must not introduce any Azure Functions.</constraint>
+    <constraint source="ADR-008">All AI endpoints must have endpoint authorization filters applied — verify in deployed environment.</constraint>
+    <constraint source="ADR-016">Rate limiting must be active on all AI endpoints in the deployed environment.</constraint>
+    <constraint source="ADR-019">All error responses must return ProblemDetails format — verify with intentional error requests.</constraint>
+    <constraint source="skill:bff-deploy">MUST follow bff-deploy skill procedure using scripts/Deploy-BffApi.ps1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF API deployment to Azure App Service, endpoint verification, health check validation</topic>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The Sprk.Bff.Api project has been extended during R2 with multiple new endpoints and tool
+      classes. The deployment target is the Azure App Service at spe-api-dev-67e2xz.azurewebsites.net.
+      The deployment uses scripts/Deploy-BffApi.ps1 which handles the build, publish, and az webapp
+      deploy sequence. After deployment, verification must confirm: (1) health check at /healthz
+      returns 200; (2) GET /api/ai/chat/actions returns a valid JSON response with action categories;
+      (3) SSE streaming endpoint emits the new document_stream_* event types alongside existing
+      token/done/error events; (4) new tool classes are registered and available in the AI tool
+      pipeline via SprkChatAgentFactory.ResolveTools(). The deployment must not break any existing
+      endpoints or functionality.
+    </background>
+    <dependencies>
+      <dependency task="R2-025">SSE document stream event types must be defined and compiled</dependency>
+      <dependency task="R2-045">GET /api/ai/chat/actions endpoint must be implemented</dependency>
+      <dependency task="R2-035">WorkingDocumentTools must be implemented</dependency>
+      <dependency task="R2-065">AnalysisExecutionTools must be implemented</dependency>
+      <dependency task="R2-090">WebSearchTools must be implemented</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DocumentStreamEvent.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatActionsResponse.cs</file>
+    <file action="reference">scripts/Deploy-BffApi.ps1</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task is deployment only -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Run full build and test suite">Run `dotnet build src/server/api/Sprk.Bff.Api/` and `dotnet test` to ensure the API compiles and all tests pass before deployment.</step>
+    <step order="2" name="Deploy to Azure dev environment">Execute `scripts/Deploy-BffApi.ps1` to deploy the API to the Azure App Service (spe-api-dev-67e2xz). Monitor deployment logs for errors.</step>
+    <step order="3" name="Verify health check">Send GET request to https://spe-api-dev-67e2xz.azurewebsites.net/healthz. Verify HTTP 200 response. If health check fails, check App Service logs for startup errors.</step>
+    <step order="4" name="Verify /api/ai/chat/actions endpoint">Send authenticated GET request to /api/ai/chat/actions. Verify HTTP 200 response with JSON body containing categories (Playbooks, Actions, Search, Settings). Verify unauthenticated request returns 401.</step>
+    <step order="5" name="Verify SSE document streaming events">Send authenticated POST to the chat streaming endpoint with a prompt that triggers a document write tool. Verify the SSE response includes document_stream_start, document_stream_token, and document_stream_end events alongside the standard token/done events.</step>
+    <step order="6" name="Verify new tool classes are registered">Send a chat request that exercises each new tool class: WorkingDocumentTools (streaming write), AnalysisExecutionTools (re-analysis), WebSearchTools (web search). Verify each tool is invoked correctly by the AI pipeline.</step>
+    <step order="7" name="Verify ProblemDetails error handling">Send intentionally malformed requests to new endpoints. Verify all error responses use ProblemDetails format with correct HTTP status codes (400, 401, 429).</step>
+    <step order="8" name="Verify existing endpoints unaffected">Test existing endpoints (/healthz, /ping, existing chat endpoints) to confirm no regressions from the R2 deployment.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">dotnet build and dotnet test pass with zero errors before deployment</criterion>
+    <criterion testable="true">Deploy-BffApi.ps1 completes successfully with no deployment errors</criterion>
+    <criterion testable="true">GET /healthz returns HTTP 200 on the deployed environment</criterion>
+    <criterion testable="true">GET /api/ai/chat/actions returns HTTP 200 with categorized actions JSON</criterion>
+    <criterion testable="true">SSE streaming emits document_stream_start, document_stream_token, and document_stream_end events</criterion>
+    <criterion testable="true">New tool classes (WorkingDocumentTools, AnalysisExecutionTools, WebSearchTools) are accessible via AI pipeline</criterion>
+    <criterion testable="true">Error responses use ProblemDetails format (400, 401, 429)</criterion>
+    <criterion testable="true">Existing endpoints (/healthz, /ping, chat) continue to function correctly</criterion>
+  </acceptance-criteria>
+</task>

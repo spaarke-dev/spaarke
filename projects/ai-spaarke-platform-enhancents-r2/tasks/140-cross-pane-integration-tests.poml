@@ -1,0 +1,102 @@
+<task id="R2-140" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Cross-Pane Integration Test Suite</title>
+    <phase>Phase 4: Deployment &amp; Validation</phase>
+    <status>not-started</status>
+    <estimated-effort>8 hours</estimated-effort>
+    <tags>testing, integration, e2e</tags>
+  </metadata>
+
+  <prompt>
+    Create a comprehensive integration test suite that validates cross-pane communication between
+    SprkChatPane and AnalysisWorkspace via SprkChatBridge. Test the full document streaming flow
+    end-to-end (SSE events from BFF → SprkChat → BroadcastChannel → StreamingInsertPlugin → editor).
+    Test the selection-based revision flow end-to-end (editor selection → BroadcastChannel →
+    SprkChat → BFF → SSE response → editor replacement). Test context switching during active
+    streaming to verify graceful cancellation and state cleanup. These tests must cover the critical
+    integration seams that unit tests cannot reach.
+  </prompt>
+  <role>Senior test engineer with Spaarke platform expertise</role>
+  <goal>A complete integration test suite covering all cross-pane communication flows. All tests pass, demonstrating that SprkChatBridge, document streaming, selection revision, and context switching work correctly across pane boundaries.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Shared components (SprkChatBridge, StreamingInsertPlugin) must be tested via the @spaarke/ui-components package.</constraint>
+    <constraint source="ADR-015">Test data must NOT contain real document content. Use synthetic test fixtures.</constraint>
+    <constraint source="testing-constraints">Test naming: {Method}_{Scenario}_{ExpectedResult}. 80%+ line coverage for new test code.</constraint>
+    <constraint source="ADR-013">SSE event testing must validate ChatHostContext flow through the full pipeline.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Cross-pane communication, BroadcastChannel API, SSE streaming, integration testing patterns</topic>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The SprkChat R2 architecture relies on BroadcastChannel-based cross-pane communication
+      between the SprkChatPane Code Page (side pane) and the AnalysisWorkspace Code Page (main form).
+      SprkChatBridge is the shared module that manages this communication channel. Critical flows
+      that must be integration-tested include: (1) document streaming — SSE tokens flowing from
+      BFF API through SprkChat into the editor via StreamingInsertPlugin; (2) selection-based revision —
+      user selects text in the editor, sends it to SprkChat for revision, receives streaming replacement;
+      (3) context switching — user navigates to a different record while streaming is active, requiring
+      graceful cancellation and state reset. These flows cross multiple module boundaries and cannot
+      be validated by unit tests alone.
+    </background>
+    <dependencies>
+      <dependency task="R2-011">SprkChatBridge cross-pane communication module must be complete</dependency>
+      <dependency task="R2-025">SSE document stream event types must be defined</dependency>
+      <dependency task="R2-030">StreamingInsertPlugin must be implemented</dependency>
+      <dependency task="R2-070">Selection-based revision flow must be implemented</dependency>
+      <dependency task="R2-072">AnalysisWorkspace Code Page must be complete</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="create">tests/integration/CrossPane/SprkChatBridgeIntegrationTests.ts</file>
+    <file action="create">tests/integration/CrossPane/DocumentStreamingFlowTests.ts</file>
+    <file action="create">tests/integration/CrossPane/SelectionRevisionFlowTests.ts</file>
+    <file action="create">tests/integration/CrossPane/ContextSwitchingTests.ts</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatBridge.ts</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/plugins/StreamingInsertPlugin.ts</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task creates tests only -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Review cross-pane integration points">Read SprkChatBridge.ts, StreamingInsertPlugin.ts, and ChatEndpoints.cs to identify all cross-pane message types and communication flows that require integration testing.</step>
+    <step order="2" name="Set up test infrastructure">Create test harness that can mock BroadcastChannel in a Node.js/Jest environment. Set up synthetic SSE event generators and mock editor instances for testing the full pipeline.</step>
+    <step order="3" name="Test SprkChatBridge communication">Write tests for SprkChatBridge message send/receive across simulated pane boundaries. Test: message delivery, channel naming conventions (sprk-workspace-{context}), error handling for closed channels, message ordering guarantees.</step>
+    <step order="4" name="Test document streaming flow end-to-end">Write tests that simulate the full streaming flow: emit SSE document_stream_start → document_stream_token (multiple) → document_stream_end events through SprkChatBridge and verify StreamingInsertPlugin receives and processes them correctly. Validate token ordering, operation ID tracking, and final content assembly.</step>
+    <step order="5" name="Test selection-based revision flow">Write tests that simulate: editor selection event → BroadcastChannel message to SprkChat → revision request → SSE streaming response → replacement in editor. Verify the selected text is correctly transmitted, the revision response replaces only the selected range, and the editor state is consistent after replacement.</step>
+    <step order="6" name="Test context switching during active streaming">Write tests that simulate context switches (record navigation) while streaming is active. Verify: active stream is cancelled gracefully, partial content is preserved (not lost), SprkChatBridge cleans up old channel, new channel is established for new context, no orphaned event listeners remain.</step>
+    <step order="7" name="Test error scenarios">Write tests for: BroadcastChannel unavailable (fallback to postMessage), SSE connection drops mid-stream, malformed events, auth token expiry during streaming, concurrent streaming operations.</step>
+    <step order="8" name="Run test suite and verify coverage">Execute all integration tests. Verify all pass. Check line coverage meets 80%+ threshold for new test code. Fix any failures.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">SprkChatBridge integration tests pass — messages delivered correctly across simulated pane boundaries</criterion>
+    <criterion testable="true">Document streaming flow test passes — SSE tokens flow through SprkChatBridge to StreamingInsertPlugin and produce correct editor content</criterion>
+    <criterion testable="true">Selection-based revision flow test passes — selected text is revised and replaced correctly via cross-pane communication</criterion>
+    <criterion testable="true">Context switching test passes — active stream cancelled gracefully, state cleaned up, new context established</criterion>
+    <criterion testable="true">Error scenario tests pass — fallback to postMessage, mid-stream disconnects, malformed events handled</criterion>
+    <criterion testable="true">All integration tests pass with zero failures</criterion>
+    <criterion testable="true">80%+ line coverage for new test code</criterion>
+  </acceptance-criteria>
+</task>

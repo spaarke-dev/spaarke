@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Implement Context Auto-Detection and Session Persistence</title>
+    <phase>1</phase>
+    <tags>code-page, frontend</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>012, 013</dependencies>
+    <parallel-group>sprint1-track1</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Implement automatic host form context detection (entityType, entityId), default playbook selection based on entity type, session persistence across form navigation, and a context-switch prompt when the user navigates to a different record while the side pane remains open.
+    </goal>
+    <context>
+      The SprkChat side pane persists across Dataverse form navigation — when a user opens the pane
+      on a Matter record and then navigates to a Project record, the pane stays open. The side pane
+      must detect this navigation and offer the user a choice:
+      1. Switch context to the new record (start fresh or transfer session)
+      2. Keep the current context (continue working on the original record)
+
+      Context detection sources (priority order):
+      1. URL parameters (entityType, entityId) — set by launcher script
+      2. Xrm.Page context — current form's entity type and record ID
+      3. Xrm.Utility.getPageContext() — alternative context API
+
+      Default playbook auto-selection maps entity types to default playbooks:
+      - sprk_matter → "Legal Analysis" playbook
+      - sprk_project → "Project Analysis" playbook
+      - sprk_invoice → "Financial Review" playbook
+      - (fallback) → "General Assistant" playbook
+
+      Session persistence uses sessionStorage keyed by paneId to maintain:
+      - Active sessionId
+      - Current entityType and entityId
+      - Selected playbookId
+      - Chat message history reference
+    </context>
+    <constraints>
+      - Context detection must work when URL params are missing (user opened pane via launcher vs page refresh)
+      - Session persistence MUST use sessionStorage (not localStorage) — scoped to tab lifetime
+      - Context-switch dialog must be non-blocking and use Fluent UI v9 Dialog component
+      - MUST wire context_changed event through SprkChatBridge when context switches
+      - Default playbook mapping should be configurable (not hard-coded entity→playbook pairs)
+      - Follow ADR-021: All dialog UI uses Fluent v9 components
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Research Xrm context APIs:
+      - Xrm.Page.data.entity.getEntityName() and getId()
+      - Xrm.Utility.getPageContext()
+      - How to detect form navigation events in Dataverse
+      - How Xrm.App.sidePanes works with navigation
+    </step>
+    <step order="2">
+      Implement context detection service:
+      - Create src/client/code-pages/SprkChatPane/services/contextService.ts
+      - detectContext(): reads URL params first, falls back to Xrm APIs
+      - Returns { entityType, entityId, playbookId? }
+      - Handle case where Xrm is not available (graceful fallback)
+    </step>
+    <step order="3">
+      Implement default playbook resolver:
+      - Create a configurable mapping of entityType → default playbookId
+      - Look up mapping when no playbookId provided in URL params
+      - Use "General Assistant" as fallback when no mapping exists
+      - Make mapping extensible (object literal, not switch/case)
+    </step>
+    <step order="4">
+      Implement session persistence:
+      - Store session state in sessionStorage keyed by pane ID
+      - State includes: sessionId, entityType, entityId, playbookId, timestamp
+      - Restore on pane reload (Code Page re-mount without full page refresh)
+      - Clear on explicit user logout or pane close
+    </step>
+    <step order="5">
+      Implement context-change detection:
+      - Poll or listen for Xrm navigation events
+      - Compare current context with persisted context
+      - When mismatch detected, trigger context-switch prompt
+    </step>
+    <step order="6">
+      Implement context-switch dialog:
+      - Fluent v9 Dialog component
+      - Options: "Switch to {new entity}" / "Keep current context"
+      - If switch: emit context_changed via SprkChatBridge, update session, optionally start new chat
+      - If keep: dismiss dialog, continue with original context
+    </step>
+    <step order="7">
+      Wire into App.tsx:
+      - Use context detection on mount
+      - Use session persistence for state management
+      - Add context-change detection lifecycle
+      - Wire context_changed events through SprkChatBridge
+    </step>
+    <step order="8">
+      Build and verify:
+      - npm run build
+      - Verify no TypeScript errors
+      - Review that all Xrm API calls have proper null checks
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Research Xrm APIs and SprkChat props</tool>
+    <tool>Write - Create contextService.ts</tool>
+    <tool>Edit - Update App.tsx with context detection and session persistence</tool>
+    <tool>Bash - npm run build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/SprkChatPane/services/contextService.ts — Context detection and playbook resolution</output>
+    <output>src/client/code-pages/SprkChatPane/App.tsx — Updated with context detection, session persistence, and context-switch dialog</output>
+    <output>Successful build</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Context auto-detected from URL params with Xrm API fallback</criterion>
+    <criterion>Default playbook selected based on entityType mapping</criterion>
+    <criterion>Session state persisted in sessionStorage and restored on pane reload</criterion>
+    <criterion>Context-switch dialog appears when user navigates to a different record</criterion>
+    <criterion>Dialog offers "Switch" and "Keep" options with clear labels</criterion>
+    <criterion>context_changed event emitted via SprkChatBridge when context switches</criterion>
+    <criterion>Playbook mapping is configurable (not hard-coded switch/case)</criterion>
+    <criterion>Graceful handling when Xrm APIs unavailable</criterion>
+    <criterion>All UI uses Fluent v9 components (Dialog, Button, Text)</criterion>
+    <criterion>npm run build succeeds without errors</criterion>
+  </acceptance-criteria>
+</task>

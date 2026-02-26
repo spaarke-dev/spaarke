@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="102" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Implement Automatic Write Mode Selection (Stream vs Diff)</title>
+    <phase>3</phase>
+    <package>Package F: Diff Compare View</package>
+    <tags>frontend</tags>
+    <estimate>4-5 hours</estimate>
+    <dependencies>100, 034</dependencies>
+    <parallel-group>sprint3-track1</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create the useWriteMode hook that automatically selects the appropriate write mode (live streaming
+      or diff review) based on the type of AI operation, with user override capability via action menu
+      commands (/mode stream, /mode diff).
+    </goal>
+    <context>
+      Different AI operations produce different types of content changes, and each is best served by
+      a different presentation mode:
+
+      - Additions/expansions (e.g., "write a new section about X"): Live streaming mode — tokens
+        stream directly into the editor as they arrive, giving the user real-time feedback.
+      - Revisions/replacements (e.g., "rewrite this paragraph to be more concise"): Diff review mode —
+        the full proposed revision is collected, then shown in the DiffCompareView for Accept/Reject.
+      - Selection-based revision (e.g., user selects text and asks "make this more formal"): Diff
+        review mode — the revised selection is shown against the original selection.
+      - Re-analysis (e.g., "rerun analysis with focus on risks"): Streaming mode — the new analysis
+        streams in and replaces the entire document content.
+
+      The hook determines the mode from the AI operation type (communicated via SSE events or action
+      menu context), but the user can always override via /mode stream or /mode diff commands in the
+      action menu. The override persists for the current session.
+
+      This hook is consumed by the Analysis Workspace Code Page to decide whether to route AI output
+      to the StreamingInsertPlugin (stream mode) or collect and show in DiffCompareView (diff mode).
+    </context>
+    <constraints>
+      - Follow ADR-012: Hook MUST live in @spaarke/ui-components shared library
+      - Mode detection must be deterministic based on operation type
+      - User override via /mode command must persist for the session (not just one operation)
+      - Hook must be stateless enough to work across React re-renders without losing override state
+      - Must expose both the current mode and a setter for programmatic override
+      - Must integrate with the action menu command system (task 034)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/hooks/</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review existing hook patterns in @spaarke/ui-components:
+      - useSseStream.ts for SSE event handling patterns
+      - Any existing hooks in the shared hooks/ directory
+      - How hooks export and integrate with components
+    </step>
+    <step order="2">
+      Define TypeScript types for write mode:
+      - WriteMode: 'stream' | 'diff'
+      - WriteModeSource: 'auto' | 'user-override'
+      - OperationType: 'addition' | 'revision' | 'selection-revision' | 'reanalysis' | 'unknown'
+      - UseWriteModeOptions: { defaultMode?: WriteMode, sessionId?: string }
+      - UseWriteModeResult: { mode: WriteMode, source: WriteModeSource, setMode: (mode: WriteMode) => void,
+        resetToAuto: () => void, resolveMode: (operationType: OperationType) => WriteMode }
+    </step>
+    <step order="3">
+      Implement automatic mode resolution logic:
+      - addition → 'stream' (live streaming into editor)
+      - revision → 'diff' (show DiffCompareView)
+      - selection-revision → 'diff' (show DiffCompareView for selected text)
+      - reanalysis → 'stream' (stream + full document replace)
+      - unknown → 'stream' (default fallback)
+    </step>
+    <step order="4">
+      Implement useWriteMode hook:
+      - useState for user override mode (null = auto, WriteMode = override)
+      - resolveMode(operationType): returns user override if set, otherwise auto-detect
+      - setMode(mode): sets user override, persists in sessionStorage keyed by sessionId
+      - resetToAuto(): clears user override
+      - On mount: check sessionStorage for persisted override
+    </step>
+    <step order="5">
+      Implement action menu command integration:
+      - Register /mode command handler that calls setMode()
+      - /mode stream → setMode('stream')
+      - /mode diff → setMode('diff')
+      - /mode auto → resetToAuto()
+      - Return command definitions for action menu registration
+    </step>
+    <step order="6">
+      Export useWriteMode from shared library:
+      - Create src/client/shared/Spaarke.UI.Components/src/hooks/useWriteMode.ts
+      - Add to hooks barrel export
+      - Add to main library barrel export
+    </step>
+    <step order="7">
+      Build verification:
+      - Run TypeScript compilation for Spaarke.UI.Components
+      - Verify no type errors or circular dependencies
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review existing hook patterns and SSE event types</tool>
+    <tool>Write - Create useWriteMode.ts</tool>
+    <tool>Edit - Update barrel exports</tool>
+    <tool>Bash - TypeScript compilation</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/hooks/useWriteMode.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/hooks/index.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</file>
+  </relevant-files>
+
+  <outputs>
+    <output>src/client/shared/Spaarke.UI.Components/src/hooks/useWriteMode.ts - Write mode hook</output>
+    <output>Updated barrel exports</output>
+    <output>Successful TypeScript compilation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>useWriteMode.ts exists at src/client/shared/Spaarke.UI.Components/src/hooks/</criterion>
+    <criterion>Hook returns current mode ('stream' or 'diff') and its source ('auto' or 'user-override')</criterion>
+    <criterion>Auto-detection correctly maps: addition→stream, revision→diff, selection-revision→diff, reanalysis→stream</criterion>
+    <criterion>setMode() sets a user override that persists across re-renders</criterion>
+    <criterion>User override persists in sessionStorage keyed by sessionId</criterion>
+    <criterion>resetToAuto() clears the user override and reverts to automatic detection</criterion>
+    <criterion>/mode stream, /mode diff, /mode auto command definitions are exported for action menu registration</criterion>
+    <criterion>Hook is exported from shared library barrel</criterion>
+    <criterion>TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+
+  <placeholders />
+</task>

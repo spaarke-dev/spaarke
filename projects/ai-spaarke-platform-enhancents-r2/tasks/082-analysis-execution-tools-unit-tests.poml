@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="082" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>AnalysisExecutionTools Unit Tests</title>
+    <phase>2</phase>
+    <package>Package E: Re-Analysis Pipeline</package>
+    <tags>testing, bff-api</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>080</dependencies>
+    <parallel-group>sprint2-track2</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Write comprehensive unit tests for AnalysisExecutionTools covering RerunAnalysisAsync,
+      RefineAnalysisAsync, progress event emission, and playbook capability gating. Target 80%+
+      line coverage.
+    </goal>
+    <context>
+      AnalysisExecutionTools is a factory-instantiated AI tool class with two primary methods:
+      - RerunAnalysisAsync: calls ExecutePlaybookAsync with original playbook + user instructions,
+        emits progress events, returns document_replace result
+      - RefineAnalysisAsync: conversational follow-up for incremental refinement
+
+      Tests should use NSubstitute to mock IAnalysisOrchestrationService and verify:
+      - Correct parameters passed to ExecutePlaybookAsync
+      - Progress events emitted at expected intervals
+      - document_replace result contains expected HTML and metadata
+      - Capability gating (tool not available without "reanalyze" capability)
+      - Error handling (orchestration failure, timeout, budget exceeded)
+
+      Test naming convention: {Method}_{Scenario}_{ExpectedResult}
+    </context>
+    <constraints>
+      - Follow .claude/constraints/testing.md for test conventions
+      - Use xUnit + NSubstitute for mocking
+      - Test naming: {Method}_{Scenario}_{ExpectedResult}
+      - Target 80%+ line coverage for AnalysisExecutionTools.cs
+      - Place tests at tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read existing AI tool test files to understand the testing pattern:
+      - How ChatHostContext is constructed for tests
+      - How IAnalysisOrchestrationService is mocked
+      - Assertion patterns for tool results
+    </step>
+    <step order="2">
+      Create test file AnalysisExecutionToolsTests.cs:
+      - Set up test fixture with NSubstitute mocks for IAnalysisOrchestrationService
+      - Create helper method to construct AnalysisExecutionTools with test ChatHostContext
+    </step>
+    <step order="3">
+      Write RerunAnalysisAsync tests:
+      - RerunAnalysisAsync_WithValidInstructions_CallsExecutePlaybookAsync
+      - RerunAnalysisAsync_AppendsUserInstructions_ToOriginalPlaybook
+      - RerunAnalysisAsync_EmitsProgressEvents_DuringExecution
+      - RerunAnalysisAsync_ReturnsDocumentReplace_OnCompletion
+      - RerunAnalysisAsync_IncludesMetadata_InResult
+      - RerunAnalysisAsync_OrchestratorFails_ReturnsErrorResult
+      - RerunAnalysisAsync_BudgetExceeded_ReturnsRateLimitError
+    </step>
+    <step order="4">
+      Write RefineAnalysisAsync tests:
+      - RefineAnalysisAsync_WithRefinementInstruction_ReturnsRefinedContent
+      - RefineAnalysisAsync_EmptyInstruction_ReturnsValidationError
+      - RefineAnalysisAsync_UsesCurrentAnalysisAsContext
+    </step>
+    <step order="5">
+      Write capability gating tests:
+      - ResolveTools_WithReanalyzeCapability_IncludesAnalysisExecutionTools
+      - ResolveTools_WithoutReanalyzeCapability_ExcludesAnalysisExecutionTools
+      (These may test SprkChatAgentFactory.ResolveTools rather than the tool directly)
+    </step>
+    <step order="6">
+      Run tests: dotnet test targeting the new test file. Fix any failures.
+    </step>
+    <step order="7">
+      Verify coverage meets 80% threshold for AnalysisExecutionTools.cs.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine existing test patterns</tool>
+    <tool>Write - Create AnalysisExecutionToolsTests.cs</tool>
+    <tool>Bash - dotnet test execution and coverage check</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/AnalysisExecutionToolsTests.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs</file>
+    <file action="reference">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this is a test-only task -->
+  </placeholders>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/AnalysisExecutionToolsTests.cs — Comprehensive unit tests</output>
+    <output>All tests pass with 80%+ coverage on AnalysisExecutionTools.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AnalysisExecutionToolsTests.cs exists at tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/</criterion>
+    <criterion>Tests cover RerunAnalysisAsync with valid inputs, error handling, and budget enforcement</criterion>
+    <criterion>Tests cover RefineAnalysisAsync with valid inputs and edge cases</criterion>
+    <criterion>Tests verify progress event emission during re-analysis</criterion>
+    <criterion>Tests verify capability gating (reanalyze capability required)</criterion>
+    <criterion>All tests use {Method}_{Scenario}_{ExpectedResult} naming convention</criterion>
+    <criterion>NSubstitute used for IAnalysisOrchestrationService mocking</criterion>
+    <criterion>dotnet test passes with zero failures</criterion>
+    <criterion>80%+ line coverage on AnalysisExecutionTools.cs</criterion>
+  </acceptance-criteria>
+</task>

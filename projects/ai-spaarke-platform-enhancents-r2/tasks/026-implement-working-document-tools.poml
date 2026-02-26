@@ -1,0 +1,102 @@
+<task id="R2-026" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Implement WorkingDocumentTools AI Tool Class</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package B: Streaming Write Engine</package>
+    <status>not-started</status>
+    <estimated-effort>8 hours</estimated-effort>
+    <tags>bff-api, ai, tools</tags>
+    <parallel-group>sprint1-track2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Create a new AI tool class `WorkingDocumentTools` with two tool methods: `EditWorkingDocumentAsync`
+    (applies targeted edits to the current working document based on user instruction) and
+    `AppendSectionAsync` (adds a new section to the end of the working document). The class follows
+    the canonical `TextRefinementTools.cs` pattern: factory-instantiated with 0 DI registrations,
+    receiving `IAnalysisOrchestrationService`, `IChatClient`, and `analysisId` via constructor.
+    Each tool method performs an inner LLM call that streams tokens and emits `document_stream_*`
+    SSE events. For this initial task, the inner LLM call returns HARDCODED streaming tokens for
+    testing — real IChatClient streaming is wired in task 028.
+  </prompt>
+  <role>Senior full-stack developer with Spaarke platform expertise</role>
+  <goal>Create a compilable, testable WorkingDocumentTools class that follows the established AI tool pattern with placeholder streaming. The class structure is complete and ready for real LLM wiring in task 028.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">0 additional DI registrations — class MUST be factory-instantiated. Current budget: 12 of 15.</constraint>
+    <constraint source="ADR-013">Tool methods MUST use `AIFunctionFactory.Create` pattern. `ChatHostContext` MUST flow through the pipeline. Rate limiting MUST be applied to AI endpoints.</constraint>
+    <constraint source="ADR-014">Streaming tokens MUST NOT be cached. Working document content MUST NOT be persisted to Redis.</constraint>
+    <constraint source="ADR-015">Document content MUST NOT appear in log entries. Full prompts MUST NOT be logged.</constraint>
+    <constraint source="ADR-019">Errors MUST be returned as ProblemDetails; SSE errors MUST be terminal events with stable errorCode.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>AI tool class implementation pattern and streaming</topic>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The SprkChat agent uses `SprkChatAgentFactory` to resolve tool classes per session. Each tool
+      class is factory-instantiated (not DI-registered) and receives session-scoped dependencies via
+      constructor. `TextRefinementTools.cs` is the canonical example: it defines tool methods
+      decorated with `[Description]` attributes, uses `AIFunctionFactory.Create` for tool registration,
+      and performs inner LLM calls via `IChatClient`. `WorkingDocumentTools` follows this exact
+      pattern but adds SSE event emission for document streaming. The inner LLM call is the core
+      mechanism: it fetches the current working document, constructs a focused prompt with the user's
+      instruction, and streams the LLM response token-by-token as SSE events to the frontend.
+    </background>
+    <dependencies>
+      <dependency task="R2-025" status="complete">SSE event types (DocumentStreamEvent.cs and TypeScript types) must exist for event emission.</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="create">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/TextRefinementTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DocumentStreamEvent.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <placeholder type="hardcoded-return" location="WorkingDocumentTools.EditWorkingDocumentAsync">
+      Inner LLM call returns hardcoded streaming tokens ("This is a placeholder edit response...") emitted as document_stream_token events with 50ms delays to simulate streaming. Real IChatClient streaming wired in task R2-028.
+    </placeholder>
+    <placeholder type="hardcoded-return" location="WorkingDocumentTools.AppendSectionAsync">
+      Inner LLM call returns hardcoded streaming tokens ("## New Section\n\nPlaceholder section content...") emitted as document_stream_token events. Real IChatClient streaming wired in task R2-028.
+    </placeholder>
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Study TextRefinementTools pattern">Read `TextRefinementTools.cs` to understand the canonical tool class structure: constructor signature, tool method attributes, `AIFunctionFactory.Create` usage, inner LLM call pattern, and how `ChatHostContext` flows through.</step>
+    <step order="2" name="Study SprkChatAgentFactory">Read `SprkChatAgentFactory.cs` to understand how tool classes are instantiated and how dependencies are passed from the factory scope.</step>
+    <step order="3" name="Create WorkingDocumentTools class">Create `WorkingDocumentTools.cs` with constructor accepting `IAnalysisOrchestrationService`, `IChatClient`, `analysisId`, and an SSE writer delegate (or `IServerSentEventWriter`). Add private fields for all dependencies.</step>
+    <step order="4" name="Implement EditWorkingDocumentAsync">Add `EditWorkingDocumentAsync(string instruction, CancellationToken cancellationToken)` tool method with `[Description]` attribute explaining the tool's purpose to the LLM. Implement placeholder streaming: emit `document_stream_start`, iterate hardcoded tokens emitting `document_stream_token` with 50ms delays, emit `document_stream_end`.</step>
+    <step order="5" name="Implement AppendSectionAsync">Add `AppendSectionAsync(string sectionTitle, string instruction, CancellationToken cancellationToken)` tool method. Same placeholder streaming pattern but with section-specific content.</step>
+    <step order="6" name="Add GetTools method">Add `public IEnumerable&lt;AIFunction&gt; GetTools()` method that returns `AIFunctionFactory.Create` for both tool methods, following the TextRefinementTools pattern.</step>
+    <step order="7" name="Build verification">Run `dotnet build src/server/api/Sprk.Bff.Api/` to verify compilation. Fix any errors.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">`WorkingDocumentTools.cs` exists with constructor accepting IAnalysisOrchestrationService, IChatClient, analysisId, and SSE writer</criterion>
+    <criterion testable="true">`EditWorkingDocumentAsync` emits document_stream_start, N document_stream_token events, and document_stream_end in correct order</criterion>
+    <criterion testable="true">`AppendSectionAsync` emits the same SSE event sequence with section-specific content</criterion>
+    <criterion testable="true">`GetTools()` returns AIFunction instances for both tool methods via AIFunctionFactory.Create</criterion>
+    <criterion testable="true">Class is factory-instantiable with 0 DI registrations (no changes to Program.cs or AiModule.cs)</criterion>
+    <criterion testable="true">All placeholder code has `// PLACEHOLDER:` comments referencing task R2-028</criterion>
+    <criterion testable="true">`dotnet build` succeeds for BFF API project with zero errors</criterion>
+  </acceptance-criteria>
+</task>

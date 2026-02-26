@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="101" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Implement Diff Algorithm for HTML Content</title>
+    <phase>3</phase>
+    <package>Package F: Diff Compare View</package>
+    <tags>frontend, ui-components</tags>
+    <estimate>4-6 hours</estimate>
+    <dependencies>100</dependencies>
+    <parallel-group>sprint3-track1</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create the diffUtils module that extracts plain text from HTML for diffing, computes word-level
+      diffs, and maps diff operations back to styled HTML spans while preserving heading and list
+      structure from the original content.
+    </goal>
+    <context>
+      The DiffCompareView component (task 100) renders diffs of plain text, but the Analysis Workspace
+      works with HTML content produced by the RichTextEditor. When the AI proposes a revision to an
+      HTML document section, we need to:
+      1. Extract readable text from the original and proposed HTML
+      2. Compute a meaningful word-level diff on the extracted text
+      3. Map the diff results back to HTML spans with addition/deletion styling
+      4. Preserve structural elements (headings, lists, paragraphs) so the diff view maintains
+         the document's visual hierarchy
+
+      This utility module sits alongside DiffCompareView and is used by it internally. It also
+      exports public functions for callers that need diff computation without the UI component
+      (e.g., for generating diff summaries in chat messages).
+
+      Edge cases to handle:
+      - Heading changes (e.g., h2 changed to h3)
+      - List item additions/removals
+      - Paragraph reordering
+      - Whitespace normalization (ignore insignificant whitespace differences)
+      - Empty content (original or proposed is empty string)
+    </context>
+    <constraints>
+      - Follow ADR-012: Utility MUST live in @spaarke/ui-components shared library alongside DiffCompareView
+      - Use jsdiff (diff) library for core diff computation
+      - Must handle HTML input without XSS risk — sanitize or escape any user-generated content
+      - Must not introduce DOM dependencies (no document.createElement) — use string parsing only
+        so the module works in both browser and test environments
+      - Preserve semantic HTML structure (headings, lists, paragraphs) in diff output
+      - Whitespace normalization must be configurable (strict vs relaxed)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/DiffCompareView.tsx</reference>
+    <reference>src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/RichTextEditor.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review the RichTextEditor component to understand the HTML structure it produces:
+      - What HTML elements are used (p, h1-h6, ul, ol, li, strong, em, etc.)
+      - How content is structured and nested
+      - Any special attributes or data attributes
+    </step>
+    <step order="2">
+      Implement extractTextFromHtml(html: string): string function:
+      - Strip HTML tags while preserving text content
+      - Maintain paragraph breaks as double newlines
+      - Maintain list structure as indented lines with bullet/number markers
+      - Preserve heading hierarchy (prefix with # markers or similar for diff visibility)
+      - Normalize whitespace (collapse multiple spaces, trim lines)
+    </step>
+    <step order="3">
+      Implement computeHtmlDiff(originalHtml: string, proposedHtml: string, options?: DiffOptions): DiffResult function:
+      - Extract text from both HTML inputs
+      - Run jsdiff diffWords on extracted text
+      - Map diff segments back to HTML spans:
+        - Added text: wrap in &lt;span class="diff-added"&gt;
+        - Removed text: wrap in &lt;span class="diff-removed"&gt;
+        - Unchanged text: no wrapping
+      - Reconstruct HTML structure around diff spans
+    </step>
+    <step order="4">
+      Implement structural diff for block-level elements:
+      - detectBlockChanges(originalHtml, proposedHtml): identify added/removed/modified blocks
+      - Handle heading level changes (h2 → h3) as modifications, not delete+add
+      - Handle list item additions/removals as discrete operations
+      - Handle paragraph reordering detection (optional: flag reordered paragraphs)
+    </step>
+    <step order="5">
+      Define TypeScript types for diff results:
+      - DiffOptions: { whitespace: 'strict' | 'relaxed', granularity: 'word' | 'character' }
+      - DiffResult: { originalHtml: string, proposedHtml: string, segments: DiffSegment[],
+        stats: { additions: number, deletions: number, unchanged: number } }
+      - DiffSegment: { type: 'added' | 'removed' | 'unchanged', text: string, htmlWrapper?: string }
+    </step>
+    <step order="6">
+      Integrate diffUtils into DiffCompareView:
+      - Update DiffCompareView to accept HTML content via an htmlMode prop
+      - When htmlMode is true, use computeHtmlDiff instead of plain text diff
+      - Render diff output as sanitized HTML in the view panels
+    </step>
+    <step order="7">
+      Export diffUtils functions from the DiffCompareView module:
+      - Export extractTextFromHtml, computeHtmlDiff, and types from index.ts
+      - These are public utilities for use outside the component
+    </step>
+    <step order="8">
+      Build verification:
+      - Run TypeScript compilation for Spaarke.UI.Components
+      - Verify no type errors, missing imports, or circular dependencies
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review RichTextEditor HTML output patterns</tool>
+    <tool>Write - Create diffUtils.ts</tool>
+    <tool>Edit - Update DiffCompareView to use diffUtils</tool>
+    <tool>Bash - TypeScript compilation</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/diffUtils.ts</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/DiffCompareView.tsx</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/index.ts</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/RichTextEditor.tsx</file>
+  </relevant-files>
+
+  <outputs>
+    <output>src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/diffUtils.ts - HTML diff utility module</output>
+    <output>Updated DiffCompareView to support HTML content diffing</output>
+    <output>Updated barrel exports with diffUtils public functions</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>diffUtils.ts exists at src/client/shared/Spaarke.UI.Components/src/components/DiffCompareView/</criterion>
+    <criterion>extractTextFromHtml correctly strips HTML tags while preserving text, paragraph breaks, and list structure</criterion>
+    <criterion>computeHtmlDiff produces DiffResult with correctly categorized segments (added, removed, unchanged)</criterion>
+    <criterion>Diff output preserves heading structure (h1-h6 elements maintained in output)</criterion>
+    <criterion>Diff output preserves list structure (ul/ol/li elements maintained in output)</criterion>
+    <criterion>Whitespace normalization works in both strict and relaxed modes</criterion>
+    <criterion>Empty content inputs (original or proposed is empty) handled gracefully without errors</criterion>
+    <criterion>DiffResult.stats accurately counts additions, deletions, and unchanged segments</criterion>
+    <criterion>No DOM dependencies — module works in Node.js test environment (string parsing only)</criterion>
+    <criterion>DiffCompareView accepts htmlMode prop and uses computeHtmlDiff when enabled</criterion>
+    <criterion>TypeScript compilation succeeds with zero errors</criterion>
+  </acceptance-criteria>
+
+  <placeholders />
+</task>

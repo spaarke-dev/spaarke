@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Port Toolbar Functionality (Save, Export, Copy, Undo/Redo)</title>
+    <phase>2</phase>
+    <package>C: AW Migration</package>
+    <tags>code-page, frontend</tags>
+    <estimate>4-5 hours</estimate>
+    <dependencies>061, 033</dependencies>
+    <parallel-group>sprint2-track1</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Port the toolbar functionality from the legacy AnalysisWorkspace PCF to the new Code Page. This
+      includes auto-save logic (extracted as a useAutoSave hook), export to Word, copy to clipboard,
+      and undo/redo buttons wired to the useDocumentHistory hook created in task 033.
+    </goal>
+    <context>
+      The existing AnalysisWorkspace PCF (AnalysisWorkspaceApp.tsx) has toolbar buttons for Save, Export
+      (Word), Copy, and Undo/Redo. These need to be ported to the Code Page version with the following
+      changes:
+
+      1. **Auto-save**: The PCF auto-save relied on context.webAPI (Dataverse Web API). The Code Page
+         must use the BFF API instead. Extract auto-save logic into a reusable `useAutoSave` hook that
+         calls the BFF API to persist analysis content.
+      2. **Export**: Port Word export functionality. The PCF used a server-side export; replicate or
+         enhance for the Code Page.
+      3. **Copy**: Port copy-to-clipboard for the analysis content.
+      4. **Undo/Redo**: Wire the toolbar Undo/Redo buttons to the `useDocumentHistory` hook from task 033
+         (max 20 snapshots). This replaces any PCF-local undo implementation.
+
+      Task 033 created the `useDocumentHistory` hook in @spaarke/ui-components. This task wires it into
+      the AnalysisWorkspace toolbar.
+    </context>
+    <constraints>
+      - Follow ADR-021: Fluent UI v9 Toolbar and Button components; no custom button styles
+      - Follow ADR-012: Import useDocumentHistory from @spaarke/ui-components
+      - Auto-save must debounce (e.g., 3 seconds after last edit) — do not save on every keystroke
+      - Auto-save must call BFF API (not context.webAPI which is PCF-only)
+      - Export must handle loading/error states with user feedback
+      - Copy must use Clipboard API with fallback for older browsers
+      - Undo/Redo buttons must show disabled state when at stack boundary
+      - Keyboard shortcuts: Ctrl+S (save), Ctrl+Z (undo), Ctrl+Y (redo), Ctrl+Shift+C (copy)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read the existing AnalysisWorkspace PCF to identify all toolbar functionality:
+      - Save/auto-save logic (debounce timing, API calls, error handling)
+      - Export logic (Word document generation flow)
+      - Copy to clipboard implementation
+      - Any undo/redo implementation in the PCF
+    </step>
+    <step order="2">
+      Create the useAutoSave hook:
+      - Accept: editorContentGetter (function returning HTML), analysisId, enabled flag
+      - Debounce saves by 3 seconds after last content change
+      - Call BFF API PUT endpoint to persist content
+      - Track save state: idle, saving, saved, error
+      - Return: { saveState, lastSavedAt, forceSave }
+      - Handle offline/network errors gracefully
+    </step>
+    <step order="3">
+      Create the AnalysisToolbar component:
+      - Fluent v9 Toolbar with ToolbarButton items
+      - Save button with status indicator (checkmark when saved, spinner when saving)
+      - Export button (Word icon) with dropdown for format options
+      - Copy button
+      - Divider, then Undo/Redo buttons
+      - All buttons with tooltips showing keyboard shortcuts
+    </step>
+    <step order="4">
+      Wire the useDocumentHistory hook (from task 033) to Undo/Redo buttons:
+      - Import useDocumentHistory from @spaarke/ui-components
+      - Connect undo() and redo() to toolbar buttons
+      - Disable Undo when canUndo is false, Redo when canRedo is false
+      - Show snapshot count in tooltip (e.g., "Undo (3 of 20)")
+    </step>
+    <step order="5">
+      Port export functionality:
+      - Create useExportAnalysis hook
+      - Call BFF API export endpoint to generate Word document
+      - Handle download via blob URL
+      - Show loading state during export, error toast on failure
+    </step>
+    <step order="6">
+      Port copy to clipboard:
+      - Use navigator.clipboard.writeText() with document.execCommand('copy') fallback
+      - Copy editor HTML content as both text/plain and text/html MIME types
+      - Show brief "Copied!" toast notification
+    </step>
+    <step order="7">
+      Wire keyboard shortcuts:
+      - Ctrl+S: forceSave() — prevent default browser save dialog
+      - Ctrl+Z: undo() (only when editor not focused — editor has its own undo)
+      - Ctrl+Y: redo() (only when editor not focused)
+      - Ctrl+Shift+C: copy analysis to clipboard
+    </step>
+    <step order="8">
+      Wire the toolbar into EditorPanel:
+      - Replace the placeholder toolbar area from task 061 with AnalysisToolbar
+      - Connect auto-save to RichTextEditor content change events
+      - Pass editor ref for content access
+    </step>
+    <step order="9">
+      Build and verify:
+      - npm run build compiles cleanly
+      - Toolbar renders with all buttons
+      - Undo/Redo buttons correctly show disabled states
+      - Auto-save debounce timing works
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine existing PCF toolbar implementation</tool>
+    <tool>Write - Create new hook and component files</tool>
+    <tool>Edit - Wire toolbar into EditorPanel</tool>
+    <tool>Bash - npm run build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/AnalysisWorkspace/hooks/useAutoSave.ts — Debounced auto-save hook</output>
+    <output>src/client/code-pages/AnalysisWorkspace/hooks/useExportAnalysis.ts — Export to Word hook</output>
+    <output>src/client/code-pages/AnalysisWorkspace/components/AnalysisToolbar.tsx — Toolbar component</output>
+    <output>src/client/code-pages/AnalysisWorkspace/components/EditorPanel.tsx — Updated with toolbar</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AnalysisToolbar renders Save, Export, Copy, Undo, and Redo buttons</criterion>
+    <criterion>Auto-save debounces at 3 seconds and calls BFF API (not context.webAPI)</criterion>
+    <criterion>Save button shows status: idle, saving (spinner), saved (checkmark), error (warning)</criterion>
+    <criterion>Undo/Redo buttons are wired to useDocumentHistory from @spaarke/ui-components</criterion>
+    <criterion>Undo/Redo buttons show disabled state at stack boundaries</criterion>
+    <criterion>Export generates Word document via BFF API with loading/error feedback</criterion>
+    <criterion>Copy uses Clipboard API to copy editor content in text/html and text/plain</criterion>
+    <criterion>Keyboard shortcuts work: Ctrl+S, Ctrl+Z, Ctrl+Y, Ctrl+Shift+C</criterion>
+    <criterion>All toolbar buttons use Fluent v9 ToolbarButton with tooltips</criterion>
+    <criterion>npm run build completes without errors</criterion>
+  </acceptance-criteria>
+
+  <placeholders>
+    <placeholder id="PH-062-A">
+      <location>src/client/code-pages/AnalysisWorkspace/hooks/useAutoSave.ts</location>
+      <type>mock-data</type>
+      <description>BFF API save endpoint URL is placeholder; real endpoint wired when analysis API integration is confirmed in task 065</description>
+      <completed-by>065</completed-by>
+      <build-impact>Compiles; auto-save calls placeholder URL (will 404 until API wired)</build-impact>
+    </placeholder>
+  </placeholders>
+</task>

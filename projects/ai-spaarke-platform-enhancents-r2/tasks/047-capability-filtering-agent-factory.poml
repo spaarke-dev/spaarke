@@ -1,0 +1,111 @@
+<task id="R2-047" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Implement Capability Filtering in SprkChatAgentFactory.ResolveTools()</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package D: Action Menu / Command Palette</package>
+    <status>not-started</status>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>bff-api, ai</tags>
+    <parallel-group>sprint1-track3</parallel-group>
+  </metadata>
+
+  <prompt>
+    Modify `SprkChatAgentFactory.ResolveTools()` to read playbook capabilities from the Dataverse
+    playbook record (via `sprk_capabilities` multi-select field) and filter which AI tool classes
+    are registered for the agent session based on the playbook's declared capability set. A playbook
+    with only `search, summarize` capabilities should result in only DocumentSearchTools and
+    KnowledgeRetrievalTools being registered — no write-back, re-analysis, or web search tools.
+    This ensures the AI agent only has access to tools appropriate for the current playbook context.
+  </prompt>
+  <role>Senior .NET backend developer with AI agent framework and Spaarke platform expertise</role>
+  <goal>SprkChatAgentFactory.ResolveTools() reads playbook capabilities from Dataverse and registers only the tool classes matching the playbook's declared capabilities. Tool registration is dynamic per session, enforcing playbook governance over AI behavior.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">0 additional DI registrations. Tool classes are factory-instantiated in ResolveTools(), not registered in DI container.</constraint>
+    <constraint source="ADR-013">AI tools MUST follow AIFunctionFactory.Create pattern. ChatHostContext MUST flow through the pipeline.</constraint>
+    <constraint source="ADR-014">Capability lookup results MAY be cached using IDistributedCache (Redis) with short TTL (5 min) to avoid per-request Dataverse queries.</constraint>
+    <constraint source="ADR-015">MUST NOT log capability field values at verbose/debug level — only log capability resolution summary at Information level.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SprkChatAgentFactory tool registration, AIFunctionFactory pattern, Dataverse data access, capability-based filtering</topic>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Currently, `SprkChatAgentFactory.ResolveTools()` registers all available tool classes
+      regardless of the playbook context. Task 046 adds a `sprk_capabilities` multi-select
+      field to the Playbook entity and a hardcoded placeholder mapping. This task replaces the
+      hardcoded mapping with a Dataverse query (via ChatDataverseRepository or direct service
+      call) and modifies ResolveTools() to filter tool registration based on the resolved
+      capability set.
+
+      Each tool class declares which capability it provides:
+      - DocumentSearchTools → `search`
+      - AnalysisQueryTools → `analyze`
+      - TextRefinementTools → `selection_revise`
+      - KnowledgeRetrievalTools → `summarize`
+      - WorkingDocumentTools → `write_back` (Package B — may not exist yet; skip gracefully)
+      - AnalysisExecutionTools → `reanalyze` (Package E — may not exist yet; skip gracefully)
+      - WebSearchTools → `web_search` (Package I — may not exist yet; skip gracefully)
+
+      Tool classes that don't exist yet should be handled by checking assembly types or
+      using a registry pattern — avoid hard compilation dependencies on future tool classes.
+    </background>
+    <dependencies>
+      <dependency task="046">Task 046 creates the `sprk_capabilities` Dataverse field and hardcoded placeholder mapping. This task replaces the placeholder with real Dataverse lookup.</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DocumentSearchTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/KnowledgeRetrievalTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/TextRefinementTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisQueryTools.cs</file>
+    <file action="reference">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatHostContext.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task resolves the placeholder from task 046 -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Review existing ResolveTools implementation">Read `SprkChatAgentFactory.cs` to understand the current tool registration flow, how tools are instantiated via AIFunctionFactory.Create, and how ChatHostContext is passed.</step>
+    <step order="2" name="Review ChatDataverseRepository">Read `ChatDataverseRepository.cs` to understand how Dataverse queries are executed for chat-related data. Identify the pattern for querying entity records with specific fields.</step>
+    <step order="3" name="Create tool-to-capability mapping">Define a static dictionary mapping capability names (from PlaybookCapabilities constants) to tool class types. Use typeof() references for existing tool classes. Future tool classes (WorkingDocumentTools, AnalysisExecutionTools, WebSearchTools) should be registered conditionally — check if the type exists in the assembly before adding the mapping.</step>
+    <step order="4" name="Implement Dataverse capability lookup">Add a method to read the `sprk_capabilities` multi-select field from the playbook record via ChatDataverseRepository or a direct Dataverse service call. Parse the multi-select option set values into a HashSet&lt;string&gt; of capability names. If the Dataverse field is not yet deployed, fall back to the hardcoded mapping from task 046.</step>
+    <step order="5" name="Modify ResolveTools to filter by capabilities">Update `ResolveTools()` to call the capability lookup, then iterate the tool-to-capability mapping, registering only tools whose required capability is present in the resolved set. Tools with no capability requirement (always-on) should still be registered.</step>
+    <step order="6" name="Add optional Redis caching for capabilities">Cache the resolved capability set per playbook ID using `IDistributedCache` with a 5-minute TTL. This avoids a Dataverse query on every chat message. Include cache invalidation note in code comments.</step>
+    <step order="7" name="Add logging">Log the resolved capability set and the number of tools registered at Information level. Do NOT log individual capability values at Debug level (ADR-015).</step>
+    <step order="8" name="Remove placeholder from task 046">Replace the `GetPlaybookCapabilities` hardcoded method from task 046 with the real Dataverse-backed implementation. Remove the `// PLACEHOLDER:` comment.</step>
+    <step order="9" name="Build verification">Run `dotnet build src/server/api/Sprk.Bff.Api/` to verify compilation. Ensure no missing type references for future tool classes.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">ResolveTools() reads playbook capabilities from Dataverse (or falls back to hardcoded mapping if field not deployed)</criterion>
+    <criterion testable="true">A playbook with capabilities `search, summarize` only registers DocumentSearchTools and KnowledgeRetrievalTools — no other tool classes</criterion>
+    <criterion testable="true">A playbook with all capabilities registers all available tool classes</criterion>
+    <criterion testable="true">A playbook with empty capabilities registers zero tool classes (no tools available)</criterion>
+    <criterion testable="true">Capability resolution result is cached in Redis with 5-minute TTL</criterion>
+    <criterion testable="true">Missing future tool classes (WorkingDocumentTools, etc.) are skipped gracefully without compilation errors</criterion>
+    <criterion testable="true">The `// PLACEHOLDER:` comment from task 046 is removed and replaced with real implementation</criterion>
+    <criterion testable="true">`dotnet build` succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

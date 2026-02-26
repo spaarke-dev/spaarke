@@ -1,0 +1,91 @@
+<task id="R2-037" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>StreamingInsertPlugin Unit Tests</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package B: Streaming Write Engine</package>
+    <status>not-started</status>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>testing, frontend</tags>
+    <parallel-group>sprint1-track2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Write unit tests for the `StreamingInsertPlugin` Lexical editor plugin covering token insertion
+    at various positions, Markdown-to-Lexical node conversion, cursor indicator visibility during
+    streaming, cursor indicator removal on end, and concurrent rendering behavior with React 19
+    startTransition. Use Jest with React Testing Library and a Lexical test environment. Tests
+    must verify that the plugin correctly transforms incoming Markdown fragments into the
+    appropriate Lexical node types (TextNode, HeadingNode, ListNode, CodeNode).
+  </prompt>
+  <role>Senior full-stack developer with Spaarke platform expertise</role>
+  <goal>Comprehensive unit tests for StreamingInsertPlugin covering token insertion, Markdown conversion, cursor indicator lifecycle, and edge cases. All tests pass with Jest.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="testing">Jest with React Testing Library. Test naming: describe/it blocks with clear scenario descriptions. Tests must run in JSDOM environment with Lexical test utilities.</constraint>
+    <constraint source="ADR-021">Verify cursor indicator uses Fluent UI v9 design tokens (no hard-coded colors in snapshot tests).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Testing Lexical editor plugins with Jest</topic>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The StreamingInsertPlugin is a critical component that handles real-time token insertion
+      into the Lexical editor. Its correctness directly impacts the user experience of streaming
+      writes — any bug could cause content corruption, lost text, or UI freezing. Testing requires
+      a Lexical test environment that provides a real editor instance in JSDOM. Tests exercise the
+      plugin's public API (beginStreamingInsert, append tokens, endStreamingInsert) and verify
+      the resulting editor state. Markdown conversion tests ensure that tokens containing Markdown
+      syntax (headings, lists, code fences) produce the correct Lexical node types.
+    </background>
+    <dependencies>
+      <dependency task="R2-030" status="complete">StreamingInsertPlugin must be implemented.</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="create">src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/plugins/StreamingInsertPlugin.test.tsx</file>
+    <file action="reference">src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/plugins/StreamingInsertPlugin.tsx</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this is a test-only task -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Set up Lexical test environment">Create the test file with a Lexical test editor setup: create a test `LexicalComposer` with the StreamingInsertPlugin registered, render in JSDOM via React Testing Library, and obtain refs to the plugin's imperative methods.</step>
+    <step order="2" name="Test token insertion at end position">Begin streaming insert at 'end' position. Append 5 plain text tokens. Verify the editor content contains all 5 tokens concatenated at the end of the document.</step>
+    <step order="3" name="Test token insertion at cursor position">Set cursor to a specific position in existing content. Begin streaming insert at 'cursor'. Append tokens. Verify content is inserted at the cursor position, not at the end.</step>
+    <step order="4" name="Test Markdown heading conversion">Append tokens that form a Markdown heading (`# `, `My`, ` Heading`). Verify a HeadingNode (level 1) is created in the Lexical editor state.</step>
+    <step order="5" name="Test Markdown list conversion">Append tokens that form Markdown list items (`- `, `Item 1`, `\n- `, `Item 2`). Verify ListNode with ListItemNodes is created.</step>
+    <step order="6" name="Test Markdown code block conversion">Append tokens forming a fenced code block. Verify a CodeNode is created with the correct content.</step>
+    <step order="7" name="Test cursor indicator visibility">After beginStreamingInsert, verify the pulsing cursor indicator element is present in the DOM. After endStreamingInsert, verify it is removed.</step>
+    <step order="8" name="Test concurrent rendering">Append tokens rapidly (simulating burst). Verify all tokens appear in the editor and no tokens are dropped. Verify startTransition is called (mock React.startTransition if needed).</step>
+    <step order="9" name="Test end without tokens">Begin streaming insert then immediately end (zero tokens). Verify editor state is unchanged and cursor indicator is removed.</step>
+    <step order="10" name="Run all tests">Execute Jest tests. Verify all pass with zero failures.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">All Jest tests pass with zero failures</criterion>
+    <criterion testable="true">Token insertion at 'end' position verified with correct editor content</criterion>
+    <criterion testable="true">Token insertion at 'cursor' position verified with correct insertion point</criterion>
+    <criterion testable="true">Markdown heading tokens produce HeadingNode in editor state</criterion>
+    <criterion testable="true">Markdown list tokens produce ListNode/ListItemNode in editor state</criterion>
+    <criterion testable="true">Markdown code fence tokens produce CodeNode in editor state</criterion>
+    <criterion testable="true">Cursor indicator visible during streaming, removed after end</criterion>
+    <criterion testable="true">Rapid token burst does not drop tokens</criterion>
+    <criterion testable="true">Zero-token stream (begin → end) leaves editor unchanged</criterion>
+  </acceptance-criteria>
+</task>

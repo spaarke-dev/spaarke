@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="069" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>AnalysisWorkspace Code Page Dark Mode and Theme Testing</title>
+    <phase>2</phase>
+    <package>C: AW Migration</package>
+    <tags>testing, frontend, accessibility</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>061</dependencies>
+    <parallel-group>sprint2-track1</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Test and validate the AnalysisWorkspace Code Page across light, dark, and high-contrast themes.
+      Verify that all Fluent UI v9 design tokens are used correctly (no hardcoded colors). Test at
+      various viewport sizes to ensure responsive behavior within the dialog.
+    </goal>
+    <context>
+      ADR-021 mandates that all UI components use Fluent UI v9 exclusively with design tokens for
+      theming. The AnalysisWorkspace Code Page must support:
+
+      1. **Light theme** (webLightTheme) — default Dataverse experience
+      2. **Dark theme** (webDarkTheme) — Dataverse dark mode
+      3. **High-contrast themes** (teamsHighContrastTheme) — accessibility compliance
+
+      The Code Page must detect the host Dataverse theme and apply the matching FluentProvider theme.
+      The 4-level theme resolution pattern is:
+      1. URL parameter override (?theme=dark)
+      2. Dataverse system settings (Xrm.Utility.getGlobalContext)
+      3. OS/browser prefers-color-scheme
+      4. Default: webLightTheme
+
+      This task implements the full theme resolution in index.tsx (replacing the placeholder from
+      task 060) and validates all components render correctly in each theme.
+    </context>
+    <constraints>
+      - Follow ADR-021: Fluent UI v9 exclusively; no hard-coded colors; makeStyles with design tokens
+      - All three theme modes must be visually correct: light, dark, high-contrast
+      - No hardcoded hex/rgb color values in any component
+      - Splitter, toolbar, panels must all respect theme tokens
+      - RichTextEditor content area must be readable in all themes
+      - Source viewer iframe background must match theme
+      - Minimum viewport sizes: 1024x768 (dialog at 95% of screen)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/code-pages/SprkChatPane/index.tsx</reference>
+    <reference>.claude/patterns/pcf/theme-management.md</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Read the theme management pattern to understand the 4-level theme resolution:
+      - URL parameter override
+      - Dataverse system settings detection
+      - OS prefers-color-scheme media query
+      - Default fallback
+    </step>
+    <step order="2">
+      Implement useThemeDetection hook:
+      - Check URL parameter: ?theme=light|dark|high-contrast
+      - Check Dataverse global context for theme setting
+      - Check window.matchMedia('(prefers-color-scheme: dark)')
+      - Default to webLightTheme
+      - Return: { theme, themeName, isDark }
+      - Listen for OS theme changes (media query change event)
+    </step>
+    <step order="3">
+      Update index.tsx to use useThemeDetection:
+      - Replace hardcoded webLightTheme (PH-060-B) with detected theme
+      - Pass theme to FluentProvider
+      - Apply matching CSS variables for non-Fluent elements (editor content area)
+    </step>
+    <step order="4">
+      Audit all components for hardcoded colors:
+      - Grep for hex codes (#xxx, #xxxxxx), rgb(), rgba(), hsl() in all .tsx and .ts files
+      - Replace any hardcoded colors with Fluent v9 design tokens
+      - Check makeStyles calls for non-token color usage
+    </step>
+    <step order="5">
+      Test light theme:
+      - All panels render with correct light backgrounds
+      - Text is readable (sufficient contrast)
+      - Splitter is visible
+      - Toolbar buttons have correct hover/focus states
+      - Spinner and loading states use theme colors
+    </step>
+    <step order="6">
+      Test dark theme:
+      - All panels render with correct dark backgrounds
+      - Editor content area has dark background with light text
+      - Source viewer iframe blends with dark theme
+      - Splitter grip is visible against dark panels
+      - No "flash of light" on load
+    </step>
+    <step order="7">
+      Test high-contrast theme:
+      - All interactive elements have visible borders/outlines
+      - Focus indicators meet WCAG 2.1 AA contrast requirements
+      - Text meets minimum contrast ratio (4.5:1 for normal, 3:1 for large)
+      - Keyboard focus is always visible
+    </step>
+    <step order="8">
+      Test viewport sizes:
+      - 1920x1080 (standard desktop — dialog at ~1824x1026)
+      - 1366x768 (common laptop — dialog at ~1298x730)
+      - 1024x768 (minimum supported — dialog at ~972x730)
+      - Verify panels don't overflow, splitter remains functional
+      - Verify minimum panel widths are enforced
+    </step>
+    <step order="9">
+      Build and verify:
+      - npm run build compiles cleanly
+      - Zero hardcoded color values remain
+      - Theme detection responds to OS theme changes
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine theme management patterns and component styles</tool>
+    <tool>Write - Create useThemeDetection hook</tool>
+    <tool>Edit - Replace hardcoded colors with design tokens</tool>
+    <tool>Bash - npm run build, grep for hardcoded colors</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/AnalysisWorkspace/hooks/useThemeDetection.ts — 4-level theme resolution hook</output>
+    <output>src/client/code-pages/AnalysisWorkspace/index.tsx — Updated with dynamic theme detection</output>
+    <output>All component files updated to remove hardcoded colors (if any found)</output>
+    <output>Theme testing validation report (light, dark, high-contrast, viewport sizes)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>useThemeDetection implements 4-level theme resolution (URL, Dataverse, OS, default)</criterion>
+    <criterion>FluentProvider receives dynamically detected theme</criterion>
+    <criterion>Light theme: all panels render with correct backgrounds and readable text</criterion>
+    <criterion>Dark theme: editor and viewer areas have dark backgrounds, no flash of light</criterion>
+    <criterion>High-contrast: all interactive elements have visible borders, focus meets WCAG 2.1 AA</criterion>
+    <criterion>Zero hardcoded hex/rgb/rgba/hsl color values in any component file</criterion>
+    <criterion>Layout functional at 1024x768 minimum viewport (dialog at 95%)</criterion>
+    <criterion>Theme changes via OS setting are detected and applied dynamically</criterion>
+    <criterion>npm run build completes without errors</criterion>
+  </acceptance-criteria>
+
+  <placeholders>
+    <!-- No placeholders — this task completes PH-060-B (theme detection) -->
+  </placeholders>
+</task>

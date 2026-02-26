@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="068" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Deprecate/Remove Legacy AnalysisWorkspace PCF</title>
+    <phase>2</phase>
+    <package>C: AW Migration</package>
+    <tags>cleanup, pcf, dataverse</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>067</dependencies>
+    <parallel-group>sprint2-track1</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Remove the legacy AnalysisWorkspace PCF control from the Dataverse solution and the Analysis
+      form. Remove or mark deprecated the PCF control binding. Verify that no other Dataverse forms
+      reference the AnalysisWorkspace PCF control.
+    </goal>
+    <context>
+      With the AnalysisWorkspace Code Page in place (tasks 060-067) and the form updated to use
+      navigateTo (task 067), the legacy AnalysisWorkspace PCF control is no longer needed. This task
+      performs the cleanup:
+
+      1. Remove the PCF control binding from the Analysis form in Dataverse
+      2. Remove the PCF web resource from the Dataverse solution (or mark deprecated)
+      3. Verify no other forms reference the AnalysisWorkspace PCF
+      4. Clean up any form scripts that referenced the PCF control
+
+      The PCF source code at src/client/pcf/AnalysisWorkspace/ is NOT deleted from the repo (it may
+      be needed for reference or rollback). Instead, add a DEPRECATED.md notice file.
+
+      Note: Task 001 already removed legacy chat code from the PCF. This task removes the PCF
+      control itself from the deployed Dataverse solution.
+    </context>
+    <constraints>
+      - Follow ADR-006: PCF controls are for field-bound form controls only — AnalysisWorkspace is now a Code Page
+      - Do NOT delete the PCF source code from the repo (keep for reference/rollback)
+      - Mark the PCF directory as deprecated with a notice file
+      - Verify all forms are checked — not just the main Analysis form
+      - Solution changes must be exportable and importable
+      - Document rollback procedure in case Code Page migration needs to be reverted
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/client/pcf/AnalysisWorkspace/ControlManifest.Input.xml</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Audit all Dataverse forms that reference the AnalysisWorkspace PCF control:
+      - Search solution XML for the PCF control name/namespace
+      - Check all forms on the Analysis entity (main, quick create, quick view)
+      - Check if any other entities reference the control
+      - Document findings
+    </step>
+    <step order="2">
+      Remove the PCF control binding from the Analysis main form:
+      - Remove the control element from the form XML
+      - Remove any associated form scripts that interact with the PCF
+      - Ensure the form still loads correctly without the control
+    </step>
+    <step order="3">
+      Update the Dataverse solution:
+      - Remove the AnalysisWorkspace PCF web resource from the solution components
+      - OR mark it as deprecated in the solution metadata
+      - Ensure the solution exports cleanly
+    </step>
+    <step order="4">
+      Add a DEPRECATED.md notice to the PCF source directory:
+      - src/client/pcf/AnalysisWorkspace/DEPRECATED.md
+      - State that this PCF is replaced by src/client/code-pages/AnalysisWorkspace/
+      - Reference tasks 060-072 for the migration
+      - Include rollback instructions
+    </step>
+    <step order="5">
+      Verify no orphaned references remain:
+      - Grep the solution for AnalysisWorkspace PCF control name
+      - Check ribbon/command bar for any references
+      - Check form scripts for any PCF-specific code
+    </step>
+    <step order="6">
+      Document the rollback procedure:
+      - How to re-add the PCF control to the form if Code Page migration fails
+      - How to re-import the PCF web resource into the solution
+      - Include in DEPRECATED.md
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Examine solution XML and form configurations</tool>
+    <tool>Write - Create DEPRECATED.md notice</tool>
+    <tool>Edit - Modify solution XML to remove PCF reference</tool>
+    <tool>Bash - Solution export/import commands, grep for references</tool>
+  </tools>
+
+  <outputs>
+    <output>Dataverse solution updated to remove AnalysisWorkspace PCF control</output>
+    <output>Analysis form updated to remove PCF control binding</output>
+    <output>src/client/pcf/AnalysisWorkspace/DEPRECATED.md — Deprecation notice with rollback instructions</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AnalysisWorkspace PCF control is removed from the Analysis form</criterion>
+    <criterion>No other Dataverse forms reference the AnalysisWorkspace PCF</criterion>
+    <criterion>Dataverse solution exports cleanly without the PCF control</criterion>
+    <criterion>Analysis form loads correctly without the PCF control</criterion>
+    <criterion>PCF source code is preserved in repo with DEPRECATED.md notice</criterion>
+    <criterion>DEPRECATED.md includes rollback instructions</criterion>
+    <criterion>No orphaned form scripts or ribbon references to the PCF control</criterion>
+  </acceptance-criteria>
+
+  <placeholders>
+    <!-- No placeholders — this is a cleanup/removal task -->
+  </placeholders>
+</task>

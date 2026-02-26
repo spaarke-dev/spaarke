@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="126" project="ai-spaarke-platform-enhancents-r2">
+  <metadata>
+    <title>Modify Search Tools to Return Source Metadata</title>
+    <phase>3</phase>
+    <package>Package H: Suggestions + Citations</package>
+    <tags>bff-api, ai</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>Phase 2 complete</dependencies>
+    <parallel-group>sprint3-track3</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Modify DocumentSearchTools and KnowledgeRetrievalTools to return source metadata (chunk IDs,
+      source names, page numbers) in their tool results, and update the system prompt to instruct
+      the AI to include citation markers [N] when referencing these sources.
+    </goal>
+    <context>
+      Currently, the search tools return search results to the AI as text content, but they don't
+      include structured metadata that can be used for citations. To support the citation feature
+      (tasks 124-125), the tool results need to include:
+
+      1. A unique chunk ID for each result (for linking back to the source)
+      2. The source document name (for display in the citation popover)
+      3. The page number or section (if available from the search index)
+      4. A short excerpt from the matched content
+
+      Additionally, the system prompt needs to instruct the AI to include citation markers [N]
+      in its response text when referencing information from search results. The [N] markers
+      must correspond to the citation IDs in the tool results so the frontend can link them.
+
+      The tool result format should be structured so that:
+      - The AI sees the content for generating its response
+      - The citation collector (task 125) can extract metadata for the citations SSE event
+      - The metadata is stored in ChatHostContext for access during SSE emission
+    </context>
+    <constraints>
+      - Follow ADR-013: AI tools use AIFunctionFactory.Create pattern; results flow through ChatHostContext
+      - Follow ADR-010: 0 additional DI registrations — modifications to existing tool classes only
+      - Follow ADR-015: Source metadata MUST NOT contain full document content; excerpts limited to 200 chars
+      - Follow ADR-007: Source document access goes through SpeFileStore facade only
+      - Tool result format must remain compatible with AI model consumption (text-based)
+      - System prompt additions must be concise to avoid wasting context window
+      - Citation numbering must be deterministic (based on order of tool calls within a session)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-015-data-governance.md</file>
+      <file>.claude/adr/ADR-007-spe-file-store.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <reference-implementations>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DocumentSearchTools.cs</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/KnowledgeRetrievalTools.cs</reference>
+    <reference>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">
+      Review DocumentSearchTools.cs and KnowledgeRetrievalTools.cs:
+      - Current result format returned to the AI
+      - How search results are fetched (Azure AI Search, knowledge base)
+      - What metadata is already available in search results (document name, page, chunk ID)
+      - How results are formatted as tool return strings
+    </step>
+    <step order="2">
+      Define CitationMetadata model:
+      - Create a CitationMetadata record: { ChunkId, SourceName, PageNumber?, Excerpt }
+      - Add a CitationContext property to ChatHostContext (or a separate CitationCollector):
+        List&lt;CitationMetadata&gt; that accumulates during the response generation
+      - Each tool call appends its results to this collection with sequential IDs
+    </step>
+    <step order="3">
+      Modify DocumentSearchTools to include metadata:
+      - After fetching search results, extract: document name, page number, chunk ID
+      - Create CitationMetadata for each relevant result
+      - Append to ChatHostContext.CitationContext
+      - Format tool return string to include citation markers:
+        "Source [1]: {excerpt from chunk}... (from {document name}, page {N})"
+      - This format lets the AI see the [N] markers and naturally include them in its response
+    </step>
+    <step order="4">
+      Modify KnowledgeRetrievalTools to include metadata:
+      - Same pattern as DocumentSearchTools
+      - Extract: knowledge base article name, section, chunk ID
+      - Append to ChatHostContext.CitationContext
+      - Format with citation markers in tool return string
+    </step>
+    <step order="5">
+      Update system prompt for citation instruction:
+      - Add to the system prompt (in SprkChatAgentFactory or prompt template):
+        "When citing information from search results, include the citation marker [N] inline
+        where N matches the source number provided. Example: 'Revenue grew 15% [1] while
+        costs decreased [2].' Do not fabricate citation numbers."
+      - Keep the instruction concise (under 100 tokens)
+    </step>
+    <step order="6">
+      Verify citation numbering is deterministic:
+      - Citation IDs are assigned in order of tool call execution
+      - Multiple calls to the same tool increment the counter
+      - IDs reset per chat message (not per session)
+    </step>
+    <step order="7">
+      Build verification:
+      - dotnet build src/server/api/Sprk.Bff.Api/
+      - Verify no breaking changes to existing tool result format
+      - Existing tests still pass
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review DocumentSearchTools.cs, KnowledgeRetrievalTools.cs, ChatHostContext</tool>
+    <tool>Edit - Add citation metadata to tool results, update system prompt</tool>
+    <tool>Bash - dotnet build, dotnet test</tool>
+  </tools>
+
+  <relevant-files>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DocumentSearchTools.cs</file>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/KnowledgeRetrievalTools.cs</file>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatHostContext.cs</file>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file action="create">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/CitationMetadata.cs</file>
+  </relevant-files>
+
+  <outputs>
+    <output>Updated DocumentSearchTools.cs with citation metadata in tool results</output>
+    <output>Updated KnowledgeRetrievalTools.cs with citation metadata in tool results</output>
+    <output>Created CitationMetadata.cs model</output>
+    <output>Updated ChatHostContext with citation collection support</output>
+    <output>Updated system prompt with citation instruction</output>
+    <output>Successful dotnet build</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>DocumentSearchTools returns results with chunk IDs, source names, and page numbers</criterion>
+    <criterion>KnowledgeRetrievalTools returns results with chunk IDs, source names, and section info</criterion>
+    <criterion>Tool result strings include citation markers [N] so the AI naturally cites them</criterion>
+    <criterion>CitationMetadata accumulated in ChatHostContext during response generation</criterion>
+    <criterion>System prompt includes citation instruction (under 100 tokens)</criterion>
+    <criterion>Citation numbering is deterministic and sequential per message</criterion>
+    <criterion>Excerpts in CitationMetadata are limited to 200 characters</criterion>
+    <criterion>0 additional DI registrations — all changes within existing tool classes</criterion>
+    <criterion>dotnet build succeeds with zero errors</criterion>
+    <criterion>Existing search tool tests still pass (no breaking changes)</criterion>
+  </acceptance-criteria>
+
+  <placeholders />
+</task>

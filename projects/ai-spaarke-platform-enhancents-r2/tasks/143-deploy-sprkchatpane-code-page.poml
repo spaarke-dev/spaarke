@@ -1,0 +1,98 @@
+<task id="R2-143" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Deploy SprkChatPane Code Page to Dataverse</title>
+    <phase>Phase 4: Deployment &amp; Validation</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>deploy, code-page, dataverse</tags>
+  </metadata>
+
+  <prompt>
+    Build and deploy the SprkChatPane Code Page as the `sprk_SprkChatPane` web resource to the
+    Dataverse dev environment. Follow the two-step Code Page build pipeline: (1) npm run build to
+    produce the webpack bundle, (2) build-webresource.ps1 to inline the bundle into a self-contained
+    HTML web resource. Import the web resource into the Spaarke solution. Configure the side pane
+    launcher (JavaScript button or ribbon command) on test forms: Matter, Project, and Analysis.
+    Verify the side pane loads and functions correctly on each form type — SprkChat renders,
+    accepts input, and streams responses.
+  </prompt>
+  <role>Senior DevOps engineer with Dataverse deployment expertise</role>
+  <goal>The sprk_SprkChatPane web resource is deployed to Dataverse dev environment and the side pane loads correctly from Matter, Project, and Analysis forms. SprkChat is functional inside the side pane.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">Code Pages must be deployed as single self-contained HTML web resources via the two-step build pipeline.</constraint>
+    <constraint source="ADR-022">Code Page bundles React 19 — the web resource must be self-contained with no external React dependency.</constraint>
+    <constraint source="skill:code-page-deploy">MUST follow code-page-deploy skill for the two-step build pipeline (webpack + inline HTML).</constraint>
+    <constraint source="skill:dataverse-deploy">MUST follow dataverse-deploy skill for solution import and web resource registration.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Code Page deployment pipeline, Dataverse web resource management, side pane configuration</topic>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The SprkChatPane Code Page is a standalone React 19 application that hosts SprkChat inside a
+      Dataverse side pane. It is opened via Xrm.App.sidePanes.createPane() and receives context
+      parameters (entityType, entityId, playbookId, sessionId) via the data query string. The
+      deployment involves: building the webpack bundle, inlining it into a self-contained HTML file
+      using build-webresource.ps1, importing the HTML as a web resource into the Spaarke Dataverse
+      solution, and then configuring a launcher mechanism on test forms. The launcher can be a ribbon
+      button, JavaScript web resource, or form onLoad event that calls createPane(). The side pane
+      must be tested on three form types (Matter, Project, Analysis) to verify it adapts to different
+      entity contexts correctly.
+    </background>
+    <dependencies>
+      <dependency task="R2-010">SprkChatPane Code Page scaffold must be complete</dependency>
+      <dependency task="R2-012">SprkChat must be wired into the Code Page</dependency>
+      <dependency task="R2-011">SprkChatBridge cross-pane communication must be functional</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="reference">src/client/code-pages/SprkChatPane/webpack.config.js</file>
+    <file action="reference">src/client/code-pages/SprkChatPane/package.json</file>
+    <file action="reference">src/client/code-pages/SprkChatPane/index.tsx</file>
+    <file action="reference">scripts/build-webresource.ps1</file>
+    <file action="modify">src/solutions/SpaarkeCore/WebResources/sprk_SprkChatPane.html</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task is deployment only -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Build SprkChatPane webpack bundle">Run `cd src/client/code-pages/SprkChatPane &amp;&amp; npm install &amp;&amp; npm run build` to produce the production webpack bundle in dist/. Verify the build completes with zero errors.</step>
+    <step order="2" name="Inline bundle into HTML web resource">Run `build-webresource.ps1` to inline the webpack bundle into a self-contained HTML file (`sprk_SprkChatPane.html`). Verify the HTML file contains all JavaScript inline — no external script references.</step>
+    <step order="3" name="Import web resource to Dataverse">Use the dataverse-deploy skill to import `sprk_SprkChatPane.html` as a web resource into the Spaarke solution in the dev environment (https://spaarkedev1.crm.dynamics.com). Set display name, unique name (sprk_SprkChatPane), and description.</step>
+    <step order="4" name="Configure side pane launcher on Matter form">Add a ribbon button or JavaScript web resource to the Matter form that calls Xrm.App.sidePanes.createPane() with the SprkChatPane web resource URL and context parameters (entityType=sprk_matter, entityId from form). Test that the side pane opens.</step>
+    <step order="5" name="Configure side pane launcher on Project form">Configure the same launcher mechanism on the Project form with entityType=sprk_project. Test that the side pane opens with correct context.</step>
+    <step order="6" name="Configure side pane launcher on Analysis form">Configure the same launcher mechanism on the Analysis form with entityType=sprk_analysis. Test that the side pane opens with correct context.</step>
+    <step order="7" name="Verify side pane functionality on each form">On each form type: open the side pane, verify SprkChat renders, send a test message, verify streaming response is received, verify context parameters are correct (entityType and entityId match the host form).</step>
+    <step order="8" name="Verify cross-pane communication">On the Analysis form, verify that SprkChatBridge establishes a BroadcastChannel connection between the side pane and the AnalysisWorkspace Code Page (if deployed). Confirm messages flow between panes.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build produces a production bundle with zero errors in SprkChatPane/dist/</criterion>
+    <criterion testable="true">build-webresource.ps1 produces a self-contained HTML file with inline JavaScript</criterion>
+    <criterion testable="true">sprk_SprkChatPane web resource is registered in the Spaarke Dataverse solution</criterion>
+    <criterion testable="true">Side pane opens from Matter form with correct entityType=sprk_matter</criterion>
+    <criterion testable="true">Side pane opens from Project form with correct entityType=sprk_project</criterion>
+    <criterion testable="true">Side pane opens from Analysis form with correct entityType=sprk_analysis</criterion>
+    <criterion testable="true">SprkChat renders inside side pane, accepts user input, and streams AI responses</criterion>
+    <criterion testable="true">Context parameters (entityType, entityId) are correctly passed to SprkChat</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,94 @@
+<task id="R2-025" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Define New SSE Event Types for Document Streaming</title>
+    <phase>Phase 1: Foundation</phase>
+    <package>Package B: Streaming Write Engine</package>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, frontend, sse</tags>
+    <parallel-group>sprint1-track2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Define the TypeScript and C# models for five new SSE event types that power the streaming write
+    engine: `document_stream_start`, `document_stream_token`, `document_stream_end`,
+    `document_replace`, and `progress`. On the backend, create a `DocumentStreamEvent.cs` model
+    with typed subclasses for each event and extend the existing SSE serialization in
+    `ChatEndpoints.cs` to emit these new event types alongside existing `token`, `done`, and `error`
+    events. On the frontend, add corresponding TypeScript discriminated-union types in the SprkChat
+    shared types file so downstream consumers (StreamingInsertPlugin, SprkChatBridge) can
+    pattern-match on event type. All new events are additive — existing SSE handling must continue
+    to work unchanged.
+  </prompt>
+  <role>Senior full-stack developer with Spaarke platform expertise</role>
+  <goal>Establish the shared contract (C# models + TypeScript types) for document streaming SSE events so that backend tool classes can emit events and frontend plugins can consume them. Existing SSE event handling remains fully functional.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">All new API endpoints and event handling MUST use Minimal API pattern; no Azure Functions.</constraint>
+    <constraint source="ADR-013">AI tool framework events MUST flow through ChatHostContext; streaming events MUST follow existing SSE chunk serialization pattern in ChatEndpoints.cs.</constraint>
+    <constraint source="ADR-019">Error events MUST use ProblemDetails format; terminal SSE error events MUST include stable errorCode field.</constraint>
+    <constraint source="ADR-015">Document content MUST NOT appear in log entries; streaming tokens are transient and MUST NOT be cached (ADR-014).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SSE streaming endpoint pattern and event serialization</topic>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The BFF API currently streams three SSE event types from ChatEndpoints.cs: `token` (incremental
+      text), `done` (session complete), and `error` (terminal failure). The streaming write engine
+      requires five additional event types to communicate document-level operations to the frontend:
+      `document_stream_start` signals the beginning of a streaming write operation with a target
+      position; `document_stream_token` carries individual tokens for insertion; `document_stream_end`
+      signals completion with final metadata; `document_replace` carries a bulk content replacement
+      (used by re-analysis in Package E); and `progress` reports percent completion for long-running
+      operations. These events must be additive to the existing SSE protocol so existing chat
+      functionality is unaffected.
+    </background>
+    <dependencies>
+      <!-- No dependencies — this is the foundation task for Package B -->
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file action="create">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DocumentStreamEvent.cs</file>
+    <file action="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholders — this task defines types/models only -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Audit existing SSE event types">Read `ChatEndpoints.cs` to understand the current SSE chunk serialization pattern (event names, JSON structure, `WriteAsync` calls). Document the existing event types (`token`, `done`, `error`) and their payload shapes.</step>
+    <step order="2" name="Create DocumentStreamEvent.cs model">Create `src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DocumentStreamEvent.cs` with a base record and typed subclasses: `DocumentStreamStartEvent` (operationId, targetPosition, operationType), `DocumentStreamTokenEvent` (operationId, token, index), `DocumentStreamEndEvent` (operationId, cancelled, totalTokens), `DocumentReplaceEvent` (operationId, html, previousVersionId), `ProgressEvent` (operationId, percent, message). Use `System.Text.Json` serialization attributes.</step>
+    <step order="3" name="Add SSE serialization helpers">In `ChatEndpoints.cs` (or a new helper if the file is large), add methods to serialize and write the new event types to the SSE response stream. Follow the exact same pattern used for existing `token`/`done`/`error` events. Ensure `data:` prefix and `\n\n` termination per SSE spec.</step>
+    <step order="4" name="Add TypeScript discriminated union types">In `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts`, add TypeScript types for each new SSE event using a discriminated union on the `type` field: `DocumentStreamStartEvent`, `DocumentStreamTokenEvent`, `DocumentStreamEndEvent`, `DocumentReplaceEvent`, `ProgressEvent`. Add a union type `DocumentStreamEvent` that covers all five. Ensure existing types are unchanged.</step>
+    <step order="5" name="Verify backward compatibility">Confirm that existing SSE consumers (SprkChat component, useSseStream hook) are not broken by the new event types. The new events use different `type` discriminators and should be ignored by existing handlers.</step>
+    <step order="6" name="Build verification">Run `dotnet build src/server/api/Sprk.Bff.Api/` and verify the shared UI components compile: `cd src/client/shared/Spaarke.UI.Components && npx tsc --noEmit`.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">`DocumentStreamEvent.cs` exists with base record and 5 typed subclasses, each with correct properties and JSON serialization attributes</criterion>
+    <criterion testable="true">`ChatEndpoints.cs` can serialize and write all 5 new event types to SSE response stream using the same pattern as existing events</criterion>
+    <criterion testable="true">TypeScript `types.ts` contains discriminated union types for all 5 new events with a `DocumentStreamEvent` union covering all</criterion>
+    <criterion testable="true">Existing SSE event types (`token`, `done`, `error`) remain unchanged and functional</criterion>
+    <criterion testable="true">`dotnet build` succeeds for BFF API project with zero errors</criterion>
+    <criterion testable="true">TypeScript compilation succeeds with zero errors for Spaarke.UI.Components</criterion>
+  </acceptance-criteria>
+</task>

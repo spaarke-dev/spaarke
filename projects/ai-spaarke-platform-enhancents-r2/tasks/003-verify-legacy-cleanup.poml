@@ -1,0 +1,100 @@
+<task id="R2-003" project="SprkChat Interactive Collaboration R2">
+  <metadata>
+    <title>Verify Legacy Cleanup Completeness</title>
+    <phase>Phase 0: Legacy Cleanup</phase>
+    <package>Package C</package>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>testing, cleanup</tags>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    Perform a comprehensive verification that all legacy chat artifacts have been removed from
+    the entire codebase. Grep for every deprecated identifier (`useLegacyChat`,
+    `ResumeSessionDialog`, `/continue` endpoint references, `/resume` endpoint references,
+    `AnalysisContinueRequest`, `AnalysisResumeRequest`, `ContinueAnalysisAsync`,
+    `ResumeAnalysisAsync`). Verify the AnalysisWorkspace PCF still builds and functions
+    correctly. Run the full test suite across both frontend and backend. This is the quality
+    gate that must pass before Phase 1 (Foundation) work begins.
+  </prompt>
+  <role>Senior full-stack developer with Spaarke platform expertise</role>
+  <goal>Confirm with zero ambiguity that all legacy chat code has been completely removed. Every grep returns empty. The PCF control builds. The full test suite passes. Phase 1 can safely begin.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-platform-enhancents-r2/spec.md</file>
+    <file purpose="design">projects/ai-spaarke-platform-enhancents-r2/design.md</file>
+    <file purpose="plan">projects/ai-spaarke-platform-enhancents-r2/plan.md</file>
+    <file purpose="project-context">projects/ai-spaarke-platform-enhancents-r2/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">PCF controls must build cleanly without legacy web resource patterns.</constraint>
+    <constraint source="ADR-001">All remaining API endpoints must follow Minimal API pattern and pass tests.</constraint>
+    <constraint source="ADR-013">AI tool pipeline must remain functional after deprecated endpoint removal.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Legacy cleanup verification and test execution</topic>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Tasks 001 and 002 remove legacy chat frontend code and deprecated backend endpoints
+      respectively. This task is the verification gate — it confirms that both cleanup tasks
+      were executed completely and that no orphaned references, broken imports, or failing
+      tests remain. This is critical because Phase 1 (Foundation) packages A, B, and D will
+      build on the cleaned-up codebase. Any leftover legacy artifacts could cause confusion,
+      merge conflicts, or runtime errors during the new implementation work.
+    </background>
+    <dependencies>
+      <dependency task="R2-001" status="not-started">Remove Legacy Chat Frontend Code — must be completed before this verification</dependency>
+      <dependency task="R2-002" status="not-started">Remove Deprecated Backend Endpoints — must be completed before this verification</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file action="modify">src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx</file>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</file>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisOrchestrationService.cs</file>
+    <file action="modify">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+  </relevant-files>
+
+  <placeholders>
+    <!-- No placeholder code — this task is verification only -->
+  </placeholders>
+
+  <steps>
+    <step order="1" name="Grep for useLegacyChat">Run `grep -r "useLegacyChat" src/` across the entire source tree. Expected result: zero matches. Document any unexpected matches.</step>
+    <step order="2" name="Grep for ResumeSessionDialog">Run `grep -r "ResumeSessionDialog" src/` across the entire source tree. Expected result: zero matches. Confirm the file has been deleted.</step>
+    <step order="3" name="Grep for legacy useSseStream">Verify `src/client/pcf/AnalysisWorkspace/control/hooks/useSseStream.ts` does not exist. Verify the shared `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts` still exists and is unmodified.</step>
+    <step order="4" name="Grep for deprecated endpoint references">Run `grep -r "ContinueAnalysis\|ResumeAnalysis\|AnalysisContinueRequest\|AnalysisResumeRequest\|ContinueAnalysisAsync\|ResumeAnalysisAsync" src/`. Expected result: zero matches (excluding comments, changelogs, or documentation if any).</step>
+    <step order="5" name="Grep for continue/resume endpoint routes">Run `grep -r "/continue\|/resume" src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs`. Expected result: zero matches for the deprecated analysis endpoints. Note: other files may legitimately contain these strings — only AnalysisEndpoints.cs matters here.</step>
+    <step order="6" name="Verify no sprk_chathistory writes">Run `grep -r "sprk_chathistory" src/server/` to verify no code writes to this field. Read operations or schema references may still exist — only active write operations must be removed.</step>
+    <step order="7" name="Build AnalysisWorkspace PCF">Run `cd src/client/pcf/AnalysisWorkspace && npm run build`. Verify zero errors and zero warnings related to missing imports or undefined references.</step>
+    <step order="8" name="Build BFF API">Run `dotnet build src/server/api/Sprk.Bff.Api/`. Verify zero errors.</step>
+    <step order="9" name="Run full test suite">Run `dotnet test` for backend tests. Run frontend tests if available (`npm test` in relevant directories). Verify all tests pass with zero failures.</step>
+    <step order="10" name="Document verification results">Create a verification summary listing each grep result (expected: 0 matches), build results (expected: success), and test results (expected: all pass). If any step fails, document the issue and flag it as a blocker for Phase 1.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep for `useLegacyChat` across `src/` returns zero matches</criterion>
+    <criterion testable="true">grep for `ResumeSessionDialog` across `src/` returns zero matches</criterion>
+    <criterion testable="true">`src/client/pcf/AnalysisWorkspace/control/hooks/useSseStream.ts` does not exist on disk</criterion>
+    <criterion testable="true">grep for `ContinueAnalysisAsync` and `ResumeAnalysisAsync` across `src/` returns zero matches</criterion>
+    <criterion testable="true">grep for `AnalysisContinueRequest` and `AnalysisResumeRequest` across `src/` returns zero matches</criterion>
+    <criterion testable="true">No active code writes to `sprk_chathistory` (grep for write operations returns zero)</criterion>
+    <criterion testable="true">`npm run build` in AnalysisWorkspace PCF succeeds with zero errors</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with zero errors</criterion>
+    <criterion testable="true">`dotnet test` passes with zero failures</criterion>
+    <criterion testable="true">Shared SprkChat `useSseStream.ts` hook in Spaarke.UI.Components is present and unmodified</criterion>
+  </acceptance-criteria>
+</task>
