@@ -592,7 +592,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     try {
       channel = new BroadcastChannel("spaarke-todo-detail-channel");
       channel.onmessage = (ev: MessageEvent) => {
-        if (ev.data?.type === "TODO_SAVED") {
+        if (ev.data?.type === "TODO_SAVED" || ev.data?.type === "TODO_DETAIL_SAVED") {
           refetch();
         }
       };

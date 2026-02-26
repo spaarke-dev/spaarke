@@ -4,12 +4,13 @@
  * Layout (top to bottom):
  *   1. Description (editable, auto-expands up to 15 lines, then scrolls)
  *   2. Details: Due Date, Assigned To
- *   3. To Do Score section:
+ *   3. Status: Completed (boolean), Completed Date
+ *   4. To Do Score section:
+ *      - Title row with score circle + info button (Popover)
  *      - Priority Score slider (editable)
  *      - Effort Score slider (editable)
  *      - Urgency Score slider (read-only, computed from due date)
- *      - Total score circle
- *   4. Sticky footer: Save + Save & Close buttons
+ *   5. Sticky footer: Save + Save & Close buttons
  *
  * All colours from Fluent UI v9 semantic tokens (ADR-021).
  */
@@ -24,15 +25,19 @@ import {
   Slider,
   Combobox,
   Option,
+  Switch,
   Button,
+  Popover,
+  PopoverTrigger,
+  PopoverSurface,
   Spinner,
-  Tooltip,
   MessageBar,
   MessageBarBody,
 } from "@fluentui/react-components";
 import type {
   SliderOnChangeData,
   ComboboxProps,
+  SwitchOnChangeData,
 } from "@fluentui/react-components";
 import { SaveRegular, DismissRegular, InfoRegular } from "@fluentui/react-icons";
 import { ITodoRecord } from "../types/TodoRecord";
@@ -114,12 +119,14 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalL,
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalM,
+    gap: "0px",
   },
   divider: {
     height: "1px",
     backgroundColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
+    marginTop: "10px",
+    marginBottom: "10px",
   },
   section: {
     display: "flex",
@@ -130,7 +137,7 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "row",
     alignItems: "center",
-    gap: tokens.spacingHorizontalXS,
+    gap: tokens.spacingHorizontalS,
   },
   sectionTitle: {
     fontWeight: tokens.fontWeightSemibold,
@@ -145,11 +152,6 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
-  },
-  helpText: {
-    color: tokens.colorNeutralForeground4,
-    fontSize: tokens.fontSizeBase100,
-    fontStyle: "italic",
   },
   sliderRow: {
     display: "flex",
@@ -169,16 +171,9 @@ const useStyles = makeStyles({
     minWidth: "24px",
     textAlign: "right" as const,
   },
-  totalRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalXS,
-  },
-  totalCircle: {
-    width: "48px",
-    height: "48px",
+  scoreCircle: {
+    width: "36px",
+    height: "36px",
     borderRadius: "50%",
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralForegroundOnBrand,
@@ -186,11 +181,26 @@ const useStyles = makeStyles({
     alignItems: "center",
     justifyContent: "center",
     fontWeight: tokens.fontWeightBold,
-    fontSize: tokens.fontSizeBase400,
+    fontSize: tokens.fontSizeBase300,
     flexShrink: 0,
   },
-  totalLabel: {
-    color: tokens.colorNeutralForeground3,
+  infoPopover: {
+    maxWidth: "320px",
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalM,
+  },
+  infoSection: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXXS,
+  },
+  infoSectionTitle: {
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  infoSectionBody: {
+    color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeBase200,
   },
   footer: {
@@ -223,6 +233,17 @@ const useStyles = makeStyles({
   },
   errorBanner: {
     flexShrink: 0,
+  },
+  assignedToDisplay: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalS,
+  },
+  assignedToName: {
+    flex: "1 1 0",
+    color: tokens.colorNeutralForeground1,
+    fontSize: tokens.fontSizeBase300,
   },
 });
 
@@ -258,6 +279,8 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     const [dueDate, setDueDate] = React.useState("");
     const [priority, setPriority] = React.useState<number>(50);
     const [effort, setEffort] = React.useState<number>(50);
+    const [completed, setCompleted] = React.useState(false);
+    const [completedDate, setCompletedDate] = React.useState("");
 
     // Assigned To state
     const [assignedToId, setAssignedToId] = React.useState<string | null>(null);
@@ -265,6 +288,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     const [contactQuery, setContactQuery] = React.useState("");
     const [contactOptions, setContactOptions] = React.useState<IContactOption[]>([]);
     const [isSearching, setIsSearching] = React.useState(false);
+    const [isEditingAssignedTo, setIsEditingAssignedTo] = React.useState(false);
 
     // Save state
     const [isSaving, setIsSaving] = React.useState(false);
@@ -276,6 +300,8 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       dueDate: "",
       priority: 50,
       effort: 50,
+      completed: false,
+      completedDate: "",
       assignedToId: null as string | null,
     });
 
@@ -286,6 +312,8 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
         const dd = toDateInputValue(record.sprk_duedate);
         const pri = record.sprk_priorityscore ?? 50;
         const eff = record.sprk_effortscore ?? 50;
+        const comp = record.sprk_completed ?? false;
+        const compDate = toDateInputValue(record.sprk_completedate);
         const aId = record._sprk_assignedto_value ?? null;
         const aName =
           record[
@@ -295,16 +323,21 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
         setDueDate(dd);
         setPriority(pri);
         setEffort(eff);
+        setCompleted(comp);
+        setCompletedDate(compDate);
         setAssignedToId(aId);
         setAssignedToName(aName);
         setContactQuery("");
         setContactOptions([]);
+        setIsEditingAssignedTo(false);
         setSaveError(null);
         origRef.current = {
           description: desc,
           dueDate: dd,
           priority: pri,
           effort: eff,
+          completed: comp,
+          completedDate: compDate,
           assignedToId: aId,
         };
       }
@@ -316,6 +349,8 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       dueDate !== origRef.current.dueDate ||
       priority !== origRef.current.priority ||
       effort !== origRef.current.effort ||
+      completed !== origRef.current.completed ||
+      completedDate !== origRef.current.completedDate ||
       assignedToId !== origRef.current.assignedToId;
 
     // --- Handlers ---
@@ -328,7 +363,6 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
           const el = textareaRef.current;
           if (!el) return;
           el.style.height = "auto";
-          // 15 lines * ~20px line height = 300px max
           const maxH = 300;
           el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
           el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";
@@ -366,6 +400,21 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       []
     );
 
+    const handleCompletedChange = React.useCallback(
+      (_ev: React.ChangeEvent<HTMLInputElement>, data: SwitchOnChangeData) => {
+        setCompleted(data.checked);
+        if (data.checked && !completedDate) {
+          setCompletedDate(new Date().toISOString().split("T")[0]);
+        }
+      },
+      [completedDate]
+    );
+
+    const handleCompletedDateChange = React.useCallback(
+      (ev: React.ChangeEvent<HTMLInputElement>) => setCompletedDate(ev.target.value),
+      []
+    );
+
     // Debounced contact search
     const searchTimerRef = React.useRef<ReturnType<typeof setTimeout>>();
     const handleContactInput: ComboboxProps["onInput"] = React.useCallback(
@@ -394,6 +443,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
           setAssignedToName(data.optionText);
           setContactQuery("");
           setContactOptions([]);
+          setIsEditingAssignedTo(false);
         }
       },
       []
@@ -418,6 +468,12 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       if (effort !== origRef.current.effort) {
         updates.sprk_effortscore = effort;
       }
+      if (completed !== origRef.current.completed) {
+        updates.sprk_completed = completed;
+      }
+      if (completedDate !== origRef.current.completedDate) {
+        updates.sprk_completedate = completedDate || null;
+      }
       if (assignedToId !== origRef.current.assignedToId) {
         updates["sprk_AssignedTo@odata.bind"] = assignedToId
           ? `/sprk_contacts(${assignedToId})`
@@ -432,6 +488,8 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
             dueDate,
             priority,
             effort,
+            completed,
+            completedDate,
             assignedToId,
           };
         } else {
@@ -449,6 +507,8 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       dueDate,
       priority,
       effort,
+      completed,
+      completedDate,
       assignedToId,
       onSaveFields,
     ]);
@@ -536,49 +596,129 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
             <div className={styles.fieldRow}>
               <label className={styles.fieldLabel}>Assigned To</label>
-              <Combobox
-                freeform
-                placeholder={assignedToName || "Search contacts..."}
-                value={contactQuery}
-                onInput={handleContactInput}
-                onOptionSelect={handleContactSelect}
-                selectedOptions={assignedToId ? [assignedToId] : []}
-              >
-                {isSearching && (
-                  <Option key="__loading" value="" text="" disabled>
-                    Searching...
-                  </Option>
-                )}
-                {!isSearching && contactOptions.length === 0 && contactQuery.length >= 2 && (
-                  <Option key="__empty" value="" text="" disabled>
-                    No contacts found
-                  </Option>
-                )}
-                {contactOptions.map((c) => (
-                  <Option key={c.id} value={c.id} text={c.name}>
-                    {c.name}
-                  </Option>
-                ))}
-              </Combobox>
+              {assignedToName && !isEditingAssignedTo ? (
+                <div className={styles.assignedToDisplay}>
+                  <Text className={styles.assignedToName}>{assignedToName}</Text>
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    onClick={() => setIsEditingAssignedTo(true)}
+                  >
+                    Change
+                  </Button>
+                </div>
+              ) : (
+                <Combobox
+                  freeform
+                  placeholder="Search contacts..."
+                  value={contactQuery}
+                  onInput={handleContactInput}
+                  onOptionSelect={handleContactSelect}
+                  selectedOptions={assignedToId ? [assignedToId] : []}
+                >
+                  {isSearching && (
+                    <Option key="__loading" value="" text="" disabled>
+                      Searching...
+                    </Option>
+                  )}
+                  {!isSearching && contactOptions.length === 0 && contactQuery.length >= 2 && (
+                    <Option key="__empty" value="" text="" disabled>
+                      No contacts found
+                    </Option>
+                  )}
+                  {contactOptions.map((c) => (
+                    <Option key={c.id} value={c.id} text={c.name}>
+                      {c.name}
+                    </Option>
+                  ))}
+                </Combobox>
+              )}
             </div>
           </div>
 
           <div className={styles.divider} role="separator" />
 
-          {/* ── To Do Score: sliders + urgency + total ────────────────── */}
+          {/* ── Status: Completed + Completed Date ─────────────────────── */}
+          <div className={styles.section}>
+            <Text className={styles.sectionTitle} size={300}>
+              Status
+            </Text>
+
+            <div className={styles.fieldRow}>
+              <Switch
+                checked={completed}
+                onChange={handleCompletedChange}
+                label="Completed"
+              />
+            </div>
+
+            {completed && (
+              <div className={styles.fieldRow}>
+                <label className={styles.fieldLabel}>Completed Date</label>
+                <Input
+                  type="date"
+                  value={completedDate}
+                  onChange={handleCompletedDateChange}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className={styles.divider} role="separator" />
+
+          {/* ── To Do Score: title row with circle + info, then sliders ── */}
           <div className={styles.section}>
             <div className={styles.sectionTitleRow}>
               <Text className={styles.sectionTitle} size={300}>
                 To Do Score
               </Text>
-              <Tooltip
-                content="Score = Priority (50%) + Inverted Effort (20%) + Urgency (30%). Higher score = higher priority in the Kanban board."
-                relationship="description"
-              >
-                <InfoRegular
-                  style={{ fontSize: "14px", color: tokens.colorNeutralForeground3, cursor: "help" }}
-                />
-              </Tooltip>
+              <div className={styles.scoreCircle}>
+                {Math.round(score.todoScore)}
+              </div>
+              <Popover withArrow>
+                <PopoverTrigger disableButtonEnhancement>
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    icon={<InfoRegular />}
+                    aria-label="Score information"
+                  />
+                </PopoverTrigger>
+                <PopoverSurface>
+                  <div className={styles.infoPopover}>
+                    <div className={styles.infoSection}>
+                      <Text className={styles.infoSectionTitle} size={300}>
+                        How Scoring Works
+                      </Text>
+                      <Text className={styles.infoSectionBody}>
+                        The To Do Score combines three factors into a single 0-100
+                        number. Higher scores surface more important items first in
+                        the Kanban board.
+                      </Text>
+                    </div>
+
+                    <div className={styles.infoSection}>
+                      <Text className={styles.infoSectionTitle} size={300}>
+                        Score Formula
+                      </Text>
+                      <Text className={styles.infoSectionBody}>
+                        Score = Priority (50%) + Inverted Effort (20%) + Urgency (30%).
+                        Lower effort items score higher (quick wins bubble up).
+                      </Text>
+                    </div>
+
+                    <div className={styles.infoSection}>
+                      <Text className={styles.infoSectionTitle} size={300}>
+                        Urgency Score
+                      </Text>
+                      <Text className={styles.infoSectionBody}>
+                        Auto-calculated from due date: Overdue = 100, within 3 days = 80,
+                        within 7 days = 50, within 10 days = 25, more than 10 days = 0.
+                      </Text>
+                    </div>
+                  </div>
+                </PopoverSurface>
+              </Popover>
             </div>
 
             <div className={styles.sliderRow}>
@@ -620,16 +760,6 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                 max={100}
                 disabled
               />
-              <Text className={styles.helpText}>
-                Auto-calculated from due date: Overdue = 100, within 3 days = 80, within 7 days = 50, within 10 days = 25
-              </Text>
-            </div>
-
-            <div className={styles.totalRow}>
-              <div className={styles.totalCircle}>
-                {Math.round(score.todoScore)}
-              </div>
-              <Text className={styles.totalLabel}>Total Score</Text>
             </div>
           </div>
         </div>
