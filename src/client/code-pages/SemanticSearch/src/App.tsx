@@ -3,15 +3,16 @@
  *
  * Full-height flex column layout:
  *   - SearchCommandBar (top, fixed ~48px)
- *   - SearchDomainTabs (between toolbar and content)
- *   - Toolbar (saved search selector + view toggle, ~36px)
- *   - Content area (flex:1): SearchFilterPane (~280px) + main results area (flex:1)
+ *   - Toolbar (Grid | Map | Treemap | Timeline toggle, ~36px)
+ *   - Content area (flex:1): SearchFilterPane (~280px, self-collapsing) + main results area
+ *     - Filter pane includes: domain tabs, saved searches, query, filters, search button
+ *     - VisualizationSettings overlay (upper-right) — view-conditional settings
  *   - StatusBar (bottom, fixed ~28px)
  *
  * Search flow:
  *   Documents domain  → useSemanticSearch (POST /api/ai/search)
  *   Matters/Projects/Invoices → useRecordSearch (POST /api/ai/search/records)
- *   Active results derived from activeDomain → routed to Grid or Graph view.
+ *   Active results derived from activeDomain → routed to Grid, Map, Treemap, or Timeline.
  *
  * All colors use Fluent v9 design tokens per ADR-021 -- no hard-coded colors.
  */
@@ -23,32 +24,37 @@ import {
     Text,
     MessageBar,
     MessageBarBody,
+    Divider,
 } from "@fluentui/react-components";
 import type {
     SearchDomain,
     SearchFilters,
     ViewMode,
-    GraphClusterBy,
+    VisualizationColorBy,
+    TimelineDateField,
     SavedSearch,
     DocumentSearchResult,
     RecordSearchResult,
 } from "./types";
 import { RecordEntityTypes } from "./types";
-import { SearchDomainTabs } from "./components/SearchDomainTabs";
 import { SearchFilterPane } from "./components/SearchFilterPane";
 import { ViewToggleToolbar } from "./components/ViewToggleToolbar";
 import { SearchCommandBar } from "./components/SearchCommandBar";
 import { StatusBar } from "./components/StatusBar";
-import { SearchResultsGrid } from "./components/SearchResultsGrid";
-import { SearchResultsGraph } from "./components/SearchResultsGraph";
+import { SearchResultsMap } from "./components/SearchResultsMap";
+import { SearchResultsTreemap } from "./components/SearchResultsTreemap";
+import { SearchResultsTimeline } from "./components/SearchResultsTimeline";
+import { VisualizationSettings } from "./components/VisualizationSettings";
 import { useSavedSearches } from "./hooks/useSavedSearches";
 import { useDocumentActions } from "./hooks/useDocumentActions";
 import { useSemanticSearch } from "./hooks/useSemanticSearch";
 import { useRecordSearch } from "./hooks/useRecordSearch";
 import { useFilterOptions } from "./hooks/useFilterOptions";
-import { useClusterLayout } from "./hooks/useClusterLayout";
-import { getColumnsForDomain } from "./config/domainColumns";
+import { useSearchViewDefinitions } from "./hooks/useSearchViewDefinitions";
+import { mapSearchResults } from "./adapters/searchResultAdapter";
 import { openEntityRecord } from "./components/EntityRecordDialog";
+import { DocumentPreviewDialog } from "./components/DocumentPreviewDialog";
+import { SearchResultsGrid } from "./components/SearchResultsGrid";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -114,14 +120,6 @@ const useStyles = makeStyles({
         borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
         backgroundColor: tokens.colorNeutralBackground1,
     },
-    domainTabsRow: {
-        display: "flex",
-        alignItems: "center",
-        paddingLeft: tokens.spacingHorizontalM,
-        paddingRight: tokens.spacingHorizontalM,
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-        backgroundColor: tokens.colorNeutralBackground1,
-    },
     toolbar: {
         display: "flex",
         alignItems: "center",
@@ -140,11 +138,17 @@ const useStyles = makeStyles({
         overflow: "hidden",
     },
     mainArea: {
+        position: "relative",
         display: "flex",
         flexDirection: "column",
         flex: 1,
         overflow: "hidden",
         backgroundColor: tokens.colorNeutralBackground1,
+    },
+    viewContainer: {
+        position: "relative",
+        flex: 1,
+        overflow: "hidden",
     },
     errorBar: {
         paddingTop: tokens.spacingVerticalS,
@@ -187,10 +191,24 @@ export const App: React.FC<AppProps> = ({
     const [filters, setFilters] = useState<SearchFilters>(DEFAULT_FILTERS);
     const [query, setQuery] = useState<string>(initialQuery);
     const [viewMode, setViewMode] = useState<ViewMode>("grid");
-    const [clusterBy, setClusterBy] = useState<GraphClusterBy>("MatterType");
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [currentSearchName, setCurrentSearchName] = useState<string | null>(null);
-    const [expandedClusterId, setExpandedClusterId] = useState<string | null>(null);
+
+    // --- Map view settings ---
+    const [mapColorBy, setMapColorBy] = useState<VisualizationColorBy>("DocumentType");
+    const [mapMinSimilarity, setMapMinSimilarity] = useState(60);
+
+    // --- Treemap view settings ---
+    const [treemapGroupBy, setTreemapGroupBy] = useState<VisualizationColorBy>("MatterType");
+    const [treemapShowLabels, setTreemapShowLabels] = useState(true);
+
+    // --- Timeline view settings ---
+    const [timelineDateField, setTimelineDateField] = useState<TimelineDateField>("createdAt");
+    const [timelineColorBy, setTimelineColorBy] = useState<VisualizationColorBy>("DocumentType");
+
+    // --- Document Preview Dialog ---
+    const [previewResult, setPreviewResult] = useState<DocumentSearchResult | null>(null);
+    const [previewPosition, setPreviewPosition] = useState<{ x: number; y: number } | null>(null);
 
     // --- Search Hooks ---
     const {
@@ -241,7 +259,17 @@ export const App: React.FC<AppProps> = ({
 
     // --- Active Domain Derivation ---
     const isDocDomain = activeDomain === "documents";
-    const activeResults = isDocDomain ? docResults : recordResults;
+    const rawResults = isDocDomain ? docResults : recordResults;
+
+    // Client-side relevance threshold filter — hides results below the slider value
+    const activeResults = useMemo(() => {
+        const t = filters.threshold;
+        if (t <= 0) return rawResults;
+        return rawResults.filter((r) => {
+            const score = "combinedScore" in r ? r.combinedScore : r.confidenceScore;
+            return score * 100 >= t;
+        });
+    }, [rawResults, filters.threshold]);
     const activeTotalCount = isDocDomain ? docTotalCount : recordTotalCount;
     const activeSearchState = isDocDomain ? docSearchState : recordSearchState;
     const activeHasMore = isDocDomain ? docHasMore : recordHasMore;
@@ -250,17 +278,18 @@ export const App: React.FC<AppProps> = ({
     const isSearching = activeSearchState === "loading";
     const isLoadingMore = activeSearchState === "loadingMore";
 
-    // --- Grid Columns (domain-specific) ---
-    const gridColumns = useMemo(
-        () => getColumnsForDomain(activeDomain),
-        [activeDomain],
-    );
+    // Detect validation-type errors (empty query) vs real errors
+    const isValidationHint = activeErrorMessage
+        ? /query.*(required|empty|missing)/i.test(activeErrorMessage)
+        : false;
 
-    // --- Cluster Layout (graph view) ---
-    const { nodes, edges, isSimulating } = useClusterLayout(
-        activeResults as (DocumentSearchResult | RecordSearchResult)[],
-        clusterBy,
-        expandedClusterId,
+    // --- Grid View Definitions (from sprk_gridconfiguration, fallback to domainColumns.ts) ---
+    const { columns: viewColumns } = useSearchViewDefinitions(activeDomain);
+
+    // --- Map search results to IDatasetRecord for UniversalDatasetGrid ---
+    const gridRecords = useMemo(
+        () => mapSearchResults(activeResults, activeDomain),
+        [activeResults, activeDomain],
     );
 
     // =============================================
@@ -270,7 +299,6 @@ export const App: React.FC<AppProps> = ({
     const executeSearch = useCallback(
         (searchQuery: string, searchFilters: SearchFilters, domain: SearchDomain) => {
             setSelectedIds([]);
-            setExpandedClusterId(null);
             if (domain === "documents") {
                 searchDocuments(searchQuery, searchFilters);
             } else {
@@ -296,7 +324,6 @@ export const App: React.FC<AppProps> = ({
     const handleDomainChange = useCallback((domain: SearchDomain) => {
         setActiveDomain(domain);
         setSelectedIds([]);
-        setExpandedClusterId(null);
     }, []);
 
     const handleFiltersChange = useCallback((newFilters: SearchFilters) => {
@@ -348,18 +375,30 @@ export const App: React.FC<AppProps> = ({
         [deleteDocuments, isDocDomain, query, filters, searchDocuments],
     );
 
-    /** Graph node click — toggle cluster expansion or open entity record */
-    const handleGraphNodeClick = useCallback(
-        (nodeId: string, nodeType: "cluster" | "record") => {
-            if (nodeType === "cluster") {
-                setExpandedClusterId((prev) => (prev === nodeId ? null : nodeId));
-            } else {
-                const recordId = nodeId.replace("record-", "");
-                openEntityRecord(recordId, activeDomain);
+    /** Handle click on a result in any visualization view */
+    const handleResultClick = useCallback(
+        (resultId: string, domain: SearchDomain, clickPosition?: { x: number; y: number }) => {
+            if (domain === "documents") {
+                // For documents: open preview dialog
+                const docResult = docResults.find(
+                    (r) => r.documentId === resultId,
+                );
+                if (docResult) {
+                    setPreviewResult(docResult);
+                    setPreviewPosition(clickPosition ?? null);
+                    return;
+                }
             }
+            // For non-documents (or if doc not found): open entity record directly
+            openEntityRecord(resultId, domain);
         },
-        [activeDomain],
+        [docResults],
     );
+
+    const handlePreviewClose = useCallback(() => {
+        setPreviewResult(null);
+        setPreviewPosition(null);
+    }, []);
 
     const handleSelectSavedSearch = useCallback(
         (search: SavedSearch) => {
@@ -368,7 +407,12 @@ export const App: React.FC<AppProps> = ({
             setFilters(search.filters);
             setViewMode(search.viewMode);
             setQuery(search.query);
-            if (search.graphClusterBy) setClusterBy(search.graphClusterBy);
+            // Restore per-view settings if saved
+            if (search.graphClusterBy) {
+                setMapColorBy(search.graphClusterBy);
+                setTreemapGroupBy(search.graphClusterBy);
+                setTimelineColorBy(search.graphClusterBy);
+            }
             executeSearch(search.query, search.filters, search.searchDomain);
         },
         [executeSearch],
@@ -386,10 +430,10 @@ export const App: React.FC<AppProps> = ({
             columns: [],
             sortColumn: "similarity",
             sortDirection: "desc",
-            graphClusterBy: clusterBy,
+            graphClusterBy: mapColorBy,
         });
         setCurrentSearchName(name);
-    }, [saveSearch, activeDomain, query, filters, viewMode, clusterBy]);
+    }, [saveSearch, activeDomain, query, filters, viewMode, mapColorBy]);
 
     // =============================================
     // Auto-search on load (FR-13)
@@ -449,31 +493,45 @@ export const App: React.FC<AppProps> = ({
                 />
             </div>
 
-            {/* Domain tabs row */}
-            <div className={styles.domainTabsRow}>
-                <SearchDomainTabs
-                    activeDomain={activeDomain}
-                    onDomainChange={handleDomainChange}
-                    query={query}
-                    onSearch={handleSearch}
-                />
-            </div>
-
-            {/* Third row: Toolbar (saved search selector + view toggle) */}
+            {/* Toolbar row: view toggle + settings dropdown */}
             <div className={styles.toolbar}>
                 <ViewToggleToolbar
                     viewMode={viewMode}
                     onViewModeChange={setViewMode}
-                    clusterBy={clusterBy}
-                    onClusterByChange={setClusterBy}
+                />
+                <Divider vertical style={{ height: "20px" }} />
+                <VisualizationSettings
+                    viewMode={viewMode}
+                    threshold={filters.threshold}
+                    onThresholdChange={(value) =>
+                        setFilters((prev) => ({ ...prev, threshold: value }))
+                    }
+                    searchMode={filters.searchMode}
+                    onSearchModeChange={(mode) =>
+                        setFilters((prev) => ({ ...prev, searchMode: mode }))
+                    }
+                    mapColorBy={mapColorBy}
+                    onMapColorByChange={setMapColorBy}
+                    mapMinSimilarity={mapMinSimilarity}
+                    onMapMinSimilarityChange={setMapMinSimilarity}
+                    treemapGroupBy={treemapGroupBy}
+                    onTreemapGroupByChange={setTreemapGroupBy}
+                    treemapShowLabels={treemapShowLabels}
+                    onTreemapShowLabelsChange={setTreemapShowLabels}
+                    timelineDateField={timelineDateField}
+                    onTimelineDateFieldChange={setTimelineDateField}
+                    timelineColorBy={timelineColorBy}
+                    onTimelineColorByChange={setTimelineColorBy}
                 />
             </div>
 
             {/* Content row: filter pane + main results area */}
             <div className={styles.contentRow}>
-                {/* Left pane: SearchFilterPane */}
+                {/* Left pane: SearchFilterPane (self-collapsing) */}
                 <SearchFilterPane
                     activeDomain={activeDomain}
+                    onDomainChange={handleDomainChange}
+                    onDomainSearch={handleSearch}
                     filters={filters}
                     onFiltersChange={handleFiltersChange}
                     onSearch={handleFilterSearch}
@@ -494,11 +552,15 @@ export const App: React.FC<AppProps> = ({
 
                 {/* Main area: grid or graph results */}
                 <div className={styles.mainArea}>
-                    {/* Error message bar */}
+                    {/* Error / info message bar */}
                     {activeErrorMessage && (
                         <div className={styles.errorBar}>
-                            <MessageBar intent="error">
-                                <MessageBarBody>{activeErrorMessage}</MessageBarBody>
+                            <MessageBar intent={isValidationHint ? "info" : "error"}>
+                                <MessageBarBody>
+                                    {isValidationHint
+                                        ? "Please enter search criteria to get results."
+                                        : activeErrorMessage}
+                                </MessageBarBody>
                             </MessageBar>
                         </div>
                     )}
@@ -515,32 +577,64 @@ export const App: React.FC<AppProps> = ({
                         </div>
                     )}
 
-                    {/* Active results — Grid or Graph view */}
+                    {/* Active results — 4-way view routing */}
                     {activeSearchState !== "idle" && !activeErrorMessage && (
-                        viewMode === "grid" ? (
-                            <SearchResultsGrid
-                                results={activeResults as (DocumentSearchResult | RecordSearchResult)[]}
-                                totalCount={activeTotalCount}
-                                isLoading={isSearching}
-                                isLoadingMore={isLoadingMore}
-                                hasMore={activeHasMore}
-                                activeDomain={activeDomain}
-                                columns={gridColumns}
-                                onLoadMore={handleLoadMore}
-                                onSelectionChange={handleSelectionChange}
-                                onSort={handleSort}
-                            />
-                        ) : (
-                            <SearchResultsGraph
-                                nodes={nodes}
-                                edges={edges}
-                                onNodeClick={handleGraphNodeClick}
-                                clusterBy={clusterBy}
-                                isLoading={isSearching || isSimulating}
-                                resultCount={activeTotalCount}
-                                expandedClusterId={expandedClusterId}
-                            />
-                        )
+                        <>
+                            {viewMode === "grid" && (
+                                <SearchResultsGrid
+                                    records={gridRecords}
+                                    totalCount={activeTotalCount}
+                                    isLoading={isSearching}
+                                    isLoadingMore={isLoadingMore}
+                                    hasMore={activeHasMore}
+                                    activeDomain={activeDomain}
+                                    columns={viewColumns}
+                                    onLoadMore={handleLoadMore}
+                                    onSelectionChange={handleSelectionChange}
+                                    onSort={handleSort}
+                                />
+                            )}
+
+                            {viewMode === "map" && (
+                                <div className={styles.viewContainer}>
+                                    <SearchResultsMap
+                                        results={activeResults as (DocumentSearchResult | RecordSearchResult)[]}
+                                        colorBy={mapColorBy}
+                                        minSimilarity={mapMinSimilarity}
+                                        isLoading={isSearching}
+                                        activeDomain={activeDomain}
+                                        onResultClick={handleResultClick}
+                                    />
+                                </div>
+                            )}
+
+                            {viewMode === "treemap" && (
+                                <div className={styles.viewContainer}>
+                                    <SearchResultsTreemap
+                                        results={activeResults as (DocumentSearchResult | RecordSearchResult)[]}
+                                        groupBy={treemapGroupBy}
+                                        showLabels={treemapShowLabels}
+                                        isLoading={isSearching}
+                                        activeDomain={activeDomain}
+                                        onResultClick={handleResultClick}
+                                    />
+                                </div>
+                            )}
+
+                            {viewMode === "timeline" && (
+                                <div className={styles.viewContainer}>
+                                    <SearchResultsTimeline
+                                        results={activeResults as (DocumentSearchResult | RecordSearchResult)[]}
+                                        dateField={timelineDateField}
+                                        colorBy={timelineColorBy}
+                                        isLoading={isSearching}
+                                        activeDomain={activeDomain}
+                                        onResultClick={handleResultClick}
+                                    />
+                                </div>
+                            )}
+
+                        </>
                     )}
                 </div>
             </div>
@@ -550,6 +644,14 @@ export const App: React.FC<AppProps> = ({
                 totalCount={activeTotalCount > 0 ? activeTotalCount : null}
                 searchTime={activeSearchTime}
                 version="1.0.0"
+            />
+
+            {/* Document preview dialog — opened when clicking a document data point */}
+            <DocumentPreviewDialog
+                open={previewResult !== null}
+                result={previewResult}
+                anchorPosition={previewPosition}
+                onClose={handlePreviewClose}
             />
         </div>
     );

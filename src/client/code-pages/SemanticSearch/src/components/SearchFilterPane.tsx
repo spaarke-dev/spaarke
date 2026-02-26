@@ -2,12 +2,16 @@
  * SearchFilterPane -- Collapsible left-side filter pane
  *
  * Layout (top to bottom):
- *   1. Collapse toggle button (header row, no "Filters" label)
- *   2. Saved Searches selector (prominent, above search)
- *   3. AI Search query textarea (multi-line, labeled)
- *   4. Domain-aware filter dropdowns
- *   5. Date range, threshold, mode
- *   6. Search button
+ *   1. "Search Criteria" header with collapse chevron
+ *   2. Domain tabs (Documents / Matters / Projects / Invoices)
+ *   3. Saved Searches selector
+ *   4. AI Search query textarea
+ *   5. Dashed separator
+ *   6. Domain-aware filter dropdowns (Document Type, File Type, Matter Type)
+ *   7. Date range
+ *   8. Search button
+ *
+ * Relevance Threshold and Search Mode live in VisualizationSettings (overlay).
  *
  * @see ADR-021 for Fluent UI v9 design system requirements
  */
@@ -19,9 +23,6 @@ import {
     mergeClasses,
     Textarea,
     Button,
-    Slider,
-    Dropdown,
-    Option,
     Label,
     Text,
 } from "@fluentui/react-components";
@@ -30,7 +31,8 @@ import {
     ChevronDoubleRight20Regular,
     Search20Regular,
 } from "@fluentui/react-icons";
-import type { SearchDomain, SearchFilters, FilterOption, HybridMode, SavedSearch } from "../types";
+import type { SearchDomain, SearchFilters, FilterOption, SavedSearch } from "../types";
+import { SearchDomainTabs } from "./SearchDomainTabs";
 import { FilterDropdown } from "./FilterDropdown";
 import { DateRangeFilter } from "./DateRangeFilter";
 import { SavedSearchSelector } from "./SavedSearchSelector";
@@ -42,6 +44,10 @@ import { SavedSearchSelector } from "./SavedSearchSelector";
 export interface SearchFilterPaneProps {
     /** Currently active search domain — controls which filter sections are visible */
     activeDomain: SearchDomain;
+    /** Callback when the user switches domain tabs */
+    onDomainChange: (domain: SearchDomain) => void;
+    /** Callback to trigger a domain-change search (query + domain) */
+    onDomainSearch: (query: string, domain: SearchDomain) => void;
     /** Current filter state */
     filters: SearchFilters;
     /** Callback when any filter value changes */
@@ -80,12 +86,6 @@ const EXPANDED_WIDTH = "280px";
 const COLLAPSED_WIDTH = "40px";
 const TRANSITION_DURATION = "200ms";
 
-const SEARCH_MODE_OPTIONS: { value: HybridMode; label: string }[] = [
-    { value: "rrf", label: "Hybrid (RRF)" },
-    { value: "vectorOnly", label: "Vector Only" },
-    { value: "keywordOnly", label: "Keyword Only" },
-];
-
 // ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
@@ -120,23 +120,26 @@ const useStyles = makeStyles({
         paddingRight: tokens.spacingHorizontalXS,
         alignItems: "center",
     },
-    header: {
+    paneTitle: {
         display: "flex",
-        justifyContent: "flex-end",
         alignItems: "center",
-        marginBottom: tokens.spacingVerticalXS,
+        justifyContent: "space-between",
+        marginBottom: "20px",
     },
     collapseButton: {
         minWidth: "auto",
     },
+    domainTabsSection: {
+        marginBottom: tokens.spacingVerticalM,
+    },
     savedSearchSection: {
-        marginBottom: tokens.spacingVerticalS,
+        marginBottom: tokens.spacingVerticalM,
     },
     querySection: {
         display: "flex",
         flexDirection: "column",
         gap: tokens.spacingVerticalXXS,
-        marginBottom: tokens.spacingVerticalS,
+        marginBottom: tokens.spacingVerticalM,
     },
     queryLabel: {
         fontWeight: tokens.fontWeightSemibold,
@@ -146,36 +149,19 @@ const useStyles = makeStyles({
     queryTextarea: {
         width: "100%",
     },
+    separator: {
+        borderBottom: `1px dashed ${tokens.colorNeutralStroke2}`,
+        marginTop: tokens.spacingVerticalM,
+        marginBottom: tokens.spacingVerticalM,
+    },
     filterSection: {
         display: "flex",
         flexDirection: "column",
         gap: tokens.spacingVerticalXS,
-        marginBottom: tokens.spacingVerticalS,
-    },
-    sectionLabel: {
-        fontWeight: tokens.fontWeightSemibold,
-        fontSize: tokens.fontSizeBase200,
-        color: tokens.colorNeutralForeground2,
-    },
-    sliderContainer: {
-        display: "flex",
-        flexDirection: "column",
-        gap: tokens.spacingVerticalXXS,
-    },
-    sliderLabel: {
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-    },
-    sliderValue: {
-        fontSize: tokens.fontSizeBase200,
-        color: tokens.colorNeutralForeground3,
-    },
-    modeDropdown: {
-        width: "100%",
+        marginBottom: tokens.spacingVerticalM,
     },
     searchButton: {
-        marginTop: tokens.spacingVerticalS,
+        marginTop: tokens.spacingVerticalM,
     },
 });
 
@@ -185,6 +171,8 @@ const useStyles = makeStyles({
 
 export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
     activeDomain,
+    onDomainChange,
+    onDomainSearch,
     filters,
     onFiltersChange,
     onSearch,
@@ -206,9 +194,6 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
     const showFileTypeFilter = activeDomain === "documents";
     const showMatterTypeFilter =
         activeDomain === "documents" || activeDomain === "matters";
-    const showDateRange = true;
-    const showThreshold = true;
-    const showMode = true;
 
     // --- Handlers ---
 
@@ -216,32 +201,12 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
         setIsCollapsed((prev) => !prev);
     }, []);
 
-    const handleThresholdChange = useCallback(
-        (_ev: unknown, data: { value: number }) => {
-            onFiltersChange({ ...filters, threshold: data.value });
-        },
-        [filters, onFiltersChange],
-    );
-
-    const handleModeChange = useCallback(
-        (_ev: unknown, data: { optionValue?: string }) => {
-            if (data.optionValue) {
-                onFiltersChange({
-                    ...filters,
-                    searchMode: data.optionValue as HybridMode,
-                });
-            }
-        },
-        [filters, onFiltersChange],
-    );
-
     const handleSearch = useCallback(() => {
         onSearch(query, filters);
     }, [onSearch, query, filters]);
 
     const handleQueryKeyDown = useCallback(
         (ev: React.KeyboardEvent) => {
-            // Ctrl+Enter or Cmd+Enter triggers search (plain Enter adds newline)
             if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
                 ev.preventDefault();
                 onSearch(query, filters);
@@ -303,8 +268,9 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
 
     return (
         <div className={paneClassName} role="region" aria-label="Search filters">
-            {/* Header: collapse button only (no label) */}
-            <div className={styles.header}>
+            {/* Header: "Search Criteria" title + collapse chevron */}
+            <div className={styles.paneTitle}>
+                <Text weight="semibold" size={400}>Search Criteria</Text>
                 <Button
                     className={styles.collapseButton}
                     appearance="subtle"
@@ -315,7 +281,20 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
                 />
             </div>
 
-            {/* Saved Searches — prominent, above search */}
+            {/* Domain tabs (Documents / Matters / Projects / Invoices) */}
+            <div className={styles.domainTabsSection}>
+                <SearchDomainTabs
+                    activeDomain={activeDomain}
+                    onDomainChange={onDomainChange}
+                    query={query}
+                    onSearch={onDomainSearch}
+                />
+            </div>
+
+            {/* Dotted divider between domain tabs and saved searches */}
+            <div className={styles.separator} />
+
+            {/* Saved Searches */}
             <div className={styles.savedSearchSection}>
                 <SavedSearchSelector
                     savedSearches={savedSearches}
@@ -340,6 +319,9 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
                     aria-label="AI search query"
                 />
             </div>
+
+            {/* Dashed separator between query and filters */}
+            <div className={styles.separator} />
 
             {/* Document Type Filter (Documents domain only) */}
             {showDocumentTypeFilter && (
@@ -377,64 +359,16 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
                 </div>
             )}
 
+            {/* Dotted divider between type filters and date range */}
+            <div className={styles.separator} />
+
             {/* Date Range Filter (all domains) */}
-            {showDateRange && (
-                <div className={styles.filterSection}>
-                    <DateRangeFilter
-                        value={filters.dateRange}
-                        onChange={handleDateRangeChange}
-                    />
-                </div>
-            )}
-
-            {/* Threshold Slider (all domains) */}
-            {showThreshold && (
-                <div className={styles.filterSection}>
-                    <div className={styles.sliderContainer}>
-                        <div className={styles.sliderLabel}>
-                            <Label className={styles.sectionLabel}>
-                                Relevance Threshold
-                            </Label>
-                            <Text className={styles.sliderValue}>
-                                {filters.threshold}%
-                            </Text>
-                        </div>
-                        <Slider
-                            min={0}
-                            max={100}
-                            value={filters.threshold}
-                            onChange={handleThresholdChange}
-                            disabled={isLoading}
-                            aria-label="Relevance threshold"
-                        />
-                    </div>
-                </div>
-            )}
-
-            {/* Search Mode Dropdown (all domains) */}
-            {showMode && (
-                <div className={styles.filterSection}>
-                    <Label className={styles.sectionLabel}>Search Mode</Label>
-                    <Dropdown
-                        className={styles.modeDropdown}
-                        value={
-                            SEARCH_MODE_OPTIONS.find(
-                                (opt) => opt.value === filters.searchMode,
-                            )?.label ?? "Hybrid (RRF)"
-                        }
-                        selectedOptions={[filters.searchMode]}
-                        onOptionSelect={handleModeChange}
-                        disabled={isLoading}
-                        aria-label="Search mode"
-                    >
-                        {SEARCH_MODE_OPTIONS.map((opt) => (
-                            <Option key={opt.value} value={opt.value}>
-                                {opt.label}
-                            </Option>
-                        ))}
-                    </Dropdown>
-                </div>
-            )}
+            <div className={styles.filterSection}>
+                <DateRangeFilter
+                    value={filters.dateRange}
+                    onChange={handleDateRangeChange}
+                />
+            </div>
 
             {/* Search Button */}
             <Button

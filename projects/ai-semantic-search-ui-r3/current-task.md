@@ -10,10 +10,58 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 073 — End-to-End Validation in Dataverse |
-| **Step** | E2E bug-fix cycle — Round 2 fixes applied, awaiting user test |
+| **Task** | UniversalDatasetGrid Multi-Source Adaptation |
+| **Step** | Phase 1+2: Shared library + Semantic Search adoption |
 | **Status** | in-progress |
-| **Next Action** | Wait for user to upload rebuilt HTML to Dataverse and report test results. If issues remain, fix and rebuild. When E2E passes, commit + push + `/merge-to-master`. |
+| **Next Action** | Implementing shared library changes (external data mode, renderer registration) then replacing SearchResultsGrid with UniversalDatasetGrid in App.tsx |
+
+### Active Work: UniversalDatasetGrid Adaptation
+
+**Spec**: `projects/ai-semantic-search-ui-r3/notes/universal-dataset-grid-adaptation-spec.md`
+**EventsPage Migration Guide**: `projects/ai-semantic-search-ui-r3/notes/eventspage-grid-migration-guide.md`
+
+**What we're doing**: Extending `@spaarke/ui-components` UniversalDatasetGrid to support a 3rd data mode ("External Data") for non-Dataverse sources (Azure AI Search, BFF APIs). Then adopting it in the Semantic Search Code Page to replace the custom `SearchResultsGrid.tsx`. Also creating a migration guide for EventsPage to follow the same pattern.
+
+**Phase 1 — Shared Library Changes** (in `src/client/shared/Spaarke.UI.Components/`):
+- [x] P1A: Add `IExternalDataConfig` interface to `DatasetTypes.ts`
+- [x] P1B: Create `useExternalDataMode.ts` hook
+- [x] P1C: Add `registerRenderer()` API + `Percentage`/`StringArray`/`FileType` renderers
+- [x] P1D: Update `UniversalDatasetGrid.tsx` to detect and route `externalConfig`
+
+**Phase 2 — Semantic Search Adoption** (in `src/client/code-pages/SemanticSearch/`):
+- [ ] P2A: Create `searchResultAdapter.ts` — map `DocumentSearchResult`/`RecordSearchResult` → `IDatasetRecord[]`
+- [ ] P2B: Create `useSearchViewDefinitions.ts` — fetch column configs from `sprk_gridconfiguration` with `domainColumns.ts` fallback
+- [ ] P2C: Replace `SearchResultsGrid` with `UniversalDatasetGrid` in `App.tsx`
+- [ ] Build + deploy + verify
+
+**Key Files (Shared Library — main spaarke repo)**:
+- `src/client/shared/Spaarke.UI.Components/src/types/DatasetTypes.ts` — added `IExternalDataConfig`
+- `src/client/shared/Spaarke.UI.Components/src/hooks/useExternalDataMode.ts` — NEW
+- `src/client/shared/Spaarke.UI.Components/src/services/ColumnRendererService.tsx` — added `registerRenderer()`
+- `src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/UniversalDatasetGrid.tsx` — added mode 3
+
+**Key Types**:
+```typescript
+// IExternalDataConfig — caller provides pre-fetched data, grid displays it
+interface IExternalDataConfig {
+  records: IDatasetRecord[];     // Mapped data from any source
+  columns: IDatasetColumn[];     // Column definitions (from sprk_gridconfiguration or fallback)
+  loading: boolean;
+  error?: string | null;
+  totalCount?: number;
+  hasNextPage?: boolean;
+  onLoadNextPage?: () => void;
+  onRefresh?: () => void;
+}
+
+// IDatasetRecord — simple shape, works for any data source
+interface IDatasetRecord { id: string; entityName: string; [key: string]: any; }
+
+// IDatasetColumn — drives rendering via dataType
+interface IDatasetColumn { name: string; displayName: string; dataType: string; ... }
+```
+
+**Important**: Side panes (`Xrm.App.sidePanes`) are NOT part of grid architecture. They're in EventsPage `App.tsx` `onRecordClick` handler. UniversalDatasetGrid already has `onRecordClick(recordId)` — side panes work unchanged.
 
 ---
 

@@ -14,8 +14,8 @@
 /** Active search domain — determines which entity type tab is active */
 export type SearchDomain = "documents" | "matters" | "projects" | "invoices";
 
-/** View mode toggle — grid (tabular) or graph (cluster visualization) */
-export type ViewMode = "grid" | "graph";
+/** View mode toggle — grid (tabular), map (similarity scatter), treemap, or timeline */
+export type ViewMode = "grid" | "map" | "treemap" | "timeline";
 
 /** Graph clustering category — determines how results are grouped in graph view */
 export type GraphClusterBy = "MatterType" | "PracticeArea" | "DocumentType" | "Organization" | "PersonContact";
@@ -532,6 +532,34 @@ export interface SearchError {
     code?: string;
     /** Whether the operation can be retried. */
     retryable: boolean;
+}
+
+// =============================================
+// Visualization View Types
+// =============================================
+
+/** Category field for color-coding and grouping across visualization views */
+export type VisualizationColorBy = GraphClusterBy;
+
+/** Date field selector for Timeline view */
+export type TimelineDateField = "createdAt" | "updatedAt" | "modifiedAt";
+
+/** Settings state for the Map (similarity scatter) view */
+export interface MapViewSettings {
+    colorBy: VisualizationColorBy;
+    minSimilarity: number;
+}
+
+/** Settings state for the Treemap view */
+export interface TreemapViewSettings {
+    groupBy: VisualizationColorBy;
+    showLabels: boolean;
+}
+
+/** Settings state for the Timeline view */
+export interface TimelineViewSettings {
+    dateField: TimelineDateField;
+    colorBy: VisualizationColorBy;
 }
 
 // =============================================

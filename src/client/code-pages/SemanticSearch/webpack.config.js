@@ -29,7 +29,7 @@ module.exports = (env) => {
           exclude: [/node_modules/, /__tests__/, /\.test\.tsx?$/, /\.spec\.tsx?$/],
         },
         {
-          // Required for @xyflow/react styles
+          // CSS imports (library styles)
           test: /\.css$/,
           use: ['style-loader', 'css-loader'],
         },

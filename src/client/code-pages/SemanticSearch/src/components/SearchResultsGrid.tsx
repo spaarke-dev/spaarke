@@ -1,21 +1,21 @@
 /**
  * SearchResultsGrid — Grid view for search results using Fluent UI v9 DataGrid
  *
- * Uses Fluent UI DataGrid directly (not UniversalDatasetGrid from shared library)
- * because the shared library GridView requires IDatasetRecord/IDatasetColumn from
- * a separate package. Per spike task 003 findings, the inner GridView accepts
- * plain data arrays; we replicate that pattern here with Fluent UI primitives.
+ * Accepts standardized IDatasetColumn[] and IDatasetRecord[] types for display,
+ * using dataType-based cell rendering (matching ColumnRendererService patterns
+ * from @spaarke/ui-components shared library).
  *
  * Features:
- *   - Domain-specific column configurations (passed as props)
+ *   - dataType-driven cell rendering (Percentage, DateOnly, Currency, etc.)
  *   - Sortable columns (asc/desc)
  *   - Multi-row selection with checkboxes
  *   - Infinite scroll via IntersectionObserver
  *   - Loading overlay for initial load and load-more
  *   - 44px row height (standard Spaarke grid row)
  *
- * @see notes/spikes/grid-headless-adapter.md — spike findings
- * @see GridView.tsx (shared library) — reference pattern
+ * @see hooks/useSearchViewDefinitions.ts — column definitions (Dataverse or fallback)
+ * @see adapters/searchResultAdapter.ts — IDatasetRecord mapping
+ * @see ColumnRendererService.tsx (shared library) — reference renderer patterns
  */
 
 import React, { useMemo, useCallback, useRef, useEffect, useState } from "react";
@@ -29,27 +29,31 @@ import {
     createTableColumn,
     Spinner,
     Text,
-    Checkbox,
+    Button,
+    Menu,
+    MenuTrigger,
+    MenuPopover,
+    MenuList,
+    MenuItemCheckbox,
     makeStyles,
     tokens,
     type TableColumnDefinition,
     type DataGridProps,
     type TableRowId,
+    type TableColumnSizingOptions,
 } from "@fluentui/react-components";
-import type {
-    SearchDomain,
-    GridColumnDef,
-    DocumentSearchResult,
-    RecordSearchResult,
-} from "../types";
+import { ColumnTriple20Regular } from "@fluentui/react-icons";
+import type { IDatasetColumn } from "../hooks/useSearchViewDefinitions";
+import type { IDatasetRecord } from "../adapters/searchResultAdapter";
+import type { SearchDomain } from "../types";
 
 // =============================================
 // Props
 // =============================================
 
 export interface SearchResultsGridProps {
-    /** Search results to display. */
-    results: (DocumentSearchResult | RecordSearchResult)[];
+    /** Mapped records to display (IDatasetRecord shape). */
+    records: IDatasetRecord[];
     /** Total number of matching results (for status display). */
     totalCount: number;
     /** Whether initial search is in progress. */
@@ -58,10 +62,10 @@ export interface SearchResultsGridProps {
     isLoadingMore: boolean;
     /** Whether more results are available. */
     hasMore: boolean;
-    /** Active search domain tab. */
+    /** Active search domain tab (used for empty-state messaging). */
     activeDomain: SearchDomain;
-    /** Column definitions for the active domain. */
-    columns: GridColumnDef[];
+    /** Column definitions from useSearchViewDefinitions (IDatasetColumn shape). */
+    columns: IDatasetColumn[];
     /** Callback to load next page of results. */
     onLoadMore: () => void;
     /** Callback when row selection changes. */
@@ -71,36 +75,60 @@ export interface SearchResultsGridProps {
 }
 
 // =============================================
-// Helpers
+// DataType-based cell rendering
 // =============================================
 
-/** Extract unique ID from a search result. */
-function getResultId(result: DocumentSearchResult | RecordSearchResult): string {
-    if ("documentId" in result && result.documentId) {
-        return result.documentId;
-    }
-    if ("recordId" in result) {
-        return result.recordId;
-    }
-    return "";
-}
+/** Render a cell value based on the column's dataType. Matches ColumnRendererService patterns. */
+function renderByDataType(value: unknown, dataType: string): string {
+    if (value == null || value === "") return "";
 
-/** Extract cell value from a result by column key. */
-function getCellValue(
-    result: DocumentSearchResult | RecordSearchResult,
-    key: string
-): unknown {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (result as Record<string, any>)[key];
-}
-
-/** Format a cell value for display. */
-function formatCellValue(value: unknown): string {
-    if (value == null) return "";
-    if (typeof value === "number") return value.toFixed(2);
-    if (typeof value === "string") return value;
-    if (Array.isArray(value)) return value.join(", ");
-    return String(value);
+    switch (dataType) {
+        case "Percentage": {
+            const num = typeof value === "number" ? value : Number(value);
+            if (isNaN(num)) return String(value);
+            return `${Math.round(num * 100)}%`;
+        }
+        case "DateAndTime.DateOnly": {
+            if (typeof value !== "string" && typeof value !== "number") return String(value);
+            try {
+                return new Date(value as string | number).toLocaleDateString(undefined, {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                });
+            } catch {
+                return String(value);
+            }
+        }
+        case "Currency": {
+            const num = typeof value === "number" ? value : Number(value);
+            if (isNaN(num)) return String(value);
+            return new Intl.NumberFormat(undefined, {
+                style: "currency",
+                currency: "USD",
+                minimumFractionDigits: 2,
+            }).format(num);
+        }
+        case "StringArray": {
+            if (Array.isArray(value)) return value.join(", ");
+            return typeof value === "string" ? value : String(value);
+        }
+        case "FileType": {
+            return typeof value === "string" ? value.toUpperCase() : String(value);
+        }
+        case "EntityLink": {
+            if (typeof value === "object" && value !== null && "name" in value) {
+                return String((value as { name: string }).name);
+            }
+            return String(value);
+        }
+        default: {
+            // SingleLine.Text and all other types
+            if (typeof value === "number") return value.toLocaleString();
+            if (Array.isArray(value)) return value.join(", ");
+            return String(value);
+        }
+    }
 }
 
 // =============================================
@@ -115,6 +143,17 @@ const useStyles = makeStyles({
         height: "100%",
         position: "relative",
         overflow: "hidden",
+    },
+    gridToolbar: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "flex-end",
+        paddingRight: tokens.spacingHorizontalM,
+        paddingTop: tokens.spacingVerticalXS,
+        paddingBottom: tokens.spacingVerticalXS,
+        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        backgroundColor: tokens.colorNeutralBackground2,
+        minHeight: "32px",
     },
     gridContainer: {
         flex: 1,
@@ -158,6 +197,13 @@ const useStyles = makeStyles({
         overflow: "hidden",
         textOverflow: "ellipsis",
         whiteSpace: "nowrap",
+        paddingLeft: tokens.spacingHorizontalS,
+        paddingRight: tokens.spacingHorizontalS,
+    },
+    headerCell: {
+        paddingLeft: tokens.spacingHorizontalS,
+        paddingRight: tokens.spacingHorizontalS,
+        fontWeight: tokens.fontWeightSemibold,
     },
 });
 
@@ -166,7 +212,7 @@ const useStyles = makeStyles({
 // =============================================
 
 export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
-    results,
+    records,
     totalCount,
     isLoading,
     isLoadingMore,
@@ -185,6 +231,18 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
         columnKey: string;
         direction: "asc" | "desc";
     } | null>(null);
+
+    // --- Column visibility state ---
+    // All columns visible by default; key = column name
+    const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
+
+    // Suppress unused-var warning — totalCount reserved for future status display
+    void totalCount;
+
+    // Reset hidden columns when domain changes (columns change)
+    useEffect(() => {
+        setHiddenColumns(new Set());
+    }, [activeDomain]);
 
     // --- Infinite scroll via IntersectionObserver ---
     useEffect(() => {
@@ -209,47 +267,91 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
         return () => observer.disconnect();
     }, [hasMore, isLoadingMore, isLoading, onLoadMore]);
 
-    // --- Map GridColumnDef to Fluent TableColumnDefinition ---
-    const tableColumns: TableColumnDefinition<DocumentSearchResult | RecordSearchResult>[] =
-        useMemo(
-            () =>
-                columns.map((col) =>
-                    createTableColumn<DocumentSearchResult | RecordSearchResult>({
-                        columnId: col.key,
-                        compare: col.sortable
-                            ? (a, b) => {
-                                  const aVal = getCellValue(a, col.key);
-                                  const bVal = getCellValue(b, col.key);
-                                  if (typeof aVal === "number" && typeof bVal === "number") {
-                                      return aVal - bVal;
-                                  }
-                                  return String(aVal ?? "").localeCompare(String(bVal ?? ""));
-                              }
-                            : undefined,
-                        renderHeaderCell: () => col.label,
-                        renderCell: (item) => {
-                            const value = getCellValue(item, col.key);
-                            if (col.render) {
-                                return col.render(value, item as unknown as Record<string, unknown>);
-                            }
-                            return formatCellValue(value);
-                        },
-                    })
-                ),
-            [columns]
-        );
+    // --- Visible columns (filtered by user selection) ---
+    const visibleColumns = useMemo(
+        () => columns.filter((col) => !hiddenColumns.has(col.name)),
+        [columns, hiddenColumns],
+    );
+
+    // --- Map IDatasetColumn to Fluent TableColumnDefinition ---
+    type GridItem = IDatasetRecord & { _rowId: number };
+
+    const tableColumns: TableColumnDefinition<GridItem>[] = useMemo(
+        () =>
+            visibleColumns.map((col) =>
+                createTableColumn<GridItem>({
+                    columnId: col.name,
+                    compare: (a, b) => {
+                        const aVal = a[col.name];
+                        const bVal = b[col.name];
+                        if (typeof aVal === "number" && typeof bVal === "number") {
+                            return aVal - bVal;
+                        }
+                        return String(aVal ?? "").localeCompare(String(bVal ?? ""));
+                    },
+                    renderHeaderCell: () => col.displayName,
+                    renderCell: (item) => {
+                        const value = item[col.name];
+                        return renderByDataType(value, col.dataType);
+                    },
+                })
+            ),
+        [visibleColumns],
+    );
+
+    // --- Column sizing options (from visualSizeFactor → pixel widths) ---
+    const columnSizingOptions: TableColumnSizingOptions = useMemo(() => {
+        const options: TableColumnSizingOptions = {};
+        for (const col of visibleColumns) {
+            const defaultWidth = col.visualSizeFactor
+                ? Math.round(col.visualSizeFactor * 100)
+                : 150;
+            options[col.name] = {
+                defaultWidth,
+                minWidth: Math.max(80, Math.round(defaultWidth * 0.5)),
+                idealWidth: defaultWidth,
+            };
+        }
+        return options;
+    }, [visibleColumns]);
+
+    // --- Column picker: checked state for MenuItemCheckbox ---
+    const columnCheckedValues = useMemo(() => {
+        const visible = columns
+            .filter((col) => !hiddenColumns.has(col.name))
+            .map((col) => col.name);
+        return { columns: visible };
+    }, [columns, hiddenColumns]);
+
+    const handleCheckedValueChange = useCallback(
+        (_ev: unknown, data: { name: string; checkedItems: string[] }) => {
+            if (data.name !== "columns") return;
+            // checkedItems = names of columns that are now checked (visible)
+            const visibleSet = new Set(data.checkedItems);
+            const newHidden = new Set<string>();
+            for (const col of columns) {
+                if (!visibleSet.has(col.name)) {
+                    newHidden.add(col.name);
+                }
+            }
+            setHiddenColumns(newHidden);
+        },
+        [columns],
+    );
 
     // --- Selection handler ---
     const handleSelectionChange: DataGridProps["onSelectionChange"] = useCallback(
         (_event: unknown, data: { selectedItems: Set<TableRowId> }) => {
             setSelectedRows(data.selectedItems);
-            const ids = Array.from(data.selectedItems).map((rowId) => {
-                const result = results[rowId as number];
-                return result ? getResultId(result) : "";
-            }).filter(Boolean);
+            const ids = Array.from(data.selectedItems)
+                .map((rowId) => {
+                    const record = records[rowId as number];
+                    return record?.id ?? "";
+                })
+                .filter(Boolean);
             onSelectionChange(ids);
         },
-        [results, onSelectionChange]
+        [records, onSelectionChange],
     );
 
     // --- Sort handler ---
@@ -260,17 +362,17 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
             setSortState({ columnKey: colKey, direction });
             onSort(colKey, direction);
         },
-        [onSort]
+        [onSort],
     );
 
     // --- Items with row IDs ---
-    const items = useMemo(
-        () => results.map((r, i) => ({ ...r, _rowId: i })),
-        [results]
+    const items: GridItem[] = useMemo(
+        () => records.map((r, i) => ({ ...r, _rowId: i })),
+        [records],
     );
 
     // --- Empty state ---
-    if (!isLoading && results.length === 0) {
+    if (!isLoading && records.length === 0) {
         return (
             <div className={styles.root}>
                 <div className={styles.emptyState}>
@@ -295,6 +397,38 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
                 </div>
             )}
 
+            {/* Column picker toolbar */}
+            <div className={styles.gridToolbar}>
+                <Menu
+                    checkedValues={columnCheckedValues}
+                    onCheckedValueChange={handleCheckedValueChange}
+                >
+                    <MenuTrigger disableButtonEnhancement>
+                        <Button
+                            appearance="subtle"
+                            size="small"
+                            icon={<ColumnTriple20Regular />}
+                            aria-label="Choose columns"
+                        >
+                            Columns
+                        </Button>
+                    </MenuTrigger>
+                    <MenuPopover>
+                        <MenuList>
+                            {columns.map((col) => (
+                                <MenuItemCheckbox
+                                    key={col.name}
+                                    name="columns"
+                                    value={col.name}
+                                >
+                                    {col.displayName}
+                                </MenuItemCheckbox>
+                            ))}
+                        </MenuList>
+                    </MenuPopover>
+                </Menu>
+            </div>
+
             <div className={styles.gridContainer} ref={gridContainerRef}>
                 <DataGrid
                     items={items}
@@ -304,7 +438,9 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
                     onSelectionChange={handleSelectionChange}
                     sortable
                     onSortChange={handleSortChange}
-                    getRowId={(item: (DocumentSearchResult | RecordSearchResult) & { _rowId: number }) => item._rowId}
+                    resizableColumns
+                    columnSizingOptions={columnSizingOptions}
+                    getRowId={(item: GridItem) => item._rowId}
                     style={{ minWidth: "100%" }}
                     aria-label="Search results"
                     {...(sortState
@@ -326,13 +462,15 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
                             }}
                         >
                             {({ renderHeaderCell }) => (
-                                <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
+                                <DataGridHeaderCell className={styles.headerCell}>
+                                    {renderHeaderCell()}
+                                </DataGridHeaderCell>
                             )}
                         </DataGridRow>
                     </DataGridHeader>
-                    <DataGridBody<(DocumentSearchResult | RecordSearchResult) & { _rowId: number }>>
+                    <DataGridBody<GridItem>>
                         {({ item, rowId }) => (
-                            <DataGridRow<(DocumentSearchResult | RecordSearchResult) & { _rowId: number }>
+                            <DataGridRow<GridItem>
                                 key={rowId}
                                 selectionCell={{
                                     checkboxIndicator: { "aria-label": "Select row" },
@@ -340,7 +478,9 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
                                 style={{ height: "44px" }}
                             >
                                 {({ renderCell }) => (
-                                    <DataGridCell className={styles.cell}>{renderCell(item)}</DataGridCell>
+                                    <DataGridCell className={styles.cell}>
+                                        {renderCell(item)}
+                                    </DataGridCell>
                                 )}
                             </DataGridRow>
                         )}

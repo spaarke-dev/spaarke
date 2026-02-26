@@ -1,8 +1,8 @@
 /**
- * SearchDomainTabs -- Entity domain tab selector
+ * SearchDomainTabs -- Entity domain tab selector (2x2 grid)
  *
- * Renders a horizontal TabList (Fluent v9 subtle appearance) for switching
- * between the four search domains: Documents, Matters, Projects, Invoices.
+ * Renders a 2x2 grid of toggle buttons for switching between the four search
+ * domains: Documents, Matters, Projects, Invoices.
  *
  * Selecting a tab updates the active domain and triggers a new search
  * against the selected domain.
@@ -15,10 +15,7 @@ import { useCallback } from "react";
 import {
     makeStyles,
     tokens,
-    TabList,
-    Tab,
-    type SelectTabData,
-    type SelectTabEvent,
+    ToggleButton,
 } from "@fluentui/react-components";
 import {
     DocumentMultipleRegular,
@@ -50,14 +47,14 @@ export interface SearchDomainTabsProps {
 interface DomainTabConfig {
     id: SearchDomain;
     label: string;
-    icon: React.ComponentType;
+    icon: React.ReactElement;
 }
 
 const DOMAIN_TABS: DomainTabConfig[] = [
-    { id: "documents", label: "Documents", icon: DocumentMultipleRegular },
-    { id: "matters", label: "Matters", icon: BriefcaseRegular },
-    { id: "projects", label: "Projects", icon: TaskListSquareAddRegular },
-    { id: "invoices", label: "Invoices", icon: ReceiptRegular },
+    { id: "documents", label: "Documents", icon: <DocumentMultipleRegular /> },
+    { id: "matters", label: "Matters", icon: <BriefcaseRegular /> },
+    { id: "projects", label: "Projects", icon: <TaskListSquareAddRegular /> },
+    { id: "invoices", label: "Invoices", icon: <ReceiptRegular /> },
 ];
 
 // ---------------------------------------------------------------------------
@@ -65,12 +62,13 @@ const DOMAIN_TABS: DomainTabConfig[] = [
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-    root: {
-        display: "flex",
-        alignItems: "center",
+    grid: {
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: tokens.spacingHorizontalXS,
     },
-    tabList: {
-        columnGap: tokens.spacingHorizontalXS,
+    button: {
+        justifyContent: "flex-start",
     },
 });
 
@@ -86,34 +84,30 @@ export const SearchDomainTabs: React.FC<SearchDomainTabsProps> = ({
 }) => {
     const styles = useStyles();
 
-    const handleTabSelect = useCallback(
-        (_event: SelectTabEvent, data: SelectTabData) => {
-            const newDomain = data.value as SearchDomain;
-            onDomainChange(newDomain);
-            onSearch(query, newDomain);
+    const handleClick = useCallback(
+        (domain: SearchDomain) => () => {
+            onDomainChange(domain);
+            onSearch(query, domain);
         },
         [onDomainChange, onSearch, query],
     );
 
     return (
-        <div className={styles.root}>
-            <TabList
-                className={styles.tabList}
-                appearance="subtle"
-                selectedValue={activeDomain}
-                onTabSelect={handleTabSelect}
-                aria-label="Search domain selector"
-            >
-                {DOMAIN_TABS.map((tab) => (
-                    <Tab
-                        key={tab.id}
-                        value={tab.id}
-                        icon={<tab.icon />}
-                    >
-                        {tab.label}
-                    </Tab>
-                ))}
-            </TabList>
+        <div className={styles.grid} role="tablist" aria-label="Search domain selector">
+            {DOMAIN_TABS.map((tab) => (
+                <ToggleButton
+                    key={tab.id}
+                    className={styles.button}
+                    checked={activeDomain === tab.id}
+                    onClick={handleClick(tab.id)}
+                    icon={tab.icon}
+                    size="small"
+                    appearance={activeDomain === tab.id ? "primary" : "subtle"}
+                    aria-label={`Search ${tab.label}`}
+                >
+                    {tab.label}
+                </ToggleButton>
+            ))}
         </div>
     );
 };

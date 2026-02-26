@@ -1,11 +1,8 @@
 /**
- * ViewToggleToolbar — Graph/Grid toggle with cluster-by dropdown
+ * ViewToggleToolbar — 4-way view mode toggle
  *
- * Contains:
- *   - Graph/Grid toggle buttons (ToggleButton group)
- *   - Cluster-by dropdown (visible only in graph mode)
- *
- * Saved search selector has moved to SearchFilterPane (side pane).
+ * Layout: spacer + Grid | Map | Treemap | Timeline buttons (right-aligned).
+ * Search pane collapse is handled internally by SearchFilterPane.
  *
  * @see spec.md Section 6.1 — toolbar layout
  */
@@ -15,26 +12,14 @@ import {
     makeStyles,
     tokens,
     ToggleButton,
-    Dropdown,
-    Option,
 } from "@fluentui/react-components";
 import {
-    GridRegular,
     TextBulletListSquareRegular,
+    DataScatterRegular,
+    DataTreemapRegular,
+    TimelineRegular,
 } from "@fluentui/react-icons";
-import type { ViewMode, GraphClusterBy } from "../types";
-
-// =============================================
-// Cluster-by options
-// =============================================
-
-const CLUSTER_BY_OPTIONS: { value: GraphClusterBy; label: string }[] = [
-    { value: "MatterType", label: "Matter Type" },
-    { value: "PracticeArea", label: "Practice Area" },
-    { value: "DocumentType", label: "Document Type" },
-    { value: "Organization", label: "Organization" },
-    { value: "PersonContact", label: "Person/Contact" },
-];
+import type { ViewMode } from "../types";
 
 // =============================================
 // Props
@@ -45,11 +30,45 @@ export interface ViewToggleToolbarProps {
     viewMode: ViewMode;
     /** Callback when view mode changes. */
     onViewModeChange: (mode: ViewMode) => void;
-    /** Current cluster-by category. */
-    clusterBy: GraphClusterBy;
-    /** Callback when cluster-by changes. */
-    onClusterByChange: (clusterBy: GraphClusterBy) => void;
 }
+
+// =============================================
+// View button configuration
+// =============================================
+
+interface ViewButtonConfig {
+    mode: ViewMode;
+    label: string;
+    icon: React.ReactElement;
+    ariaLabel: string;
+}
+
+const VIEW_BUTTONS: ViewButtonConfig[] = [
+    {
+        mode: "grid",
+        label: "Grid",
+        icon: <TextBulletListSquareRegular />,
+        ariaLabel: "Switch to grid view",
+    },
+    {
+        mode: "map",
+        label: "Network",
+        icon: <DataScatterRegular />,
+        ariaLabel: "Switch to network graph view",
+    },
+    {
+        mode: "treemap",
+        label: "Treemap",
+        icon: <DataTreemapRegular />,
+        ariaLabel: "Switch to treemap view",
+    },
+    {
+        mode: "timeline",
+        label: "Timeline",
+        icon: <TimelineRegular />,
+        ariaLabel: "Switch to timeline view",
+    },
+];
 
 // =============================================
 // Styles
@@ -70,9 +89,6 @@ const useStyles = makeStyles({
         alignItems: "center",
         gap: tokens.spacingHorizontalXXS,
     },
-    clusterDropdown: {
-        minWidth: "160px",
-    },
 });
 
 // =============================================
@@ -82,76 +98,35 @@ const useStyles = makeStyles({
 export const ViewToggleToolbar: React.FC<ViewToggleToolbarProps> = ({
     viewMode,
     onViewModeChange,
-    clusterBy,
-    onClusterByChange,
 }) => {
     const styles = useStyles();
 
-    const handleGridClick = useCallback(() => {
-        onViewModeChange("grid");
-    }, [onViewModeChange]);
-
-    const handleGraphClick = useCallback(() => {
-        onViewModeChange("graph");
-    }, [onViewModeChange]);
-
-    const handleClusterByChange = useCallback(
-        (_event: unknown, data: { optionValue?: string }) => {
-            if (data.optionValue) {
-                onClusterByChange(data.optionValue as GraphClusterBy);
-            }
+    const handleClick = useCallback(
+        (mode: ViewMode) => () => {
+            onViewModeChange(mode);
         },
-        [onClusterByChange]
+        [onViewModeChange],
     );
 
     return (
         <div className={styles.toolbar}>
             <div className={styles.spacer} />
 
-            {/* View toggle */}
             <div className={styles.toggleGroup}>
-                <ToggleButton
-                    checked={viewMode === "grid"}
-                    onClick={handleGridClick}
-                    icon={<TextBulletListSquareRegular />}
-                    size="small"
-                    appearance={viewMode === "grid" ? "primary" : "subtle"}
-                    aria-label="Switch to grid view"
-                >
-                    Grid
-                </ToggleButton>
-                <ToggleButton
-                    checked={viewMode === "graph"}
-                    onClick={handleGraphClick}
-                    icon={<GridRegular />}
-                    size="small"
-                    appearance={viewMode === "graph" ? "primary" : "subtle"}
-                    aria-label="Switch to graph view"
-                >
-                    Graph
-                </ToggleButton>
+                {VIEW_BUTTONS.map((btn) => (
+                    <ToggleButton
+                        key={btn.mode}
+                        checked={viewMode === btn.mode}
+                        onClick={handleClick(btn.mode)}
+                        icon={btn.icon}
+                        size="small"
+                        appearance={viewMode === btn.mode ? "primary" : "subtle"}
+                        aria-label={btn.ariaLabel}
+                    >
+                        {btn.label}
+                    </ToggleButton>
+                ))}
             </div>
-
-            {/* Cluster-by dropdown — visible only in graph mode */}
-            {viewMode === "graph" && (
-                <Dropdown
-                    className={styles.clusterDropdown}
-                    size="small"
-                    value={
-                        CLUSTER_BY_OPTIONS.find((o) => o.value === clusterBy)
-                            ?.label ?? "Matter Type"
-                    }
-                    selectedOptions={[clusterBy]}
-                    onOptionSelect={handleClusterByChange}
-                    aria-label="Cluster by"
-                >
-                    {CLUSTER_BY_OPTIONS.map((opt) => (
-                        <Option key={opt.value} value={opt.value}>
-                            {opt.label}
-                        </Option>
-                    ))}
-                </Dropdown>
-            )}
         </div>
     );
 };
