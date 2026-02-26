@@ -154,13 +154,28 @@ export function useKanbanColumns(options: IUseKanbanColumnsOptions): IUseKanbanC
     serviceRef.current = new DataverseService(webApi);
   }, [webApi]);
 
-  // Clear overrides when the underlying items change (e.g., refetch) so
-  // we pick up the persisted Dataverse values.
+  // Reconcile overrides when items change (e.g., refetch).
+  // Only clear overrides whose values are now reflected in the fresh Dataverse data.
+  // Keep overrides that haven't been persisted yet (write still in-flight).
   const prevItemsRef = useRef(items);
   useEffect(() => {
     if (prevItemsRef.current !== items) {
       prevItemsRef.current = items;
-      setOverrides({});
+      setOverrides((prev) => {
+        if (Object.keys(prev).length === 0) return prev;
+        const remaining: typeof prev = {};
+        for (const [eventId, ov] of Object.entries(prev)) {
+          const freshItem = items.find((i) => i.sprk_eventid === eventId);
+          if (!freshItem) continue; // Item gone — drop override
+          const columnMatch = ov.column == null || freshItem.sprk_todocolumn === ov.column;
+          const pinnedMatch = ov.pinned == null || freshItem.sprk_todopinned === ov.pinned;
+          if (!columnMatch || !pinnedMatch) {
+            remaining[eventId] = ov; // Keep — Dataverse hasn't caught up yet
+          }
+          // else: Dataverse values match override — safe to drop
+        }
+        return Object.keys(remaining).length > 0 ? remaining : {};
+      });
     }
   }, [items]);
 

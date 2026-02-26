@@ -187,10 +187,17 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
     todoRefetchRef.current = refetch;
   }, []);
 
-  // Tab switch handler
+  // Tab switch handler — refetch data when switching tabs so newly
+  // flagged/created items appear without a full page reload.
   const handleTabSelect = React.useCallback(
     (_event: SelectTabEvent, data: SelectTabData) => {
-      setActiveTab(data.value as TabValue);
+      const tab = data.value as TabValue;
+      setActiveTab(tab);
+      if (tab === "todo") {
+        todoRefetchRef.current?.();
+      } else if (tab === "updates") {
+        feedRefetchRef.current?.();
+      }
     },
     []
   );

@@ -4,17 +4,18 @@
  * Rendered inside the generic KanbanBoard via the renderCard prop.
  *
  * Layout (flexbox row):
- *   [Checkbox] [Event Name (truncated)] ... [Pin toggle]
- *              [Due label] [separator] [Assigned to] ... [Score badge]
+ *   [Score circle 40px]  [Event Name (truncated)]  [Pin toggle]
+ *                         [Due: Feb 4 · Overdue]
+ *                         [Assigned: Jane Smith]
  *
  * Features:
  *   - Left accent border (3px) coloured by the parent column via prop
- *   - Checkbox toggles completion status (parent handles Dataverse write)
+ *   - Score displayed as a prominent 40px circle (brand colour)
  *   - Pin toggle locks item in its Kanban column
- *   - Card body click opens detail pane (checkbox/pin clicks do not bubble)
+ *   - Card body click opens detail pane (pin clicks do not bubble)
  *   - Completed state: opacity 0.6, title strikethrough
- *   - Due badge colour-coded by urgency tier (overdue/3d/7d/10d)
- *   - To Do Score badge shows composite ranking score
+ *   - Due date shows actual date + urgency badge
+ *   - Field labels: "Due:", "Assigned:" for clarity
  *
  * Design constraints:
  *   - ALL colours from Fluent UI v9 semantic tokens (ADR-021)
@@ -27,7 +28,6 @@ import {
   makeStyles,
   tokens,
   Text,
-  Checkbox,
   Button,
 } from "@fluentui/react-components";
 import { PinRegular, PinFilled } from "@fluentui/react-icons";
@@ -100,6 +100,8 @@ const useStyles = makeStyles({
   card: {
     display: "flex",
     flexDirection: "row",
+    alignItems: "flex-start",
+    gap: tokens.spacingHorizontalM,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
@@ -126,11 +128,19 @@ const useStyles = makeStyles({
     opacity: "0.6",
   },
 
-  checkboxWrapper: {
+  scoreCircle: {
     flexShrink: 0,
     display: "flex",
-    alignItems: "flex-start",
-    paddingTop: "2px",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "40px",
+    height: "40px",
+    borderRadius: "50%",
+    backgroundColor: tokens.colorBrandBackground2,
+    color: tokens.colorBrandForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+    lineHeight: "1",
   },
 
   contentColumn: {
@@ -156,7 +166,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
 
-  secondaryRow: {
+  metadataRow: {
     display: "flex",
     flexDirection: "row",
     alignItems: "center",
@@ -164,14 +174,39 @@ const useStyles = makeStyles({
     flexWrap: "wrap",
   },
 
+  fieldLabel: {
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+  },
+
+  fieldValue: {
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase200,
+  },
+
   actionsColumn: {
     display: "flex",
     flexDirection: "column",
     alignItems: "flex-end",
-    gap: tokens.spacingVerticalXXS,
     flexShrink: 0,
   },
 });
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Format a Date to a short display string like "Feb 4" or "Feb 4, 2027". */
+function formatDueDate(date: Date): string {
+  const now = new Date();
+  const sameYear = date.getFullYear() === now.getFullYear();
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -179,11 +214,9 @@ const useStyles = makeStyles({
 
 export interface IKanbanCardProps {
   event: IEvent;
-  /** Called when checkbox is toggled. Parent handles optimistic UI + Dataverse write. */
-  onToggleComplete?: (eventId: string, completed: boolean) => void;
   /** Called when pin button is clicked. */
   onPinToggle?: (eventId: string) => void;
-  /** Called when card body is clicked (not checkbox/pin). Opens detail pane. */
+  /** Called when card body is clicked (not pin). Opens detail pane. */
   onClick?: (eventId: string) => void;
   /** Left border accent colour from parent column. */
   accentColor?: string;
@@ -194,29 +227,21 @@ export interface IKanbanCardProps {
 // ---------------------------------------------------------------------------
 
 export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
-  ({ event, onToggleComplete, onPinToggle, onClick, accentColor }) => {
+  ({ event, onPinToggle, onClick, accentColor }) => {
     const styles = useStyles();
 
     // Derived display values
     const dueDate = parseDueDate(event.sprk_duedate);
     const dueLabel = computeDueLabel(dueDate);
     const { todoScore } = computeTodoScore(event);
+    const roundedScore = Math.round(todoScore);
     const isCompleted = event.sprk_todostatus === 100000001;
     const isPinned = event.sprk_todopinned === true;
+    const dueDateFormatted = dueDate ? formatDueDate(dueDate) : null;
 
     // -----------------------------------------------------------------------
     // Handlers
     // -----------------------------------------------------------------------
-
-    const handleCheckboxChange = React.useCallback(
-      (ev: React.ChangeEvent<HTMLInputElement>, data: { checked: boolean | "mixed" }) => {
-        ev.stopPropagation();
-        if (onToggleComplete) {
-          onToggleComplete(event.sprk_eventid, data.checked === true);
-        }
-      },
-      [onToggleComplete, event.sprk_eventid]
-    );
 
     const handlePinClick = React.useCallback(
       (ev: React.MouseEvent<HTMLButtonElement>) => {
@@ -252,8 +277,9 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
       event.sprk_eventname,
       isCompleted ? "Completed." : "Open.",
       isPinned ? "Pinned." : "",
-      dueLabel.label ? `Due: ${dueLabel.label}.` : "",
-      `Score: ${Math.round(todoScore)}.`,
+      dueDateFormatted ? `Due: ${dueDateFormatted}.` : "",
+      dueLabel.label ? `${dueLabel.label}.` : "",
+      `To Do Score: ${roundedScore}.`,
     ]
       .filter(Boolean)
       .join(" ");
@@ -293,48 +319,60 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
         onClick={handleCardClick}
         onKeyDown={handleCardKeyDown}
       >
-        {/* Checkbox */}
-        <div className={styles.checkboxWrapper}>
-          <Checkbox
-            checked={isCompleted}
-            onChange={handleCheckboxChange}
-            aria-label={`Mark "${event.sprk_eventname}" as ${isCompleted ? "open" : "complete"}`}
-          />
+        {/* Score circle — prominent left visual anchor */}
+        <div
+          className={styles.scoreCircle}
+          title={`To Do Score: ${roundedScore}`}
+          aria-hidden="true"
+        >
+          {roundedScore}
         </div>
 
-        {/* Content: title row + secondary row */}
+        {/* Content: title + metadata rows */}
         <div className={styles.contentColumn}>
           {/* Row 1: Title */}
           <Text as="span" size={300} weight="semibold" className={titleClassName}>
             {event.sprk_eventname}
           </Text>
 
-          {/* Row 2: Due badge + separator + assigned-to name */}
-          <div className={styles.secondaryRow}>
-            {dueLabel.urgency !== "none" && (
-              <InlineBadge
-                style={DUE_BADGE_STYLE[dueLabel.urgency]}
-                ariaLabel={`Due: ${dueLabel.label}`}
-              >
-                {dueLabel.label}
-              </InlineBadge>
-            )}
-            {dueLabel.urgency !== "none" && event.assignedToName && (
-              <Text as="span" size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-                {"\u00B7"}
-              </Text>
-            )}
-            {event.assignedToName && (
-              <Text as="span" size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-                {event.assignedToName}
-              </Text>
-            )}
-          </div>
+          {/* Row 2: Due date + urgency badge */}
+          {(dueDateFormatted || dueLabel.urgency !== "none") && (
+            <div className={styles.metadataRow}>
+              {dueDateFormatted && (
+                <>
+                  <span className={styles.fieldLabel}>Due:</span>
+                  <span className={styles.fieldValue}>{dueDateFormatted}</span>
+                </>
+              )}
+              {dueLabel.urgency !== "none" && (
+                <>
+                  {dueDateFormatted && (
+                    <Text as="span" size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                      {"\u00B7"}
+                    </Text>
+                  )}
+                  <InlineBadge
+                    style={DUE_BADGE_STYLE[dueLabel.urgency]}
+                    ariaLabel={dueLabel.label}
+                  >
+                    {dueLabel.label}
+                  </InlineBadge>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Row 3: Assigned to */}
+          {event.assignedToName && (
+            <div className={styles.metadataRow}>
+              <span className={styles.fieldLabel}>Assigned:</span>
+              <span className={styles.fieldValue}>{event.assignedToName}</span>
+            </div>
+          )}
         </div>
 
-        {/* Actions column: pin button + score badge */}
+        {/* Actions column: pin button */}
         <div className={styles.actionsColumn}>
-          {/* Pin toggle */}
           <Button
             appearance="subtle"
             size="small"
@@ -343,17 +381,6 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
             aria-label={isPinned ? `Unpin "${event.sprk_eventname}"` : `Pin "${event.sprk_eventname}"`}
             title={isPinned ? "Unpin from column" : "Pin to column"}
           />
-
-          {/* To Do Score badge */}
-          <InlineBadge
-            style={{
-              backgroundColor: tokens.colorBrandBackground2,
-              color: tokens.colorBrandForeground1,
-            }}
-            ariaLabel={`To Do Score: ${Math.round(todoScore)}`}
-          >
-            {Math.round(todoScore)}
-          </InlineBadge>
         </div>
       </div>
     );

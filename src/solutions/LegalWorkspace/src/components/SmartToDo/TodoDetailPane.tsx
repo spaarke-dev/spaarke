@@ -25,7 +25,6 @@ import {
   Divider,
 } from "@fluentui/react-components";
 import {
-  DismissRegular,
   EditRegular,
   MailRegular,
   ChatRegular,
@@ -182,20 +181,6 @@ const useStyles = makeStyles({
     overflow: "hidden",
     backgroundColor: tokens.colorNeutralBackground1,
   },
-  header: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalM,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
-    borderBottomColor: tokens.colorNeutralStroke2,
-    flexShrink: 0,
-  },
   content: {
     flex: "1 1 0",
     overflowY: "auto",
@@ -242,7 +227,7 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export const TodoDetailPane: React.FC<ITodoDetailPaneProps> = React.memo(
-  ({ event, onSaveDescription, onClose }) => {
+  ({ event, onSaveDescription }) => {
     const styles = useStyles();
 
     // -- Description editing state --
@@ -325,21 +310,6 @@ export const TodoDetailPane: React.FC<ITodoDetailPaneProps> = React.memo(
 
     return (
       <div className={styles.pane}>
-        {/* Header: event name + close button */}
-        <div className={styles.header}>
-          <Text weight="semibold" size={400} truncate wrap={false}>
-            {event.sprk_eventname}
-          </Text>
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={<DismissRegular />}
-            onClick={onClose}
-            aria-label="Close detail pane"
-            title="Close"
-          />
-        </div>
-
         {/* Scrollable content area */}
         <div className={styles.content}>
           {/* Description section */}

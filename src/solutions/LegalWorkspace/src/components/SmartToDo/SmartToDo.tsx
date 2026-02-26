@@ -9,7 +9,7 @@
  *   - KanbanHeader: title, AddTodoBar, recalculate button, settings gear
  *   - KanbanBoard: drag-and-drop columns with KanbanCard items
  *   - DismissedSection: collapsible section for dismissed items
- *   - TodoDetailPane: side panel for full event details + description editing
+ *   - TodoDetailSidePane: Xrm.App.sidePanes web resource for full event details
  *
  * Data:
  *   - Fetches active to-do items via useTodoItems hook
@@ -46,18 +46,10 @@ import {
   MessageBar,
   MessageBarBody,
 } from "@fluentui/react-components";
-import {
-  Drawer,
-  DrawerHeader,
-  DrawerHeaderTitle,
-  DrawerBody,
-} from "@fluentui/react-drawer";
-import { DismissRegular } from "@fluentui/react-icons";
 import { KanbanBoard } from "../shared/KanbanBoard";
 import { KanbanCard } from "./KanbanCard";
 import { KanbanHeader } from "./KanbanHeader";
 import { ThresholdSettingsPopover } from "./ThresholdSettings";
-import { TodoDetailPane } from "./TodoDetailPane";
 import { DismissedSection } from "./DismissedSection";
 import { useTodoItems } from "../../hooks/useTodoItems";
 import { useKanbanColumns } from "../../hooks/useKanbanColumns";
@@ -328,10 +320,6 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   /** Settings popover state */
   const [settingsOpen, setSettingsOpen] = React.useState(false);
 
-  /** Detail pane state */
-  const [selectedEvent, setSelectedEvent] = React.useState<IEvent | null>(null);
-  const [detailDrawerOpen, setDetailDrawerOpen] = React.useState(false);
-
   // -------------------------------------------------------------------------
   // Derived active items: hook items minus dismissed ones, with status overlays
   // -------------------------------------------------------------------------
@@ -426,49 +414,6 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       }
     },
     [userId, refetch]
-  );
-
-  // -------------------------------------------------------------------------
-  // Checkbox toggle handler
-  // -------------------------------------------------------------------------
-
-  const handleToggleComplete = React.useCallback(
-    async (eventId: string, completed: boolean) => {
-      const newStatus = completed ? 1 : 0;
-      const prevStatus = statusOverrides.get(eventId);
-
-      setStatusOverrides((prev) => new Map(prev).set(eventId, newStatus));
-
-      try {
-        const result = await serviceRef.current.updateTodoStatus(
-          eventId,
-          completed ? "Completed" : "Open"
-        );
-
-        if (!result.success) {
-          setStatusOverrides((prev) => {
-            const next = new Map(prev);
-            if (prevStatus === undefined) {
-              next.delete(eventId);
-            } else {
-              next.set(eventId, prevStatus);
-            }
-            return next;
-          });
-        }
-      } catch {
-        setStatusOverrides((prev) => {
-          const next = new Map(prev);
-          if (prevStatus === undefined) {
-            next.delete(eventId);
-          } else {
-            next.set(eventId, prevStatus);
-          }
-          return next;
-        });
-      }
-    },
-    [statusOverrides]
   );
 
   // -------------------------------------------------------------------------
@@ -575,36 +520,65 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   );
 
   // -------------------------------------------------------------------------
-  // Card click handler: open detail pane
+  // Card click handler: open Xrm.App.sidePanes detail pane
   // -------------------------------------------------------------------------
 
-  const handleCardClick = React.useCallback(
-    (eventId: string) => {
-      const event = displayItems.find((i) => i.sprk_eventid === eventId);
-      if (!event) return;
-      setSelectedEvent(event);
-      setDetailDrawerOpen(true);
-    },
-    [displayItems]
-  );
+  const handleCardClick = React.useCallback(async (eventId: string) => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm = (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
+      const sidePanes = xrm?.App?.sidePanes;
+      if (!sidePanes) {
+        console.warn("[SmartToDo] Xrm.App.sidePanes not available");
+        return;
+      }
 
-  // -------------------------------------------------------------------------
-  // Detail pane: save description
-  // -------------------------------------------------------------------------
+      const PANE_ID = "todoDetailPane";
+      const pageInput = {
+        pageType: "webresource",
+        webresourceName: "sprk_tododetailsidepane",
+        data: `eventId=${eventId}`,
+      };
 
-  const handleSaveDescription = React.useCallback(
-    async (eventId: string, description: string) => {
-      await serviceRef.current.updateEventDescription(eventId, description);
-      // Refetch to pick up saved description
-      refetch();
-    },
-    [refetch]
-  );
-
-  const handleDetailClose = React.useCallback(() => {
-    setDetailDrawerOpen(false);
-    setSelectedEvent(null);
+      const existingPane = sidePanes.getPane(PANE_ID);
+      if (existingPane) {
+        await existingPane.navigate(pageInput);
+        existingPane.select();
+      } else {
+        const pane = await sidePanes.createPane({
+          title: "To Do Details",
+          paneId: PANE_ID,
+          canClose: true,
+          width: 400,
+          isSelected: true,
+        });
+        await pane.navigate(pageInput);
+      }
+    } catch (err) {
+      console.warn("[SmartToDo] Side pane unavailable", err);
+    }
   }, []);
+
+  // -------------------------------------------------------------------------
+  // BroadcastChannel: listen for saves from TodoDetailSidePane → refetch
+  // -------------------------------------------------------------------------
+
+  React.useEffect(() => {
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel("spaarke-todo-detail-channel");
+      channel.onmessage = (ev: MessageEvent) => {
+        if (ev.data?.type === "TODO_SAVED") {
+          refetch();
+        }
+      };
+    } catch {
+      // BroadcastChannel not supported — ignore
+    }
+    return () => {
+      channel?.close();
+    };
+  }, [refetch]);
 
   // -------------------------------------------------------------------------
   // Settings: save thresholds
@@ -639,14 +613,13 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       return (
         <KanbanCard
           event={item}
-          onToggleComplete={handleToggleComplete}
           onPinToggle={handlePinToggle}
           onClick={handleCardClick}
           accentColor={col?.accentColor}
         />
       );
     },
-    [columns, handleToggleComplete, handlePinToggle, handleCardClick]
+    [columns, handlePinToggle, handleCardClick]
   );
 
   const getItemId = React.useCallback(
@@ -770,38 +743,6 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         </>
       )}
 
-      {/* ── Detail pane (Drawer overlay) ────────────────────────────────── */}
-      <Drawer
-        type="overlay"
-        open={detailDrawerOpen}
-        onOpenChange={(_, data) => {
-          if (!data.open) handleDetailClose();
-        }}
-        position="end"
-        size="medium"
-      >
-        <DrawerHeader>
-          <DrawerHeaderTitle
-            action={
-              <Button
-                appearance="subtle"
-                aria-label="Close"
-                icon={<DismissRegular />}
-                onClick={handleDetailClose}
-              />
-            }
-          >
-            {selectedEvent?.sprk_eventname ?? "Event Details"}
-          </DrawerHeaderTitle>
-        </DrawerHeader>
-        <DrawerBody>
-          <TodoDetailPane
-            event={selectedEvent}
-            onSaveDescription={handleSaveDescription}
-            onClose={handleDetailClose}
-          />
-        </DrawerBody>
-      </Drawer>
     </div>
   );
 };
