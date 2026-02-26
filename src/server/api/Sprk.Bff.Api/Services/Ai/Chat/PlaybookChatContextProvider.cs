@@ -42,6 +42,7 @@ public class PlaybookChatContextProvider : IChatContextProvider
         string tenantId,
         Guid playbookId,
         ChatHostContext? hostContext = null,
+        IReadOnlyList<string>? additionalDocumentIds = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -83,7 +84,7 @@ public class PlaybookChatContextProvider : IChatContextProvider
 
         // 3. Resolve playbook scopes (Skills, Knowledge, Tools)
         var knowledgeScope = await ResolveKnowledgeScopeAsync(
-            playbookId, documentId, hostContext, cancellationToken);
+            playbookId, documentId, hostContext, additionalDocumentIds, cancellationToken);
 
         // 4. Enrich system prompt with inline knowledge and skill instructions
         systemPrompt = EnrichSystemPrompt(systemPrompt, knowledgeScope);
@@ -141,6 +142,7 @@ public class PlaybookChatContextProvider : IChatContextProvider
         Guid playbookId,
         string documentId,
         ChatHostContext? hostContext,
+        IReadOnlyList<string>? additionalDocumentIds,
         CancellationToken cancellationToken)
     {
         try
@@ -182,13 +184,28 @@ public class PlaybookChatContextProvider : IChatContextProvider
                 scopes.Knowledge.Count(k => k.Type == KnowledgeType.Inline),
                 scopes.Skills.Count(s => !string.IsNullOrWhiteSpace(s.PromptFragment)));
 
+            // Normalize additional document IDs: remove nulls/blanks and enforce max cap
+            var normalizedAdditionalDocs = additionalDocumentIds?
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct()
+                .Take(ChatKnowledgeScope.MaxAdditionalDocuments)
+                .ToList();
+
+            if (normalizedAdditionalDocs is { Count: > 0 })
+            {
+                _logger.LogInformation(
+                    "Including {AdditionalDocCount} additional document(s) in knowledge scope for playbook {PlaybookId}",
+                    normalizedAdditionalDocs.Count, playbookId);
+            }
+
             return new ChatKnowledgeScope(
                 RagKnowledgeSourceIds: ragSourceIds,
                 InlineContent: string.IsNullOrWhiteSpace(inlineContent) ? null : inlineContent,
                 SkillInstructions: string.IsNullOrWhiteSpace(skillInstructions) ? null : skillInstructions,
                 ActiveDocumentId: documentId,
                 ParentEntityType: hostContext?.EntityType,
-                ParentEntityId: hostContext?.EntityId);
+                ParentEntityId: hostContext?.EntityId,
+                AdditionalDocumentIds: normalizedAdditionalDocs is { Count: > 0 } ? normalizedAdditionalDocs : null);
         }
         catch (Exception ex)
         {

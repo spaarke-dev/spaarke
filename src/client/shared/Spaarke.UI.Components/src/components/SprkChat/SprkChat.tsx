@@ -30,9 +30,11 @@ import { SprkChatInput } from "./SprkChatInput";
 import { SprkChatContextSelector } from "./SprkChatContextSelector";
 import { SprkChatPredefinedPrompts } from "./SprkChatPredefinedPrompts";
 import { SprkChatHighlightRefine } from "./SprkChatHighlightRefine";
-import { useSseStream } from "./hooks/useSseStream";
+import { SprkChatSuggestions } from "./SprkChatSuggestions";
+import { useSseStream, parseSseEvent } from "./hooks/useSseStream";
 import { useChatSession } from "./hooks/useChatSession";
 import { useChatPlaybooks } from "./hooks/useChatPlaybooks";
+import { useSelectionListener } from "./hooks/useSelectionListener";
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -117,6 +119,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     contentRef: externalContentRef,
     maxCharCount,
     hostContext,
+    bridge,
 }) => {
     const styles = useStyles();
     const messageListRef = React.useRef<HTMLDivElement>(null);
@@ -159,11 +162,30 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         isDone: streamDone,
         isStreaming,
         error: streamError,
+        suggestions,
+        citations: streamCitations,
         startStream,
+        clearSuggestions,
     } = sseStream;
 
     // Track current streaming state
     const isStreamingRef = React.useRef<boolean>(false);
+
+    // Editor-sourced refine state (separate from chat SSE stream)
+    const [isEditorRefining, setIsEditorRefining] = React.useState(false);
+    const [editorRefineError, setEditorRefineError] = React.useState<Error | null>(null);
+    const editorRefineAbortRef = React.useRef<AbortController | null>(null);
+
+    // Additional documents state for multi-document context
+    const [additionalDocumentIds, setAdditionalDocumentIds] = React.useState<string[]>([]);
+    const additionalDocsDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Cross-pane selection listener (receives selection_changed from Analysis Workspace editor)
+    const { selection: crossPaneSelection, clearSelection: clearCrossPaneSelection } =
+        useSelectionListener({
+            bridge: bridge ?? null,
+            enabled: !!bridge,
+        });
 
     // Initialize session on mount
     React.useEffect(() => {
@@ -224,6 +246,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                 return;
             }
 
+            // Clear follow-up suggestions from previous response
+            clearSuggestions();
+
             // Add user message
             const userMessage: IChatMessage = {
                 role: "User",
@@ -249,7 +274,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                 accessToken
             );
         },
-        [session, isStreaming, addMessage, startStream, apiBaseUrl, documentId, accessToken]
+        [session, isStreaming, addMessage, startStream, clearSuggestions, apiBaseUrl, documentId, accessToken]
     );
 
     // Handle predefined prompt selection
@@ -260,12 +285,21 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         [handleSend]
     );
 
-    // Handle context changes
+    // Handle follow-up suggestion selection — sends suggestion text as a new user message
+    const handleSuggestionSelect = React.useCallback(
+        (suggestion: string) => {
+            handleSend(suggestion);
+        },
+        [handleSend]
+    );
+
+    // Handle context changes — clear cross-pane selection when document/record changes
     const handleDocumentChange = React.useCallback(
         (newDocId: string) => {
+            clearCrossPaneSelection();
             switchContext(newDocId || undefined, playbookId);
         },
-        [switchContext, playbookId]
+        [switchContext, playbookId, clearCrossPaneSelection]
     );
 
     const handlePlaybookChange = React.useCallback(
@@ -275,10 +309,251 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         [switchContext, documentId]
     );
 
-    // Handle highlight-and-refine
-    const handleRefine = React.useCallback(
+    // Handle additional documents change with debounce (300ms)
+    const handleAdditionalDocumentsChange = React.useCallback(
+        (newIds: string[]) => {
+            setAdditionalDocumentIds(newIds);
+
+            // Debounce the API call to avoid rapid-fire PATCH requests
+            if (additionalDocsDebounceRef.current) {
+                clearTimeout(additionalDocsDebounceRef.current);
+            }
+            additionalDocsDebounceRef.current = setTimeout(() => {
+                switchContext(documentId, playbookId, hostContext, newIds);
+            }, 300);
+        },
+        [switchContext, documentId, playbookId, hostContext]
+    );
+
+    // Clean up debounce timer and editor refine abort controller on unmount
+    React.useEffect(() => {
+        return () => {
+            if (additionalDocsDebounceRef.current) {
+                clearTimeout(additionalDocsDebounceRef.current);
+            }
+            if (editorRefineAbortRef.current) {
+                editorRefineAbortRef.current.abort();
+            }
+        };
+    }, []);
+
+    // Extract tenant ID from JWT for X-Tenant-Id header (same logic as useSseStream)
+    const extractTenantIdFromToken = React.useCallback((token: string): string | null => {
+        try {
+            const parts = token.split(".");
+            if (parts.length !== 3) return null;
+            const payload = JSON.parse(atob(parts[1]));
+            return payload.tid || null;
+        } catch {
+            return null;
+        }
+    }, []);
+
+    /**
+     * Handle editor-sourced refine requests by streaming SSE response through the bridge.
+     *
+     * When the selection comes from the Analysis Workspace editor (source="editor"),
+     * the revised text is routed through SprkChatBridge as document_stream_* events
+     * so the Analysis Workspace can handle it via its diff review or streaming pipeline.
+     *
+     * The operationType is set to "diff" for selection-revision operations, which causes
+     * the Analysis Workspace's useDiffReview hook to buffer tokens and show the
+     * DiffReviewPanel for user review (Accept/Reject/Edit).
+     */
+    const handleEditorRefine = React.useCallback(
         (selectedText: string, instruction: string) => {
-            if (!session) {
+            if (!session || !bridge || isEditorRefining || isStreaming) {
+                return;
+            }
+
+            // Cancel any existing editor refine
+            if (editorRefineAbortRef.current) {
+                editorRefineAbortRef.current.abort();
+            }
+
+            // Add a brief user message in the chat for awareness
+            const refineMessage: IChatMessage = {
+                role: "User",
+                content: `Refining editor selection: "${selectedText.substring(0, 100)}${selectedText.length > 100 ? "\u2026" : ""}"\n\nInstruction: ${instruction}`,
+                timestamp: new Date().toISOString(),
+            };
+            addMessage(refineMessage);
+
+            // Add a placeholder assistant message that will show status
+            const statusMessage: IChatMessage = {
+                role: "Assistant",
+                content: "Generating revision\u2026",
+                timestamp: new Date().toISOString(),
+            };
+            addMessage(statusMessage);
+
+            setIsEditorRefining(true);
+            setEditorRefineError(null);
+
+            const controller = new AbortController();
+            editorRefineAbortRef.current = controller;
+
+            const operationId = `refine-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+            let tokenIndex = 0;
+
+            const runRefineStream = async () => {
+                try {
+                    // Emit document_stream_start through the bridge with operationType "diff"
+                    // so the Analysis Workspace's useDiffReview hook captures and buffers tokens.
+                    bridge.emit("document_stream_start", {
+                        operationId,
+                        targetPosition: "selection",
+                        operationType: "diff",
+                    });
+
+                    const tenantId = extractTenantIdFromToken(accessToken);
+                    const baseUrl = apiBaseUrl.replace(/\/+$/, "").replace(/\/api\/?$/, "");
+                    const refineUrl = `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/refine`;
+
+                    const response = await fetch(refineUrl, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            Authorization: `Bearer ${accessToken}`,
+                            ...(tenantId ? { "X-Tenant-Id": tenantId } : {}),
+                        },
+                        body: JSON.stringify({
+                            selectedText,
+                            instruction,
+                            // TODO: PH-112-A — surroundingContext not yet available from editor
+                            surroundingContext: null,
+                        }),
+                        signal: controller.signal,
+                    });
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(
+                            `Refine request failed (${response.status}): ${errorText}`
+                        );
+                    }
+
+                    if (!response.body) {
+                        throw new Error("Response body is empty");
+                    }
+
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = "";
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        buffer += decoder.decode(value, { stream: true });
+
+                        // Parse SSE events separated by double newlines
+                        const parts = buffer.split("\n\n");
+                        buffer = parts.pop() || "";
+
+                        for (const part of parts) {
+                            const lines = part.split("\n");
+                            for (const line of lines) {
+                                const event = parseSseEvent(line);
+                                if (!event) continue;
+
+                                if (event.type === "token" && event.content) {
+                                    // Route token through bridge for Analysis Workspace consumption
+                                    bridge.emit("document_stream_token", {
+                                        operationId,
+                                        token: event.content,
+                                        index: tokenIndex++,
+                                    });
+                                } else if (event.type === "done") {
+                                    // Stream completed successfully
+                                    bridge.emit("document_stream_end", {
+                                        operationId,
+                                        cancelled: false,
+                                        totalTokens: tokenIndex,
+                                    });
+                                } else if (event.type === "error") {
+                                    throw new Error(event.content || "Refinement stream error");
+                                }
+                            }
+                        }
+                    }
+
+                    // Process any remaining buffer
+                    if (buffer.trim()) {
+                        const lines = buffer.split("\n");
+                        for (const line of lines) {
+                            const event = parseSseEvent(line);
+                            if (!event) continue;
+                            if (event.type === "token" && event.content) {
+                                bridge.emit("document_stream_token", {
+                                    operationId,
+                                    token: event.content,
+                                    index: tokenIndex++,
+                                });
+                            } else if (event.type === "done") {
+                                bridge.emit("document_stream_end", {
+                                    operationId,
+                                    cancelled: false,
+                                    totalTokens: tokenIndex,
+                                });
+                            } else if (event.type === "error") {
+                                throw new Error(event.content || "Refinement stream error");
+                            }
+                        }
+                    }
+
+                    // Update the chat status message
+                    if (tokenIndex === 0) {
+                        updateLastMessage("No changes suggested.");
+                    } else {
+                        updateLastMessage("Revision sent to editor for review.");
+                    }
+
+                    // Clear cross-pane selection after successful submission
+                    clearCrossPaneSelection();
+                } catch (err: unknown) {
+                    if (err instanceof DOMException && err.name === "AbortError") {
+                        // Cancelled by user, not an error
+                        bridge.emit("document_stream_end", {
+                            operationId,
+                            cancelled: true,
+                            totalTokens: tokenIndex,
+                        });
+                        updateLastMessage("Refinement cancelled.");
+                        return;
+                    }
+
+                    const errorObj = err instanceof Error ? err : new Error("Unknown refine error");
+                    setEditorRefineError(errorObj);
+
+                    // Emit stream end with cancel to clean up Analysis Workspace state
+                    bridge.emit("document_stream_end", {
+                        operationId,
+                        cancelled: true,
+                        totalTokens: tokenIndex,
+                    });
+
+                    // Show error in the chat status message
+                    updateLastMessage(`Refinement error: ${errorObj.message}`);
+                } finally {
+                    setIsEditorRefining(false);
+                    editorRefineAbortRef.current = null;
+                }
+            };
+
+            runRefineStream();
+        },
+        [session, bridge, isEditorRefining, isStreaming, addMessage, updateLastMessage,
+         apiBaseUrl, accessToken, clearCrossPaneSelection, extractTenantIdFromToken]
+    );
+
+    /**
+     * Handle chat-sourced refine requests (local text selection in chat messages).
+     * Uses the standard useSseStream hook to show the refined text as a chat response.
+     */
+    const handleChatRefine = React.useCallback(
+        (selectedText: string, instruction: string) => {
+            if (!session || isStreaming) {
                 return;
             }
 
@@ -307,7 +582,29 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                 accessToken
             );
         },
-        [session, addMessage, startStream, apiBaseUrl, accessToken]
+        [session, isStreaming, addMessage, startStream, apiBaseUrl, accessToken]
+    );
+
+    /**
+     * Handle highlight-and-refine: routes to either editor-sourced or chat-sourced handler.
+     *
+     * Task 112: Selection-based revision flow
+     * - Editor source (cross-pane): SSE tokens are routed through SprkChatBridge
+     *   as document_stream_* events for diff review in the Analysis Workspace.
+     * - Chat source (local DOM): SSE tokens are displayed as a chat response.
+     */
+    const handleRefine = React.useCallback(
+        (selectedText: string, instruction: string) => {
+            // Determine source from crossPaneSelection state
+            const isEditorSource = !!crossPaneSelection && crossPaneSelection.text.length > 0;
+
+            if (isEditorSource && bridge) {
+                handleEditorRefine(selectedText, instruction);
+            } else {
+                handleChatRefine(selectedText, instruction);
+            }
+        },
+        [crossPaneSelection, bridge, handleEditorRefine, handleChatRefine]
     );
 
     // Handle playbook chip selection — switches context to the selected playbook
@@ -318,7 +615,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         [switchContext, documentId, hostContext]
     );
 
-    const displayError = sessionError || streamError;
+    const displayError = sessionError || streamError || editorRefineError;
     const showPredefinedPrompts = messages.length === 0 && predefinedPrompts.length > 0 && !isSessionLoading;
     const showPlaybookChips = messages.length === 0 && allPlaybooks.length > 1 && !isSessionLoading;
 
@@ -333,7 +630,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                     playbooks={allPlaybooks}
                     onDocumentChange={handleDocumentChange}
                     onPlaybookChange={handlePlaybookChange}
-                    disabled={isStreaming}
+                    disabled={isStreaming || isEditorRefining}
+                    additionalDocumentIds={additionalDocumentIds}
+                    onAdditionalDocumentsChange={handleAdditionalDocumentsChange}
                 />
             )}
 
@@ -392,23 +691,44 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                     </div>
                 )}
 
-                {messages.map((msg, index) => (
-                    <SprkChatMessage
-                        key={`msg-${index}`}
-                        message={msg}
-                        isStreaming={
-                            isStreaming &&
-                            index === messages.length - 1 &&
-                            msg.role === "Assistant"
-                        }
-                    />
-                ))}
+                {messages.map((msg, index) => {
+                    // Citations apply to the last assistant message (the one that was just streamed).
+                    // They are cleared on each new startStream call, so they always correspond
+                    // to the most recent response.
+                    const isLastAssistant =
+                        index === messages.length - 1 && msg.role === "Assistant";
+                    const messageCitations =
+                        isLastAssistant && streamCitations.length > 0
+                            ? streamCitations
+                            : undefined;
 
-                {/* Highlight-and-refine floating toolbar */}
+                    return (
+                        <SprkChatMessage
+                            key={`msg-${index}`}
+                            message={msg}
+                            isStreaming={
+                                isStreaming && isLastAssistant
+                            }
+                            citations={messageCitations}
+                        />
+                    );
+                })}
+
+                {/* Follow-up suggestions shown after the latest assistant response */}
+                {suggestions.length > 0 && (
+                    <SprkChatSuggestions
+                        suggestions={suggestions}
+                        onSelect={handleSuggestionSelect}
+                        visible={!isStreaming && suggestions.length > 0}
+                    />
+                )}
+
+                {/* Highlight-and-refine floating toolbar (local DOM selection + cross-pane bridge selection) */}
                 <SprkChatHighlightRefine
                     contentRef={highlightContainerRef}
                     onRefine={handleRefine}
-                    isRefining={isStreaming}
+                    isRefining={isStreaming || isEditorRefining}
+                    crossPaneSelection={crossPaneSelection}
                 />
             </div>
 

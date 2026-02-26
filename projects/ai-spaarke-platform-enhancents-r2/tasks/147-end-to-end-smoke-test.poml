@@ -2,7 +2,7 @@
   <metadata>
     <title>End-to-End Smoke Test on Deployed Environment</title>
     <phase>Phase 4: Deployment &amp; Validation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>6 hours</estimated-effort>
     <tags>testing, e2e, smoke</tags>
   </metadata>

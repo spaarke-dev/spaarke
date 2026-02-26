@@ -33,6 +33,7 @@ public sealed class SprkChatAgent : ISprkChatAgent
     private readonly IChatClient _chatClient;
     private readonly ChatContext _context;
     private readonly IReadOnlyList<AIFunction> _tools;
+    private readonly CitationContext? _citationContext;
     private readonly ILogger<SprkChatAgent> _logger;
 
     /// <summary>
@@ -40,6 +41,13 @@ public sealed class SprkChatAgent : ISprkChatAgent
     /// context switch is needed (different document or playbook).
     /// </summary>
     public ChatContext Context => _context;
+
+    /// <summary>
+    /// Exposes the citation context so callers (e.g., SSE endpoints) can retrieve
+    /// citations accumulated during the last message for rendering footnotes.
+    /// May be null when no search tools are registered.
+    /// </summary>
+    public CitationContext? Citations => _citationContext;
 
     /// <summary>
     /// Creates a new SprkChatAgent.  Called exclusively by <see cref="SprkChatAgentFactory"/>.
@@ -50,16 +58,23 @@ public sealed class SprkChatAgent : ISprkChatAgent
     /// analysis metadata, playbook ID).
     /// </param>
     /// <param name="tools">AI functions registered as tools for this agent session.</param>
+    /// <param name="citationContext">
+    /// Shared citation context populated by search tools during tool execution.
+    /// Reset before each message to keep citation numbering per-response.
+    /// May be null when no search tools are available.
+    /// </param>
     /// <param name="logger">Logger.</param>
     public SprkChatAgent(
         IChatClient chatClient,
         ChatContext context,
         IReadOnlyList<AIFunction> tools,
+        CitationContext? citationContext,
         ILogger<SprkChatAgent> logger)
     {
         _chatClient = chatClient;
         _context = context;
         _tools = tools;
+        _citationContext = citationContext;
         _logger = logger;
     }
 
@@ -90,6 +105,10 @@ public sealed class SprkChatAgent : ISprkChatAgent
         _logger.LogInformation(
             "SprkChatAgent.SendMessageAsync — playbook {PlaybookId}, historyCount={HistoryCount}, msgLen={MsgLen}",
             _context.PlaybookId, history.Count, message.Length);
+
+        // Reset citation context for this message so citation numbering starts at [1].
+        // Citations are scoped per assistant response, not accumulated across the conversation.
+        _citationContext?.Reset();
 
         // Build the full message list: [system] + [history] + [user]
         var messages = BuildMessages(message, history);
@@ -166,6 +185,33 @@ public sealed class SprkChatAgent : ISprkChatAgent
                 sb.AppendLine();
                 sb.AppendLine(_context.DocumentSummary);
             }
+        }
+
+        // Append additional document IDs so the agent knows which extra documents
+        // are available for cross-referencing and can call tools to retrieve their content.
+        var additionalDocs = _context.KnowledgeScope?.AdditionalDocumentIds;
+        if (additionalDocs is { Count: > 0 })
+        {
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.AppendLine("## Additional Documents");
+            sb.AppendLine($"The user has pinned {additionalDocs.Count} additional document(s) for cross-referencing.");
+            sb.AppendLine("You can use the SearchDocuments or GetAnalysisResult tools to retrieve their content.");
+            sb.AppendLine();
+            for (var i = 0; i < additionalDocs.Count; i++)
+            {
+                sb.AppendLine($"- **Additional Document {i + 1} ID**: {additionalDocs[i]}");
+            }
+        }
+
+        // Citation instructions: instruct the AI to use citation markers when referencing
+        // search results. Only added when citation context is available (search tools are registered).
+        if (_citationContext is not null)
+        {
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.AppendLine("## Citation Guidelines");
+            sb.AppendLine("When citing information from search results, include the citation marker [N] inline where N matches the source number provided in the search results. Place citations at the end of the sentence or clause that references the source.");
         }
 
         return sb.ToString();

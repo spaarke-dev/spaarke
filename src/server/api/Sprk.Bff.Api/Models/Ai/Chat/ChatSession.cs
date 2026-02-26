@@ -39,6 +39,11 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 /// Ordered list of messages for this session (most recent up to the configured max).
 /// This is the hot in-memory/Redis copy; Dataverse holds the authoritative audit trail.
 /// </param>
+/// <param name="AdditionalDocumentIds">
+/// Optional list of additional document IDs (max 5) pinned to the conversation for
+/// cross-referencing, comparison, or comprehensive analysis across multiple documents.
+/// Persisted to Redis cache and Dataverse for session recovery.
+/// </param>
 public record ChatSession(
     string SessionId,
     string TenantId,
@@ -47,4 +52,5 @@ public record ChatSession(
     DateTimeOffset CreatedAt,
     DateTimeOffset LastActivity,
     IReadOnlyList<ChatMessage> Messages,
-    ChatHostContext? HostContext = null);
+    ChatHostContext? HostContext = null,
+    IReadOnlyList<string>? AdditionalDocumentIds = null);

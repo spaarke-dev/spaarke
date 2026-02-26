@@ -8,7 +8,7 @@
     <estimate>4-6 hours</estimate>
     <dependencies>011, 030, 031, 060</dependencies>
     <parallel-group>sprint2-track1</parallel-group>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -165,4 +165,18 @@
   <placeholders>
     <!-- No placeholders — this task wires real implementations from tasks 011, 030, 031 -->
   </placeholders>
+
+  <notes>
+    Completed 2026-02-26. Created 3 new files:
+    - src/client/code-pages/AnalysisWorkspace/src/hooks/useDocumentStreaming.ts
+      Integration hook combining SprkChatBridge + useDocumentStreamConsumer + useDocumentHistory.
+      Handles document_replaced events, cancel-stream, and FR-07 undo snapshots.
+    - src/client/code-pages/AnalysisWorkspace/src/components/StreamingIndicator.tsx
+      Fluent v9 streaming overlay with pulse animation, token count, progress bar, and cancel button.
+    - src/client/code-pages/AnalysisWorkspace/src/components/DocumentStreamBridge.tsx
+      Self-contained bridge wiring component (pluggable into App.tsx).
+      Handles Escape key for cancel, exposes onStreamingStateChange callback.
+    Modified App.tsx to include DocumentStreamBridge above EditorPanel in the left panel.
+    Build passes with zero errors (3 bundle size warnings expected for Code Pages).
+  </notes>
 </task>

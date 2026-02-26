@@ -213,7 +213,7 @@ public class PlaybookChatContextProviderTests
 
         // Act
         var context = await sut.GetContextAsync(
-            TestDocumentId, TestTenantId, TestPlaybookId, hostContext, CancellationToken.None);
+            TestDocumentId, TestTenantId, TestPlaybookId, hostContext, cancellationToken: CancellationToken.None);
 
         // Assert
         context.KnowledgeScope.Should().NotBeNull();

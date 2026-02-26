@@ -1,0 +1,21 @@
+{
+  "name": "cross-pane-integration-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cross-pane integration tests for SprkChatBridge communication between SprkChatPane and AnalysisWorkspace",
+  "scripts": {
+    "test": "jest --config jest.config.js",
+    "test:coverage": "jest --config jest.config.js --coverage",
+    "test:watch": "jest --config jest.config.js --watch"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.1.0",
+    "@types/jest": "^30.0.0",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.2.0",
+    "ts-jest": "^29.4.4",
+    "typescript": "^5.4.0"
+  }
+}
