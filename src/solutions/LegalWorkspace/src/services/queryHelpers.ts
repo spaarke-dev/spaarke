@@ -97,7 +97,7 @@ export function buildBroadOwnerFilter(userId: string, contactId: string | null):
 export const MATTER_SELECT_FIELDS: string[] = [
   'sprk_matterid',
   'sprk_name',
-  '_sprk_mattertype_ref_value',  // Lookup → sprk_mattertype_ref (display via formatted value)
+  '_sprk_mattertype_value',  // Lookup → sprk_mattertype_ref (display via formatted value)
   'sprk_practicearea',
   'sprk_totalbudget',
   'sprk_totalspend',
@@ -142,7 +142,7 @@ export const MATTER_TAB_SELECT_FIELDS: string[] = [
   'sprk_matternumber',
   'sprk_mattername',
   'sprk_matterdescription',
-  '_sprk_mattertype_ref_value',  // Lookup → sprk_mattertype_ref (display via formatted value)
+  '_sprk_mattertype_value',  // Lookup → sprk_mattertype_ref (display via formatted value)
   'sprk_practicearea',
   'statuscode',
   '_ownerid_value',

@@ -81,7 +81,7 @@ function mapEventFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
 function mapMatterFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
   return entities.map(e => ({
     ...e,
-    matterTypeName: (e[`_sprk_mattertype_ref_value${FV}`] as string) ?? '',
+    matterTypeName: (e[`_sprk_mattertype_value${FV}`] as string) ?? '',
   }));
 }
 
@@ -102,7 +102,7 @@ function mapDocumentFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
 function mapMatterTabFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
   return entities.map(e => ({
     ...e,
-    matterTypeName: (e[`_sprk_mattertype_ref_value${FV}`] as string) ?? '',
+    matterTypeName: (e[`_sprk_mattertype_value${FV}`] as string) ?? '',
     practiceAreaName: (e[`sprk_practicearea${FV}`] as string) ?? '',
     statuscodeName: (e[`statuscode${FV}`] as string) ?? '',
   }));
