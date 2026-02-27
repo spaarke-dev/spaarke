@@ -106,6 +106,7 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "row",
     flexWrap: "wrap",
+    alignItems: "center",
     gap: tokens.spacingHorizontalXS,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
@@ -116,6 +117,7 @@ const useStyles = makeStyles({
     borderBottomColor: tokens.colorNeutralStroke2,
     backgroundColor: tokens.colorNeutralBackground2,
     flexShrink: 0,
+    minHeight: "36px",
   },
   pill: {
     // Compact pill sizing

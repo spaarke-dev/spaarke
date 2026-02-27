@@ -53,9 +53,10 @@ const useStyles = makeStyles({
     borderBottomWidth: "1px",
     borderBottomStyle: "solid",
     borderBottomColor: tokens.colorNeutralStroke2,
-    backgroundColor: tokens.colorNeutralBackground1,
+    backgroundColor: tokens.colorNeutralBackground2,
     flexShrink: 0,
     flexWrap: "wrap",
+    minHeight: "36px",
   },
 
   leftGroup: {
