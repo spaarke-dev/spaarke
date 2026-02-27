@@ -67,7 +67,7 @@ export const MattersTab: React.FC<IMattersTabProps> = ({
           entityName="sprk_matter"
           entityId={matter.sprk_matterid}
           typeBadge={matter.matterTypeName || undefined}
-          title={matter.sprk_name}
+          title={matter.sprk_mattername ?? matter.sprk_name}
           primaryFields={[
             matter.sprk_matternumber,
             matter.practiceAreaName,

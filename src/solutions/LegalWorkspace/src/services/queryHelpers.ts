@@ -140,6 +140,7 @@ export function buildMattersQuery(userId: string, top: number = 5): string {
 export const MATTER_TAB_SELECT_FIELDS: string[] = [
   'sprk_matterid',
   'sprk_matternumber',
+  'sprk_mattername',
   'sprk_name',
   'sprk_description',
   '_sprk_mattertype_ref_value',  // Lookup → sprk_mattertype_ref (display via formatted value)

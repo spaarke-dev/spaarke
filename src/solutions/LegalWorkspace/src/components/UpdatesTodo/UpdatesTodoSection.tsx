@@ -74,7 +74,8 @@ const useStyles = makeStyles({
   tabList: {
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalM,
+    paddingTop: tokens.spacingVerticalL,
+    paddingBottom: tokens.spacingVerticalS,
     columnGap: tokens.spacingHorizontalM,
     flexShrink: 0,
   },
@@ -85,6 +86,23 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase400,
     lineHeight: tokens.lineHeightBase400,
+  },
+
+  // ── Toolbar area (grey bar below tabs, above content) ─────────────────
+  toolbar: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    borderBottomWidth: "1px",
+    borderBottomStyle: "solid",
+    borderBottomColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground2,
+    flexShrink: 0,
+    minHeight: "36px",
   },
 
   // ── Tab content panels ──────────────────────────────────────────────────
@@ -284,6 +302,7 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
         role="tabpanel"
         aria-label="Latest updates feed"
       >
+        <div className={styles.toolbar} role="toolbar" aria-label="Updates toolbar" />
         <ActivityFeed
           embedded
           webApi={webApi}
@@ -298,6 +317,7 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
         role="tabpanel"
         aria-label="To do list"
       >
+        <div className={styles.toolbar} role="toolbar" aria-label="To do toolbar" />
         <SmartToDo
           embedded
           webApi={webApi}
@@ -312,6 +332,7 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
         role="tabpanel"
         aria-label="Matters list"
       >
+        <div className={styles.toolbar} role="toolbar" aria-label="Matters toolbar" />
         <MattersTab
           service={service}
           userId={userId}
@@ -326,6 +347,7 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
         role="tabpanel"
         aria-label="Projects list"
       >
+        <div className={styles.toolbar} role="toolbar" aria-label="Projects toolbar" />
         <ProjectsTab
           service={service}
           userId={userId}
@@ -340,6 +362,7 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
         role="tabpanel"
         aria-label="Invoices list"
       >
+        <div className={styles.toolbar} role="toolbar" aria-label="Invoices toolbar" />
         <InvoicesTab
           service={service}
           userId={userId}

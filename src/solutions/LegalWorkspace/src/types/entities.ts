@@ -2,6 +2,7 @@
 export interface IMatter {
   sprk_matterid: string;
   sprk_name: string;
+  sprk_mattername?: string;
   sprk_matternumber?: string;
   sprk_description?: string;
   /** Display name from sprk_mattertype_ref lookup (populated via formatted value mapping). */
