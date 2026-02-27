@@ -8,3 +8,7 @@ export { ProjectsTab } from './ProjectsTab';
 export type { IProjectsTabProps } from './ProjectsTab';
 export { InvoicesTab } from './InvoicesTab';
 export type { IInvoicesTabProps } from './InvoicesTab';
+export { DocumentsTab } from './DocumentsTab';
+export type { IDocumentsTabProps } from './DocumentsTab';
+export { DocumentCard } from './DocumentCard';
+export type { IDocumentCardProps } from './DocumentCard';

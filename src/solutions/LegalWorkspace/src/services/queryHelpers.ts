@@ -358,7 +358,7 @@ export function buildInvoicesQuery(userId: string, contactId: string | null, top
 /** $select fields for sprk_document used in My Portfolio */
 export const DOCUMENT_SELECT_FIELDS: string[] = [
   'sprk_documentid',
-  'sprk_name',
+  'sprk_documentname',
   'sprk_documenttype',  // Choice field (display via formatted value)
   'sprk_description',
   '_sprk_matter_value',
@@ -390,6 +390,67 @@ export function buildDocumentsByUserQuery(userId: string, top: number = 5): stri
   return buildQuery({
     select: DOCUMENT_SELECT_FIELDS,
     filter: `_ownerid_value eq ${userId}`,
+    orderby: 'modifiedon desc',
+    top,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Documents tab query helpers (Activity section — broader filter)
+// ---------------------------------------------------------------------------
+
+/** $select fields for sprk_document used in the Documents tab */
+export const DOCUMENT_TAB_SELECT_FIELDS: string[] = [
+  'sprk_documentid',
+  'sprk_documentname',
+  'sprk_documentdescription',
+  'sprk_documenttype',             // Choice field (display via formatted value)
+  'sprk_filetype',
+  'sprk_workspaceflag',
+  'sprk_filesummary',
+  'sprk_filetldr',
+  '_sprk_checkedoutby_value',      // Contact lookup
+  'statuscode',
+  '_ownerid_value',
+  '_createdby_value',
+  '_modifiedby_value',
+  '_sprk_matter_value',
+  'createdon',
+  'modifiedon',
+];
+
+/**
+ * Build the OData $filter predicate for the Documents tab.
+ *
+ * Returns documents where the user is:
+ *   - Owner
+ *   - Creator (within last 30 days)
+ *   - Modifier (within last 30 days)
+ *   - Has workspace flag set to true
+ *   - Checked out by the user (statuscode = 421500001)
+ */
+export function buildDocumentsTabFilter(userId: string): string {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+
+  const clauses = [
+    `_ownerid_value eq ${userId}`,
+    `(_createdby_value eq ${userId} and createdon ge ${thirtyDaysAgo})`,
+    `(_modifiedby_value eq ${userId} and modifiedon ge ${thirtyDaysAgo})`,
+    `sprk_workspaceflag eq true`,
+    `(statuscode eq 421500001 and _sprk_checkedoutby_value eq ${userId})`,
+  ];
+
+  return clauses.join(' or ');
+}
+
+/**
+ * Build the full OData query string for the Documents tab.
+ * Uses the complex filter (owner/creator/modifier/workspace/checked-out).
+ */
+export function buildDocumentsTabQuery(userId: string, top: number = 50): string {
+  return buildQuery({
+    select: DOCUMENT_TAB_SELECT_FIELDS,
+    filter: buildDocumentsTabFilter(userId),
     orderby: 'modifiedon desc',
     top,
   });

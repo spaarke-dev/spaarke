@@ -4,7 +4,7 @@
  * with Fluent UI v9 TabList navigation.
  *
  * Layout:
- *   [TabList: Latest Updates | To Do List | Matters | Projects | Invoices]
+ *   [TabList: Latest Updates | To Do List | Matters | Projects | Invoices | Documents]
  *   [Tab panel — embedded component]
  *
  * All tab panels are kept mounted at all times (display toggling) so that:
@@ -36,11 +36,12 @@ import {
   GavelRegular,
   TaskListSquareLtrRegular,
   ReceiptRegular,
+  DocumentRegular,
   InfoRegular,
 } from "@fluentui/react-icons";
 import { ActivityFeed } from "../ActivityFeed";
 import { SmartToDo } from "../SmartToDo";
-import { MattersTab, ProjectsTab, InvoicesTab } from "../RecordCards";
+import { MattersTab, ProjectsTab, InvoicesTab, DocumentsTab } from "../RecordCards";
 import type { IWebApi } from "../../types/xrm";
 import { useDataverseService } from "../../hooks/useDataverseService";
 import { useUserContactId } from "../../hooks/useUserContactId";
@@ -49,7 +50,7 @@ import { useUserContactId } from "../../hooks/useUserContactId";
 // Types
 // ---------------------------------------------------------------------------
 
-type TabValue = "updates" | "todo" | "matters" | "projects" | "invoices";
+type TabValue = "updates" | "todo" | "matters" | "projects" | "invoices" | "documents";
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -185,6 +186,7 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
   const [mattersCount, setMattersCount] = React.useState<number | undefined>(undefined);
   const [projectsCount, setProjectsCount] = React.useState<number | undefined>(undefined);
   const [invoicesCount, setInvoicesCount] = React.useState<number | undefined>(undefined);
+  const [documentsCount, setDocumentsCount] = React.useState<number | undefined>(undefined);
 
   // Refetch functions — exposed by embedded children
   const feedRefetchRef = React.useRef<(() => void) | null>(null);
@@ -192,6 +194,7 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
   const mattersRefetchRef = React.useRef<(() => void) | null>(null);
   const projectsRefetchRef = React.useRef<(() => void) | null>(null);
   const invoicesRefetchRef = React.useRef<(() => void) | null>(null);
+  const documentsRefetchRef = React.useRef<(() => void) | null>(null);
 
   const handleFeedRefetchReady = React.useCallback((refetch: () => void) => {
     feedRefetchRef.current = refetch;
@@ -211,6 +214,10 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
 
   const handleInvoicesRefetchReady = React.useCallback((refetch: () => void) => {
     invoicesRefetchRef.current = refetch;
+  }, []);
+
+  const handleDocumentsRefetchReady = React.useCallback((refetch: () => void) => {
+    documentsRefetchRef.current = refetch;
   }, []);
 
   // Tab switch handler — refetch data when switching tabs so newly
@@ -249,6 +256,9 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
           break;
         case "invoices":
           invoicesRefetchRef.current?.();
+          break;
+        case "documents":
+          documentsRefetchRef.current?.();
           break;
       }
     },
@@ -298,6 +308,13 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
             label="Invoices"
             icon={<ReceiptRegular fontSize={16} />}
             count={invoicesCount}
+          />
+        </Tab>
+        <Tab value="documents">
+          <TabLabel
+            label="Documents"
+            icon={<DocumentRegular fontSize={16} />}
+            count={documentsCount}
           />
         </Tab>
       </TabList>
@@ -379,6 +396,22 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
           contactId={contactId}
           onCountChange={setInvoicesCount}
           onRefetchReady={handleInvoicesRefetchReady}
+        />
+      </div>
+
+      <div
+        className={activeTab === "documents" ? styles.tabPanel : styles.tabPanelHidden}
+        role="tabpanel"
+        aria-label="Documents list"
+      >
+        <div className={styles.toolbar} role="toolbar" aria-label="Documents toolbar">
+          <InfoRegular fontSize={18} className={styles.toolbarIcon} aria-label="Information" />
+        </div>
+        <DocumentsTab
+          service={service}
+          userId={userId}
+          onCountChange={setDocumentsCount}
+          onRefetchReady={handleDocumentsRefetchReady}
         />
       </div>
     </div>

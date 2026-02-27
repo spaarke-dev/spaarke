@@ -455,15 +455,28 @@ export const TodoItem: React.FC<ITodoItemProps> = React.memo(
 
         {/* Title + context */}
         <div className={styles.contentColumn}>
-          <Text
-            as="span"
-            size={300}
-            className={[styles.title, isCompleted ? styles.titleCompleted : ""]
-              .filter(Boolean)
-              .join(" ")}
-          >
-            {event.sprk_eventname}
-          </Text>
+          <div style={{ display: "flex", alignItems: "center", gap: tokens.spacingHorizontalXS, minWidth: 0 }}>
+            {event.eventTypeName && (
+              <InlineBadge
+                style={{
+                  backgroundColor: tokens.colorNeutralBackground3,
+                  color: tokens.colorNeutralForeground2,
+                }}
+                ariaLabel={`Type: ${event.eventTypeName}`}
+              >
+                {event.eventTypeName}
+              </InlineBadge>
+            )}
+            <Text
+              as="span"
+              size={300}
+              className={[styles.title, isCompleted ? styles.titleCompleted : ""]
+                .filter(Boolean)
+                .join(" ")}
+            >
+              {event.sprk_eventname}
+            </Text>
+          </div>
           {(event.sprk_priorityreason || event.sprk_effortreason) && (
             <Text as="span" size={200} className={styles.context}>
               {event.sprk_priorityreason ?? event.sprk_effortreason}

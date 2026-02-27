@@ -28,6 +28,7 @@ import {
   buildInvoicesQuery,
   buildDocumentsByMatterQuery,
   buildDocumentsByUserQuery,
+  buildDocumentsTabQuery,
   buildTodoItemsQuery,
   buildDismissedTodoQuery,
 } from './queryHelpers';
@@ -122,6 +123,15 @@ function mapInvoiceFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
   return entities.map(e => ({
     ...e,
     statuscodeName: (e[`statuscode${FV}`] as string) ?? '',
+  }));
+}
+
+function mapDocumentTabFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
+  return entities.map(e => ({
+    ...e,
+    documentTypeName: (e[`sprk_documenttype${FV}`] as string) ?? '',
+    statuscodeName: (e[`statuscode${FV}`] as string) ?? '',
+    checkedOutByName: (e[`_sprk_checkedoutby_value${FV}`] as string) ?? '',
   }));
 }
 
@@ -350,6 +360,25 @@ export class DataverseService {
       const result = await this._webApi.retrieveMultipleRecords('sprk_document', query, top);
       return toTypedArray<IDocument>(mapDocumentFormattedValues(result.entities));
     }, 'DOCUMENTS_FETCH_ERROR');
+  }
+
+  /**
+   * Retrieve documents for the Documents tab using the broad filter.
+   *
+   * Returns documents where the user is owner, recent creator, recent modifier,
+   * workspace-flagged, or checked out by the user.
+   */
+  async getDocumentsForTab(
+    userId: string,
+    options: { top?: number } = {}
+  ): Promise<IResult<IDocument[]>> {
+    const top = options.top ?? 50;
+    const query = buildDocumentsTabQuery(userId, top);
+
+    return tryCatch(async () => {
+      const result = await this._webApi.retrieveMultipleRecords('sprk_document', query, top);
+      return toTypedArray<IDocument>(mapDocumentTabFormattedValues(result.entities));
+    }, 'DOCUMENTS_TAB_FETCH_ERROR');
   }
 
   // -------------------------------------------------------------------------
