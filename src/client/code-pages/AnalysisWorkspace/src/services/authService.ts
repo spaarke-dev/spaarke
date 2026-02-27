@@ -1,29 +1,38 @@
 /**
  * Authentication Service for AnalysisWorkspace Code Page
  *
- * Acquires access tokens for the BFF API using the Xrm SDK global context.
- * When running inside a Dataverse-hosted iframe (dialog), the user is already
- * authenticated via the Dataverse session. This service leverages that session
- * to obtain a Bearer token scoped to the BFF API resource.
+ * Acquires access tokens for the BFF API using a multi-strategy approach
+ * that supports both navigateTo dialogs and embedded web resource scenarios.
  *
- * Authentication flow:
- *   1. Locate Xrm SDK via frame-walk (window -> parent -> top)
- *   2. Use Xrm.Utility.getGlobalContext().getClientUrl() to get the org URL
- *   3. Acquire a token via the Dataverse token endpoint (same-origin fetch)
- *   4. Cache the token in memory with expiration tracking
- *   5. Auto-refresh before expiry (5-minute buffer)
+ * Token acquisition strategies (in priority order):
+ *   1. In-memory cache (fastest — no I/O)
+ *   2. Xrm platform strategies (getAccessToken, __crmTokenProvider, etc.)
+ *      — Works when opened via Xrm.Navigation.navigateTo
+ *   3. MSAL ssoSilent (uses existing Azure AD session cookie)
+ *      — Works when embedded as web resource on a form
+ *   4. Retry with exponential backoff on transient failures
+ *
+ * Why dual strategies:
+ *   - navigateTo mode: Xrm.Utility.getGlobalContext().getAccessToken() is
+ *     available and fast. No MSAL needed.
+ *   - Embedded on form: getAccessToken() is NOT available for web resource
+ *     iframes. MSAL ssoSilent() acquires a token using the Azure AD session
+ *     cookie (the user is already logged in to Dataverse).
+ *
+ * The MSAL fallback matches the LegalWorkspace pattern:
+ *   src/solutions/LegalWorkspace/src/services/bffAuthProvider.ts
  *
  * Constraints:
- *   - MUST use Xrm.Utility.getGlobalContext() -- NOT MSAL browser directly
  *   - MUST NOT transmit auth tokens via BroadcastChannel or postMessage
- *   - MUST NOT hard-code client IDs, tenant IDs, or secrets
- *   - Graceful degradation when Xrm SDK is unavailable (outside Dataverse)
- *
- * Pattern: Copied from SprkChatPane/src/services/authService.ts (task 013)
+ *   - MUST NOT hard-code secrets (CLIENT_ID is a public SPA client)
+ *   - Graceful degradation when both Xrm and MSAL are unavailable
  *
  * @see ADR-008 - Endpoint filters for auth
- * @see .claude/constraints/api.md
+ * @see docs/architecture/sdap-auth-patterns.md - Pattern 7: Code Page Embedded Auth
  */
+
+import { PublicClientApplication } from "@azure/msal-browser";
+import { msalConfig, BFF_API_SCOPE } from "../config/msalConfig";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -124,85 +133,25 @@ function findXrm(): XrmNamespace | null {
     return null;
 }
 
-/* eslint-enable @typescript-eslint/no-explicit-any */
-
 // ---------------------------------------------------------------------------
-// Token Acquisition via Dataverse
+// Xrm Platform Token Extraction
 // ---------------------------------------------------------------------------
-
-/**
- * Acquire an access token for the BFF API from the Dataverse environment.
- *
- * Dataverse-hosted web resources share the user's authenticated session.
- * We fetch a token from the Dataverse internal token proxy endpoint, which
- * returns a token scoped to the BFF API resource without requiring client
- * IDs or secrets to be embedded in the frontend code.
- *
- * @param clientUrl - The Dataverse org URL (from Xrm.Utility.getGlobalContext().getClientUrl())
- * @returns The token cache entry with token and expiration
- * @throws AuthError on acquisition failure
- */
-async function acquireTokenFromDataverse(clientUrl: string): Promise<TokenCache> {
-    const baseUrl = clientUrl.replace(/\/+$/, "");
-
-    try {
-        // Verify Dataverse session is valid via lightweight WhoAmI call
-        const response = await fetch(`${baseUrl}/api/data/v9.2/WhoAmI`, {
-            method: "GET",
-            headers: {
-                "Accept": "application/json",
-                "OData-MaxVersion": "4.0",
-                "OData-Version": "4.0",
-            },
-            credentials: "include",
-        });
-
-        if (!response.ok) {
-            throw new AuthError(
-                `Dataverse authentication failed (${response.status}): ${response.statusText}`,
-                { isRetryable: response.status >= 500 || response.status === 429 }
-            );
-        }
-
-        // Extract platform token using multi-strategy approach
-        const token = await extractPlatformToken(baseUrl);
-
-        if (token) {
-            return token;
-        }
-
-        throw new AuthError(
-            "Could not acquire BFF API token from Dataverse session. " +
-            "The BFF API may need to be configured for Dataverse session-based auth.",
-            { isRetryable: false }
-        );
-    } catch (err) {
-        if (err instanceof AuthError) {
-            throw err;
-        }
-        throw new AuthError(
-            `Token acquisition failed: ${err instanceof Error ? err.message : "Unknown error"}`,
-            { isRetryable: true, cause: err }
-        );
-    }
-}
 
 /**
  * Extract an access token from the PowerApps platform runtime.
  *
- * Uses a multi-strategy approach:
+ * Uses a multi-strategy approach for Xrm-based token acquisition:
  *   1. Xrm.Utility.getGlobalContext().getAccessToken() (modern Dataverse 2024+)
  *   2. __crmTokenProvider.getToken() (legacy platform global)
  *   3. AUTHENTICATION_TOKEN global (some configurations)
  *   4. Xrm.Page.context.getAuthToken() (deprecated but functional)
- *   5. Dataverse Web API authorization header extraction
  *
- * @param clientUrl - The Dataverse org URL
+ * These strategies work when opened via Xrm.Navigation.navigateTo but
+ * typically fail when embedded as a web resource iframe on a form.
+ *
  * @returns TokenCache if successful, null if platform token is unavailable
  */
-async function extractPlatformToken(clientUrl: string): Promise<TokenCache | null> {
-    /* eslint-disable @typescript-eslint/no-explicit-any */
-
+async function extractPlatformToken(): Promise<TokenCache | null> {
     // Strategy 1: Xrm.Utility.getGlobalContext().getAccessToken() (modern)
     try {
         const xrm = findXrm();
@@ -267,31 +216,109 @@ async function extractPlatformToken(clientUrl: string): Promise<TokenCache | nul
         console.debug(`${LOG_PREFIX} Legacy token providers not available`);
     }
 
-    // Strategy 3: Dataverse Web API authorization header extraction
+    // Strategy 3: Window-level token from PCF bridge (__SPAARKE_BFF_TOKEN__)
     try {
-        const baseUrl = clientUrl.replace(/\/+$/, "");
-        const response = await fetch(`${baseUrl}/api/data/v9.2/RetrieveCurrentOrganization`, {
-            method: "GET",
-            headers: {
-                "Accept": "application/json",
-                "OData-MaxVersion": "4.0",
-                "OData-Version": "4.0",
-            },
-            credentials: "include",
-        });
+        const bridgeToken = (window as any).__SPAARKE_BFF_TOKEN__ as string | undefined;
+        if (bridgeToken) {
+            return { token: bridgeToken, expiresAt: parseJwtExpiry(bridgeToken) };
+        }
 
-        if (response.ok) {
-            const authHeader = response.headers.get("Authorization");
-            if (authHeader?.startsWith("Bearer ")) {
-                const token = authHeader.substring(7);
-                return { token, expiresAt: parseJwtExpiry(token) };
-            }
+        const parentToken = (window.parent as any)?.__SPAARKE_BFF_TOKEN__ as string | undefined;
+        if (parentToken) {
+            return { token: parentToken, expiresAt: parseJwtExpiry(parentToken) };
         }
     } catch {
-        console.debug(`${LOG_PREFIX} Dataverse token service unavailable`);
+        /* cross-origin — swallow */
     }
 
-    /* eslint-enable @typescript-eslint/no-explicit-any */
+    return null;
+}
+
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+// ---------------------------------------------------------------------------
+// MSAL Token Acquisition (Embedded Fallback)
+// ---------------------------------------------------------------------------
+
+/**
+ * MSAL PublicClientApplication singleton — lazily initialized on first use
+ * to avoid blocking the initial render.
+ */
+let _msalInstance: PublicClientApplication | null = null;
+let _msalInitPromise: Promise<void> | null = null;
+
+/**
+ * Lazily initialize the MSAL PublicClientApplication.
+ * Safe to call multiple times — returns the same promise.
+ */
+async function ensureMsalInitialized(): Promise<PublicClientApplication | null> {
+    if (_msalInstance) return _msalInstance;
+
+    if (!_msalInitPromise) {
+        _msalInitPromise = (async () => {
+            try {
+                const instance = new PublicClientApplication(msalConfig);
+                await instance.initialize();
+                await instance.handleRedirectPromise();
+                _msalInstance = instance;
+                console.info(`${LOG_PREFIX} MSAL initialized successfully`);
+            } catch (err) {
+                console.warn(`${LOG_PREFIX} MSAL initialization failed — Xrm strategies only`, err);
+                _msalInstance = null;
+            }
+        })();
+    }
+
+    await _msalInitPromise;
+    return _msalInstance;
+}
+
+/**
+ * Acquire a token via MSAL ssoSilent (hidden iframe).
+ *
+ * Uses the existing Azure AD session cookie — the user is already
+ * authenticated in Dataverse, so no interactive login is required.
+ *
+ * This is the same pattern used by:
+ *   src/solutions/LegalWorkspace/src/services/bffAuthProvider.ts
+ *
+ * @returns TokenCache if successful, null on failure
+ */
+async function acquireTokenViaMsal(): Promise<TokenCache | null> {
+    const msal = await ensureMsalInitialized();
+    if (!msal) return null;
+
+    const scopes = [BFF_API_SCOPE];
+
+    try {
+        // Try acquireTokenSilent first (uses cached token / refresh token)
+        const accounts = msal.getAllAccounts();
+        if (accounts.length > 0) {
+            const result = await msal.acquireTokenSilent({
+                scopes,
+                account: accounts[0],
+            });
+            if (result?.accessToken) {
+                console.info(`${LOG_PREFIX} Token acquired via MSAL silent (cached account)`);
+                return {
+                    token: result.accessToken,
+                    expiresAt: result.expiresOn ? result.expiresOn.getTime() : parseJwtExpiry(result.accessToken),
+                };
+            }
+        }
+
+        // Fall back to ssoSilent (uses existing Azure AD session cookie)
+        const ssoResult = await msal.ssoSilent({ scopes });
+        if (ssoResult?.accessToken) {
+            console.info(`${LOG_PREFIX} Token acquired via MSAL ssoSilent`);
+            return {
+                token: ssoResult.accessToken,
+                expiresAt: ssoResult.expiresOn ? ssoResult.expiresOn.getTime() : parseJwtExpiry(ssoResult.accessToken),
+            };
+        }
+    } catch (err) {
+        console.warn(`${LOG_PREFIX} MSAL token acquisition failed`, err);
+    }
 
     return null;
 }
@@ -366,14 +393,49 @@ async function retryWithBackoff<T>(
 }
 
 // ---------------------------------------------------------------------------
+// Combined Token Acquisition
+// ---------------------------------------------------------------------------
+
+/**
+ * Acquire a BFF API token using all available strategies.
+ *
+ * Priority:
+ *   1. Xrm platform strategies (getAccessToken, legacy providers, bridge)
+ *   2. MSAL ssoSilent (for embedded web resource mode)
+ *
+ * @returns TokenCache with token and expiration
+ * @throws AuthError if no strategy succeeds
+ */
+async function acquireToken(): Promise<TokenCache> {
+    // Strategy group 1: Xrm platform token extraction
+    const platformToken = await extractPlatformToken();
+    if (platformToken) {
+        console.info(`${LOG_PREFIX} Token acquired via Xrm platform strategy`);
+        return platformToken;
+    }
+
+    console.debug(`${LOG_PREFIX} Xrm platform strategies exhausted, trying MSAL ssoSilent...`);
+
+    // Strategy group 2: MSAL ssoSilent (embedded web resource fallback)
+    const msalToken = await acquireTokenViaMsal();
+    if (msalToken) {
+        return msalToken;
+    }
+
+    throw new AuthError(
+        "Could not acquire BFF API token. " +
+        "Xrm platform token and MSAL ssoSilent both failed. " +
+        "Ensure this page is running within Dataverse.",
+        { isRetryable: false }
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Public API -- Singleton Auth Service
 // ---------------------------------------------------------------------------
 
 /** In-memory token cache. Never stored externally or transmitted via messaging. */
 let cachedToken: TokenCache | null = null;
-
-/** The resolved Xrm global context, cached after first discovery. */
-let resolvedClientUrl: string | null = null;
 
 /**
  * Check if the Xrm SDK is available (running inside Dataverse).
@@ -386,61 +448,32 @@ export function isXrmAvailable(): boolean {
 
 /**
  * Get the Dataverse org URL from Xrm.Utility.getGlobalContext().
- * Caches the result after first resolution.
  *
- * @returns The org URL (e.g., "https://orgname.crm.dynamics.com")
- * @throws AuthError if Xrm SDK is not available
+ * @returns The org URL (e.g., "https://orgname.crm.dynamics.com"), or null if Xrm unavailable
  */
-export function getClientUrl(): string {
-    if (resolvedClientUrl) {
-        return resolvedClientUrl;
-    }
-
+export function getClientUrl(): string | null {
     const xrm = findXrm();
-    if (!xrm) {
-        throw new AuthError(
-            "Xrm SDK is not available. This page must be opened from within Dataverse.",
-            { isXrmUnavailable: true }
-        );
-    }
+    if (!xrm) return null;
 
     try {
         const context = xrm.Utility.getGlobalContext();
-        const clientUrl = context.getClientUrl();
-
-        if (!clientUrl) {
-            throw new AuthError(
-                "Xrm.Utility.getGlobalContext().getClientUrl() returned empty.",
-                { isXrmUnavailable: true }
-            );
-        }
-
-        resolvedClientUrl = clientUrl;
-        return clientUrl;
-    } catch (err) {
-        if (err instanceof AuthError) throw err;
-        throw new AuthError(
-            `Failed to get client URL from Xrm: ${err instanceof Error ? err.message : "Unknown error"}`,
-            { isXrmUnavailable: true, cause: err }
-        );
+        return context.getClientUrl() || null;
+    } catch {
+        return null;
     }
 }
 
 /**
  * Acquire an access token for the BFF API.
  *
- * Uses Xrm.Utility.getGlobalContext() to authenticate via the Dataverse session.
- * Implements in-memory caching with automatic refresh before expiry.
- *
- * Token lifecycle:
- *   1. Check in-memory cache -- return if valid (with 5-min buffer)
- *   2. Use Xrm context to acquire fresh token from Dataverse platform
- *   3. Cache the new token in memory
+ * Uses a combined strategy that works in both navigateTo and embedded modes:
+ *   1. Check in-memory cache — return if valid (with 5-min buffer)
+ *   2. Try Xrm platform strategies (getAccessToken, legacy providers)
+ *   3. Fall back to MSAL ssoSilent (for embedded web resource mode)
  *   4. Retry with exponential backoff on transient failures
  *
  * @returns The Bearer access token string (without "Bearer " prefix)
- * @throws AuthError with isXrmUnavailable=true when outside Dataverse
- * @throws AuthError with isRetryable=true on transient network failures
+ * @throws AuthError when no authentication strategy succeeds
  */
 export async function getAccessToken(): Promise<string> {
     // Check cached token (with expiry buffer)
@@ -453,10 +486,8 @@ export async function getAccessToken(): Promise<string> {
         cachedToken = null;
     }
 
-    const clientUrl = getClientUrl();
-
     const tokenCache = await retryWithBackoff(
-        () => acquireTokenFromDataverse(clientUrl),
+        () => acquireToken(),
         MAX_RETRY_ATTEMPTS,
         RETRY_BASE_DELAY_MS
     );
@@ -472,30 +503,27 @@ export async function getAccessToken(): Promise<string> {
  */
 export function clearTokenCache(): void {
     cachedToken = null;
-    resolvedClientUrl = null;
     console.debug(`${LOG_PREFIX} Token cache cleared`);
 }
 
 /**
- * Initialize the auth service by verifying Xrm availability and acquiring
+ * Initialize the auth service by verifying Dataverse context and acquiring
  * the first token. Call this during app startup.
  *
+ * Supports both navigateTo (Xrm available) and embedded (MSAL fallback) modes.
+ *
  * @returns The initial access token
- * @throws AuthError if Xrm is unavailable or initial token acquisition fails
+ * @throws AuthError if no authentication strategy succeeds
  */
 export async function initializeAuth(): Promise<string> {
     console.info(`${LOG_PREFIX} Initializing authentication...`);
 
-    if (!isXrmAvailable()) {
-        throw new AuthError(
-            "This page must be opened from within Dataverse. " +
-            "Xrm SDK is not available in the current context.",
-            { isXrmUnavailable: true }
-        );
-    }
-
     const clientUrl = getClientUrl();
-    console.info(`${LOG_PREFIX} Dataverse org: ${clientUrl}`);
+    if (clientUrl) {
+        console.info(`${LOG_PREFIX} Dataverse org: ${clientUrl}`);
+    } else {
+        console.info(`${LOG_PREFIX} Xrm SDK not available, will use MSAL ssoSilent`);
+    }
 
     const token = await getAccessToken();
     console.info(`${LOG_PREFIX} Authentication initialized successfully`);

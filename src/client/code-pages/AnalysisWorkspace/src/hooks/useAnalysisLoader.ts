@@ -100,7 +100,7 @@ export function useAnalysisLoader(options: UseAnalysisLoaderOptions): UseAnalysi
         setAnalysisError(null);
 
         try {
-            const result = await fetchAnalysis(analysisId, token);
+            const result = await fetchAnalysis(analysisId, token, documentId);
             if (mountedRef.current) {
                 setAnalysis(result);
             }
@@ -122,7 +122,7 @@ export function useAnalysisLoader(options: UseAnalysisLoaderOptions): UseAnalysi
                 setIsAnalysisLoading(false);
             }
         }
-    }, [analysisId, token]);
+    }, [analysisId, documentId, token]);
 
     /**
      * Load document metadata from the BFF API.
