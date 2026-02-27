@@ -787,17 +787,14 @@ export const GridSection: React.FC<GridSectionProps> = ({
 
         fetchXml = mergeDateFilterIntoFetchXml(fetchXml, dateFilterInput);
 
-        // v2.16.0: Merge context filter (drill-through) into FetchXML
+        // v3.0.1: Merge context filter as a separate <filter> at entity level.
+        // Always adds a NEW filter before </entity> instead of injecting into
+        // existing filters — avoids misplacement when date/link-entity filters
+        // create nested </filter> tags (replace only matches the first occurrence).
         if (contextFilter) {
           console.log("[GridSection] Applying context filter:", contextFilter);
-          const conditionXml = `<condition attribute="${contextFilter.fieldName}" operator="eq" value="${contextFilter.value}" />`;
-          // Insert into existing <filter> element
-          if (fetchXml.includes("</filter>")) {
-            fetchXml = fetchXml.replace("</filter>", `${conditionXml}</filter>`);
-          } else {
-            // No filter element — add one before </entity>
-            fetchXml = fetchXml.replace("</entity>", `<filter type="and">${conditionXml}</filter></entity>`);
-          }
+          const contextFilterXml = `<filter type="and"><condition attribute="${contextFilter.fieldName}" operator="eq" value="${contextFilter.value}" /></filter>`;
+          fetchXml = fetchXml.replace("</entity>", `${contextFilterXml}</entity>`);
         }
 
         console.log("[GridSection] Final FetchXML:", fetchXml);

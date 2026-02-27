@@ -173,6 +173,80 @@ export function getDefaultEventViewId(): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Entity-Specific View Discovery (Embedded Mode)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Entity logical name → display prefix for view naming convention.
+ * Views are named "{Prefix}-{ViewName}" (e.g., "Matter-All Tasks").
+ * Add new entities here to enable view discovery for them.
+ */
+const ENTITY_VIEW_PREFIXES: Record<string, string> = {
+  sprk_matter: "Matter",
+  sprk_project: "Project",
+  sprk_invoice: "Invoice",
+  sprk_workassignment: "Work Assignment",
+};
+
+/**
+ * Get the view name prefix for a Dataverse entity.
+ * Returns null if entity has no prefix mapping — falls back to system views.
+ */
+export function getEntityViewPrefix(entityName: string): string | null {
+  return ENTITY_VIEW_PREFIXES[entityName] ?? null;
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+/**
+ * Discover entity-specific views from Dataverse savedquery.
+ * Queries for views matching the "{Prefix}-" naming convention.
+ *
+ * @param entityName - Dataverse entity logical name (e.g., "sprk_matter")
+ * @returns Entity-specific views, or empty array if none found
+ */
+export async function discoverEntityViews(entityName: string): Promise<IEventViewConfig[]> {
+  const prefix = ENTITY_VIEW_PREFIXES[entityName];
+  if (!prefix) {
+    console.log(`[eventConfig] No view prefix mapping for entity: ${entityName}, using system views`);
+    return [];
+  }
+
+  try {
+    const xrm = (window as any).parent?.Xrm || (window as any).Xrm;
+    if (!xrm?.WebApi) {
+      console.warn("[eventConfig] Xrm.WebApi not available for view discovery");
+      return [];
+    }
+
+    const filter = `returnedtypecode eq 'sprk_event' and startswith(name,'${prefix}-') and statecode eq 0`;
+    const result = await xrm.WebApi.retrieveMultipleRecords(
+      "savedquery",
+      `?$filter=${encodeURIComponent(filter)}&$select=savedqueryid,name,isdefault&$orderby=name`
+    );
+
+    if (!result?.entities?.length) {
+      console.log(`[eventConfig] No entity-specific views found for prefix: ${prefix}`);
+      return [];
+    }
+
+    const views: IEventViewConfig[] = result.entities.map((entity: any, index: number) => ({
+      id: entity.savedqueryid,
+      name: entity.name.replace(`${prefix}-`, "").trim(),
+      isDefault: index === 0,
+    }));
+
+    console.log(`[eventConfig] Discovered ${views.length} views for ${prefix}:`, views.map((v: IEventViewConfig) => v.name));
+    return views;
+  } catch (error) {
+    console.error("[eventConfig] View discovery failed:", error);
+    return [];
+  }
+}
+
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Side Pane Configuration
 // ─────────────────────────────────────────────────────────────────────────────
 

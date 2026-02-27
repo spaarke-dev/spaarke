@@ -1,4 +1,4 @@
-# EventDetailSidePane Rebuild: HTML Web Resource Approach
+ # EventDetailSidePane Rebuild: HTML Web Resource Approach
 
 > **Date**: 2026-02-19
 > **Status**: Implementation Complete
