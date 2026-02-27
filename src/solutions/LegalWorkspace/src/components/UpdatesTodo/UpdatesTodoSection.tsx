@@ -26,7 +26,6 @@ import {
   tokens,
   Text,
   Badge,
-  Button,
   TabList,
   Tab,
   SelectTabData,
@@ -35,7 +34,6 @@ import {
 import {
   AlertRegular,
   CheckboxCheckedRegular,
-  ArrowClockwiseRegular,
 } from "@fluentui/react-icons";
 import { ActivityFeed } from "../ActivityFeed";
 import { SmartToDo } from "../SmartToDo";
@@ -84,13 +82,6 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
-  headerActions: {
-    display: "flex",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalXXS,
-    paddingBottom: tokens.spacingVerticalXS,
-  },
-
   // ── TabList ─────────────────────────────────────────────────────────────
   tabList: {
     paddingLeft: tokens.spacingHorizontalM,
@@ -187,25 +178,30 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
     todoRefetchRef.current = refetch;
   }, []);
 
-  // Tab switch handler
+  // Tab switch handler — refetch data when switching tabs so newly
+  // flagged/created items appear without a full page reload.
+  // Also closes the To Do detail side pane when leaving the To Do tab.
   const handleTabSelect = React.useCallback(
     (_event: SelectTabEvent, data: SelectTabData) => {
-      setActiveTab(data.value as TabValue);
+      const tab = data.value as TabValue;
+      setActiveTab(tab);
+      if (tab === "todo") {
+        todoRefetchRef.current?.();
+      } else if (tab === "updates") {
+        feedRefetchRef.current?.();
+        // Close the To Do detail side pane when navigating away
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const xrm = (window.top as any)?.Xrm ?? (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
+          const pane = xrm?.App?.sidePanes?.getPane("todoDetailPane");
+          if (pane) pane.close();
+        } catch {
+          // Side pane API unavailable — ignore
+        }
+      }
     },
     []
   );
-
-  // Refresh button — routes to active tab's refetch
-  const handleRefresh = React.useCallback(() => {
-    if (activeTab === "updates") {
-      feedRefetchRef.current?.();
-    } else {
-      todoRefetchRef.current?.();
-    }
-  }, [activeTab]);
-
-  const refreshLabel =
-    activeTab === "updates" ? "Refresh updates feed" : "Refresh to-do list";
 
   return (
     <div className={styles.card} role="region" aria-label="Updates and To Do">
@@ -214,15 +210,6 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
         <Text className={styles.headerTitle} size={400}>
           Activity
         </Text>
-        <div className={styles.headerActions}>
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={<ArrowClockwiseRegular />}
-            onClick={handleRefresh}
-            aria-label={refreshLabel}
-          />
-        </div>
       </div>
 
       {/* ── TabList ───────────────────────────────────────────────────── */}

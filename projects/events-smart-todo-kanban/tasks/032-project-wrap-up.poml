@@ -1,0 +1,40 @@
+<task id="032" project="events-smart-todo-kanban">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>4 — Polish</phase>
+    <estimate>15min</estimate>
+    <tags>wrap-up</tags>
+    <dependencies>030, 031</dependencies>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Complete project wrap-up: update README status, final build check, push to GitHub.</goal>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/events-smart-todo-kanban/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Update README.md status from "In Progress" to "Complete"</step>
+    <step>Check all graduation criteria in README.md</step>
+    <step>Run npm run build one final time</step>
+    <step>Commit and push all changes</step>
+    <step>Update TASK-INDEX.md — all tasks marked complete</step>
+  </steps>
+
+  <outputs>
+    <output>Updated README.md with Complete status</output>
+    <output>Final commit pushed</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README status is "Complete"</criterion>
+    <criterion>All graduation criteria checked</criterion>
+    <criterion>Final build succeeds</criterion>
+    <criterion>All changes committed and pushed</criterion>
+  </acceptance-criteria>
+</task>

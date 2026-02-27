@@ -1,0 +1,66 @@
+<task id="011" project="events-smart-todo-kanban">
+  <metadata>
+    <title>Create generic KanbanColumn component</title>
+    <phase>2 — Reusable DnD Components</phase>
+    <estimate>45min</estimate>
+    <tags>component, dnd, reusable</tags>
+    <dependencies>010</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create a generic, reusable KanbanColumn component that wraps @hello-pangea/dnd Droppable and renders draggable cards via a renderCard function.</goal>
+    <context>
+      Each KanbanColumn is a Droppable zone from @hello-pangea/dnd. It renders:
+      1. Column header (title + item count badge + optional accent colour top-border)
+      2. Scrollable area with Draggable-wrapped cards
+      3. Drop placeholder
+
+      The component is generic — it receives items and a renderCard function, with no
+      knowledge of what the cards contain.
+    </context>
+    <constraints>
+      - TypeScript generics: KanbanColumn&lt;T&gt;
+      - NO domain-specific imports
+      - Droppable from @hello-pangea/dnd
+      - Each card wrapped in Draggable with index and draggableId from getItemId prop
+      - Column header: Fluent v9 Text + Badge for count
+      - Top-border accent colour passed as prop (CSS token string)
+      - Scrollable card area with overflow-y: auto
+      - ADR-021: Fluent v9 tokens, dark mode
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create KanbanColumn.tsx in components/shared/</step>
+    <step>Define IKanbanColumnProps&lt;T&gt;: id, title, items, accentColor, renderCard, getItemId</step>
+    <step>Implement Droppable wrapper with droppableId = column id</step>
+    <step>Map items to Draggable wrappers, each calling renderCard(item, index)</step>
+    <step>Add column header with title Text and count Badge</step>
+    <step>Add accent top-border via inline style (accentColor prop)</step>
+    <step>Add Griffel styles: column container, header, scrollable card list, empty state</step>
+    <step>Wire into KanbanBoard.tsx (replace placeholder from task 010)</step>
+    <step>Verify npm run build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>New file: components/shared/KanbanColumn.tsx</output>
+    <output>Updated: components/shared/KanbanBoard.tsx (wire KanbanColumn)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>KanbanColumn is fully generic (typed with &lt;T&gt;)</criterion>
+    <criterion>Uses Droppable and Draggable from @hello-pangea/dnd</criterion>
+    <criterion>Column header shows title + count badge</criterion>
+    <criterion>Top-border accent colour applied</criterion>
+    <criterion>Scrollable card area</criterion>
+    <criterion>npm run build succeeds</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,58 @@
+<task id="002" project="events-smart-todo-kanban">
+  <metadata>
+    <title>Extend data model interfaces for Kanban fields</title>
+    <phase>1 — Foundation</phase>
+    <estimate>30min</estimate>
+    <tags>data-model, typescript</tags>
+    <dependencies>none</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Add sprk_todocolumn, sprk_todopinned fields to IEvent interface, add IUserPreference interface, add TodoColumn type, and update OData SELECT field arrays.</goal>
+    <context>
+      The Dataverse fields sprk_todocolumn (Choice: 0=Today, 1=Tomorrow, 2=Future) and sprk_todopinned (Boolean)
+      have already been created on the sprk_event entity by the user.
+      The sprk_userpreference entity has also been created with sprk_preferencetype (Choice) and
+      sprk_preferencevalue (Text/JSON) fields.
+      These TypeScript interfaces need to match the Dataverse schema.
+    </context>
+    <constraints>
+      - Follow existing patterns in entities.ts for field documentation
+      - Add fields to both EVENT_SELECT_FIELDS and TODO_SELECT_FIELDS in queryHelpers.ts
+      - sprk_todocolumn is a choice field — select it directly (not a lookup)
+      - sprk_todopinned is a boolean field — select it directly
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/types/entities.ts</file>
+      <file>src/solutions/LegalWorkspace/src/types/enums.ts</file>
+      <file>src/solutions/LegalWorkspace/src/services/queryHelpers.ts</file>
+      <file>.claude/patterns/pcf/dataverse-queries.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Add sprk_todocolumn (optional number) and sprk_todopinned (optional boolean) to IEvent in entities.ts</step>
+    <step>Add IUserPreference interface to entities.ts with sprk_userpreferenceid, sprk_preferencetype, sprk_preferencevalue, _sprk_user_value</step>
+    <step>Add TodoColumn type ('Today' | 'Tomorrow' | 'Future') to enums.ts</step>
+    <step>Add 'sprk_todocolumn' and 'sprk_todopinned' to TODO_SELECT_FIELDS in queryHelpers.ts</step>
+    <step>Verify npm run build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Updated entities.ts with IEvent extensions and IUserPreference</output>
+    <output>Updated enums.ts with TodoColumn type</output>
+    <output>Updated queryHelpers.ts with new SELECT fields</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>IEvent has sprk_todocolumn?: number and sprk_todopinned?: boolean</criterion>
+    <criterion>IUserPreference interface exists with all required fields</criterion>
+    <criterion>TodoColumn type exported from enums.ts</criterion>
+    <criterion>TODO_SELECT_FIELDS includes both new fields</criterion>
+    <criterion>npm run build succeeds</criterion>
+  </acceptance-criteria>
+</task>

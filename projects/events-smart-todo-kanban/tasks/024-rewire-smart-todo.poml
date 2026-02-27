@@ -1,0 +1,95 @@
+<task id="024" project="events-smart-todo-kanban">
+  <metadata>
+    <title>Rewire SmartToDo container with Kanban board</title>
+    <phase>3 — Smart To Do Kanban Components</phase>
+    <estimate>2hr</estimate>
+    <tags>component, integration, kanban</tags>
+    <dependencies>005, 012, 020, 021, 022, 023</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Replace the flat list rendering in SmartToDo.tsx with the Kanban board, wiring all hooks and components while preserving existing features (add, dismiss, restore, cross-block sync, AI summary, embedded mode).</goal>
+    <context>
+      SmartToDo.tsx is the main container component. Currently it renders a flat sorted list
+      of TodoItem components. We need to:
+
+      1. Replace flat list with KanbanBoard + KanbanColumn + KanbanCard
+      2. Wire useKanbanColumns hook for column assignment
+      3. Wire useUserPreferences hook for threshold configuration
+      4. Keep AddTodoBar (relocated to KanbanHeader)
+      5. Keep DismissedSection (at bottom, below Kanban board)
+      6. Keep all optimistic UI patterns (status toggle, dismiss, restore)
+      7. Keep cross-block sync via FeedTodoSyncContext
+      8. Keep LazyTodoAISummaryDialog
+      9. Add side pane for card expansion (TodoDetailPane)
+      10. Wire ThresholdSettingsPopover
+      11. Handle recalculate action
+      12. Handle drag-end: call moveItem from useKanbanColumns
+
+      This is the largest task — it integrates all pieces from tasks 005-023.
+    </context>
+    <constraints>
+      - Must preserve ALL existing functionality (add, toggle, dismiss, restore, AI summary, embedded mode)
+      - Must preserve onCountChange and onRefetchReady callbacks for parent
+      - Must preserve FeedTodoSyncContext integration (items arrive from useTodoItems)
+      - Side pane: try Xrm.App.sidePanes first, fallback to DrawerOverlay
+      - Drag-end handler: extract source/destination from DropResult, call moveItem
+      - Card height (TODO_CARD_HEIGHT) may need adjustment for Kanban layout
+      - Consider embedded mode: in embedded mode, hide KanbanHeader
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/SmartToDo/SmartToDo.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/hooks/useTodoItems.ts</file>
+      <file>src/solutions/LegalWorkspace/src/hooks/useKanbanColumns.ts</file>
+      <file>src/solutions/LegalWorkspace/src/hooks/useUserPreferences.ts</file>
+      <file>src/solutions/LegalWorkspace/src/components/SmartToDo/AddTodoBar.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/SmartToDo/DismissedSection.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/contexts/FeedTodoSyncContext.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read current SmartToDo.tsx thoroughly to understand all features</step>
+    <step>Add imports: KanbanBoard, KanbanColumn, KanbanCard, KanbanHeader, ThresholdSettingsPopover, TodoDetailPane, useKanbanColumns, useUserPreferences</step>
+    <step>Wire useUserPreferences hook with webApi and userId</step>
+    <step>Wire useKanbanColumns hook with items from useTodoItems and thresholds from useUserPreferences</step>
+    <step>Create handleDragEnd callback: extract DropResult, call moveItem if cross-column</step>
+    <step>Create handleCardClick callback: open side pane or DrawerOverlay with TodoDetailPane</step>
+    <step>Create handleSaveDescription callback: write to Dataverse</step>
+    <step>Create handleSettingsOpen/Close state</step>
+    <step>Replace flat list rendering with KanbanHeader + KanbanBoard</step>
+    <step>Pass renderCard function that renders KanbanCard with all callbacks</step>
+    <step>Keep DismissedSection below the Kanban board</step>
+    <step>Keep LazyTodoAISummaryDialog (Suspense-wrapped)</step>
+    <step>Adjust TODO_CARD_HEIGHT for Kanban layout (remove fixed height, use flex: 1)</step>
+    <step>Verify all existing features still work: add, toggle, dismiss, restore, AI summary</step>
+    <step>Verify embedded mode works (no header, flex layout)</step>
+    <step>Verify npm run build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Updated: components/SmartToDo/SmartToDo.tsx (major rewrite)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Kanban board renders with 3 columns (Today, Tomorrow, Future)</criterion>
+    <criterion>Items assigned to columns by To Do Score thresholds</criterion>
+    <criterion>Drag-and-drop moves items between columns with auto-pin</criterion>
+    <criterion>AddTodoBar functional in KanbanHeader</criterion>
+    <criterion>DismissedSection still visible below Kanban board</criterion>
+    <criterion>Checkbox toggle (complete/open) still works</criterion>
+    <criterion>Dismiss and restore still work</criterion>
+    <criterion>Cross-block sync still works (flag in Feed → appears in Kanban)</criterion>
+    <criterion>Card click opens side pane with TodoDetailPane</criterion>
+    <criterion>Settings gear opens ThresholdSettingsPopover</criterion>
+    <criterion>Recalculate button reassigns unpinned items</criterion>
+    <criterion>Embedded mode still works</criterion>
+    <criterion>AI Summary dialog still works</criterion>
+    <criterion>npm run build succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

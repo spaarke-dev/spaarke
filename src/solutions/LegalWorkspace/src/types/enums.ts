@@ -16,6 +16,9 @@ export type TodoStatus = 'Open' | 'Completed' | 'Dismissed';
 /** To-Do item source (matches Dataverse sprk_todosource choice: 100000000=System, 100000001=User, 100000002=AI) */
 export type TodoSource = 'System' | 'User' | 'AI';
 
+/** Kanban column assignment for To Do items */
+export type TodoColumn = 'Today' | 'Tomorrow' | 'Future';
+
 /** Event types matching Dataverse option set */
 export type EventType =
   | 'Email'

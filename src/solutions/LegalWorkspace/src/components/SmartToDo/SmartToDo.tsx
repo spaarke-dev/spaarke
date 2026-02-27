@@ -1,41 +1,38 @@
 /**
- * SmartToDo — Smart To Do list container (Block 4).
+ * SmartToDo — Smart To Do Kanban board container (Block 4).
  *
- * Renders a card with:
- *   - Section header: "Smart To Do" title + Badge with live item count
- *   - Refresh button to re-fetch from Dataverse
- *   - AddTodoBar (Task 015): input row for manual to-do creation
- *   - Loading state (Spinner)
- *   - Error state (MessageBar with retry)
- *   - Empty state (no to-do items)
- *   - Scrollable list of TodoItem rows
- *   - DismissedSection (Task 015): collapsible section for dismissed items
+ * Renders a three-column Kanban board (Today / Tomorrow / Future) where items
+ * are automatically assigned to columns based on their To Do Score and
+ * user-configurable thresholds.
+ *
+ * Layout:
+ *   - KanbanHeader: title, AddTodoBar, recalculate button, settings gear
+ *   - KanbanBoard: drag-and-drop columns with KanbanCard items
+ *   - DismissedSection: collapsible section for dismissed items
+ *   - TodoDetailSidePane: Xrm.App.sidePanes web resource for full event details
  *
  * Data:
  *   - Fetches active to-do items via useTodoItems hook
- *     (sprk_event where sprk_todoflag=true AND sprk_todostatus != Dismissed)
- *   - Items sorted FR-07: priorityscore DESC, then duedate ASC
+ *   - Column assignment via useKanbanColumns hook (score-based with pin support)
+ *   - Threshold preferences via useUserPreferences hook (persisted in Dataverse)
  *
  * Cross-block integration:
  *   - useTodoItems internally consumes FeedTodoSyncContext.subscribe() so that
- *     flag toggles in the Updates Feed (Block 3) are immediately reflected here:
- *       * Newly flagged event → inserted and re-sorted
- *       * Unflagged event → removed from list
- *   - FeedTodoSyncProvider must wrap both ActivityFeed and SmartToDo at app level
- *     (done in LegalWorkspaceApp.tsx as of task 012).
+ *     flag toggles in the Updates Feed (Block 3) are immediately reflected here.
+ *   - FeedTodoSyncProvider must wrap both ActivityFeed and SmartToDo at app level.
  *
- * Task 015 additions:
- *   - AddTodoBar at top of scrollable area
- *   - Checkbox toggle: optimistic Open ↔ Completed, rollback on failure
+ * Preserved features (from pre-Kanban version):
+ *   - AddTodoBar (relocated to KanbanHeader)
+ *   - Checkbox toggle: optimistic Open/Completed, rollback on failure
  *   - Dismiss button: optimistic move to dismissed list, rollback on failure
- *   - DismissedSection at bottom of card: collapsible, with restore button
- *   - Restore: optimistic move back to active list, rollback on failure
+ *   - DismissedSection: collapsible, with restore button
+ *   - LazyTodoAISummaryDialog: lazy-loaded AI summary dialog
+ *   - Embedded mode: headerless, flex-height for tabbed containers
  *
  * Design constraints:
  *   - ALL colours from Fluent UI v9 semantic tokens — zero hardcoded hex/rgb
  *   - makeStyles (Griffel) for all custom styles
  *   - Support light, dark, and high-contrast modes (automatic via token system)
- *   - Fixed height card with overflow-y scroll, matching ActivityFeed pattern
  */
 
 import * as React from "react";
@@ -44,19 +41,24 @@ import {
   shorthands,
   tokens,
   Text,
-  Badge,
   Button,
   Spinner,
   MessageBar,
   MessageBarBody,
 } from "@fluentui/react-components";
-import { ArrowClockwiseRegular } from "@fluentui/react-icons";
-import { TodoItem } from "./TodoItem";
-import { AddTodoBar } from "./AddTodoBar";
+import { KanbanBoard } from "../shared/KanbanBoard";
+import { KanbanCard } from "./KanbanCard";
+import { KanbanHeader } from "./KanbanHeader";
+import { ThresholdSettingsPopover } from "./ThresholdSettings";
 import { DismissedSection } from "./DismissedSection";
 import { useTodoItems } from "../../hooks/useTodoItems";
+import { useKanbanColumns } from "../../hooks/useKanbanColumns";
+import { useUserPreferences } from "../../hooks/useUserPreferences";
 import { DataverseService } from "../../services/DataverseService";
 import { IEvent } from "../../types/entities";
+import { computeTodoScore } from "../../utils/todoScoreUtils";
+import type { TodoColumn } from "../../types/enums";
+import type { DropResult } from "@hello-pangea/dnd";
 import type { IWebApi } from "../../types/xrm";
 
 // ---------------------------------------------------------------------------
@@ -99,11 +101,13 @@ export { LazyTodoAISummaryDialog, TodoAISummaryFallback };
 
 function sortTodoItems(items: IEvent[]): IEvent[] {
   return [...items].sort((a, b) => {
-    const scoreA = a.sprk_priorityscore ?? -1;
-    const scoreB = b.sprk_priorityscore ?? -1;
+    // Primary: To Do Score DESC (higher is more important)
+    const scoreA = computeTodoScore(a).todoScore;
+    const scoreB = computeTodoScore(b).todoScore;
     const scoreDiff = scoreB - scoreA;
     if (scoreDiff !== 0) return scoreDiff;
 
+    // Tiebreaker: duedate ASC (earlier is more urgent)
     const dueDateA = a.sprk_duedate ? new Date(a.sprk_duedate).getTime() : Infinity;
     const dueDateB = b.sprk_duedate ? new Date(b.sprk_duedate).getTime() : Infinity;
     return dueDateA - dueDateB;
@@ -113,9 +117,6 @@ function sortTodoItems(items: IEvent[]): IEvent[] {
 // ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
-
-/** Matches the ActivityFeed card height for visual balance in the 2-column grid */
-const TODO_CARD_HEIGHT = "520px";
 
 const useStyles = makeStyles({
   card: {
@@ -127,8 +128,8 @@ const useStyles = makeStyles({
     ...shorthands.borderColor(tokens.colorNeutralStroke2),
     borderRadius: tokens.borderRadiusMedium,
     overflow: "hidden",
-    height: TODO_CARD_HEIGHT,
-    minHeight: TODO_CARD_HEIGHT,
+    flex: "1 1 0",
+    minHeight: "400px",
   },
   /** Borderless, height-flexible root for use inside a tabbed container. */
   embeddedRoot: {
@@ -137,39 +138,6 @@ const useStyles = makeStyles({
     flex: "1 1 0",
     overflow: "hidden",
     backgroundColor: tokens.colorNeutralBackground1,
-  },
-
-  // ── Header ───────────────────────────────────────────────────────────────
-  header: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
-    borderBottomColor: tokens.colorNeutralStroke2,
-    backgroundColor: tokens.colorNeutralBackground2,
-    flexShrink: 0,
-  },
-  headerLeft: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalS,
-  },
-  headerTitle: {
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-  },
-  headerActions: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalS,
   },
 
   // ── Loading state ─────────────────────────────────────────────────────────
@@ -215,13 +183,17 @@ const useStyles = makeStyles({
     textAlign: "center",
   },
 
-  // ── Scrollable list ───────────────────────────────────────────────────────
-  listContainer: {
+  // ── Kanban board area ─────────────────────────────────────────────────────
+  boardContainer: {
     flex: "1 1 0",
-    overflowY: "auto",
-    // Custom scrollbar styling — subtle to match Fluent aesthetic
-    scrollbarWidth: "thin",
-    scrollbarColor: `${tokens.colorNeutralStroke1} transparent`,
+    display: "flex",
+    flexDirection: "column",
+    minHeight: 0,
+    overflow: "hidden",
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
   },
 });
 
@@ -242,6 +214,16 @@ const TodoEmptyState: React.FC = () => {
       </Text>
     </div>
   );
+};
+
+// ---------------------------------------------------------------------------
+// Column ID to TodoColumn mapping
+// ---------------------------------------------------------------------------
+
+const COLUMN_ID_MAP: Record<string, TodoColumn> = {
+  Today: "Today",
+  Tomorrow: "Tomorrow",
+  Future: "Future",
 };
 
 // ---------------------------------------------------------------------------
@@ -289,11 +271,18 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     serviceRef.current = new DataverseService(webApi);
   }, [webApi]);
 
+  // -------------------------------------------------------------------------
+  // Core data hooks
+  // -------------------------------------------------------------------------
+
   const { items, isLoading, error, refetch } = useTodoItems({
     webApi,
     userId,
     mockItems,
   });
+
+  const { preferences, updatePreferences, isLoading: prefsLoading } =
+    useUserPreferences({ webApi, userId });
 
   // Expose refetch to parent for refresh button routing (embedded mode)
   React.useEffect(() => {
@@ -301,9 +290,9 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refetch]);
 
-  // Local overrides on top of the hook's items list.
-  // We layer optimistic changes over the hook's items so the hook's
-  // cross-block sync (FeedTodoSync) continues to work.
+  // -------------------------------------------------------------------------
+  // Local optimistic state (preserved from pre-Kanban version)
+  // -------------------------------------------------------------------------
 
   /** Status overrides keyed by eventId: 0=Open, 1=Completed */
   const [statusOverrides, setStatusOverrides] = React.useState<Map<string, number>>(
@@ -325,6 +314,12 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   /** Error from a failed add operation */
   const [addError, setAddError] = React.useState<string | null>(null);
 
+  /** Locally-added items (optimistic, replaced by refetch on Dataverse success) */
+  const [addedItems, setAddedItems] = React.useState<IEvent[]>([]);
+
+  /** Settings popover state */
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
+
   // -------------------------------------------------------------------------
   // Derived active items: hook items minus dismissed ones, with status overlays
   // -------------------------------------------------------------------------
@@ -340,8 +335,35 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       });
   }, [items, dismissedItems, statusOverrides]);
 
-  const itemCount = activeItems.length;
-  const isEmpty = !isLoading && !error && itemCount === 0 && dismissedItems.length === 0;
+  // Merge addedItems into the display list
+  const displayItems = React.useMemo(() => {
+    if (addedItems.length === 0) return activeItems;
+    const addedIds = new Set(addedItems.map((a) => a.sprk_eventid));
+    const dedupedActive = activeItems.filter((i) => !addedIds.has(i.sprk_eventid));
+    return sortTodoItems([...dedupedActive, ...addedItems]);
+  }, [activeItems, addedItems]);
+
+  const totalCount = displayItems.length;
+  const isEmpty = !isLoading && !error && totalCount === 0 && dismissedItems.length === 0;
+
+  // -------------------------------------------------------------------------
+  // Kanban columns hook
+  // -------------------------------------------------------------------------
+
+  const {
+    columns,
+    moveItem,
+    reorderInColumn,
+    togglePin,
+    recalculate,
+    isRecalculating,
+  } = useKanbanColumns({
+    items: displayItems,
+    todayThreshold: preferences.todayThreshold,
+    tomorrowThreshold: preferences.tomorrowThreshold,
+    webApi,
+    userId,
+  });
 
   // -------------------------------------------------------------------------
   // Manual add handler
@@ -352,7 +374,6 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       setIsAdding(true);
       setAddError(null);
 
-      // Optimistic: create a temporary item with a fake ID
       const tempId = `temp-${Date.now()}`;
       const optimisticItem: IEvent = {
         sprk_eventid: tempId,
@@ -366,23 +387,12 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         modifiedon: new Date().toISOString(),
       };
 
-      // We can't mutate the hook's items directly, so we track manually-added
-      // items separately and include them via useTodoItems refetch.
-      // Optimistic approach: add to the hook state via refetch + temp tracking
-      // is complex. Instead use a simpler pattern: add temp item to a local list,
-      // then remove it and trigger refetch once Dataverse confirms creation.
-      const addTempItem = (item: IEvent) => {
-        // We surface temp items by adding them into the dismissed-items-exclusion
-        // mechanism via a separate local addedItems state (see below).
-        setAddedItems((prev) => sortTodoItems([...prev, item]));
-      };
-      addTempItem(optimisticItem);
+      setAddedItems((prev) => sortTodoItems([...prev, optimisticItem]));
 
       try {
         const result = await serviceRef.current.createTodo(title, userId);
 
         if (!result.success) {
-          // Rollback optimistic item
           setAddedItems((prev) =>
             prev.filter((i) => i.sprk_eventid !== tempId)
           );
@@ -390,14 +400,12 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
             result.error?.message ?? "Failed to create to-do item. Please try again."
           );
         } else {
-          // Remove temp item and trigger a refetch to get the real record
           setAddedItems((prev) =>
             prev.filter((i) => i.sprk_eventid !== tempId)
           );
           refetch();
         }
-      } catch (err: unknown) {
-        // Rollback
+      } catch {
         setAddedItems((prev) =>
           prev.filter((i) => i.sprk_eventid !== tempId)
         );
@@ -409,89 +417,26 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     [userId, refetch]
   );
 
-  /** Locally-added items (optimistic, replaced by refetch on Dataverse success) */
-  const [addedItems, setAddedItems] = React.useState<IEvent[]>([]);
-
-  // Merge addedItems into the display list (they are already sorted)
-  const displayItems = React.useMemo(() => {
-    if (addedItems.length === 0) return activeItems;
-    const addedIds = new Set(addedItems.map((a) => a.sprk_eventid));
-    // Remove any hook items that match added IDs (avoids duplicates after refetch)
-    const dedupedActive = activeItems.filter((i) => !addedIds.has(i.sprk_eventid));
-    return sortTodoItems([...dedupedActive, ...addedItems]);
-  }, [activeItems, addedItems]);
-
-  // -------------------------------------------------------------------------
-  // Checkbox toggle handler
-  // -------------------------------------------------------------------------
-
-  const handleToggleComplete = React.useCallback(
-    async (eventId: string, completed: boolean) => {
-      const newStatus = completed ? 1 : 0; // 1=Completed, 0=Open
-      const prevStatus = statusOverrides.get(eventId);
-
-      // Optimistic: apply immediately
-      setStatusOverrides((prev) => new Map(prev).set(eventId, newStatus));
-
-      try {
-        const result = await serviceRef.current.updateTodoStatus(
-          eventId,
-          completed ? "Completed" : "Open"
-        );
-
-        if (!result.success) {
-          // Rollback
-          setStatusOverrides((prev) => {
-            const next = new Map(prev);
-            if (prevStatus === undefined) {
-              next.delete(eventId);
-            } else {
-              next.set(eventId, prevStatus);
-            }
-            return next;
-          });
-        }
-      } catch {
-        // Rollback
-        setStatusOverrides((prev) => {
-          const next = new Map(prev);
-          if (prevStatus === undefined) {
-            next.delete(eventId);
-          } else {
-            next.set(eventId, prevStatus);
-          }
-          return next;
-        });
-      }
-    },
-    [statusOverrides]
-  );
-
   // -------------------------------------------------------------------------
   // Dismiss handler
   // -------------------------------------------------------------------------
 
   const handleDismiss = React.useCallback(
     async (eventId: string) => {
-      // Find the item to move
       const item = displayItems.find((i) => i.sprk_eventid === eventId);
       if (!item) return;
 
-      // Optimistic: mark as dismissing + add to dismissed list
       setDismissingIds((prev) => new Set(prev).add(eventId));
       setDismissedItems((prev) => [item, ...prev]);
 
       try {
         const result = await serviceRef.current.dismissTodo(eventId);
-
         if (!result.success) {
-          // Rollback
           setDismissedItems((prev) =>
             prev.filter((i) => i.sprk_eventid !== eventId)
           );
         }
       } catch {
-        // Rollback
         setDismissedItems((prev) =>
           prev.filter((i) => i.sprk_eventid !== eventId)
         );
@@ -515,17 +460,13 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       const item = dismissedItems.find((i) => i.sprk_eventid === eventId);
       if (!item) return;
 
-      // Optimistic: remove from dismissed, add back to active via statusOverrides=Open
       setRestoringIds((prev) => new Set(prev).add(eventId));
       setDismissedItems((prev) => prev.filter((i) => i.sprk_eventid !== eventId));
-      // Item is still in the hook's items list with Dismissed status — override to Open
       setStatusOverrides((prev) => new Map(prev).set(eventId, 0));
 
       try {
         const result = await serviceRef.current.updateTodoStatus(eventId, "Open");
-
         if (!result.success) {
-          // Rollback: put back in dismissed, remove override
           setDismissedItems((prev) => [item, ...prev]);
           setStatusOverrides((prev) => {
             const next = new Map(prev);
@@ -533,11 +474,9 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
             return next;
           });
         } else {
-          // Success: trigger a refetch so the item appears with proper Dataverse data
           refetch();
         }
       } catch {
-        // Rollback
         setDismissedItems((prev) => [item, ...prev]);
         setStatusOverrides((prev) => {
           const next = new Map(prev);
@@ -556,55 +495,295 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   );
 
   // -------------------------------------------------------------------------
-  // Render
+  // Drag-end handler: move item between Kanban columns
   // -------------------------------------------------------------------------
 
-  const totalCount = displayItems.length;
+  const handleDragEnd = React.useCallback(
+    (result: DropResult) => {
+      const { destination, source } = result;
 
-  // Report active item count to parent for tab badge display (embedded mode)
+      // Dropped outside any column or back to the same position
+      if (!destination) return;
+      if (
+        destination.droppableId === source.droppableId &&
+        destination.index === source.index
+      ) {
+        return;
+      }
+
+      if (destination.droppableId === source.droppableId) {
+        // Same-column reorder — preserve user's manual arrangement
+        reorderInColumn(source.droppableId, source.index, destination.index);
+      } else {
+        // Cross-column move
+        const targetColumn = COLUMN_ID_MAP[destination.droppableId];
+        if (targetColumn) {
+          moveItem(result.draggableId, targetColumn);
+        }
+      }
+    },
+    [moveItem, reorderInColumn]
+  );
+
+  // -------------------------------------------------------------------------
+  // Card click handler: open Xrm.App.sidePanes detail pane
+  // -------------------------------------------------------------------------
+
+  // -------------------------------------------------------------------------
+  // Xrm resolution — try all frame levels (matches EventsPage getXrm pattern)
+  // -------------------------------------------------------------------------
+
+  const getXrm = React.useCallback((): any | null => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (typeof Xrm !== "undefined" && (Xrm as any)?.App?.sidePanes) return Xrm;
+    try {
+      const p = (window.parent as any)?.Xrm;
+      if (p?.App?.sidePanes) return p;
+    } catch { /* cross-origin */ }
+    try {
+      const t = (window.top as any)?.Xrm;
+      if (t?.App?.sidePanes) return t;
+    } catch { /* cross-origin */ }
+    return null;
+  }, []);
+
+  const TODO_PANE_ID = "todoDetailPane";
+
+  const handleCardClick = React.useCallback(async (eventId: string) => {
+    try {
+      const xrm = getXrm();
+      const sidePanes = xrm?.App?.sidePanes;
+      if (!sidePanes) {
+        console.warn("[SmartToDo] Xrm.App.sidePanes not available");
+        return;
+      }
+
+      const pageInput = {
+        pageType: "webresource",
+        webresourceName: "sprk_tododetailsidepane",
+        data: `eventId=${eventId}`,
+      };
+
+      const existingPane = sidePanes.getPane(TODO_PANE_ID);
+      if (existingPane) {
+        await existingPane.navigate(pageInput);
+        existingPane.select();
+      } else {
+        const pane = await sidePanes.createPane({
+          title: "To Do Details",
+          paneId: TODO_PANE_ID,
+          canClose: true,
+          width: 400,
+          isSelected: true,
+        });
+        await pane.navigate(pageInput);
+      }
+    } catch (err) {
+      console.warn("[SmartToDo] Side pane unavailable", err);
+    }
+  }, [getXrm]);
+
+  // -------------------------------------------------------------------------
+  // BroadcastChannel: listen for saves from TodoDetailSidePane → refetch
+  // -------------------------------------------------------------------------
+
+  React.useEffect(() => {
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel("spaarke-todo-detail-channel");
+      channel.onmessage = (ev: MessageEvent) => {
+        if (ev.data?.type === "TODO_SAVED" || ev.data?.type === "TODO_DETAIL_SAVED") {
+          refetch();
+        }
+      };
+    } catch {
+      // BroadcastChannel not supported — ignore
+    }
+    return () => {
+      channel?.close();
+    };
+  }, [refetch]);
+
+  // -------------------------------------------------------------------------
+  // Close side pane on navigation away or when user interacts elsewhere.
+  //
+  // Strategies (layered):
+  //   1. URL polling (200ms) — Dataverse SPA navigation doesn't fire unload
+  //   2. beforeunload / pagehide — standard browser navigation
+  //   3. Parent frame hashchange / popstate — SPA route changes
+  //   4. IntersectionObserver — tab switch sets display:none
+  //   5. Document mousedown — user clicks outside SmartToDo (flat grid nav)
+  //   6. React cleanup — component unmount
+  // -------------------------------------------------------------------------
+
+  const rootRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const closeTodoPane = () => {
+      try {
+        const xrm = getXrm();
+        const pane = xrm?.App?.sidePanes?.getPane(TODO_PANE_ID);
+        if (pane) pane.close();
+      } catch {
+        // Side pane API unavailable — ignore
+      }
+    };
+
+    // Capture initial parent URL for SPA navigation detection
+    let lastParentHref = "";
+    try { lastParentHref = window.parent?.location?.href ?? ""; } catch { /* cross-origin */ }
+
+    // Poll for Dataverse SPA navigation (URL changes without unload events)
+    const navCheckInterval = setInterval(() => {
+      try {
+        const currentHref = window.parent?.location?.href ?? "";
+        if (lastParentHref && currentHref && currentHref !== lastParentHref) {
+          closeTodoPane();
+          lastParentHref = currentHref;
+        }
+      } catch { /* cross-origin — ignore */ }
+    }, 200);
+
+    // Standard browser events
+    window.addEventListener("beforeunload", closeTodoPane);
+    window.addEventListener("pagehide", closeTodoPane);
+
+    // Parent frame navigation events
+    const handleParentNav = () => closeTodoPane();
+    try {
+      window.parent?.addEventListener("hashchange", handleParentNav);
+      window.parent?.addEventListener("popstate", handleParentNav);
+    } catch { /* cross-origin — ignore */ }
+
+    // IntersectionObserver: detect when SmartToDo is hidden (e.g. tab switch
+    // sets display:none on the parent tab panel)
+    let observer: IntersectionObserver | undefined;
+    if (rootRef.current) {
+      observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) {
+              closeTodoPane();
+            }
+          }
+        },
+        { threshold: 0 }
+      );
+      observer.observe(rootRef.current);
+    }
+
+    // Document mousedown: close pane when user clicks outside SmartToDo.
+    // In a flat-grid workspace, all sections are always visible — this
+    // detects when the user interacts with another part of the page.
+    const handleDocumentMouseDown = (ev: MouseEvent) => {
+      if (!rootRef.current) return;
+      const target = ev.target as Node | null;
+      if (target && !rootRef.current.contains(target)) {
+        closeTodoPane();
+      }
+    };
+    document.addEventListener("mousedown", handleDocumentMouseDown, true);
+
+    return () => {
+      clearInterval(navCheckInterval);
+      observer?.disconnect();
+      document.removeEventListener("mousedown", handleDocumentMouseDown, true);
+      window.removeEventListener("beforeunload", closeTodoPane);
+      window.removeEventListener("pagehide", closeTodoPane);
+      try {
+        window.parent?.removeEventListener("hashchange", handleParentNav);
+        window.parent?.removeEventListener("popstate", handleParentNav);
+      } catch { /* cross-origin — ignore */ }
+      closeTodoPane();
+    };
+  }, [getXrm]);
+
+  // -------------------------------------------------------------------------
+  // Settings: save thresholds
+  // -------------------------------------------------------------------------
+
+  const handleSettingsSave = React.useCallback(
+    (prefs: { todayThreshold: number; tomorrowThreshold: number }) => {
+      void updatePreferences(prefs);
+    },
+    [updatePreferences]
+  );
+
+  // -------------------------------------------------------------------------
+  // Pin toggle handler
+  // -------------------------------------------------------------------------
+
+  const handlePinToggle = React.useCallback(
+    (eventId: string) => {
+      togglePin(eventId);
+    },
+    [togglePin]
+  );
+
+  // -------------------------------------------------------------------------
+  // renderCard for KanbanBoard
+  // -------------------------------------------------------------------------
+
+  const renderCard = React.useCallback(
+    (item: IEvent, _index: number, columnId: string) => {
+      // Get column accent colour from the columns array
+      const col = columns.find((c) => c.id === columnId);
+      return (
+        <KanbanCard
+          event={item}
+          onPinToggle={handlePinToggle}
+          onClick={handleCardClick}
+          accentColor={col?.accentColor}
+        />
+      );
+    },
+    [columns, handlePinToggle, handleCardClick]
+  );
+
+  const getItemId = React.useCallback(
+    (item: IEvent) => item.sprk_eventid,
+    []
+  );
+
+  // -------------------------------------------------------------------------
+  // Report count to parent
+  // -------------------------------------------------------------------------
+
   React.useEffect(() => {
     onCountChange?.(totalCount);
   }, [totalCount, onCountChange]);
 
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
+
   return (
     <div
+      ref={rootRef}
       className={embedded ? styles.embeddedRoot : styles.card}
       role="region"
-      aria-label={`Smart To Do list, ${totalCount} item${totalCount === 1 ? "" : "s"}`}
+      aria-label={`Smart To Do Kanban, ${totalCount} item${totalCount === 1 ? "" : "s"}`}
     >
-      {/* ── Header — hidden when embedded inside a tabbed container ──── */}
-      {!embedded && (
-        <div className={styles.header}>
-          <div className={styles.headerLeft}>
-            <Text className={styles.headerTitle} size={400}>
-              Smart To Do
-            </Text>
-            {/* Item count badge — updates reactively as items change */}
-            {!isLoading && !error && (
-              <Badge
-                appearance="filled"
-                color="brand"
-                size="small"
-                aria-label={`${totalCount} to-do item${totalCount === 1 ? "" : "s"}`}
-                aria-live="polite"
-              >
-                {totalCount}
-              </Badge>
-            )}
-          </div>
+      {/* ── KanbanHeader — hidden when embedded ────────────────────────── */}
+      <KanbanHeader
+        totalCount={totalCount}
+        onRecalculate={recalculate}
+        isRecalculating={isRecalculating}
+        onAdd={handleAdd}
+        isAdding={isAdding}
+        onSettingsOpen={() => setSettingsOpen(true)}
+        embedded={embedded}
+      />
 
-          <div className={styles.headerActions}>
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<ArrowClockwiseRegular />}
-              onClick={refetch}
-              aria-label="Refresh to-do list"
-              disabled={isLoading}
-            />
-          </div>
-        </div>
-      )}
+      {/* ── Settings popover — anchor to a hidden trigger ──────────────── */}
+      <ThresholdSettingsPopover
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        preferences={preferences}
+        onSave={handleSettingsSave}
+      >
+        <span style={{ display: "none" }} />
+      </ThresholdSettingsPopover>
 
       {/* ── Add-error banner ──────────────────────────────────────────── */}
       {addError && (
@@ -626,7 +805,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       )}
 
       {/* ── Loading state ─────────────────────────────────────────────── */}
-      {isLoading && (
+      {(isLoading || prefsLoading) && (
         <div className={styles.loadingContainer}>
           <Spinner
             size="medium"
@@ -655,31 +834,22 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         </div>
       )}
 
-      {/* ── Main content area (AddTodoBar + list + dismissed) ─────────── */}
-      {!isLoading && !error && (
+      {/* ── Main content area (Kanban board + dismissed) ──────────────── */}
+      {!isLoading && !prefsLoading && !error && (
         <>
-          {/* Add input bar — always visible */}
-          <AddTodoBar onAdd={handleAdd} isAdding={isAdding} />
-
           {/* Empty state */}
           {isEmpty && <TodoEmptyState />}
 
-          {/* Scrollable todo list */}
+          {/* Kanban board */}
           {!isEmpty && (
-            <div
-              className={styles.listContainer}
-              role="list"
-              aria-label="To-do items"
-            >
-              {displayItems.map((item) => (
-                <TodoItem
-                  key={item.sprk_eventid}
-                  event={item}
-                  onToggleComplete={handleToggleComplete}
-                  onDismiss={handleDismiss}
-                  isDismissing={dismissingIds.has(item.sprk_eventid)}
-                />
-              ))}
+            <div className={styles.boardContainer}>
+              <KanbanBoard<IEvent>
+                columns={columns}
+                onDragEnd={handleDragEnd}
+                renderCard={renderCard}
+                getItemId={getItemId}
+                ariaLabel="Smart To Do Kanban board"
+              />
             </div>
           )}
 
@@ -691,6 +861,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
           />
         </>
       )}
+
     </div>
   );
 };

@@ -1,0 +1,34 @@
+<task id="025" project="events-smart-todo-kanban">
+  <metadata>
+    <title>Update SmartToDo barrel exports</title>
+    <phase>3 — Smart To Do Kanban Components</phase>
+    <estimate>10min</estimate>
+    <tags>export</tags>
+    <dependencies>024</dependencies>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Update components/SmartToDo/index.ts to export new Kanban components and their types.</goal>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/SmartToDo/index.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Add exports for KanbanCard, KanbanHeader, ThresholdSettings, TodoDetailPane and their prop types</step>
+    <step>Verify npm run build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Updated: components/SmartToDo/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All new components exportable from '../SmartToDo'</criterion>
+    <criterion>npm run build succeeds</criterion>
+  </acceptance-criteria>
+</task>

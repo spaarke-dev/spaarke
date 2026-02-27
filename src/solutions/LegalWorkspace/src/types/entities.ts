@@ -39,6 +39,10 @@ export interface IEvent {
   sprk_regardingrecordname?: string; // Text field: display name of associated matter/project
   /** Display name from sprk_regardingrecordtype lookup (populated via formatted value mapping). */
   regardingRecordTypeName?: string;
+  /** Display name from sprk_assignedto contact lookup (populated via formatted value mapping). */
+  assignedToName?: string;
+  sprk_todocolumn?: number;  // Choice: 0=Today, 1=Tomorrow, 2=Future
+  sprk_todopinned?: boolean; // Lock item in assigned Kanban column
   sprk_duedate?: string;  // ISO date
   createdon: string;
   modifiedon: string;
@@ -80,6 +84,16 @@ export interface IContact {
   sprk_contactid: string;
   sprk_name: string;
   sprk_email?: string;
+}
+
+/** Dataverse sprk_userpreference entity for storing user-specific settings. */
+export interface IUserPreference {
+  sprk_userpreferenceid: string;
+  sprk_preferencetype: number;   // Choice field discriminator
+  sprk_preferencevalue: string;  // JSON text
+  _sprk_user_value?: string;     // Lookup to systemuser
+  createdon: string;
+  modifiedon: string;
 }
 
 /** Generic lookup item for Dataverse reference table searches. */

@@ -1,0 +1,47 @@
+<task id="030" project="events-smart-todo-kanban">
+  <metadata>
+    <title>Dark mode and high-contrast verification</title>
+    <phase>4 — Polish</phase>
+    <estimate>30min</estimate>
+    <tags>verification, dark-mode, accessibility</tags>
+    <dependencies>026</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Verify all Kanban components render correctly in dark mode and high-contrast mode.</goal>
+    <context>
+      ADR-021 requires all UI to use Fluent v9 semantic tokens with zero hardcoded colours.
+      This task verifies that:
+      - Column headers and accent borders are visible in dark mode
+      - Card backgrounds, text, and badges have sufficient contrast
+      - Pin icons are visible
+      - Side pane content renders correctly
+      - ThresholdSettingsPopover is readable
+      - No hardcoded hex values in any new component
+    </context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Review all new component files for any hardcoded colour values</step>
+    <step>Verify all colour references use tokens.* from Fluent v9</step>
+    <step>Deploy to Dataverse dev environment and test dark mode toggle</step>
+    <step>Document any issues found and fix</step>
+  </steps>
+
+  <outputs>
+    <output>Dark mode verification report</output>
+    <output>Any component fixes for colour issues</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Zero hardcoded hex/rgb values in new components</criterion>
+    <criterion>All components render correctly in light, dark, and high-contrast modes</criterion>
+  </acceptance-criteria>
+</task>

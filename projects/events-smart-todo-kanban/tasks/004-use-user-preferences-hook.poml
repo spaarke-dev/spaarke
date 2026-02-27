@@ -1,0 +1,56 @@
+<task id="004" project="events-smart-todo-kanban">
+  <metadata>
+    <title>Create useUserPreferences hook</title>
+    <phase>1 — Foundation</phase>
+    <estimate>30min</estimate>
+    <tags>hook, preferences</tags>
+    <dependencies>003</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create a React hook that reads and writes To Do Kanban threshold preferences from sprk_userpreference in Dataverse.</goal>
+    <context>
+      The hook needs to:
+      1. On mount, fetch the user's TodoKanbanThresholds preference
+      2. Parse the JSON preferencevalue into { todayThreshold: number, tomorrowThreshold: number }
+      3. Provide updatePreferences() to save new thresholds
+      4. Use defaults (60, 30) when no preference record exists
+      5. Follow existing hook patterns (useState, useEffect, useCallback, useRef for service)
+    </context>
+    <constraints>
+      - Uses DataverseService.getUserPreferences and .saveUserPreferences
+      - JSON parse with try/catch fallback to defaults
+      - Memoize return value to prevent cascading re-renders
+      - Follow existing useTodoItems pattern for hook structure
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/hooks/useTodoItems.ts</file>
+      <file>src/solutions/LegalWorkspace/src/services/DataverseService.ts</file>
+      <file>src/solutions/LegalWorkspace/src/types/entities.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create src/solutions/LegalWorkspace/src/hooks/useUserPreferences.ts</step>
+    <step>Define ITodoKanbanPreferences interface with todayThreshold and tomorrowThreshold</step>
+    <step>Define IUseUserPreferencesResult with preferences, updatePreferences, isLoading</step>
+    <step>Implement hook: fetch on mount, parse JSON, provide update callback</step>
+    <step>Export defaults as constants: DEFAULT_TODAY_THRESHOLD = 60, DEFAULT_TOMORROW_THRESHOLD = 30</step>
+    <step>Verify npm run build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>New file: hooks/useUserPreferences.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Hook returns preferences with correct defaults</criterion>
+    <criterion>updatePreferences writes to Dataverse and updates local state</criterion>
+    <criterion>JSON parse errors fall back to defaults</criterion>
+    <criterion>npm run build succeeds</criterion>
+  </acceptance-criteria>
+</task>

@@ -41,6 +41,7 @@ import { useActivityFeedFilters } from "../../hooks/useActivityFeedFilters";
 import { EventFilterCategory } from "../../types/enums";
 import { IEvent } from "../../types/entities";
 import { useFeedTodoSync } from "../../hooks/useFeedTodoSync";
+import { navigateToEntity } from "../../utils/navigation";
 import type { IWebApi } from "../../types/xrm";
 
 // ---------------------------------------------------------------------------
@@ -315,6 +316,23 @@ export const ActivityFeed: React.FC<IActivityFeedProps> = ({
     [setFilter]
   );
 
+  // ── Action handlers for FeedItemCard ─────────────────────────────────
+  const handleEmail = React.useCallback((eventId: string) => {
+    console.info(`[ActivityFeed] Email action for event ${eventId} — will connect to Communication Service`);
+  }, []);
+
+  const handleTeams = React.useCallback((eventId: string) => {
+    console.info(`[ActivityFeed] Teams action for event ${eventId} — will connect to Teams deep link`);
+  }, []);
+
+  const handleEdit = React.useCallback((eventId: string) => {
+    navigateToEntity({
+      action: "openRecord",
+      entityName: "sprk_event",
+      entityId: eventId,
+    });
+  }, []);
+
   return (
     <div className={embedded ? styles.embeddedRoot : styles.card} aria-label="Updates Feed" role="region">
       {/* Header — hidden when embedded inside a tabbed container */}
@@ -403,6 +421,9 @@ export const ActivityFeed: React.FC<IActivityFeedProps> = ({
           <ActivityFeedList
             events={filteredEvents}
             scrollContainerRef={scrollContainerRef}
+            onEmail={handleEmail}
+            onTeams={handleTeams}
+            onEdit={handleEdit}
           />
         )}
       </div>

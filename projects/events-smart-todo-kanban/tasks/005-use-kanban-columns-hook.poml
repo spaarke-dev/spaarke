@@ -1,0 +1,68 @@
+<task id="005" project="events-smart-todo-kanban">
+  <metadata>
+    <title>Create useKanbanColumns hook</title>
+    <phase>1 — Foundation</phase>
+    <estimate>1hr</estimate>
+    <tags>hook, kanban, scoring</tags>
+    <dependencies>003, 004</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create a React hook that assigns To Do items to Kanban columns (Today/Tomorrow/Future) based on To Do Score thresholds, with pin/move/recalculate support.</goal>
+    <context>
+      This is the core data-management hook for the Kanban board. It:
+      1. Takes items from useTodoItems and thresholds from useUserPreferences
+      2. Assigns each item to a column:
+         - Pinned items (sprk_todopinned=true) keep their sprk_todocolumn
+         - Unpinned items: score >= todayThreshold → Today, >= tomorrowThreshold → Tomorrow, else → Future
+      3. Provides moveItem(eventId, targetColumn) — moves item + auto-pins + writes to Dataverse
+      4. Provides togglePin(eventId) — flip pin state + write to Dataverse
+      5. Provides recalculate() — reassign all unpinned items by current scores + thresholds, batch write
+
+      Uses computeTodoScore from todoScoreUtils.ts for scoring.
+    </context>
+    <constraints>
+      - Optimistic UI for all operations (move, pin, recalculate)
+      - Rollback on Dataverse write failure
+      - Column structure: IKanbanColumn generic type from shared KanbanBoard
+      - Must preserve existing cross-block sync (items come from useTodoItems)
+      - Recalculate must skip pinned items
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/hooks/useTodoItems.ts</file>
+      <file>src/solutions/LegalWorkspace/src/utils/todoScoreUtils.ts</file>
+      <file>src/solutions/LegalWorkspace/src/services/DataverseService.ts</file>
+      <file>src/solutions/LegalWorkspace/src/types/entities.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create src/solutions/LegalWorkspace/src/hooks/useKanbanColumns.ts</step>
+    <step>Define IUseKanbanColumnsOptions: items, todayThreshold, tomorrowThreshold, webApi, userId</step>
+    <step>Define IUseKanbanColumnsResult: columns, moveItem, togglePin, recalculate, isRecalculating</step>
+    <step>Implement assignItemToColumn(event, todayThreshold, tomorrowThreshold) pure function</step>
+    <step>Implement column derivation with useMemo: group items into 3 columns, respect pinned items</step>
+    <step>Implement moveItem: optimistic column change + auto-pin + Dataverse write</step>
+    <step>Implement togglePin: optimistic pin flip + Dataverse write with rollback</step>
+    <step>Implement recalculate: reassign unpinned items + batch Dataverse write</step>
+    <step>Verify npm run build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>New file: hooks/useKanbanColumns.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Items correctly assigned to columns by To Do Score thresholds</criterion>
+    <criterion>Pinned items stay in their sprk_todocolumn regardless of score</criterion>
+    <criterion>moveItem updates column + pins + writes to Dataverse</criterion>
+    <criterion>togglePin flips sprk_todopinned + writes to Dataverse</criterion>
+    <criterion>recalculate only moves unpinned items</criterion>
+    <criterion>All operations use optimistic UI with rollback</criterion>
+    <criterion>npm run build succeeds</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,63 @@
+<task id="010" project="events-smart-todo-kanban">
+  <metadata>
+    <title>Create generic KanbanBoard component</title>
+    <phase>2 — Reusable DnD Components</phase>
+    <estimate>1hr</estimate>
+    <tags>component, dnd, reusable</tags>
+    <dependencies>001</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create a generic, reusable KanbanBoard component that wraps @hello-pangea/dnd DragDropContext and renders typed columns with cards.</goal>
+    <context>
+      This component goes in components/shared/ and must have ZERO domain-specific logic.
+      It accepts generic typed columns and a renderCard function, making it reusable for any
+      future Kanban-style UI (project tasks, document review pipeline, etc.).
+
+      The component uses DragDropContext from @hello-pangea/dnd and delegates column rendering
+      to KanbanColumn (task 011). The onDragEnd callback is passed through to the consumer.
+    </context>
+    <constraints>
+      - TypeScript generics: KanbanBoard&lt;T&gt; where T is the item type
+      - NO SmartToDo-specific imports, types, or logic
+      - Fluent v9 tokens for all styling (makeStyles/Griffel)
+      - Horizontal flex layout for columns (equal-width, gap between)
+      - Must support dark mode via semantic tokens
+      - Must pass keyboard accessibility requirements
+      - ADR-012: Shared component, reusable across the application
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create src/solutions/LegalWorkspace/src/components/shared/ directory</step>
+    <step>Create KanbanBoard.tsx with IKanbanColumn&lt;T&gt; and IKanbanBoardProps&lt;T&gt; interfaces</step>
+    <step>Implement DragDropContext wrapper with onDragEnd prop passthrough</step>
+    <step>Render columns using horizontal flexbox (flex: 1 for equal width)</step>
+    <step>Import and use KanbanColumn for each column (will be created in task 011 — use placeholder for now)</step>
+    <step>Add Griffel styles with Fluent v9 tokens (gap, padding, height)</step>
+    <step>Add aria attributes for accessibility (role="region", aria-label)</step>
+    <step>Verify npm run build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>New file: components/shared/KanbanBoard.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>KanbanBoard is fully generic (typed with &lt;T&gt;)</criterion>
+    <criterion>Zero domain-specific imports</criterion>
+    <criterion>Uses DragDropContext from @hello-pangea/dnd</criterion>
+    <criterion>Horizontal flex layout for columns</criterion>
+    <criterion>All styles use Fluent v9 semantic tokens</criterion>
+    <criterion>npm run build succeeds</criterion>
+  </acceptance-criteria>
+</task>

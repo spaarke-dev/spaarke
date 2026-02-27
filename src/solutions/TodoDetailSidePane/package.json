@@ -1,20 +1,16 @@
 {
-  "name": "legal-workspace",
-  "version": "1.0.2",
-  "description": "Legal Operations Workspace - Home Corporate Custom Page",
-  "type": "module",
+  "name": "todo-detail-sidepane",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TodoDetailSidePane — Xrm side pane for To Do item details, description editing, and score breakdown",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node -e \"require('fs').renameSync('dist/index.html','dist/corporateworkspace.html')\"",
-    "preview": "vite preview",
-    "lint": "eslint src --ext .ts,.tsx",
-    "lint:fix": "eslint src --ext .ts,.tsx --fix"
+    "build": "vite build && node -e \"require('fs').renameSync('dist/index.html','dist/tododetailsidepane.html')\"",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@azure/msal-browser": "^4.28.2",
     "@fluentui/react-components": "^9.46.2",
-    "@fluentui/react-icons": "^2.0.225",
-    "@hello-pangea/dnd": "^18.0.1"
+    "@fluentui/react-icons": "^2.0.200"
   },
   "devDependencies": {
     "@types/react": "^18.3.27",
