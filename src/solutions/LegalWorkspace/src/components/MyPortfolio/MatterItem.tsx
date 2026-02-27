@@ -169,7 +169,7 @@ export const MatterItem: React.FC<IMatterItemProps> = React.memo(({ matter }) =>
   const statusLabel = getStatusLabel(status);
 
   // Secondary line: prefer practiceArea, fall back to type
-  const secondaryText = matter.sprk_practicearea ?? matter.matterTypeName ?? '';
+  const secondaryText = matter.practiceAreaName ?? matter.matterTypeName ?? '';
 
   // ---------------------------------------------------------------------------
   // Navigation
