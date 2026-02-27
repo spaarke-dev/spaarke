@@ -104,7 +104,7 @@ function mapMatterTabFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
     ...e,
     matterTypeName: (e[`_sprk_mattertype_ref_value${FV}`] as string) ?? '',
     practiceAreaName: (e[`sprk_practicearea${FV}`] as string) ?? '',
-    statusName: (e[`sprk_status${FV}`] as string) ?? '',
+    statuscodeName: (e[`statuscode${FV}`] as string) ?? '',
   }));
 }
 

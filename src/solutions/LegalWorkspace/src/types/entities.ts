@@ -4,7 +4,7 @@ export interface IMatter {
   sprk_name: string;
   sprk_mattername?: string;
   sprk_matternumber?: string;
-  sprk_description?: string;
+  sprk_matterdescription?: string;
   /** Display name from sprk_mattertype_ref lookup (populated via formatted value mapping). */
   matterTypeName?: string;
   /** Display name from sprk_practicearea_ref lookup (populated via formatted value mapping). */
@@ -23,8 +23,9 @@ export interface IMatter {
   _sprk_assignedattorney_value?: string;  // Lookup GUID (contact)
   _sprk_assignedparalegal_value?: string;  // Lookup GUID (contact)
   sprk_status?: number;  // Option set
-  /** Display name from sprk_status option set (populated via formatted value mapping). */
-  statusName?: string;
+  statuscode?: number;  // Standard Dataverse statuscode
+  /** Display name from statuscode (populated via formatted value mapping). */
+  statuscodeName?: string;
   createdon: string;  // ISO date
   modifiedon: string;  // ISO date
 }

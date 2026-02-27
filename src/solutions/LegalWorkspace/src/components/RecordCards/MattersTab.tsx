@@ -72,8 +72,8 @@ export const MattersTab: React.FC<IMattersTabProps> = ({
             matter.sprk_matternumber,
             matter.practiceAreaName,
           ].filter(Boolean) as string[]}
-          statusBadge={matter.statusName || undefined}
-          description={matter.sprk_description}
+          statusBadge={matter.statuscodeName || undefined}
+          description={matter.sprk_matterdescription}
         />
       ))}
     </RecordCardList>

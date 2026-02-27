@@ -74,7 +74,7 @@ const useStyles = makeStyles({
   tabList: {
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalL,
+    paddingTop: "10px",
     paddingBottom: tokens.spacingVerticalS,
     columnGap: tokens.spacingHorizontalM,
     flexShrink: 0,
@@ -100,9 +100,10 @@ const useStyles = makeStyles({
     borderBottomWidth: "1px",
     borderBottomStyle: "solid",
     borderBottomColor: tokens.colorNeutralStroke2,
-    backgroundColor: tokens.colorNeutralBackground2,
+    backgroundColor: tokens.colorNeutralBackground1,
     flexShrink: 0,
     minHeight: "44px",
+    marginBottom: "10px",
   },
 
   // ── Tab content panels ──────────────────────────────────────────────────

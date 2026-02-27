@@ -141,10 +141,10 @@ export const MATTER_TAB_SELECT_FIELDS: string[] = [
   'sprk_matterid',
   'sprk_matternumber',
   'sprk_mattername',
-  'sprk_description',
+  'sprk_matterdescription',
   '_sprk_mattertype_ref_value',  // Lookup → sprk_mattertype_ref (display via formatted value)
   'sprk_practicearea',
-  'sprk_status',
+  'statuscode',
   '_ownerid_value',
   '_modifiedby_value',
   '_sprk_assignedattorney_value',
@@ -295,7 +295,6 @@ export const PROJECT_TAB_SELECT_FIELDS: string[] = [
   'sprk_projectname',
   'sprk_projectdescription',
   'statuscode',
-  'sprk_status',
   '_sprk_projecttype_ref_value',  // Lookup → sprk_projecttype_ref (display via formatted value)
   '_ownerid_value',
   '_modifiedby_value',
