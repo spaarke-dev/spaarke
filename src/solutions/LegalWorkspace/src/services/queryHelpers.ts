@@ -266,7 +266,7 @@ export function buildEventsFeedQuery(
 export const PROJECT_SELECT_FIELDS: string[] = [
   'sprk_projectid',
   'sprk_name',
-  '_sprk_projecttype_value',  // Lookup → sprk_projecttype_ref (display via formatted value)
+  '_sprk_projecttype_ref_value',  // Lookup → sprk_projecttype_ref (display via formatted value)
   '_sprk_practicearea_value',  // Lookup → sprk_practicearea_ref (display via formatted value)
   '_sprk_owner_value',
   'sprk_status',
@@ -295,7 +295,7 @@ export const PROJECT_TAB_SELECT_FIELDS: string[] = [
   'sprk_projectname',
   'sprk_projectdescription',
   'statuscode',
-  '_sprk_projecttype_value',  // Lookup → sprk_projecttype_ref (display via formatted value)
+  '_sprk_projecttype_ref_value',  // Lookup → sprk_projecttype_ref (display via formatted value)
   '_ownerid_value',
   '_modifiedby_value',
   '_sprk_assignedattorney_value',

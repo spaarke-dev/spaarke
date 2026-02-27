@@ -89,7 +89,7 @@ function mapMatterFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
 function mapProjectFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
   return entities.map(e => ({
     ...e,
-    projectTypeName: (e[`_sprk_projecttype_value${FV}`] as string) ?? '',
+    projectTypeName: (e[`_sprk_projecttype_ref_value${FV}`] as string) ?? '',
     practiceAreaName: (e[`_sprk_practicearea_value${FV}`] as string) ?? '',
   }));
 }
@@ -113,7 +113,7 @@ function mapMatterTabFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
 function mapProjectTabFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
   return entities.map(e => ({
     ...e,
-    projectTypeName: (e[`_sprk_projecttype_value${FV}`] as string) ?? '',
+    projectTypeName: (e[`_sprk_projecttype_ref_value${FV}`] as string) ?? '',
     statuscodeName: (e[`statuscode${FV}`] as string) ?? '',
   }));
 }
