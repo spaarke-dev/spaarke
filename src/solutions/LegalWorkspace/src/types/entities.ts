@@ -85,11 +85,26 @@ export interface IProject {
 /** Dataverse sprk_document entity */
 export interface IDocument {
   sprk_documentid: string;
-  sprk_name: string;
+  sprk_documentname: string;
+  sprk_documentdescription?: string;
   /** Display name from sprk_documenttype choice field (populated via formatted value mapping). */
   documentTypeName?: string;
   sprk_description?: string;
-  _sprk_matter_value?: string;  // Lookup GUID
+  sprk_filetype?: string;           // Text: "pdf", "docx", "xlsx", etc.
+  sprk_workspaceflag?: boolean;
+  sprk_filesummary?: string;        // AI-generated summary
+  sprk_filetldr?: string;           // AI-generated TL;DR
+  _sprk_checkedoutby_value?: string; // Contact lookup GUID
+  /** Display name from sprk_checkedoutby contact lookup (populated via formatted value mapping). */
+  checkedOutByName?: string;
+  statuscode?: number;              // 1=Draft, 421500001=Checked Out, 421500002=Check In, 2=Locked
+  /** Display name from statuscode (populated via formatted value mapping). */
+  statuscodeName?: string;
+  _ownerid_value?: string;          // Lookup GUID
+  _createdby_value?: string;        // Lookup GUID
+  _modifiedby_value?: string;       // Lookup GUID
+  _sprk_matter_value?: string;      // Lookup GUID
+  createdon?: string;               // ISO date
   modifiedon: string;
 }
 

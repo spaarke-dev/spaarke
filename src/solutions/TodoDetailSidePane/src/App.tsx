@@ -1,9 +1,11 @@
 /**
  * App — Root component for TodoDetailSidePane.
  *
- * Reads eventId from URL params, loads the record from Dataverse via
- * Xrm.WebApi, renders TodoDetail, and communicates saves back to the
- * parent Kanban board via BroadcastChannel.
+ * Reads eventId from URL params, loads data from TWO Dataverse entities:
+ *   - sprk_event: core event fields
+ *   - sprk_eventtodo: to-do extension fields (notes, completed, statuscode)
+ *
+ * Communicates saves back to the parent Kanban board via BroadcastChannel.
  */
 
 import * as React from "react";
@@ -16,11 +18,17 @@ import {
   Text,
 } from "@fluentui/react-components";
 import { parseSidePaneParams } from "./utils/parseParams";
-import { loadTodoRecord, saveTodoFields } from "./services/todoService";
-import type { ITodoFieldUpdates } from "./services/todoService";
+import {
+  loadTodoRecord,
+  loadTodoExtension,
+  saveTodoFields,
+  saveTodoExtensionFields,
+} from "./services/todoService";
+import type { IEventFieldUpdates, ITodoExtensionUpdates } from "./services/todoService";
 import { sendTodoSaved } from "./utils/broadcastChannel";
 import { TodoDetail } from "./components/TodoDetail";
 import type { ITodoRecord } from "./types/TodoRecord";
+import type { ITodoExtension } from "./types/TodoRecord";
 
 // ---------------------------------------------------------------------------
 // Theme resolution (matches EventDetailSidePane pattern)
@@ -114,6 +122,7 @@ export function App() {
   const params = React.useMemo(() => parseSidePaneParams(), []);
 
   const [record, setRecord] = React.useState<ITodoRecord | null>(null);
+  const [todoExt, setTodoExt] = React.useState<ITodoExtension | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -136,7 +145,7 @@ export function App() {
     };
   }, [eventId]);
 
-  // Load record when eventId changes
+  // Load both entities in parallel when eventId changes
   React.useEffect(() => {
     if (!eventId) {
       setIsLoading(false);
@@ -148,12 +157,21 @@ export function App() {
     setIsLoading(true);
     setError(null);
 
-    loadTodoRecord(eventId).then((result) => {
+    Promise.all([
+      loadTodoRecord(eventId),
+      loadTodoExtension(eventId),
+    ]).then(([eventResult, extResult]) => {
       if (cancelled) return;
-      if (result.success && result.data) {
-        setRecord(result.data);
+      if (eventResult.success && eventResult.data) {
+        setRecord(eventResult.data);
       } else {
-        setError(result.error ?? "Failed to load record");
+        setError(eventResult.error ?? "Failed to load record");
+      }
+      // Extension is optional — may not exist for every event
+      if (extResult.success && extResult.data) {
+        setTodoExt(extResult.data);
+      } else {
+        setTodoExt(null);
       }
       setIsLoading(false);
     });
@@ -183,21 +201,34 @@ export function App() {
     try { window.close(); } catch { /* ignore */ }
   }, []);
 
-  // Save fields handler — updates one or more fields on the event record
-  const handleSaveFields = React.useCallback(
-    async (evtId: string, fields: ITodoFieldUpdates) => {
+  // Save event fields (sprk_event)
+  const handleSaveEventFields = React.useCallback(
+    async (evtId: string, fields: IEventFieldUpdates) => {
       const result = await saveTodoFields(evtId, fields);
       if (result.success) {
-        // Update local record with saved values
         setRecord((prev) => (prev ? { ...prev, ...fields } : prev));
-        // Notify parent Kanban to refresh
         sendTodoSaved(evtId);
       } else {
-        console.error("[App] Save failed:", result.error);
+        console.error("[App] Event save failed:", result.error);
       }
       return result;
     },
     []
+  );
+
+  // Save todo extension fields (sprk_eventtodo)
+  const handleSaveTodoExtFields = React.useCallback(
+    async (todoId: string, fields: ITodoExtensionUpdates) => {
+      const result = await saveTodoExtensionFields(todoId, fields);
+      if (result.success) {
+        setTodoExt((prev) => (prev ? { ...prev, ...fields } : prev));
+        if (eventId) sendTodoSaved(eventId);
+      } else {
+        console.error("[App] Todo extension save failed:", result.error);
+      }
+      return result;
+    },
+    [eventId]
   );
 
   // Remove from To Do — sets sprk_todoflag = false, notifies Kanban, closes pane
@@ -232,9 +263,11 @@ export function App() {
         <div className={styles.body}>
           <TodoDetail
             record={record}
+            todoExtension={todoExt}
             isLoading={isLoading}
             error={error}
-            onSaveFields={handleSaveFields}
+            onSaveEventFields={handleSaveEventFields}
+            onSaveTodoExtFields={handleSaveTodoExtFields}
             onRemoveTodo={handleRemoveTodo}
             onClose={handleClose}
           />
