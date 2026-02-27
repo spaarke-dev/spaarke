@@ -6,6 +6,7 @@ using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Caching.Distributed;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Models.Ai.Chat;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -178,7 +179,7 @@ public class PlaybookService : IPlaybookService
 
         // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
         // NOTE: sprk_istemplate removed until Dataverse schema is updated
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon";
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon,sprk_playbookcapabilities";
         var url = $"{EntitySetName}({playbookId})?$select={select}";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);
@@ -206,6 +207,7 @@ public class PlaybookService : IPlaybookService
             IsPublic = entity.IsPublic ?? false,
             IsTemplate = entity.IsTemplate ?? false,
             OwnerId = entity.OwnerId ?? Guid.Empty,
+            Capabilities = ParseCapabilities(entity.Capabilities),
             ActionIds = actionIds,
             SkillIds = skillIds,
             KnowledgeIds = knowledgeIds,
@@ -367,7 +369,7 @@ public class PlaybookService : IPlaybookService
         // Query by name - exact match, case-insensitive per Dataverse default
         // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
         // NOTE: sprk_istemplate removed until Dataverse schema is updated (causes 400 if column doesn't exist)
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon";
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon,sprk_playbookcapabilities";
         var filter = $"sprk_name eq '{EscapeODataString(name)}'";
         var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$top=1";
 
@@ -428,6 +430,7 @@ public class PlaybookService : IPlaybookService
             IsPublic = entity.IsPublic ?? false,
             IsTemplate = entity.IsTemplate ?? false,
             OwnerId = entity.OwnerId ?? Guid.Empty,
+            Capabilities = ParseCapabilities(entity.Capabilities),
             ActionIds = actionIds,
             SkillIds = skillIds,
             KnowledgeIds = knowledgeIds,
@@ -478,7 +481,7 @@ public class PlaybookService : IPlaybookService
         // Get paginated results
         // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
         // NOTE: sprk_istemplate removed until Dataverse schema is updated
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,modifiedon";
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,modifiedon,sprk_playbookcapabilities";
         var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$orderby={orderBy}&$top={pageSize}&$skip={skip}";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);
@@ -530,6 +533,43 @@ public class PlaybookService : IPlaybookService
     {
         // Escape single quotes for OData filter
         return value.Replace("'", "''");
+    }
+
+    /// <summary>
+    /// Parse Dataverse multi-select choice field (sprk_playbookcapabilities) into capability strings.
+    ///
+    /// Dataverse returns multi-select picklists as comma-separated integer option values,
+    /// e.g. "100000000,100000001,100000006". This maps them to <see cref="PlaybookCapabilities"/>
+    /// string constants used by the tool resolution pipeline.
+    /// </summary>
+    private static string[] ParseCapabilities(string? rawCapabilities)
+    {
+        if (string.IsNullOrWhiteSpace(rawCapabilities))
+            return [];
+
+        var capabilities = new List<string>();
+        foreach (var part in rawCapabilities.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (int.TryParse(part, out var optionValue))
+            {
+                var capability = optionValue switch
+                {
+                    100000000 => PlaybookCapabilities.Search,
+                    100000001 => PlaybookCapabilities.Analyze,
+                    100000002 => PlaybookCapabilities.WriteBack,
+                    100000003 => PlaybookCapabilities.Reanalyze,
+                    100000004 => PlaybookCapabilities.SelectionRevise,
+                    100000005 => PlaybookCapabilities.WebSearch,
+                    100000006 => PlaybookCapabilities.Summarize,
+                    _ => null
+                };
+
+                if (capability != null)
+                    capabilities.Add(capability);
+            }
+        }
+
+        return capabilities.ToArray();
     }
 
     /// <inheritdoc />
@@ -907,6 +947,14 @@ public class PlaybookService : IPlaybookService
 
         [JsonPropertyName("modifiedon")]
         public DateTime? ModifiedOn { get; set; }
+
+        /// <summary>
+        /// Multi-select choice field (sprk_playbookcapabilities global option set).
+        /// Dataverse Web API returns multi-select picklists as a comma-separated string
+        /// of integer option values, e.g. "100000000,100000001,100000006".
+        /// </summary>
+        [JsonPropertyName("sprk_playbookcapabilities")]
+        public string? Capabilities { get; set; }
     }
 
     private class ODataCollectionResponse
