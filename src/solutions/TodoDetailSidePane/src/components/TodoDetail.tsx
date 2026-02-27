@@ -2,15 +2,15 @@
  * TodoDetail — Main content component for the To Do Detail side pane.
  *
  * Layout (top to bottom):
- *   1. Description (editable, auto-expands up to 15 lines, then scrolls)
- *   2. Details: Due Date, Assigned To
- *   3. To Do Score section:
- *      - Title row with score circle + info button (Popover)
- *      - Priority Score slider (editable)
- *      - Effort Score slider (editable)
- *      - Urgency Score slider (read-only, computed from due date)
- *   4. Remove from To Do button
- *   5. Sticky footer: Save + Save & Close buttons
+ *   1. Description (editable, auto-expands, no scroll)
+ *   2. Details: Record Type, Record link, Due Date, Assigned To
+ *   3. To Do Notes (editable, auto-expands, no scroll) — from sprk_eventtodo
+ *   4. To Do Score section (Priority, Effort, Urgency sliders)
+ *   5. Sticky footer: Remove, Save, Completed buttons
+ *
+ * Data spans TWO entities:
+ *   - sprk_event: description, due date, scores, lookups
+ *   - sprk_eventtodo: notes, completed flag/date, statuscode
  *
  * All colours from Fluent UI v9 semantic tokens (ADR-021).
  */
@@ -26,6 +26,8 @@ import {
   Combobox,
   Option,
   Button,
+  Badge,
+  Link,
   Popover,
   PopoverTrigger,
   PopoverSurface,
@@ -37,10 +39,22 @@ import type {
   SliderOnChangeData,
   ComboboxProps,
 } from "@fluentui/react-components";
-import { SaveRegular, DismissRegular, InfoRegular, DeleteRegular } from "@fluentui/react-icons";
+import {
+  SaveRegular,
+  InfoRegular,
+  DeleteRegular,
+  CheckmarkRegular,
+  OpenRegular,
+} from "@fluentui/react-icons";
 import { ITodoRecord } from "../types/TodoRecord";
+import type { ITodoExtension } from "../types/TodoRecord";
 import { searchContacts } from "../services/todoService";
-import type { ITodoFieldUpdates, IContactOption } from "../services/todoService";
+import type {
+  IEventFieldUpdates,
+  ITodoExtensionUpdates,
+  IContactOption,
+} from "../services/todoService";
+import { getXrm } from "../utils/xrmAccess";
 
 // ---------------------------------------------------------------------------
 // To Do Score computation (self-contained — no cross-solution imports)
@@ -97,6 +111,12 @@ function toDateInputValue(dateStr?: string | null): string {
   return d.toISOString().split("T")[0];
 }
 
+/** Map record type display name → Dataverse entity logical name for navigation. */
+const RECORD_TYPE_ENTITY_MAP: Record<string, string> = {
+  Matter: "sprk_matter",
+  Project: "sprk_project",
+};
+
 // ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
@@ -123,8 +143,8 @@ const useStyles = makeStyles({
     height: "1px",
     backgroundColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
-    marginTop: "10px",
-    marginBottom: "10px",
+    marginTop: "25px",
+    marginBottom: "25px",
   },
   section: {
     display: "flex",
@@ -243,6 +263,20 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
     fontSize: tokens.fontSizeBase300,
   },
+  recordLink: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+    cursor: "pointer",
+  },
+  completedBtn: {
+    backgroundColor: tokens.colorPaletteGreenBackground3,
+    color: tokens.colorNeutralForegroundOnBrand,
+    ":hover": {
+      backgroundColor: tokens.colorPaletteGreenForeground2,
+    },
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -251,15 +285,23 @@ const useStyles = makeStyles({
 
 export interface ITodoDetailProps {
   record: ITodoRecord | null;
+  /** sprk_eventtodo extension record (notes, completed, statuscode). */
+  todoExtension: ITodoExtension | null;
   isLoading: boolean;
   error: string | null;
-  onSaveFields: (
+  /** Save event fields (sprk_event). */
+  onSaveEventFields: (
     eventId: string,
-    fields: ITodoFieldUpdates
+    fields: IEventFieldUpdates
+  ) => Promise<{ success: boolean; error?: string }>;
+  /** Save todo extension fields (sprk_eventtodo). */
+  onSaveTodoExtFields: (
+    todoId: string,
+    fields: ITodoExtensionUpdates
   ) => Promise<{ success: boolean; error?: string }>;
   /** Remove from To Do (sets sprk_todoflag=false, then closes pane). */
   onRemoveTodo?: (eventId: string) => Promise<void>;
-  /** Close the side pane (called after Save & Close). */
+  /** Close the side pane. */
   onClose?: () => void;
 }
 
@@ -268,17 +310,30 @@ export interface ITodoDetailProps {
 // ---------------------------------------------------------------------------
 
 export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
-  ({ record, isLoading, error, onSaveFields, onRemoveTodo, onClose }) => {
+  ({
+    record,
+    todoExtension,
+    isLoading,
+    error,
+    onSaveEventFields,
+    onSaveTodoExtFields,
+    onRemoveTodo,
+    onClose,
+  }) => {
     const styles = useStyles();
 
-    // Auto-expand textarea ref (grows up to 15 lines, then scrolls)
+    // Auto-expand textarea refs
     const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+    const notesTextareaRef = React.useRef<HTMLTextAreaElement | null>(null);
 
-    // Editable field values
+    // Editable field values (sprk_event fields)
     const [description, setDescription] = React.useState("");
     const [dueDate, setDueDate] = React.useState("");
     const [priority, setPriority] = React.useState<number>(50);
     const [effort, setEffort] = React.useState<number>(50);
+
+    // Editable field value (sprk_eventtodo field)
+    const [toDoNotes, setToDoNotes] = React.useState("");
 
     // Assigned To state
     const [assignedToId, setAssignedToId] = React.useState<string | null>(null);
@@ -291,6 +346,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     // Save state
     const [isSaving, setIsSaving] = React.useState(false);
     const [isRemoving, setIsRemoving] = React.useState(false);
+    const [isCompleting, setIsCompleting] = React.useState(false);
     const [saveError, setSaveError] = React.useState<string | null>(null);
 
     // Snapshot of original values (for dirty detection)
@@ -300,6 +356,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       priority: 50,
       effort: 50,
       assignedToId: null as string | null,
+      toDoNotes: "",
     });
 
     // Reset when record changes
@@ -325,6 +382,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
         setIsEditingAssignedTo(false);
         setSaveError(null);
         origRef.current = {
+          ...origRef.current,
           description: desc,
           dueDate: dd,
           priority: pri,
@@ -334,41 +392,72 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       }
     }, [record?.sprk_eventid]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // Reset notes when todoExtension changes
+    React.useEffect(() => {
+      const notes = todoExtension?.sprk_todonotes ?? "";
+      setToDoNotes(notes);
+      origRef.current = { ...origRef.current, toDoNotes: notes };
+    }, [todoExtension?.sprk_eventtodoid]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // Dirty detection
-    const isDirty =
+    const isEventDirty =
       description !== origRef.current.description ||
       dueDate !== origRef.current.dueDate ||
       priority !== origRef.current.priority ||
       effort !== origRef.current.effort ||
       assignedToId !== origRef.current.assignedToId;
 
+    const isNotesDirty = toDoNotes !== origRef.current.toDoNotes;
+
+    const isDirty = isEventDirty || isNotesDirty;
+
     // --- Handlers ---
 
     const handleDescriptionChange = React.useCallback(
       (_ev: unknown, data: { value: string }) => {
         setDescription(data.value);
-        // Auto-resize after React updates the DOM
         requestAnimationFrame(() => {
           const el = textareaRef.current;
           if (!el) return;
           el.style.height = "auto";
-          const maxH = 300;
-          el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
-          el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";
+          el.style.height = `${el.scrollHeight}px`;
+          el.style.overflowY = "hidden";
         });
       },
       []
     );
 
-    // Auto-resize textarea on initial load
+    // Auto-resize description textarea on initial load
     React.useEffect(() => {
       const el = textareaRef.current;
       if (!el) return;
       el.style.height = "auto";
-      const maxH = 300;
-      el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
-      el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";
+      el.style.height = `${el.scrollHeight}px`;
+      el.style.overflowY = "hidden";
     }, [description]);
+
+    const handleNotesChange = React.useCallback(
+      (_ev: unknown, data: { value: string }) => {
+        setToDoNotes(data.value);
+        requestAnimationFrame(() => {
+          const el = notesTextareaRef.current;
+          if (!el) return;
+          el.style.height = "auto";
+          el.style.height = `${el.scrollHeight}px`;
+          el.style.overflowY = "hidden";
+        });
+      },
+      []
+    );
+
+    // Auto-resize notes textarea on initial load
+    React.useEffect(() => {
+      const el = notesTextareaRef.current;
+      if (!el) return;
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+      el.style.overflowY = "hidden";
+    }, [toDoNotes]);
 
     const handleDueDateChange = React.useCallback(
       (ev: React.ChangeEvent<HTMLInputElement>) => setDueDate(ev.target.value),
@@ -423,44 +512,66 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       []
     );
 
-    // Save all dirty fields
+    // Save dirty fields to the correct entities
     const handleSave = React.useCallback(async () => {
       if (!record || !isDirty) return;
       setIsSaving(true);
       setSaveError(null);
 
-      const updates: ITodoFieldUpdates = {};
-      if (description !== origRef.current.description) {
-        updates.sprk_description = description;
-      }
-      if (dueDate !== origRef.current.dueDate) {
-        updates.sprk_duedate = dueDate || null;
-      }
-      if (priority !== origRef.current.priority) {
-        updates.sprk_priorityscore = priority;
-      }
-      if (effort !== origRef.current.effort) {
-        updates.sprk_effortscore = effort;
-      }
-      if (assignedToId !== origRef.current.assignedToId) {
-        updates["sprk_AssignedTo@odata.bind"] = assignedToId
-          ? `/sprk_contacts(${assignedToId})`
-          : null;
-      }
-
       try {
-        const result = await onSaveFields(record.sprk_eventid, updates);
-        if (result.success) {
-          origRef.current = {
-            description,
-            dueDate,
-            priority,
-            effort,
-            assignedToId,
-          };
-        } else {
-          setSaveError(result.error ?? "Save failed");
+        // Save event fields if any changed
+        if (isEventDirty) {
+          const eventUpdates: IEventFieldUpdates = {};
+          if (description !== origRef.current.description) {
+            eventUpdates.sprk_description = description;
+          }
+          if (dueDate !== origRef.current.dueDate) {
+            eventUpdates.sprk_duedate = dueDate || null;
+          }
+          if (priority !== origRef.current.priority) {
+            eventUpdates.sprk_priorityscore = priority;
+          }
+          if (effort !== origRef.current.effort) {
+            eventUpdates.sprk_effortscore = effort;
+          }
+          if (assignedToId !== origRef.current.assignedToId) {
+            eventUpdates["sprk_AssignedTo@odata.bind"] = assignedToId
+              ? `/contacts(${assignedToId})`
+              : null;
+          }
+          const eventResult = await onSaveEventFields(record.sprk_eventid, eventUpdates);
+          if (!eventResult.success) {
+            setSaveError(eventResult.error ?? "Failed to save event fields");
+            setIsSaving(false);
+            return;
+          }
         }
+
+        // Save notes if changed (requires todoExtension record)
+        if (isNotesDirty && todoExtension?.sprk_eventtodoid) {
+          const extUpdates: ITodoExtensionUpdates = {
+            sprk_todonotes: toDoNotes,
+          };
+          const extResult = await onSaveTodoExtFields(
+            todoExtension.sprk_eventtodoid,
+            extUpdates
+          );
+          if (!extResult.success) {
+            setSaveError(extResult.error ?? "Failed to save notes");
+            setIsSaving(false);
+            return;
+          }
+        }
+
+        // Update snapshots on success
+        origRef.current = {
+          description,
+          dueDate,
+          priority,
+          effort,
+          assignedToId,
+          toDoNotes,
+        };
       } catch {
         setSaveError("Save failed — unexpected error");
       } finally {
@@ -468,13 +579,18 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       }
     }, [
       record,
+      todoExtension,
       isDirty,
+      isEventDirty,
+      isNotesDirty,
       description,
       dueDate,
       priority,
       effort,
       assignedToId,
-      onSaveFields,
+      toDoNotes,
+      onSaveEventFields,
+      onSaveTodoExtFields,
     ]);
 
     // Remove from To Do: sets sprk_todoflag = false, notifies Kanban, closes pane
@@ -490,13 +606,109 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       }
     }, [record, onRemoveTodo]);
 
-    // Save & Close: save dirty fields then close the pane
-    const handleSaveAndClose = React.useCallback(async () => {
-      if (record && isDirty) {
-        await handleSave();
+    // Completed: saves dirty fields + marks sprk_eventtodo as completed
+    const handleCompleted = React.useCallback(async () => {
+      if (!record) return;
+      setIsCompleting(true);
+      setSaveError(null);
+
+      try {
+        // Save any dirty event fields first
+        if (isEventDirty) {
+          const eventUpdates: IEventFieldUpdates = {};
+          if (description !== origRef.current.description) {
+            eventUpdates.sprk_description = description;
+          }
+          if (dueDate !== origRef.current.dueDate) {
+            eventUpdates.sprk_duedate = dueDate || null;
+          }
+          if (priority !== origRef.current.priority) {
+            eventUpdates.sprk_priorityscore = priority;
+          }
+          if (effort !== origRef.current.effort) {
+            eventUpdates.sprk_effortscore = effort;
+          }
+          if (assignedToId !== origRef.current.assignedToId) {
+            eventUpdates["sprk_AssignedTo@odata.bind"] = assignedToId
+              ? `/contacts(${assignedToId})`
+              : null;
+          }
+          const eventResult = await onSaveEventFields(record.sprk_eventid, eventUpdates);
+          if (!eventResult.success) {
+            setSaveError(eventResult.error ?? "Failed to save event fields");
+            setIsCompleting(false);
+            return;
+          }
+        }
+
+        // Mark as completed on sprk_eventtodo
+        if (todoExtension?.sprk_eventtodoid) {
+          const extUpdates: ITodoExtensionUpdates = {
+            sprk_completed: true,
+            sprk_completeddate: new Date().toISOString(),
+            statuscode: 2,
+          };
+          // Also save notes if dirty
+          if (isNotesDirty) {
+            extUpdates.sprk_todonotes = toDoNotes;
+          }
+          const extResult = await onSaveTodoExtFields(
+            todoExtension.sprk_eventtodoid,
+            extUpdates
+          );
+          if (!extResult.success) {
+            setSaveError(extResult.error ?? "Failed to mark as completed");
+            setIsCompleting(false);
+            return;
+          }
+        }
+
+        onClose?.();
+      } catch {
+        setSaveError("Failed to mark as completed — unexpected error");
+      } finally {
+        setIsCompleting(false);
       }
-      onClose?.();
-    }, [record, isDirty, handleSave, onClose]);
+    }, [
+      record,
+      todoExtension,
+      isEventDirty,
+      isNotesDirty,
+      description,
+      dueDate,
+      priority,
+      effort,
+      assignedToId,
+      toDoNotes,
+      onSaveEventFields,
+      onSaveTodoExtFields,
+      onClose,
+    ]);
+
+    // Open regarding record in a new browser tab
+    const handleOpenRegardingRecord = React.useCallback(() => {
+      if (!record?.sprk_regardingrecordid) return;
+      const typeName =
+        record[
+          "_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue"
+        ] ?? "";
+      const entityName = RECORD_TYPE_ENTITY_MAP[typeName];
+      if (!entityName) return;
+
+      const xrm = getXrm();
+      if (xrm?.Navigation) {
+        xrm.Navigation.navigateTo(
+          {
+            pageType: "entityrecord",
+            entityName,
+            entityId: record.sprk_regardingrecordid,
+          },
+          { target: 1 } // 1 = new window/tab
+        ).catch(() => {
+          // Fallback: open via URL
+        });
+      }
+    }, [record]);
 
     // --- Render states ---
 
@@ -549,18 +761,49 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               resize="none"
               textarea={{
                 ref: textareaRef,
-                style: { minHeight: "60px", maxHeight: "300px" },
+                style: { minHeight: "160px" },
               }}
             />
           </div>
 
           <div className={styles.divider} role="separator" />
 
-          {/* ── Details: Due Date + Assigned To ────────────────────────── */}
+          {/* ── Details ────────────────────────────────────────────────── */}
           <div className={styles.section}>
             <Text className={styles.sectionTitle} size={300}>
               Details
             </Text>
+
+            {/* Record Type tag */}
+            {record["_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue"] && (
+              <div className={styles.fieldRow}>
+                <label className={styles.fieldLabel}>Record Type</label>
+                <div>
+                  <Badge
+                    appearance="filled"
+                    color="informative"
+                    size="medium"
+                  >
+                    {record["_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue"]}
+                  </Badge>
+                </div>
+              </div>
+            )}
+
+            {/* Record link */}
+            {record.sprk_regardingrecordname && record.sprk_regardingrecordid && (
+              <div className={styles.fieldRow}>
+                <label className={styles.fieldLabel}>Record</label>
+                <Link
+                  className={styles.recordLink}
+                  onClick={handleOpenRegardingRecord}
+                  as="button"
+                >
+                  {record.sprk_regardingrecordname}
+                  <OpenRegular style={{ fontSize: "12px" }} />
+                </Link>
+              </div>
+            )}
 
             <div className={styles.fieldRow}>
               <label className={styles.fieldLabel}>Due Date</label>
@@ -611,6 +854,25 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                 </Combobox>
               )}
             </div>
+          </div>
+
+          <div className={styles.divider} role="separator" />
+
+          {/* ── To Do Notes (from sprk_eventtodo) ──────────────────────── */}
+          <div className={styles.section}>
+            <Text className={styles.sectionTitle} size={300}>
+              To Do Notes
+            </Text>
+            <Textarea
+              value={toDoNotes}
+              onChange={handleNotesChange}
+              placeholder="Add notes..."
+              resize="none"
+              textarea={{
+                ref: notesTextareaRef,
+                style: { minHeight: "160px" },
+              }}
+            />
           </div>
 
           <div className={styles.divider} role="separator" />
@@ -698,18 +960,6 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               />
             </div>
 
-            <div className={styles.sliderRow}>
-              <div className={styles.sliderLabelRow}>
-                <label className={styles.fieldLabel}>Urgency (30%)</label>
-                <span className={styles.sliderValue}>{score.urgencyRaw}</span>
-              </div>
-              <Slider
-                value={score.urgencyRaw}
-                min={0}
-                max={100}
-                disabled
-              />
-            </div>
           </div>
         </div>
 
@@ -720,27 +970,27 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               appearance="subtle"
               icon={<DeleteRegular />}
               onClick={handleRemoveTodo}
-              disabled={isRemoving || isSaving}
+              disabled={isRemoving || isSaving || isCompleting}
               style={{ color: tokens.colorPaletteRedForeground1, marginRight: "auto" }}
             >
               {isRemoving ? "Removing..." : "Remove"}
             </Button>
           )}
           <Button
-            appearance="secondary"
-            icon={<DismissRegular />}
-            onClick={handleSaveAndClose}
-            disabled={isSaving}
-          >
-            {isDirty ? "Save & Close" : "Close"}
-          </Button>
-          <Button
             appearance="primary"
             icon={<SaveRegular />}
             onClick={handleSave}
-            disabled={!isDirty || isSaving}
+            disabled={!isDirty || isSaving || isCompleting}
           >
             {isSaving ? "Saving..." : "Save"}
+          </Button>
+          <Button
+            icon={<CheckmarkRegular />}
+            onClick={handleCompleted}
+            disabled={isSaving || isCompleting}
+            className={styles.completedBtn}
+          >
+            {isCompleting ? "Completing..." : "Completed"}
           </Button>
         </div>
       </div>

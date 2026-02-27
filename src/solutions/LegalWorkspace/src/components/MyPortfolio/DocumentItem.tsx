@@ -192,7 +192,7 @@ export interface IDocumentItemProps {
 export const DocumentItem: React.FC<IDocumentItemProps> = ({ document }) => {
   const styles = useStyles();
 
-  const fileIcon = getFileIcon(document.sprk_name);
+  const fileIcon = getFileIcon(document.sprk_documentname);
   const timestamp = formatTimestamp(document.modifiedon);
 
   // ---------------------------------------------------------------------------
@@ -228,7 +228,7 @@ export const DocumentItem: React.FC<IDocumentItemProps> = ({ document }) => {
       tabIndex={0}
       onClick={handleNavigate}
       onKeyDown={handleKeyDown}
-      aria-label={`Document: ${document.sprk_name}.${document.documentTypeName ? ` Type: ${document.documentTypeName}.` : ''}`}
+      aria-label={`Document: ${document.sprk_documentname}.${document.documentTypeName ? ` Type: ${document.documentTypeName}.` : ''}`}
     >
       {/* File type icon */}
       <span className={styles.fileIcon} aria-hidden="true">
@@ -238,7 +238,7 @@ export const DocumentItem: React.FC<IDocumentItemProps> = ({ document }) => {
       {/* Center: document name, description, secondary metadata */}
       <div className={styles.documentInfo}>
         <Text size={200} className={styles.documentName}>
-          {document.sprk_name}
+          {document.sprk_documentname}
         </Text>
 
         {document.sprk_description && (
