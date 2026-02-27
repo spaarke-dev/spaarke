@@ -36,6 +36,7 @@ import {
   GavelRegular,
   TaskListSquareLtrRegular,
   ReceiptRegular,
+  InfoRegular,
 } from "@fluentui/react-icons";
 import { ActivityFeed } from "../ActivityFeed";
 import { SmartToDo } from "../SmartToDo";
@@ -86,6 +87,28 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase400,
     lineHeight: tokens.lineHeightBase400,
+  },
+
+  // ── Toolbar (Matters / Projects / Invoices only) ────────────────────────
+  toolbar: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    borderBottomWidth: "1px",
+    borderBottomStyle: "solid",
+    borderBottomColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground2,
+    flexShrink: 0,
+    minHeight: "36px",
+  },
+  toolbarIcon: {
+    color: tokens.colorNeutralForeground3,
+    cursor: "pointer",
   },
 
   // ── Tab content panels ──────────────────────────────────────────────────
@@ -313,6 +336,9 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
         role="tabpanel"
         aria-label="Matters list"
       >
+        <div className={styles.toolbar} role="toolbar" aria-label="Matters toolbar">
+          <InfoRegular fontSize={18} className={styles.toolbarIcon} aria-label="Information" />
+        </div>
         <MattersTab
           service={service}
           userId={userId}
@@ -327,6 +353,9 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
         role="tabpanel"
         aria-label="Projects list"
       >
+        <div className={styles.toolbar} role="toolbar" aria-label="Projects toolbar">
+          <InfoRegular fontSize={18} className={styles.toolbarIcon} aria-label="Information" />
+        </div>
         <ProjectsTab
           service={service}
           userId={userId}
@@ -341,6 +370,9 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
         role="tabpanel"
         aria-label="Invoices list"
       >
+        <div className={styles.toolbar} role="toolbar" aria-label="Invoices toolbar">
+          <InfoRegular fontSize={18} className={styles.toolbarIcon} aria-label="Information" />
+        </div>
         <InvoicesTab
           service={service}
           userId={userId}
