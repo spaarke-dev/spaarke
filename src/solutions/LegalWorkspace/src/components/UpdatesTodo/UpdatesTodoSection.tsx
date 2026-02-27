@@ -93,8 +93,8 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "row",
     alignItems: "center",
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
     borderBottomWidth: "1px",
@@ -102,7 +102,7 @@ const useStyles = makeStyles({
     borderBottomColor: tokens.colorNeutralStroke2,
     backgroundColor: tokens.colorNeutralBackground2,
     flexShrink: 0,
-    minHeight: "36px",
+    minHeight: "44px",
   },
 
   // ── Tab content panels ──────────────────────────────────────────────────
