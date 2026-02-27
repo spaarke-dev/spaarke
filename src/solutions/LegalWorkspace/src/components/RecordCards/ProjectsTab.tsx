@@ -64,7 +64,7 @@ export const ProjectsTab: React.FC<IProjectsTabProps> = ({
           entityName="sprk_project"
           entityId={project.sprk_projectid}
           typeBadge={project.projectTypeName || undefined}
-          title={project.sprk_projectname ?? project.sprk_name}
+          title={project.sprk_projectname ?? ''}
           primaryFields={[
             project.sprk_projectnumber,
           ].filter(Boolean) as string[]}

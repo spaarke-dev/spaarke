@@ -141,7 +141,6 @@ export const MATTER_TAB_SELECT_FIELDS: string[] = [
   'sprk_matterid',
   'sprk_matternumber',
   'sprk_mattername',
-  'sprk_name',
   'sprk_description',
   '_sprk_mattertype_ref_value',  // Lookup → sprk_mattertype_ref (display via formatted value)
   'sprk_practicearea',
@@ -294,7 +293,6 @@ export const PROJECT_TAB_SELECT_FIELDS: string[] = [
   'sprk_projectid',
   'sprk_projectnumber',
   'sprk_projectname',
-  'sprk_name',
   'sprk_projectdescription',
   'statuscode',
   'sprk_status',
