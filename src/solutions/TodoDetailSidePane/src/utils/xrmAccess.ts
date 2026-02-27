@@ -9,11 +9,13 @@
 
 export interface IXrmWebApi {
   retrieveRecord(entityName: string, id: string, options?: string): Promise<any>;
+  retrieveMultipleRecords(entityName: string, options?: string): Promise<{ entities: any[] }>;
   updateRecord(entityName: string, id: string, data: Record<string, unknown>): Promise<any>;
 }
 
 export interface IXrmNavigation {
   openForm(options: Record<string, unknown>): Promise<any>;
+  navigateTo(pageInput: Record<string, unknown>, navigationOptions?: Record<string, unknown>): Promise<any>;
 }
 
 export interface IXrm {

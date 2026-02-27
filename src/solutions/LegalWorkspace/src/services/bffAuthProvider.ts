@@ -228,5 +228,40 @@ export async function authenticatedFetch(
   return response;
 }
 
+// ---------------------------------------------------------------------------
+// Tenant ID helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the Azure AD tenant ID.
+ *
+ * Resolution order:
+ *   1. MSAL account tenantId (most reliable — populated after authentication)
+ *   2. Xrm.Utility.getGlobalContext().organizationSettings.tenantId
+ *   3. Empty string (caller must handle)
+ */
+export async function getTenantId(): Promise<string> {
+  // 1. MSAL account
+  const msal = await ensureMsalInitialized();
+  if (msal) {
+    const accounts = msal.getAllAccounts();
+    if (accounts.length > 0 && accounts[0].tenantId) {
+      return accounts[0].tenantId;
+    }
+  }
+
+  // 2. Xrm global context
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm = (window.top as any)?.Xrm ?? (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
+    const tid = xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId;
+    if (tid) return tid;
+  } catch {
+    /* cross-origin or unavailable — swallow */
+  }
+
+  return '';
+}
+
 // Re-export scope for convenience
 export { BFF_API_SCOPE };
