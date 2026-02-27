@@ -18,6 +18,10 @@ module.exports = (env) => {
         // Resolve workspace dependency to shared library source for bundling
         '@spaarke/ui-components': path.resolve(__dirname, '../../shared/Spaarke.UI.Components/src'),
       },
+      modules: [
+        path.resolve(__dirname, 'node_modules'),
+        'node_modules',
+      ],
     },
     module: {
       rules: [
