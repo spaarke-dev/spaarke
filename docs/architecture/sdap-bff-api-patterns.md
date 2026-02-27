@@ -1,7 +1,7 @@
 # SDAP BFF API Patterns
 
 > **Source**: SDAP-ARCHITECTURE-GUIDE.md (BFF API section)
-> **Last Updated**: February 17, 2026
+> **Last Updated**: February 26, 2026
 > **Applies To**: Backend API development, endpoint changes, service layer
 
 ---
@@ -1295,6 +1295,107 @@ traces
 - **Full Architecture**: [office-outlook-teams-integration-architecture.md](office-outlook-teams-integration-architecture.md)
 - **Component Interactions**: [sdap-component-interactions.md](sdap-component-interactions.md) Pattern 5B
 - **Customer Deployment**: [CUSTOMER-DEPLOYMENT-GUIDE.md](../guides/CUSTOMER-DEPLOYMENT-GUIDE.md) Service Bus configuration
+
+---
+
+## Code Page → BFF API Authentication
+
+### Overview
+
+React Code Pages (HTML web resources) call the BFF API for AI analysis, document operations, and other server-side features. Authentication differs depending on how the Code Page is loaded:
+
+| Launch Mode | Token Acquisition | Performance |
+|-------------|-------------------|-------------|
+| `Xrm.Navigation.navigateTo` (dialog) | Xrm platform APIs (getAccessToken) | Fast — no MSAL initialization |
+| Embedded iframe on form | MSAL `ssoSilent()` (Azure AD session cookie) | ~200-500ms MSAL init on first use |
+
+### Why Two Modes Exist
+
+Code Pages are standard HTML web resources. They can be:
+1. **Opened as dialogs** via `navigateTo({ pageType: "webresource" })` — the Xrm runtime injects token APIs
+2. **Embedded directly on forms** as iframe web resources — the Xrm token APIs are NOT injected
+
+The same Code Page must work in both scenarios, so the auth service uses a dual-strategy approach.
+
+### Client-Side Auth Pattern
+
+Every Code Page that calls the BFF API should follow this pattern:
+
+```typescript
+// services/authService.ts — dual-strategy token acquisition
+export async function getAccessToken(): Promise<string> {
+    // 1. Check in-memory cache
+    if (cachedToken && !isExpiring(cachedToken)) return cachedToken.token;
+
+    // 2. Try Xrm platform strategies (navigateTo mode)
+    const platformToken = await extractPlatformToken();
+    if (platformToken) return platformToken.token;
+
+    // 3. Fall back to MSAL ssoSilent (embedded mode)
+    const msalToken = await acquireTokenViaMsal();
+    if (msalToken) return msalToken.token;
+
+    throw new AuthError("No auth strategy succeeded");
+}
+```
+
+Then use the token when calling BFF endpoints:
+
+```typescript
+const token = await getAccessToken();
+const response = await fetch(`${BFF_BASE_URL}/api/ai/analysis/execute`, {
+    method: "POST",
+    headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+    },
+    body: JSON.stringify(request),
+});
+```
+
+### MSAL Configuration (Shared Across Code Pages)
+
+All Code Pages use the same Azure AD app registration and BFF API scope:
+
+| Config | Value | Notes |
+|--------|-------|-------|
+| Client ID | `170c98e1-d486-4355-bcbe-170454e0207c` | DSM-SPE Dev 2 SPA registration |
+| Authority | `https://login.microsoftonline.com/organizations` | Multi-tenant |
+| BFF API Scope | `api://1e40baad-.../user_impersonation` | Same as PCF controls |
+| Redirect URI | `window.location.origin` | Auto-detect from Dataverse environment |
+| Cache | `sessionStorage` | Avoids cross-tab token leakage |
+
+Override `CLIENT_ID` via `window.__SPAARKE_MSAL_CLIENT_ID__` for customer tenant deployments.
+
+### Current Implementations
+
+| Code Page | Auth Service Location | Notes |
+|-----------|----------------------|-------|
+| AnalysisWorkspace | `src/client/code-pages/AnalysisWorkspace/src/services/authService.ts` | Dual-strategy (Xrm + MSAL ssoSilent) |
+| LegalWorkspace | `src/solutions/LegalWorkspace/src/services/bffAuthProvider.ts` | MSAL ssoSilent with bridge token support |
+
+Both share identical MSAL config. A future `@spaarke/auth` shared package should consolidate the duplicated `msalConfig.ts` and auth service logic.
+
+### Debugging Code Page Auth
+
+```
+// Check auth mode in browser console:
+[AnalysisWorkspace:AuthService] Dataverse org: https://spaarkedev1.crm.dynamics.com
+→ navigateTo mode (Xrm available)
+
+[AnalysisWorkspace:AuthService] Xrm SDK not available, will use MSAL ssoSilent
+→ Embedded mode (MSAL fallback)
+
+// If MSAL ssoSilent fails:
+// 1. Check that origin is registered as SPA redirect in app registration
+// 2. Verify user has an active Azure AD session (not expired)
+// 3. Check browser console for AADSTS errors
+```
+
+### Related
+
+- **Full auth pattern details**: [sdap-auth-patterns.md](sdap-auth-patterns.md) → Pattern 7
+- **MSAL config reference**: `src/client/code-pages/AnalysisWorkspace/src/config/msalConfig.ts`
 
 ---
 

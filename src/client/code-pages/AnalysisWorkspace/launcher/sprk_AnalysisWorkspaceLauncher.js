@@ -166,30 +166,109 @@ Spaarke.AnalysisWorkspace = Spaarke.AnalysisWorkspace || {};
     }
 
     // ========================================================================
+    // Navigation Mode Detection
+    // ========================================================================
+
+    /**
+     * Session storage key prefix for the back-navigation guard.
+     *
+     * When opening the Code Page as full page (target: 1) from Form OnLoad,
+     * pressing browser Back returns to the form, which fires OnLoad again.
+     * The guard prevents this infinite redirect loop by tracking whether
+     * we already redirected for a given analysis record.
+     *
+     * Flow:
+     *   1. OnLoad fires → guard key NOT set → set key → navigate to Code Page (full page)
+     *   2. User presses Back → form loads → OnLoad fires → guard key IS set → clear key → stay on form
+     *   3. User presses Back again → returns to entity list (or Document form)
+     */
+    var REDIRECT_GUARD_PREFIX = "sprk_aw_redirected_";
+
+    /**
+     * Determine whether to open as full page (target: 1) or dialog (target: 2).
+     *
+     * Heuristic: if the form was opened from a parent context (e.g., subgrid on
+     * a Document form), Dataverse includes an "etn" (entity type name) parameter
+     * in the URL representing the referring entity. When present, the user navigated
+     * from another form's subgrid, so a dialog is appropriate (preserves parent
+     * context). When absent, the user came from the entity list or direct navigation,
+     * so full page is appropriate (matches standard entity-open behavior).
+     *
+     * @returns {number} 1 for full page, 2 for dialog
+     */
+    function detectNavigationTarget() {
+        try {
+            var search = window.location.search || "";
+            var params = new URLSearchParams(search);
+
+            // "etn" = referring entity type name, set by Dataverse when navigating
+            // from a subgrid on another entity's form
+            if (params.get("etn") || params.get("parentrecordid")) {
+                console.log(LOG_PREFIX, "Detected parent context (etn/parentrecordid) → dialog mode");
+                return 2; // Dialog — opened from another form's subgrid
+            }
+        } catch (e) {
+            console.warn(LOG_PREFIX, "Could not detect navigation context:", e.message);
+        }
+
+        console.log(LOG_PREFIX, "No parent context detected → full page mode");
+        return 1; // Full page — opened from entity list or direct navigation
+    }
+
+    /**
+     * Check and manage the back-navigation redirect guard.
+     *
+     * @param {string} analysisId - Clean analysis GUID
+     * @returns {boolean} True if we should SKIP the redirect (user pressed Back)
+     */
+    function checkRedirectGuard(analysisId) {
+        var guardKey = REDIRECT_GUARD_PREFIX + analysisId;
+
+        if (sessionStorage.getItem(guardKey)) {
+            // Guard is set — user pressed Back from the Code Page.
+            // Clear the guard and let the form load normally.
+            sessionStorage.removeItem(guardKey);
+            console.log(LOG_PREFIX, "Back-navigation detected for", analysisId, "→ staying on form");
+            return true; // Skip redirect
+        }
+
+        return false; // OK to redirect
+    }
+
+    /**
+     * Set the redirect guard before navigating to the Code Page (full page mode only).
+     *
+     * @param {string} analysisId - Clean analysis GUID
+     */
+    function setRedirectGuard(analysisId) {
+        var guardKey = REDIRECT_GUARD_PREFIX + analysisId;
+        sessionStorage.setItem(guardKey, "1");
+    }
+
+    // ========================================================================
     // Main Launcher Function
     // ========================================================================
 
     /**
-     * Open the AnalysisWorkspace Code Page as a near-full-screen dialog.
+     * Open the AnalysisWorkspace Code Page from the sprk_analysis form.
      *
-     * This function is designed to be called from:
-     *   - A form onLoad event handler on the sprk_analysis entity form
-     *   - A ribbon/command bar button on the sprk_analysis entity form
+     * Navigation mode is auto-detected:
+     *   - From entity list / direct URL → full page (target: 1), matching standard
+     *     entity-open behavior. A sessionStorage guard prevents infinite OnLoad loops.
+     *   - From a parent form's subgrid → dialog (target: 2) at 95%, preserving
+     *     the parent form context underneath.
+     *
+     * Designed to be called from:
+     *   - Form OnLoad event handler on the sprk_analysis entity form (primary)
+     *   - Ribbon/command bar button on the sprk_analysis entity form
      *   - Programmatic invocation from other form scripts
-     *
-     * Flow:
-     *   1. Extract analysisId from the current form record
-     *   2. If record is unsaved, prompt user to save first
-     *   3. Extract documentId from the source document lookup field
-     *   4. Extract tenantId from Xrm global context
-     *   5. Open Code Page dialog via navigateTo
      *
      * @param {object} executionContext - Execution context from form event or
      *   primaryControl from ribbon CrmParameter
      */
     ns.openAnalysisWorkspace = function (executionContext) {
         console.log(LOG_PREFIX, "========================================");
-        console.log(LOG_PREFIX, "openAnalysisWorkspace: Starting v1.0.0");
+        console.log(LOG_PREFIX, "openAnalysisWorkspace: Starting v1.1.0");
         console.log(LOG_PREFIX, "========================================");
 
         try {
@@ -231,7 +310,18 @@ Spaarke.AnalysisWorkspace = Spaarke.AnalysisWorkspace || {};
             }
 
             // -----------------------------------------------------------------
-            // Step 3: Extract documentId from source document lookup
+            // Step 3: Detect navigation mode and check redirect guard
+            // -----------------------------------------------------------------
+            var target = detectNavigationTarget();
+
+            if (target === 1 && checkRedirectGuard(analysisId)) {
+                // User pressed Back from Code Page → stay on form, don't redirect
+                console.log(LOG_PREFIX, "Allowing form to load normally (back-navigation)");
+                return;
+            }
+
+            // -----------------------------------------------------------------
+            // Step 4: Extract documentId from source document lookup
             // -----------------------------------------------------------------
             var rawDocumentId = getAttributeValue(formContext, SOURCE_DOCUMENT_FIELD);
             var documentId = cleanGuid(rawDocumentId);
@@ -243,13 +333,13 @@ Spaarke.AnalysisWorkspace = Spaarke.AnalysisWorkspace || {};
             }
 
             // -----------------------------------------------------------------
-            // Step 4: Extract tenantId from global context
+            // Step 5: Extract tenantId from global context
             // -----------------------------------------------------------------
             var tenantId = getTenantId();
             console.log(LOG_PREFIX, "tenantId:", tenantId);
 
             // -----------------------------------------------------------------
-            // Step 5: Navigate to Code Page dialog
+            // Step 6: Navigate to Code Page
             // -----------------------------------------------------------------
             var dataParams = buildDataParams(analysisId, documentId, tenantId);
             console.log(LOG_PREFIX, "dataParams:", dataParams);
@@ -260,26 +350,40 @@ Spaarke.AnalysisWorkspace = Spaarke.AnalysisWorkspace || {};
                 data: dataParams
             };
 
-            var navigationOptions = {
-                target: 2,  // Dialog (not full page)
-                width: DIALOG_WIDTH,
-                height: DIALOG_HEIGHT
-            };
+            var navigationOptions;
+
+            if (target === 1) {
+                // Full page — from entity list or direct navigation
+                console.log(LOG_PREFIX, "Opening as FULL PAGE (target: 1)");
+                setRedirectGuard(analysisId);
+                navigationOptions = { target: 1 };
+            } else {
+                // Dialog — from parent form subgrid
+                console.log(LOG_PREFIX, "Opening as DIALOG (target: 2, 95%)");
+                navigationOptions = {
+                    target: 2,
+                    width: DIALOG_WIDTH,
+                    height: DIALOG_HEIGHT
+                };
+            }
 
             console.log(LOG_PREFIX, "Navigating to:", pageInput);
             console.log(LOG_PREFIX, "Options:", navigationOptions);
 
             Xrm.Navigation.navigateTo(pageInput, navigationOptions).then(
                 function success() {
-                    console.log(LOG_PREFIX, "Dialog closed successfully");
+                    console.log(LOG_PREFIX, "Navigation completed successfully");
                     // Refresh the form to pick up any changes made in the workspace
-                    try {
-                        if (formContext.data && typeof formContext.data.refresh === "function") {
-                            formContext.data.refresh(false); // false = don't save before refresh
-                            console.log(LOG_PREFIX, "Form data refreshed");
+                    // (only relevant for dialog mode — full page replaces the form)
+                    if (target === 2) {
+                        try {
+                            if (formContext.data && typeof formContext.data.refresh === "function") {
+                                formContext.data.refresh(false);
+                                console.log(LOG_PREFIX, "Form data refreshed");
+                            }
+                        } catch (refreshError) {
+                            console.warn(LOG_PREFIX, "Form refresh failed (non-critical):", refreshError.message);
                         }
-                    } catch (refreshError) {
-                        console.warn(LOG_PREFIX, "Form refresh failed (non-critical):", refreshError.message);
                     }
                 },
                 function error(err) {
@@ -414,27 +518,8 @@ Spaarke.AnalysisWorkspace = Spaarke.AnalysisWorkspace || {};
 // ============================================================================
 
 /*
-RIBBON CONFIGURATION:
-
 ================================================================================
-FORM COMMAND BAR (sprk_analysis entity)
-================================================================================
-
-Location: Mscrm.Form.sprk_analysis.MainTab.Actions.Controls._children
-
-Button: "Open Workspace"
-  - Command ID: Spaarke.AnalysisWorkspace.Open.Command
-  - Function: Spaarke.AnalysisWorkspace.openAnalysisWorkspace
-  - Library: $webresource:sprk_/scripts/analysisWorkspaceLauncher.js
-  - CrmParameter: PrimaryControl
-  - Enable Rule: Spaarke.AnalysisWorkspace.enableOpenWorkspace (same library)
-    - CrmParameter: PrimaryControl
-  - Visibility Rule: Spaarke.AnalysisWorkspace.showOpenWorkspace (same library)
-  - Label: "Open Workspace"
-  - Tooltip: "Open the Analysis Workspace to view and edit this analysis"
-
-================================================================================
-FORM EVENT (alternative to ribbon button)
+SETUP: FORM ONLOAD EVENT (RECOMMENDED — auto-opens workspace)
 ================================================================================
 
 Entity: sprk_analysis
@@ -445,9 +530,36 @@ Event: OnLoad
   - Function: Spaarke.AnalysisWorkspace.openAnalysisWorkspace
   - Pass execution context: Yes (checkbox)
 
-Note: If using form OnLoad, the workspace dialog opens automatically when the
-      form loads. This is useful for a "workspace-first" UX where the form
-      itself is minimal and the real work happens in the Code Page dialog.
+NAVIGATION MODE IS AUTO-DETECTED:
+
+  From Entity List (Analyses view):
+    - User clicks a row → Analysis form loads → OnLoad fires
+    - No parent context detected (no "etn" URL param)
+    - Opens Code Page as FULL PAGE (target: 1)
+    - SessionStorage guard prevents infinite loop on Back navigation
+    - Back button flow: Code Page → form (guard stops redirect) → entity list
+
+  From Document Subgrid (sprk_analysis subgrid on Document form):
+    - User clicks Analysis Name link → Analysis form loads → OnLoad fires
+    - Parent context detected ("etn=sprk_document" in URL)
+    - Opens Code Page as DIALOG (target: 2, 95%)
+    - Close dialog → back on Analysis form → Back → Document form
+
+================================================================================
+OPTIONAL: FORM COMMAND BAR BUTTON (manual trigger)
+================================================================================
+
+Not needed when using OnLoad (auto-open). Only add if you want a manual
+"Open Workspace" button as an alternative:
+
+Location: Mscrm.Form.sprk_analysis.MainTab.Actions.Controls._children
+
+Button: "Open Workspace"
+  - Command ID: Spaarke.AnalysisWorkspace.Open.Command
+  - Function: Spaarke.AnalysisWorkspace.openAnalysisWorkspace
+  - Library: $webresource:sprk_/scripts/analysisWorkspaceLauncher.js
+  - CrmParameter: PrimaryControl
+  - Enable Rule: Spaarke.AnalysisWorkspace.enableOpenWorkspace (same library)
 
 ================================================================================
 SUBGRID / EXTERNAL INVOCATION
@@ -466,12 +578,12 @@ MIGRATION FROM CUSTOM PAGE (sprk_analysis_commands.js)
 The existing Spaarke_OpenAnalysisWorkspace() function in sprk_analysis_commands.js
 navigates to a Custom Page (pageType: "custom", name: "sprk_analysisworkspace_8bc0b").
 
-To migrate:
-  1. Update ribbon command to call Spaarke.AnalysisWorkspace.openAnalysisWorkspace
-     instead of Spaarke_OpenAnalysisWorkspace
-  2. Update library reference to sprk_/scripts/analysisWorkspaceLauncher.js
-  3. The existing sprk_analysis_commands.js can remain for other commands
-     (NewAnalysis, NewAnalysisFromSubgrid) that use the Analysis Builder dialog
+With the Form OnLoad approach, the subgrid ribbon command for "Open Workspace"
+(Spaarke.Analysis.OpenWorkspace.Command) is no longer needed — users click the
+Name link to open the Analysis form, which auto-opens the workspace.
+
+The existing sprk_analysis_commands.js remains for:
+  - NewAnalysis / NewAnalysisFromSubgrid (Analysis Builder dialog)
 
 ================================================================================
 WEB RESOURCE REGISTRATION
@@ -480,11 +592,14 @@ WEB RESOURCE REGISTRATION
 Name: sprk_/scripts/analysisWorkspaceLauncher.js
 Display Name: Analysis Workspace Code Page Launcher
 Type: Script (JScript)
-Description: Opens the AnalysisWorkspace Code Page dialog via navigateTo webresource.
+Description: Opens the AnalysisWorkspace Code Page via navigateTo webresource.
+             Auto-detects context: full page from entity list, dialog from subgrid.
              Replaces legacy Custom Page navigation for the Analysis Workspace.
 
 ================================================================================
 VERSION HISTORY
 ================================================================================
-- 1.0.0: Initial release - navigateTo webresource launcher (replaces Custom Page nav)
+- 1.1.0: Dual-mode navigation — full page from entity list, dialog from subgrid.
+         Back-navigation guard prevents OnLoad redirect loop in full page mode.
+- 1.0.0: Initial release - dialog-only navigateTo webresource launcher
 */
