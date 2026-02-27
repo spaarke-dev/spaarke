@@ -28,6 +28,16 @@ export interface IUseMattersListOptions {
    */
   top?: number;
   /**
+   * Optional contact ID for the broad owner filter (Matters tab).
+   * When provided, uses getMattersByBroadFilter instead of getMattersByUser,
+   * returning records where the user is owner, modifier, assigned attorney,
+   * or assigned paralegal.
+   *
+   * Pass null to use the broad filter without contact-based clauses.
+   * Omit entirely to use the simple owner filter (My Portfolio).
+   */
+  contactId?: string | null;
+  /**
    * Optional mock data for local development / Storybook.
    * When provided, bypasses the service call and resolves immediately.
    */
@@ -94,6 +104,10 @@ export function useMattersList(
 ): IUseMattersListResult {
   const top = options.top ?? 5;
   const { mockData } = options;
+  // When contactId is explicitly provided (even as null), use the broad filter.
+  // When undefined, use the simple owner filter (My Portfolio).
+  const useBroadFilter = 'contactId' in options;
+  const contactId = options.contactId ?? null;
 
   const [matters, setMatters] = useState<IMatter[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -105,10 +119,10 @@ export function useMattersList(
 
   const refetch = useCallback(() => {
     // Invalidate cache for this user so refetch always hits Xrm.WebApi
-    const cacheKey = `${userId}:${top}`;
+    const cacheKey = useBroadFilter ? `matters-broad:${userId}:${top}` : `${userId}:${top}`;
     _cache.delete(cacheKey);
     setFetchKey((k) => k + 1);
-  }, [userId, top]);
+  }, [userId, top, useBroadFilter]);
 
   useEffect(() => {
     // --- Mock data path (dev / Storybook) ---
@@ -127,7 +141,7 @@ export function useMattersList(
       return;
     }
 
-    const cacheKey = `${userId}:${top}`;
+    const cacheKey = useBroadFilter ? `matters-broad:${userId}:${top}` : `${userId}:${top}`;
 
     // --- Check in-memory cache ---
     const cached = getCached(cacheKey);
@@ -156,8 +170,11 @@ export function useMattersList(
       cancelled = true;
     });
 
-    service
-      .getMattersByUser(userId, { top })
+    const fetchPromise = useBroadFilter
+      ? service.getMattersByBroadFilter(userId, contactId, { top })
+      : service.getMattersByUser(userId, { top });
+
+    fetchPromise
       .then((result) => {
         if (cancelled) return;
 
@@ -188,7 +205,7 @@ export function useMattersList(
     };
     // fetchKey is intentionally included so refetch() re-triggers this effect
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [service, userId, top, mockData, fetchKey]);
+  }, [service, userId, top, mockData, fetchKey, useBroadFilter, contactId]);
 
   return {
     matters,

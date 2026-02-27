@@ -181,7 +181,7 @@ export const ProjectItem: React.FC<IProjectItemProps> = ({ project }) => {
 
   // Secondary line: prefer practiceArea, fall back to type, then owner lookup
   const secondaryParts: string[] = [];
-  if (project.sprk_practicearea) secondaryParts.push(project.sprk_practicearea);
+  if (project.practiceAreaName) secondaryParts.push(project.practiceAreaName);
   if (project.projectTypeName) secondaryParts.push(project.projectTypeName);
   const secondaryText = secondaryParts.join(' · ');
 

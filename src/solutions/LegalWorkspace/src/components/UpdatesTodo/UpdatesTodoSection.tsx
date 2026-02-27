@@ -1,13 +1,13 @@
 /**
- * UpdatesTodoSection — tabbed container combining the Updates Feed and Smart
- * To Do list into a single card with Fluent UI v9 TabList navigation.
+ * UpdatesTodoSection — tabbed container combining the Updates Feed, Smart
+ * To Do list, and Matters/Projects/Invoices record tabs into a single card
+ * with Fluent UI v9 TabList navigation.
  *
  * Layout:
- *   [Header: section title + refresh button]
- *   [TabList: Updates | To Do — each with count badge]
- *   [Tab panel: ActivityFeed or SmartToDo (embedded mode)]
+ *   [TabList: Latest Updates | To Do List | Matters | Projects | Invoices]
+ *   [Tab panel — embedded component]
  *
- * Both tab panels are kept mounted at all times (display toggling) so that:
+ * All tab panels are kept mounted at all times (display toggling) so that:
  *   - Scroll position and filter state are preserved across tab switches
  *   - FeedTodoSync subscriptions remain active in both components
  *   - Optimistic UI updates are not lost when switching tabs
@@ -24,7 +24,6 @@ import {
   makeStyles,
   shorthands,
   tokens,
-  Text,
   Badge,
   TabList,
   Tab,
@@ -34,16 +33,23 @@ import {
 import {
   AlertRegular,
   CheckboxCheckedRegular,
+  GavelRegular,
+  TaskListSquareLtrRegular,
+  ReceiptRegular,
+  InfoRegular,
 } from "@fluentui/react-icons";
 import { ActivityFeed } from "../ActivityFeed";
 import { SmartToDo } from "../SmartToDo";
+import { MattersTab, ProjectsTab, InvoicesTab } from "../RecordCards";
 import type { IWebApi } from "../../types/xrm";
+import { useDataverseService } from "../../hooks/useDataverseService";
+import { useUserContactId } from "../../hooks/useUserContactId";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type TabValue = "updates" | "todo";
+type TabValue = "updates" | "todo" | "matters" | "projects" | "invoices";
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -65,28 +71,12 @@ const useStyles = makeStyles({
     minHeight: SECTION_HEIGHT,
   },
 
-  // ── Header row ──────────────────────────────────────────────────────────
-  header: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalS,
-    gap: tokens.spacingHorizontalS,
-    flexShrink: 0,
-  },
-  headerTitle: {
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-  },
   // ── TabList ─────────────────────────────────────────────────────────────
   tabList: {
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalXS,
+    paddingTop: "10px",
+    paddingBottom: tokens.spacingVerticalS,
     columnGap: tokens.spacingHorizontalM,
     flexShrink: 0,
   },
@@ -94,6 +84,31 @@ const useStyles = makeStyles({
     display: "flex",
     alignItems: "center",
     gap: tokens.spacingHorizontalXS,
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase400,
+    lineHeight: tokens.lineHeightBase400,
+  },
+
+  // ── Toolbar (Matters / Projects / Invoices only) ────────────────────────
+  toolbar: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    borderBottomWidth: "1px",
+    borderBottomStyle: "solid",
+    borderBottomColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground2,
+    flexShrink: 0,
+    minHeight: "36px",
+  },
+  toolbarIcon: {
+    color: tokens.colorNeutralForeground3,
+    cursor: "pointer",
   },
 
   // ── Tab content panels ──────────────────────────────────────────────────
@@ -158,6 +173,8 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
   userId,
 }) => {
   const styles = useStyles();
+  const service = useDataverseService(webApi);
+  const { contactId } = useUserContactId(service, userId);
 
   // Active tab state
   const [activeTab, setActiveTab] = React.useState<TabValue>("updates");
@@ -165,10 +182,16 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
   // Count badges — reported by embedded children
   const [feedCount, setFeedCount] = React.useState<number | undefined>(undefined);
   const [todoCount, setTodoCount] = React.useState<number | undefined>(undefined);
+  const [mattersCount, setMattersCount] = React.useState<number | undefined>(undefined);
+  const [projectsCount, setProjectsCount] = React.useState<number | undefined>(undefined);
+  const [invoicesCount, setInvoicesCount] = React.useState<number | undefined>(undefined);
 
   // Refetch functions — exposed by embedded children
   const feedRefetchRef = React.useRef<(() => void) | null>(null);
   const todoRefetchRef = React.useRef<(() => void) | null>(null);
+  const mattersRefetchRef = React.useRef<(() => void) | null>(null);
+  const projectsRefetchRef = React.useRef<(() => void) | null>(null);
+  const invoicesRefetchRef = React.useRef<(() => void) | null>(null);
 
   const handleFeedRefetchReady = React.useCallback((refetch: () => void) => {
     feedRefetchRef.current = refetch;
@@ -178,6 +201,18 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
     todoRefetchRef.current = refetch;
   }, []);
 
+  const handleMattersRefetchReady = React.useCallback((refetch: () => void) => {
+    mattersRefetchRef.current = refetch;
+  }, []);
+
+  const handleProjectsRefetchReady = React.useCallback((refetch: () => void) => {
+    projectsRefetchRef.current = refetch;
+  }, []);
+
+  const handleInvoicesRefetchReady = React.useCallback((refetch: () => void) => {
+    invoicesRefetchRef.current = refetch;
+  }, []);
+
   // Tab switch handler — refetch data when switching tabs so newly
   // flagged/created items appear without a full page reload.
   // Also closes the To Do detail side pane when leaving the To Do tab.
@@ -185,11 +220,9 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
     (_event: SelectTabEvent, data: SelectTabData) => {
       const tab = data.value as TabValue;
       setActiveTab(tab);
-      if (tab === "todo") {
-        todoRefetchRef.current?.();
-      } else if (tab === "updates") {
-        feedRefetchRef.current?.();
-        // Close the To Do detail side pane when navigating away
+
+      // Close the To Do detail side pane when navigating away from To Do tab
+      if (tab !== "todo") {
         try {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const xrm = (window.top as any)?.Xrm ?? (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
@@ -199,19 +232,31 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
           // Side pane API unavailable — ignore
         }
       }
+
+      // Refetch the target tab's data
+      switch (tab) {
+        case "updates":
+          feedRefetchRef.current?.();
+          break;
+        case "todo":
+          todoRefetchRef.current?.();
+          break;
+        case "matters":
+          mattersRefetchRef.current?.();
+          break;
+        case "projects":
+          projectsRefetchRef.current?.();
+          break;
+        case "invoices":
+          invoicesRefetchRef.current?.();
+          break;
+      }
     },
     []
   );
 
   return (
-    <div className={styles.card} role="region" aria-label="Updates and To Do">
-      {/* ── Header ────────────────────────────────────────────────────── */}
-      <div className={styles.header}>
-        <Text className={styles.headerTitle} size={400}>
-          Activity
-        </Text>
-      </div>
-
+    <div className={styles.card} role="region" aria-label="Activity and Records">
       {/* ── TabList ───────────────────────────────────────────────────── */}
       <TabList
         selectedValue={activeTab}
@@ -222,25 +267,46 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
       >
         <Tab value="updates">
           <TabLabel
-            label="Updates"
+            label="Latest Updates"
             icon={<AlertRegular fontSize={16} />}
             count={feedCount}
           />
         </Tab>
         <Tab value="todo">
           <TabLabel
-            label="To Do"
+            label="To Do List"
             icon={<CheckboxCheckedRegular fontSize={16} />}
             count={todoCount}
           />
         </Tab>
+        <Tab value="matters">
+          <TabLabel
+            label="Matters"
+            icon={<GavelRegular fontSize={16} />}
+            count={mattersCount}
+          />
+        </Tab>
+        <Tab value="projects">
+          <TabLabel
+            label="Projects"
+            icon={<TaskListSquareLtrRegular fontSize={16} />}
+            count={projectsCount}
+          />
+        </Tab>
+        <Tab value="invoices">
+          <TabLabel
+            label="Invoices"
+            icon={<ReceiptRegular fontSize={16} />}
+            count={invoicesCount}
+          />
+        </Tab>
       </TabList>
 
-      {/* ── Tab panels — both always mounted, visibility toggled ──── */}
+      {/* ── Tab panels — all always mounted, visibility toggled ──── */}
       <div
         className={activeTab === "updates" ? styles.tabPanel : styles.tabPanelHidden}
         role="tabpanel"
-        aria-label="Updates feed"
+        aria-label="Latest updates feed"
       >
         <ActivityFeed
           embedded
@@ -262,6 +328,57 @@ export const UpdatesTodoSection: React.FC<IUpdatesTodoSectionProps> = ({
           userId={userId}
           onCountChange={setTodoCount}
           onRefetchReady={handleTodoRefetchReady}
+        />
+      </div>
+
+      <div
+        className={activeTab === "matters" ? styles.tabPanel : styles.tabPanelHidden}
+        role="tabpanel"
+        aria-label="Matters list"
+      >
+        <div className={styles.toolbar} role="toolbar" aria-label="Matters toolbar">
+          <InfoRegular fontSize={18} className={styles.toolbarIcon} aria-label="Information" />
+        </div>
+        <MattersTab
+          service={service}
+          userId={userId}
+          contactId={contactId}
+          onCountChange={setMattersCount}
+          onRefetchReady={handleMattersRefetchReady}
+        />
+      </div>
+
+      <div
+        className={activeTab === "projects" ? styles.tabPanel : styles.tabPanelHidden}
+        role="tabpanel"
+        aria-label="Projects list"
+      >
+        <div className={styles.toolbar} role="toolbar" aria-label="Projects toolbar">
+          <InfoRegular fontSize={18} className={styles.toolbarIcon} aria-label="Information" />
+        </div>
+        <ProjectsTab
+          service={service}
+          userId={userId}
+          contactId={contactId}
+          onCountChange={setProjectsCount}
+          onRefetchReady={handleProjectsRefetchReady}
+        />
+      </div>
+
+      <div
+        className={activeTab === "invoices" ? styles.tabPanel : styles.tabPanelHidden}
+        role="tabpanel"
+        aria-label="Invoices list"
+      >
+        <div className={styles.toolbar} role="toolbar" aria-label="Invoices toolbar">
+          <InfoRegular fontSize={18} className={styles.toolbarIcon} aria-label="Information" />
+        </div>
+        <InvoicesTab
+          service={service}
+          userId={userId}
+          contactId={contactId}
+          onCountChange={setInvoicesCount}
+          onRefetchReady={handleInvoicesRefetchReady}
         />
       </div>
     </div>

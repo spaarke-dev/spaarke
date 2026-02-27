@@ -16,13 +16,16 @@
  */
 
 import { IResult, ok, fail, tryCatch } from '../types/result';
-import { IMatter, IEvent, IProject, IDocument, IUserPreference } from '../types/entities';
+import { IMatter, IEvent, IProject, IDocument, IInvoice, IUserPreference } from '../types/entities';
 import { TodoStatus, EventFilterCategory } from '../types/enums';
 import type { IWebApi, WebApiEntity } from '../types/xrm';
 import {
   buildMattersQuery,
+  buildMattersTabQuery,
   buildEventsFeedQuery,
   buildProjectsQuery,
+  buildProjectsTabQuery,
+  buildInvoicesQuery,
   buildDocumentsByMatterQuery,
   buildDocumentsByUserQuery,
   buildTodoItemsQuery,
@@ -78,7 +81,8 @@ function mapEventFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
 function mapMatterFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
   return entities.map(e => ({
     ...e,
-    matterTypeName: (e[`_sprk_mattertype_ref_value${FV}`] as string) ?? '',
+    matterTypeName: (e[`_sprk_mattertype_value${FV}`] as string) ?? '',
+    practiceAreaName: (e[`_sprk_practicearea_value${FV}`] as string) ?? '',
   }));
 }
 
@@ -86,6 +90,7 @@ function mapProjectFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
   return entities.map(e => ({
     ...e,
     projectTypeName: (e[`_sprk_projecttype_ref_value${FV}`] as string) ?? '',
+    practiceAreaName: (e[`_sprk_practicearea_value${FV}`] as string) ?? '',
   }));
 }
 
@@ -93,6 +98,30 @@ function mapDocumentFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
   return entities.map(e => ({
     ...e,
     documentTypeName: (e[`sprk_documenttype${FV}`] as string) ?? '',
+  }));
+}
+
+function mapMatterTabFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
+  return entities.map(e => ({
+    ...e,
+    matterTypeName: (e[`_sprk_mattertype_value${FV}`] as string) ?? '',
+    practiceAreaName: (e[`_sprk_practicearea_value${FV}`] as string) ?? '',
+    statuscodeName: (e[`statuscode${FV}`] as string) ?? '',
+  }));
+}
+
+function mapProjectTabFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
+  return entities.map(e => ({
+    ...e,
+    projectTypeName: (e[`_sprk_projecttype_ref_value${FV}`] as string) ?? '',
+    statuscodeName: (e[`statuscode${FV}`] as string) ?? '',
+  }));
+}
+
+function mapInvoiceFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
+  return entities.map(e => ({
+    ...e,
+    statuscodeName: (e[`statuscode${FV}`] as string) ?? '',
   }));
 }
 
@@ -189,6 +218,89 @@ export class DataverseService {
       const result = await this._webApi.retrieveMultipleRecords('sprk_project', query, top);
       return toTypedArray<IProject>(mapProjectFormattedValues(result.entities));
     }, 'PROJECTS_FETCH_ERROR');
+  }
+
+  // -------------------------------------------------------------------------
+  // User contact resolution
+  // -------------------------------------------------------------------------
+
+  /**
+   * Resolve the linked contact ID for a systemuser.
+   *
+   * Many lookup fields (sprk_assignedattorney, sprk_assignedparalegal) point
+   * to contacts rather than systemusers. This method retrieves the
+   * systemuser._contactid_value lookup to enable broad owner filtering.
+   *
+   * @param userId - The systemuser GUID
+   * @returns IResult<string | null> — the contact GUID or null if none linked
+   */
+  async getUserContactId(userId: string): Promise<IResult<string | null>> {
+    return tryCatch(async () => {
+      const result = await this._webApi.retrieveRecord(
+        'systemuser',
+        userId,
+        '?$select=_contactid_value'
+      );
+      return (result._contactid_value as string) ?? null;
+    }, 'USER_CONTACT_RESOLVE_ERROR');
+  }
+
+  // -------------------------------------------------------------------------
+  // Broad filter queries (Matters/Projects/Invoices tabs)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Retrieve matters matching the broad owner filter for the Matters tab.
+   * Includes records where the user is owner, modifier, assigned attorney, or assigned paralegal.
+   */
+  async getMattersByBroadFilter(
+    userId: string,
+    contactId: string | null,
+    options: { top?: number } = {}
+  ): Promise<IResult<IMatter[]>> {
+    const top = options.top ?? 50;
+    const query = buildMattersTabQuery(userId, contactId, top);
+
+    return tryCatch(async () => {
+      const result = await this._webApi.retrieveMultipleRecords('sprk_matter', query, top);
+      return toTypedArray<IMatter>(mapMatterTabFormattedValues(result.entities));
+    }, 'MATTERS_TAB_FETCH_ERROR');
+  }
+
+  /**
+   * Retrieve projects matching the broad owner filter for the Projects tab.
+   * Includes records where the user is owner, modifier, assigned attorney, or assigned paralegal.
+   */
+  async getProjectsByBroadFilter(
+    userId: string,
+    contactId: string | null,
+    options: { top?: number } = {}
+  ): Promise<IResult<IProject[]>> {
+    const top = options.top ?? 50;
+    const query = buildProjectsTabQuery(userId, contactId, top);
+
+    return tryCatch(async () => {
+      const result = await this._webApi.retrieveMultipleRecords('sprk_project', query, top);
+      return toTypedArray<IProject>(mapProjectTabFormattedValues(result.entities));
+    }, 'PROJECTS_TAB_FETCH_ERROR');
+  }
+
+  /**
+   * Retrieve invoices matching the broad owner filter for the Invoices tab.
+   * Includes records where the user is owner, modifier, assigned attorney, or assigned paralegal.
+   */
+  async getInvoicesByBroadFilter(
+    userId: string,
+    contactId: string | null,
+    options: { top?: number } = {}
+  ): Promise<IResult<IInvoice[]>> {
+    const top = options.top ?? 50;
+    const query = buildInvoicesQuery(userId, contactId, top);
+
+    return tryCatch(async () => {
+      const result = await this._webApi.retrieveMultipleRecords('sprk_invoice', query, top);
+      return toTypedArray<IInvoice>(mapInvoiceFormattedValues(result.entities));
+    }, 'INVOICES_FETCH_ERROR');
   }
 
   // -------------------------------------------------------------------------

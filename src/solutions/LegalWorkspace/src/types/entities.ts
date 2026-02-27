@@ -2,8 +2,13 @@
 export interface IMatter {
   sprk_matterid: string;
   sprk_name: string;
+  sprk_mattername?: string;
+  sprk_matternumber?: string;
+  sprk_matterdescription?: string;
   /** Display name from sprk_mattertype_ref lookup (populated via formatted value mapping). */
   matterTypeName?: string;
+  /** Display name from sprk_practicearea_ref lookup (populated via formatted value mapping). */
+  practiceAreaName?: string;
   sprk_practicearea?: string;
   sprk_totalbudget: number;
   sprk_totalspend: number;
@@ -14,7 +19,13 @@ export interface IMatter {
   sprk_overdueeventcount: number;
   _sprk_organization_value?: string;  // Lookup GUID
   _sprk_leadattorney_value?: string;  // Lookup GUID
+  _modifiedby_value?: string;  // Lookup GUID
+  _sprk_assignedattorney_value?: string;  // Lookup GUID (contact)
+  _sprk_assignedparalegal_value?: string;  // Lookup GUID (contact)
   sprk_status?: number;  // Option set
+  statuscode?: number;  // Standard Dataverse statuscode
+  /** Display name from statuscode (populated via formatted value mapping). */
+  statuscodeName?: string;
   createdon: string;  // ISO date
   modifiedon: string;  // ISO date
 }
@@ -52,11 +63,20 @@ export interface IEvent {
 export interface IProject {
   sprk_projectid: string;
   sprk_name: string;
+  sprk_projectnumber?: string;
+  sprk_projectname?: string;
+  sprk_projectdescription?: string;
   /** Display name from sprk_projecttype_ref lookup (populated via formatted value mapping). */
   projectTypeName?: string;
   sprk_practicearea?: string;
   _sprk_owner_value?: string;
+  _modifiedby_value?: string;  // Lookup GUID
+  _sprk_assignedattorney_value?: string;  // Lookup GUID (contact)
+  _sprk_assignedparalegal_value?: string;  // Lookup GUID (contact)
   sprk_status?: number;
+  statuscode?: number;  // Standard Dataverse statuscode
+  /** Display name from statuscode (populated via formatted value mapping). */
+  statuscodeName?: string;
   sprk_budgetused?: number;
   createdon: string;
   modifiedon: string;
@@ -70,6 +90,25 @@ export interface IDocument {
   documentTypeName?: string;
   sprk_description?: string;
   _sprk_matter_value?: string;  // Lookup GUID
+  modifiedon: string;
+}
+
+/** Dataverse sprk_invoice entity */
+export interface IInvoice {
+  sprk_invoiceid: string;
+  sprk_name: string;
+  sprk_invoicenumber?: string;
+  sprk_invoicedate?: string;  // ISO date
+  sprk_vendororg?: string;
+  sprk_description?: string;
+  statuscode?: number;  // Standard Dataverse statuscode
+  /** Display name from statuscode (populated via formatted value mapping). */
+  statuscodeName?: string;
+  _ownerid_value?: string;  // Lookup GUID
+  _modifiedby_value?: string;  // Lookup GUID
+  _sprk_assignedattorney_value?: string;  // Lookup GUID (contact)
+  _sprk_assignedparalegal_value?: string;  // Lookup GUID (contact)
+  createdon: string;
   modifiedon: string;
 }
 
