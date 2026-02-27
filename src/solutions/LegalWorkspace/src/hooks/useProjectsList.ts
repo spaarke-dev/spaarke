@@ -29,6 +29,14 @@ export interface IUseProjectsListOptions {
    */
   top?: number;
   /**
+   * Optional contact ID for the broad owner filter (Projects tab).
+   * When provided, uses getProjectsByBroadFilter instead of getProjectsByUser.
+   *
+   * Pass null to use the broad filter without contact-based clauses.
+   * Omit entirely to use the simple owner filter (My Portfolio).
+   */
+  contactId?: string | null;
+  /**
    * Optional mock data for local development / Storybook.
    * When provided, bypasses the service call and resolves immediately.
    */
@@ -95,6 +103,8 @@ export function useProjectsList(
 ): IUseProjectsListResult {
   const top = options.top ?? 5;
   const { mockData } = options;
+  const useBroadFilter = 'contactId' in options;
+  const contactId = options.contactId ?? null;
 
   const [projects, setProjects] = useState<IProject[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -106,10 +116,10 @@ export function useProjectsList(
 
   const refetch = useCallback(() => {
     // Invalidate cache for this user so refetch always hits Xrm.WebApi
-    const cacheKey = `projects:${userId}:${top}`;
+    const cacheKey = useBroadFilter ? `projects-broad:${userId}:${top}` : `projects:${userId}:${top}`;
     _cache.delete(cacheKey);
     setFetchKey((k) => k + 1);
-  }, [userId, top]);
+  }, [userId, top, useBroadFilter]);
 
   useEffect(() => {
     // --- Mock data path (dev / Storybook) ---
@@ -128,7 +138,7 @@ export function useProjectsList(
       return;
     }
 
-    const cacheKey = `projects:${userId}:${top}`;
+    const cacheKey = useBroadFilter ? `projects-broad:${userId}:${top}` : `projects:${userId}:${top}`;
 
     // --- Check in-memory cache ---
     const cached = getCached(cacheKey);
@@ -157,8 +167,11 @@ export function useProjectsList(
       cancelled = true;
     });
 
-    service
-      .getProjectsByUser(userId, { top })
+    const fetchPromise = useBroadFilter
+      ? service.getProjectsByBroadFilter(userId, contactId, { top })
+      : service.getProjectsByUser(userId, { top });
+
+    fetchPromise
       .then((result) => {
         if (cancelled) return;
 
@@ -189,7 +202,7 @@ export function useProjectsList(
     };
     // fetchKey is intentionally included so refetch() re-triggers this effect
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [service, userId, top, mockData, fetchKey]);
+  }, [service, userId, top, mockData, fetchKey, useBroadFilter, contactId]);
 
   return {
     projects,

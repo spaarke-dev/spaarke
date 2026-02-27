@@ -45,11 +45,48 @@ export function navigateToEntity(message: INavigationMessage): void {
     }
   }
 
-  // Fallback: postMessage to parent frame
+  // Fallback: postMessage to parent frame (navigateToEntity only)
   try {
     console.info("[navigation] Posting navigation message to parent:", message);
     window.parent.postMessage(message, "*");
   } catch (err) {
     console.error("[navigation] Failed to post navigation message:", err, message);
+  }
+}
+
+/**
+ * Open a Dataverse entity record as a dialog main form.
+ *
+ * Uses Xrm.Navigation.openForm with target: 2 (dialog) to open the record
+ * in a modal overlay instead of full-page navigation.
+ *
+ * @param entityName - The logical name of the entity (e.g. "sprk_matter")
+ * @param entityId   - The GUID of the record to open
+ */
+export function openRecordDialog(entityName: string, entityId: string): void {
+  if (!entityName || !entityId) {
+    console.error("[navigation] openRecordDialog: entityName and entityId are required");
+    return;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm() as any;
+
+  if (!xrm?.Navigation?.openForm) {
+    console.error("[navigation] openRecordDialog: Xrm.Navigation.openForm is not available");
+    return;
+  }
+
+  try {
+    xrm.Navigation.openForm(
+      { entityName, entityId },
+      {
+        target: 2,
+        width: { value: 80, unit: "%" },
+        height: { value: 80, unit: "%" },
+      }
+    );
+  } catch (err) {
+    console.error("[navigation] openRecordDialog failed:", err);
   }
 }

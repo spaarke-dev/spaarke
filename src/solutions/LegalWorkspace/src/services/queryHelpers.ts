@@ -61,6 +61,35 @@ export function buildQuery(opts: IQueryOptions): string {
 }
 
 // ---------------------------------------------------------------------------
+// Broad owner filter (Matters/Projects/Invoices tabs)
+// ---------------------------------------------------------------------------
+
+/**
+ * Build an OData $filter predicate that matches records where the user is:
+ *   - owner (ownerid)
+ *   - last modifier (modifiedby)
+ *   - assigned attorney (sprk_assignedattorney — contact lookup)
+ *   - assigned paralegal (sprk_assignedparalegal — contact lookup)
+ *
+ * The attorney/paralegal fields are contact lookups, so `contactId` is the
+ * user's linked contact record resolved from `systemuser._contactid_value`.
+ * When contactId is null the attorney/paralegal clauses are omitted.
+ */
+export function buildBroadOwnerFilter(userId: string, contactId: string | null): string {
+  const clauses = [
+    `_ownerid_value eq ${userId}`,
+    `_modifiedby_value eq ${userId}`,
+  ];
+
+  if (contactId) {
+    clauses.push(`_sprk_assignedattorney_value eq ${contactId}`);
+    clauses.push(`_sprk_assignedparalegal_value eq ${contactId}`);
+  }
+
+  return clauses.join(' or ');
+}
+
+// ---------------------------------------------------------------------------
 // Matter query helpers
 // ---------------------------------------------------------------------------
 
@@ -103,6 +132,36 @@ export function buildMattersQuery(userId: string, top: number = 5): string {
     select: MATTER_SELECT_FIELDS,
     filter: buildMatterOwnerFilter(userId),
     orderby: 'sprk_name asc',
+    top,
+  });
+}
+
+/** $select fields for sprk_matter used in the Matters tab (broader than My Portfolio) */
+export const MATTER_TAB_SELECT_FIELDS: string[] = [
+  'sprk_matterid',
+  'sprk_matternumber',
+  'sprk_name',
+  'sprk_description',
+  '_sprk_mattertype_ref_value',  // Lookup → sprk_mattertype_ref (display via formatted value)
+  'sprk_practicearea',
+  'sprk_status',
+  '_ownerid_value',
+  '_modifiedby_value',
+  '_sprk_assignedattorney_value',
+  '_sprk_assignedparalegal_value',
+  'createdon',
+  'modifiedon',
+];
+
+/**
+ * Build the full OData query string for the Matters tab.
+ * Uses the broad owner filter (owner/modifier/attorney/paralegal).
+ */
+export function buildMattersTabQuery(userId: string, contactId: string | null, top: number = 50): string {
+  return buildQuery({
+    select: MATTER_TAB_SELECT_FIELDS,
+    filter: buildBroadOwnerFilter(userId, contactId),
+    orderby: 'modifiedon desc',
     top,
   });
 }
@@ -225,6 +284,71 @@ export function buildProjectsQuery(userId: string, top: number = 5): string {
     select: PROJECT_SELECT_FIELDS,
     filter: `_ownerid_value eq ${userId}`,
     orderby: 'modifiedon desc',
+    top,
+  });
+}
+
+/** $select fields for sprk_project used in the Projects tab */
+export const PROJECT_TAB_SELECT_FIELDS: string[] = [
+  'sprk_projectid',
+  'sprk_projectnumber',
+  'sprk_projectname',
+  'sprk_name',
+  'sprk_projectdescription',
+  'statuscode',
+  'sprk_status',
+  '_sprk_projecttype_ref_value',  // Lookup → sprk_projecttype_ref (display via formatted value)
+  '_ownerid_value',
+  '_modifiedby_value',
+  '_sprk_assignedattorney_value',
+  '_sprk_assignedparalegal_value',
+  'createdon',
+  'modifiedon',
+];
+
+/**
+ * Build the full OData query string for the Projects tab.
+ * Uses the broad owner filter (owner/modifier/attorney/paralegal).
+ */
+export function buildProjectsTabQuery(userId: string, contactId: string | null, top: number = 50): string {
+  return buildQuery({
+    select: PROJECT_TAB_SELECT_FIELDS,
+    filter: buildBroadOwnerFilter(userId, contactId),
+    orderby: 'modifiedon desc',
+    top,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Invoice query helpers
+// ---------------------------------------------------------------------------
+
+/** $select fields for sprk_invoice used in the Invoices tab */
+export const INVOICE_SELECT_FIELDS: string[] = [
+  'sprk_invoiceid',
+  'sprk_invoicenumber',
+  'sprk_name',
+  'sprk_invoicedate',
+  'sprk_vendororg',
+  'sprk_description',
+  'statuscode',
+  '_ownerid_value',
+  '_modifiedby_value',
+  '_sprk_assignedattorney_value',
+  '_sprk_assignedparalegal_value',
+  'createdon',
+  'modifiedon',
+];
+
+/**
+ * Build the full OData query string for the Invoices tab.
+ * Uses the broad owner filter (owner/modifier/attorney/paralegal).
+ */
+export function buildInvoicesQuery(userId: string, contactId: string | null, top: number = 50): string {
+  return buildQuery({
+    select: INVOICE_SELECT_FIELDS,
+    filter: buildBroadOwnerFilter(userId, contactId),
+    orderby: 'sprk_invoicedate desc,modifiedon desc',
     top,
   });
 }
