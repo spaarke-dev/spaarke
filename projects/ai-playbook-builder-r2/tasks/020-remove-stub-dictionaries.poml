@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Remove all stub dictionaries and fake GUIDs from ScopeResolverService</title>
+    <phase>3: Stub Removal</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010, 011, 012</dependencies>
+    <blocks>021, 030</blocks>
+    <tags>bff-api, ai, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code modification and critical refactoring — removes all stub scaffolding gating subsequent phases</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Delete all stub dictionaries, fake GUIDs, and placeholder method bodies from ScopeResolverService.cs.
+    After tasks 010-012 have proven all 4 scope-type Dataverse queries, this task is the hard gate that
+    ensures zero stub or hardcoded data remains in the service. Every getter (GetToolAsync, GetSkillAsync,
+    GetKnowledgeAsync, GetActionAsync) must delegate to a real Dataverse query before this task is complete.
+  </prompt>
+
+  <role>
+    Senior .NET backend engineer performing a targeted refactor to eliminate all stub scaffolding from a
+    production AI service, with zero tolerance for leftover placeholder code.
+  </role>
+
+  <goal>
+    ScopeResolverService.cs contains zero _stub fields, zero fake GUIDs, and zero TODO comments referencing
+    stubs or future replacement. All four scope getters use verified Dataverse queries. dotnet build succeeds.
+  </goal>
+
+  <context>
+    <background>
+      During early development, ScopeResolverService.cs was scaffolded with in-memory stub dictionaries
+      (_stubActions, _stubSkills, _stubKnowledge, _stubTools) and fake GUIDs (lines 25-129) so that the
+      AI pipeline could be exercised before Dataverse schema was finalised. Tasks 010, 011, and 012
+      implemented and proved all four real Dataverse queries. This task is the "no more stubs" gate:
+      delete every vestige of the stub layer so the service is production-ready and the fake-data risk
+      is eliminated before handler discovery (021) and canvas sync (030) build on top of it.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST NOT leave any stub, hardcoded, or placeholder code in the codebase after this task completes.</constraint>
+    <constraint source="spec">Zero fake GUIDs may remain anywhere in ScopeResolverService.cs or files it references.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="design-section-6.6" location="projects/ai-playbook-builder-r2/design.md">Section 6.6 — Stub removal specification and acceptance criteria.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read ScopeResolverService.cs in full to understand the current structure and locate all stub fields and their usages.</step>
+    <step order="2">Identify all stub dictionary fields: _stubActions, _stubSkills, _stubKnowledge, _stubTools — note their declaration lines and all read-sites.</step>
+    <step order="3">Delete all stub dictionary field declarations and their collection initializers.</step>
+    <step order="4">Delete any constructor code that populates stub dictionaries (object initialiser blocks, Add() calls, etc.).</step>
+    <step order="5">Search ScopeResolverService.cs for Guid literal patterns (e.g. new Guid("...") or "xxxxxxxx-xxxx-...") not originating from Dataverse response binding — remove every occurrence.</step>
+    <step order="6">Remove any TODO or FIXME comments that reference stubs, fake data, or future replacement with real queries.</step>
+    <step order="7">Verify GetToolAsync, GetSkillAsync, GetKnowledgeAsync, and GetActionAsync each contain only Dataverse query logic with no fallback to a stub dictionary.</step>
+    <step order="8">Run dotnet build and fix any compilation errors introduced by the deletions.</step>
+    <step order="9">Grep the entire codebase for _stub to confirm zero remaining references.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read ScopeResolverService.cs and any referenced helper files.</tool>
+    <tool name="Edit">Remove stub fields, initializers, and TODO comments from ScopeResolverService.cs.</tool>
+    <tool name="Grep">Search codebase for _stub, fake GUIDs, and stub-related TODO patterns post-deletion.</tool>
+    <tool name="Bash">Run dotnet build to verify compilation succeeds after removal.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep for _stub across the entire repository returns zero matches.</criterion>
+    <criterion testable="true">Grep for fake/placeholder GUID literals in ScopeResolverService.cs returns zero matches.</criterion>
+    <criterion testable="true">Grep for TODO.*stub (case-insensitive) in ScopeResolverService.cs returns zero matches.</criterion>
+    <criterion testable="true">GetToolAsync, GetSkillAsync, GetKnowledgeAsync, and GetActionAsync each contain a Dataverse query and no dictionary lookup fallback.</criterion>
+    <criterion testable="true">dotnet build completes with zero errors and zero new warnings.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Implement ResolveNodeScopesAsync for per-node scope resolution</title>
+    <phase>4: Node Scope Resolution</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>040</blocks>
+    <tags>bff-api, ai, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag; code modification; depends on 3+ tasks; replaces a stub with real Dataverse N:N queries</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Replace the stub implementation of ResolveNodeScopesAsync in ScopeResolverService with real Dataverse
+    queries. The method must query the sprk_playbooknode record for its toolId lookup and then query the
+    sprk_playbooknode_skill and sprk_playbooknode_knowledge N:N relationship tables to build a fully
+    populated ResolvedScopes object using GetSkillAsync, GetKnowledgeAsync, and GetToolAsync.
+  </prompt>
+
+  <role>
+    Senior .NET backend engineer replacing a stub scope resolver with production Dataverse queries against
+    N:N relationship tables and lookup columns, using the established pattern from tasks 010-012.
+  </role>
+
+  <goal>
+    ResolveNodeScopesAsync returns a fully populated ResolvedScopes object sourced entirely from Dataverse
+    — no stub logic, no empty collections. Skills are loaded from the sprk_playbooknode_skill N:N table,
+    knowledge from sprk_playbooknode_knowledge, and the tool from the sprk_toolid lookup. dotnet build
+    succeeds.
+  </goal>
+
+  <context>
+    <background>
+      The AI execution engine calls ResolveNodeScopesAsync before dispatching a playbook node so it knows
+      which skills, knowledge documents, and tools are in scope for that node's AI handler invocation.
+      The method currently returns an empty ResolvedScopes (stub) because tasks 010-012 had not yet
+      proven the Dataverse query patterns. Task 030 created the N:N records during canvas sync; this task
+      reads them back at execution time to provide per-node scope context. Without real scopes, the AI
+      handler receives no context documents and produces generic, unhelpful output.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">AI scope resolution is part of the AI Tool Framework in the BFF; do not move to a separate service.</constraint>
+    <constraint source="spec">Every method in ScopeResolverService must have a real implementation after task 020 removed all stubs; ResolveNodeScopesAsync must not return empty collections.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="design-section-6.11" location="projects/ai-playbook-builder-r2/design.md">Section 6.11 — ResolveNodeScopesAsync implementation pattern including Dataverse query structure for N:N tables and lookup column retrieval.</pattern>
+      <pattern name="analysis-scopes" location=".claude/patterns/ai/analysis-scopes.md">Pattern for building ResolvedScopes from Dataverse query results, consistent with GetSkillAsync and GetKnowledgeAsync patterns from tasks 010-012.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read ScopeResolverService.cs to locate the current ResolveNodeScopesAsync stub implementation and understand the existing Dataverse client and query patterns established in tasks 010-012.</step>
+    <step order="2">Read design.md section 6.11 for the full ResolveNodeScopesAsync implementation pattern.</step>
+    <step order="3">Query the sprk_playbooknode Dataverse record by nodeId to retrieve the sprk_toolid lookup column value and any directly stored scope references.</step>
+    <step order="4">Query the sprk_playbooknode_skill N:N relationship table to retrieve all skill IDs associated with this node.</step>
+    <step order="5">Query the sprk_playbooknode_knowledge N:N relationship table to retrieve all knowledge IDs associated with this node.</step>
+    <step order="6">For each skill ID returned from the N:N query, call the existing GetSkillAsync method and collect the resolved skill objects.</step>
+    <step order="7">For each knowledge ID returned from the N:N query, call the existing GetKnowledgeAsync method and collect the resolved knowledge objects.</step>
+    <step order="8">If sprk_toolid lookup is populated, call the existing GetToolAsync method to resolve the tool object.</step>
+    <step order="9">Construct and return a ResolvedScopes object with the populated Skills[], Knowledge[], and Tools[] arrays (Tools containing the single resolved tool if present).</step>
+    <step order="10">Run dotnet build and fix any compilation errors.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read ScopeResolverService.cs, IScopeResolverService.cs, and design.md section 6.11.</tool>
+    <tool name="Edit">Replace the stub ResolveNodeScopesAsync body with real Dataverse query logic.</tool>
+    <tool name="Bash">Run dotnet build to verify compilation after changes.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ResolveNodeScopesAsync queries sprk_playbooknode to retrieve toolId and scope relationship references.</criterion>
+    <criterion testable="true">ResolveNodeScopesAsync queries sprk_playbooknode_skill N:N table and resolves each skill via GetSkillAsync.</criterion>
+    <criterion testable="true">ResolveNodeScopesAsync queries sprk_playbooknode_knowledge N:N table and resolves each knowledge document via GetKnowledgeAsync.</criterion>
+    <criterion testable="true">ResolveNodeScopesAsync resolves the tool lookup via GetToolAsync when sprk_toolid is populated.</criterion>
+    <criterion testable="true">Returned ResolvedScopes contains non-empty Skills[], Knowledge[], and Tools[] collections when the node has scopes assigned (not hardcoded empty arrays).</criterion>
+    <criterion testable="true">No stub logic, empty-collection returns, or TODO placeholders remain in ResolveNodeScopesAsync.</criterion>
+    <criterion testable="true">dotnet build completes with zero errors and zero new warnings.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

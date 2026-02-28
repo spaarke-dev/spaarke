@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Persist Deliver Output result to sprk_workingdocument and finalize analysis</title>
+    <phase>6: Output Persistence</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks>060</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag, code modification, writes to Dataverse via WorkingDocumentService</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>After PlaybookOrchestrationService completes node-based execution, extract the Deliver Output node's rendered markdown from PlaybookRunContext.NodeOutputs, persist it to sprk_workingdocument via WorkingDocumentService, then call FinalizeAnalysisAsync. Handle partial data (node failure) with "Completed with warnings" status.</prompt>
+  <role>Senior .NET backend engineer implementing output persistence after node-based playbook execution, with correct partial-data handling.</role>
+  <goal>After PlaybookOrchestrationService.ExecuteAsync() completes, the Deliver Output node's rendered markdown is persisted to sprk_workingdocument via WorkingDocumentService.UpdateWorkingDocumentAsync(), FinalizeAnalysisAsync is called with token counts, and partial data scenarios (any node failed but Deliver Output succeeded) result in "Completed with warnings" statuscode. dotnet build succeeds.</goal>
+  <context>
+    <background>PlaybookOrchestrationService.ExecuteAsync() runs all nodes and stores results in PlaybookRunContext.NodeOutputs. After execution, the Deliver Output node's result (rendered markdown content) must be written to the sprk_workingdocument Dataverse table so the Analysis Workspace can display it. WorkingDocumentService already provides UpdateWorkingDocumentAsync and FinalizeAnalysisAsync — these must be called in the correct order. If any non-Deliver-Output node failed during execution but the Deliver Output node itself succeeded (producing partial output), the analysis should be marked "Completed with warnings" rather than Error, allowing the user to see partial results. This logic belongs in the node-based execution branch in AnalysisOrchestrationService (added in task 040).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/WorkingDocumentService.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-013">AI execution pipeline lives in the BFF. WorkingDocumentService is the correct abstraction for writing analysis output to Dataverse.</constraint>
+    <constraint source="spec">Partial data scenario: if any node failed but Deliver Output succeeded, use "Completed with warnings" statuscode. Do not fail the entire analysis if partial results are available.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="working-document-persistence" location="src/server/api/Sprk.Bff.Api/Services/Ai/WorkingDocumentService.cs">WorkingDocumentService provides UpdateWorkingDocumentAsync(analysisId, content) and FinalizeAnalysisAsync(analysisId, tokensIn, tokensOut) — use these in sequence after node execution completes.</pattern>
+    </patterns>
+  </knowledge>
+  <steps>
+    <step order="1">Read design.md section 6.15 for the persistence contract: how to find the Deliver Output node result, what content field to extract, and how token counts are sourced.</step>
+    <step order="2">Read WorkingDocumentService.cs to confirm method signatures for UpdateWorkingDocumentAsync and FinalizeAnalysisAsync.</step>
+    <step order="3">Read AnalysisOrchestrationService.cs to find the node-based execution branch added in task 040, specifically where to add post-execution persistence.</step>
+    <step order="4">After the await PlaybookOrchestrationService.ExecuteAsync() call completes: look up the Deliver Output node's result in context.NodeOutputs by node type or node ID.</step>
+    <step order="5">Extract the rendered text/markdown content from the Deliver Output node result.</step>
+    <step order="6">Call await WorkingDocumentService.UpdateWorkingDocumentAsync(analysisId, renderedContent).</step>
+    <step order="7">Call await WorkingDocumentService.FinalizeAnalysisAsync(analysisId, context.TotalTokensIn, context.TotalTokensOut) (or equivalent token count fields from PlaybookRunContext).</step>
+    <step order="8">Implement partial data handling: check context.NodeOutputs for any node in error state. If any non-Deliver-Output node failed but the Deliver Output node has content, set statuscode to "Completed with warnings" instead of Completed.</step>
+    <step order="9">If Deliver Output node itself has no content or is in error state: set statuscode to Error (do not call UpdateWorkingDocumentAsync with empty content).</step>
+    <step order="10">Run dotnet build src/server/api/Sprk.Bff.Api/ and resolve any compilation errors.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Read design.md section 6.15, WorkingDocumentService.cs, and AnalysisOrchestrationService.cs before making changes.</tool>
+    <tool name="Edit">Make targeted edits to AnalysisOrchestrationService.cs only. Do not modify WorkingDocumentService.cs.</tool>
+    <tool name="Bash">Run dotnet build src/server/api/Sprk.Bff.Api/ to verify compilation.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Deliver Output node's rendered markdown is persisted to sprk_workingdocument via WorkingDocumentService.UpdateWorkingDocumentAsync after node execution completes.</criterion>
+    <criterion testable="true">FinalizeAnalysisAsync is called after UpdateWorkingDocumentAsync with correct token counts from PlaybookRunContext.</criterion>
+    <criterion testable="true">When any non-Deliver-Output node is in error state but Deliver Output has content, statuscode is set to "Completed with warnings".</criterion>
+    <criterion testable="true">When Deliver Output node itself has no content or is in error state, statuscode is set to Error and UpdateWorkingDocumentAsync is not called with empty content.</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ succeeds with zero errors.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

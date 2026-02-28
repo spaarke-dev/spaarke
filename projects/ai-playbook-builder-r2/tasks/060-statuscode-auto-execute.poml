@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Replace age-based auto-execute with statuscode-based logic in Analysis Workspace</title>
+    <phase>7: Analysis Workspace UX</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>051</dependencies>
+    <blocks>061, 062, 063</blocks>
+    <tags>frontend, fluent-ui, code-page, react</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code modification to .tsx files, changes core auto-execute behavior in Analysis Workspace</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Replace the age-based auto-execute check (60-second createdOn window) in useAnalysisExecution.ts with statuscode-based logic: auto-execute when isDraft (statusCode===1) AND isEmpty (no content) AND hasAction. Export triggerExecute() for the Run Analysis button added in task 062.</prompt>
+  <role>Senior React/TypeScript frontend engineer refactoring Analysis Workspace auto-execute logic to use reliable statuscode semantics instead of fragile timestamp checks.</role>
+  <goal>useAnalysisExecution.ts auto-executes based on isDraft &amp;&amp; isEmpty &amp;&amp; hasAction &amp;&amp; !!token &amp;&amp; !isExecuting, with no NEW_RECORD_AGE_MS constant remaining. triggerExecute() is exported for manual invocation from the Run Analysis button. Build succeeds.</goal>
+  <context>
+    <background>useAnalysisExecution.ts currently determines whether to auto-execute by checking if the record's createdOn timestamp falls within a 60-second window (NEW_RECORD_AGE_MS). This is fragile — it depends on timing and fails if the page loads late. The correct signal is statuscode: a Draft analysis (statusCode===1) with no existing content and a configured action or playbook should auto-execute. This change also enables the manual Run Analysis button (task 062) by exporting triggerExecute(), which bypasses the shouldAutoExecute guard and directly initiates execution.</background>
+    <relevant-files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useAnalysisExecution.ts</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-006">Code Page pattern using React 18. No PCF-style platform dependencies. Hook must work within the React 18 component lifecycle.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 for any UI elements. This hook is logic-only but any error/status UI it influences must use Fluent v9 tokens.</constraint>
+    <constraint source="spec">Production quality — statuscode-based logic is the correct long-term approach. Remove all timestamp-based auto-execute code.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-006.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="code-page-hooks" location="src/client/code-pages/AnalysisWorkspace/src/hooks/">React 18 custom hooks pattern used by Analysis Workspace — stateful hooks with exported functions for UI wiring.</pattern>
+    </patterns>
+  </knowledge>
+  <steps>
+    <step order="1">Read useAnalysisExecution.ts in full to understand current auto-execute logic, the NEW_RECORD_AGE_MS constant, shouldAutoExecute(), and the execution trigger flow.</step>
+    <step order="2">Read design.md section 6.17 for the precise statuscode-based logic specification and triggerExecute() contract.</step>
+    <step order="3">Remove the NEW_RECORD_AGE_MS constant entirely.</step>
+    <step order="4">Remove the createdOn age check from shouldAutoExecute() (or the equivalent useEffect/useMemo that references it).</step>
+    <step order="5">Replace with statuscode logic: isDraft = statusCode === 1, isEmpty = !content?.trim(), hasAction = !!actionId || !!playbookId.</step>
+    <step order="6">Update shouldAutoExecute to return isDraft &amp;&amp; isEmpty &amp;&amp; hasAction &amp;&amp; !!token &amp;&amp; !isExecuting.</step>
+    <step order="7">Add and export triggerExecute(): a function that directly invokes execution without checking shouldAutoExecute — used by the Run Analysis button (task 062).</step>
+    <step order="8">Ensure the auto-execute useEffect still fires correctly on mount and when statusCode changes (not just on mount with a stale timestamp check).</step>
+    <step order="9">Run npm run build (or webpack) in the AnalysisWorkspace directory to verify TypeScript compilation with zero errors.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Read useAnalysisExecution.ts and design.md section 6.17 before making changes.</tool>
+    <tool name="Edit">Make targeted edits to useAnalysisExecution.ts only.</tool>
+    <tool name="Bash">Run the appropriate build command in src/client/code-pages/AnalysisWorkspace/ to verify TypeScript compilation.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/code-pages/AnalysisWorkspace/src/hooks/useAnalysisExecution.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Auto-execute fires when statusCode===1 (Draft) AND content is empty AND actionId or playbookId is set AND token is available AND not already executing.</criterion>
+    <criterion testable="true">Auto-execute does NOT fire when statusCode !== 1 (e.g., In Progress, Completed, Error).</criterion>
+    <criterion testable="true">NEW_RECORD_AGE_MS constant is completely removed — no timestamp-based auto-execute logic remains.</criterion>
+    <criterion testable="true">triggerExecute() is exported from the hook and bypasses shouldAutoExecute checks for manual invocation.</criterion>
+    <criterion testable="true">Build succeeds with zero TypeScript errors.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

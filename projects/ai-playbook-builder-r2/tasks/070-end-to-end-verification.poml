@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>End-to-end verification and integration testing</title>
+    <phase>8: End-to-End Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>060, 061, 062, 063</dependencies>
+    <blocks>080</blocks>
+    <tags>testing, integration-test, verification</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with explicit constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Run comprehensive end-to-end verification of the complete playbook execution pipeline. Verify all 12 success criteria from spec.md. Fix any issues found.
+  </prompt>
+
+  <role>QA engineer and integration test specialist</role>
+
+  <goal>
+    All 12 success criteria from spec.md pass. Zero stub/placeholder code remains. dotnet build succeeds.
+    Legacy path verified working. Codebase clean of _stub, fake GUIDs, TODO placeholders.
+  </goal>
+
+  <context>
+    <background>
+      All implementation tasks are complete. Need to verify the full pipeline works end-to-end:
+      scope resolution, canvas-to-node sync, node execution, streaming, output persistence,
+      statuscode transitions, and workspace UX. Also verify legacy path still works.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/NodeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useAnalysisExecution.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/App.tsx</file>
+      <file>projects/ai-playbook-builder-r2/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">All 12 success criteria must pass.</constraint>
+    <constraint source="spec">Zero stub/placeholder code remains.</constraint>
+    <constraint source="spec">Legacy path (no nodes) still works unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-playbook-builder-r2/spec.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run dotnet build — verify zero compilation errors</step>
+    <step order="2">Grep codebase for _stub — verify zero results</step>
+    <step order="3">Grep codebase for fake GUIDs patterns — verify zero results</step>
+    <step order="4">Grep codebase for "TODO: replace" or "TODO: implement" — verify zero results</step>
+    <step order="5">Verify ScopeResolverService: all 4 getters use Dataverse queries, ResolveNodeScopesAsync queries N:N tables</step>
+    <step order="6">Verify Program.cs: AiAnalysisNodeExecutor and AppOnlyDocumentAnalysisJobHandler registered</step>
+    <step order="7">Verify HandlerEndpoints.cs: GET /api/ai/handlers endpoint exists with caching</step>
+    <step order="8">Verify NodeService.cs: SyncCanvasToNodesAsync implemented and hooked into PUT canvas</step>
+    <step order="9">Verify AnalysisOrchestrationService: delegates to PlaybookOrchestrationService when nodes exist, legacy path preserved</step>
+    <step order="10">Verify AiAnalysisNodeExecutor: streaming support via IStreamingAnalysisToolHandler</step>
+    <step order="11">Verify useAnalysisExecution.ts: statuscode-based auto-execute, triggerExecute exported</step>
+    <step order="12">Verify App.tsx: toast, Run Analysis button, source toggle, SprkChat pane</step>
+    <step order="13">Run dotnet test if test projects exist</step>
+    <step order="14">Build AnalysisWorkspace: cd src/client/code-pages/AnalysisWorkspace and npm run build</step>
+    <step order="15">Document any issues found and fix them</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Run dotnet build, dotnet test, npm run build</tool>
+    <tool name="Grep">Search for stubs, fake GUIDs, TODOs</tool>
+    <tool name="Read">Verify implementation details in source files</tool>
+    <tool name="Edit">Fix any issues found</tool>
+  </tools>
+
+  <outputs>
+    <output type="verification">Verification checklist with all 12 criteria marked pass/fail</output>
+    <output type="code">Any bug fixes applied</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">dotnet build succeeds with zero errors</criterion>
+    <criterion testable="true">Zero _stub references in codebase (grep verification)</criterion>
+    <criterion testable="true">Zero fake GUID patterns in ScopeResolverService</criterion>
+    <criterion testable="true">Zero TODO placeholder comments about stubs</criterion>
+    <criterion testable="true">All 12 success criteria from spec.md verified</criterion>
+    <criterion testable="true">AnalysisWorkspace builds (npm run build succeeds)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

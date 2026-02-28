@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Implement SyncCanvasToNodesAsync for canvas-to-node auto-sync</title>
+    <phase>4: Canvas-to-Node Sync</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>031, 040</blocks>
+    <tags>bff-api, ai, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Complex new feature bridging canvas JSON to Dataverse records; bff-api tag; 8+ steps; N:N relationship mapping</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement SyncCanvasToNodesAsync on NodeService to bridge the visual canvas (JSON) and executable
+    Dataverse sprk_playbooknode records. When the existing PUT /api/ai/playbooks/{id}/canvas endpoint
+    saves canvas JSON, it must also call SyncCanvasToNodesAsync to create, update, or delete
+    sprk_playbooknode records and their N:N scope relationships so the execution engine always reflects
+    the latest visual design.
+  </prompt>
+
+  <role>
+    Senior .NET backend engineer implementing a canvas-to-Dataverse sync algorithm, including topological
+    sort for execution order, N:N relationship management, and incremental diff/patch logic.
+  </role>
+
+  <goal>
+    SyncCanvasToNodesAsync parses canvas JSON, diffs against existing sprk_playbooknode records, and
+    creates/updates/deletes records plus their N:N skill and knowledge relationships. Execution order is
+    computed via topological sort of canvas edges. The PUT canvas endpoint triggers sync after persisting
+    the canvas JSON. dotnet build succeeds.
+  </goal>
+
+  <context>
+    <background>
+      The playbook builder stores the visual design as raw canvas JSON (nodes[], edges[]) on the
+      sprk_playbook record. For the execution engine to run a playbook, each visual node must be
+      materialised as a sprk_playbooknode Dataverse record with its scope relationships (N:N to
+      sprk_skill, sprk_knowledge) and execution metadata (order, dependsOnJson, timeoutSeconds,
+      retryCount, configJson, position). SyncCanvasToNodesAsync is the bridge that keeps Dataverse
+      records in sync every time the canvas is saved. This is a key architectural seam: visual designer
+      writes canvas JSON; execution engine reads sprk_playbooknode records.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/NodeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/INodeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">AI features extend the BFF API; do not create a separate microservice for sync logic.</constraint>
+    <constraint source="ADR-001">Minimal API pattern must be preserved in PlaybookEndpoints.cs; do not convert to controller.</constraint>
+    <constraint source="spec">No stubs or hardcoded data; SyncCanvasToNodesAsync must perform real Dataverse reads and writes.</constraint>
+    <constraint source="spec">Production quality: handle partial failures gracefully; orphaned records must be deleted; N:N tables must be updated atomically per node.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+      <file>projects/ai-playbook-builder-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="design-section-6.9" location="projects/ai-playbook-builder-r2/design.md">Section 6.9 — Full SyncCanvasToNodesAsync specification including canvas JSON schema, Dataverse field mapping, topological sort algorithm, and diff/patch strategy.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read NodeService.cs and INodeService.cs to understand existing methods, injected services, and Dataverse client usage patterns.</step>
+    <step order="2">Read design.md section 6.9 for the SyncCanvasToNodesAsync specification and canvas JSON schema.</step>
+    <step order="3">Add SyncCanvasToNodesAsync(Guid playbookId, string canvasJson, CancellationToken ct) to INodeService interface.</step>
+    <step order="4">Implement SyncCanvasToNodesAsync in NodeService: deserialise canvasJson to extract nodes[] and edges[] arrays.</step>
+    <step order="5">Query Dataverse to load all existing sprk_playbooknode records for the given playbookId.</step>
+    <step order="6">Diff canvas nodes against existing records: identify nodes to create (new canvas nodeId), update (existing nodeId with changed fields), and delete (Dataverse records whose nodeId is absent from canvas).</step>
+    <step order="7">Compute execution order via topological sort of edges[] (each edge has source and target nodeId); assign executionOrder integer to each node.</step>
+    <step order="8">For each node, compute dependsOnJson as a JSON array of nodeIds from incoming edges.</step>
+    <step order="9">Create/update sprk_playbooknode records with fields: skillIds (N:N), knowledgeIds (N:N), toolId (lookup), actionId (lookup), outputVariable, timeoutSeconds, retryCount, configJson, position (x/y serialised), executionOrder, dependsOnJson.</step>
+    <step order="10">For each updated or created node, sync N:N relationships: for sprk_playbooknode_skill associate the node to each skillId; for sprk_playbooknode_knowledge associate to each knowledgeId; remove stale N:N links not present in canvas.</step>
+    <step order="11">Delete orphaned sprk_playbooknode records (those in Dataverse but absent from canvas nodes[]).</step>
+    <step order="12">Read PlaybookEndpoints.cs to locate the existing PUT /api/ai/playbooks/{id}/canvas handler.</step>
+    <step order="13">In the PUT canvas handler, call nodeService.SyncCanvasToNodesAsync(id, canvasJson, ct) after the canvas JSON has been persisted to the playbook record.</step>
+    <step order="14">Run dotnet build and fix any compilation errors.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read NodeService.cs, INodeService.cs, PlaybookEndpoints.cs, and design.md section 6.9.</tool>
+    <tool name="Edit">Add interface method to INodeService; implement SyncCanvasToNodesAsync in NodeService; hook into PUT canvas endpoint in PlaybookEndpoints.cs.</tool>
+    <tool name="Bash">Run dotnet build to verify compilation after all changes.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/NodeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/INodeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">INodeService interface declares SyncCanvasToNodesAsync(Guid playbookId, string canvasJson, CancellationToken ct).</criterion>
+    <criterion testable="true">NodeService.SyncCanvasToNodesAsync creates sprk_playbooknode records for new canvas nodes.</criterion>
+    <criterion testable="true">NodeService.SyncCanvasToNodesAsync updates existing sprk_playbooknode records when canvas node fields change.</criterion>
+    <criterion testable="true">NodeService.SyncCanvasToNodesAsync deletes sprk_playbooknode records absent from canvas nodes[].</criterion>
+    <criterion testable="true">N:N relationships for sprk_playbooknode_skill and sprk_playbooknode_knowledge are created and pruned per node.</criterion>
+    <criterion testable="true">executionOrder is computed via topological sort of canvas edges and stored on each sprk_playbooknode record.</criterion>
+    <criterion testable="true">dependsOnJson is populated from incoming edge sources for each node.</criterion>
+    <criterion testable="true">PUT /api/ai/playbooks/{id}/canvas endpoint calls SyncCanvasToNodesAsync after persisting canvas JSON.</criterion>
+    <criterion testable="true">dotnet build completes with zero errors and zero new warnings.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

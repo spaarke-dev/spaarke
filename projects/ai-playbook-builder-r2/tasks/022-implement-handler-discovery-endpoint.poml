@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Implement GET /api/ai/handlers endpoint for handler discovery</title>
+    <phase>3: Handler Discovery API</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>030</blocks>
+    <tags>bff-api, ai, api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New API endpoint with bff-api tag; requires ADR-001, ADR-008, ADR-014 compliance and caching</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add a GET /api/ai/handlers endpoint to HandlerEndpoints.cs that returns metadata for all registered
+    tool handlers, including their JSON Schema configuration schemas. The response must be cached in
+    IMemoryCache with a 5-minute TTL to avoid repeated reflection on hot paths. The endpoint must require
+    authorization and be tagged "AI" for OpenAPI grouping.
+  </prompt>
+
+  <role>
+    Senior .NET backend engineer implementing a Minimal API discovery endpoint following Spaarke's ADR
+    conventions for authentication, caching, and DI minimalism.
+  </role>
+
+  <goal>
+    GET /api/ai/handlers returns a JSON array of all 9 registered handlers with their full metadata
+    (handlerId, name, description, version, supportedToolTypes, parameters, configurationSchema,
+    isEnabled). Response is cached 5 minutes via IMemoryCache. Endpoint requires authorization.
+    dotnet build succeeds.
+  </goal>
+
+  <context>
+    <background>
+      The playbook builder canvas needs to know which AI tool handlers are available so it can populate
+      the tool palette and render per-tool configuration forms. Task 021 added ConfigurationSchema to
+      each handler's metadata; this task surfaces all metadata through a REST endpoint. The endpoint file
+      HandlerEndpoints.cs already exists in the codebase and may contain partial scaffolding.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/HandlerEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API MapGet pattern; no controller classes.</constraint>
+    <constraint source="ADR-008">All non-health endpoints must call .RequireAuthorization() via endpoint filter — no global auth middleware.</constraint>
+    <constraint source="ADR-010">DI registrations must remain minimal; inject IToolHandlerRegistry and IMemoryCache only — do not add new service registrations.</constraint>
+    <constraint source="ADR-014">Use IMemoryCache for short-lived metadata; TTL must be 5 minutes for handler discovery responses.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-008.md</file>
+      <file>.claude/adr/ADR-014.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="design-section-6.7" location="projects/ai-playbook-builder-r2/design.md">Section 6.7 — Full implementation specification for the GET /api/ai/handlers endpoint including response DTO shape and caching strategy.</pattern>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API MapGet/MapPost registration pattern used across BFF API.</pattern>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">RequireAuthorization and other endpoint filter chaining patterns.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read HandlerEndpoints.cs to understand the existing file structure, any existing endpoints, and how IWebApplication is referenced.</step>
+    <step order="2">Read design.md section 6.7 for the full endpoint implementation code and response DTO specification.</step>
+    <step order="3">Add a GET /api/ai/handlers endpoint using app.MapGet, injecting IToolHandlerRegistry and IMemoryCache as parameters.</step>
+    <step order="4">Implement the cache-aside pattern: try IMemoryCache for the response first; on miss, call IToolHandlerRegistry to enumerate all handlers.</step>
+    <step order="5">Map each handler's metadata to a response DTO with fields: handlerId, name, description, version, supportedToolTypes, parameters, configurationSchema, isEnabled.</step>
+    <step order="6">Store the mapped list in IMemoryCache with a 5-minute absolute expiration (TimeSpan.FromMinutes(5)).</step>
+    <step order="7">Chain .RequireAuthorization() and .WithTags("AI") on the MapGet registration.</step>
+    <step order="8">Run dotnet build and fix any compilation errors.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read HandlerEndpoints.cs and design.md to understand existing structure and implementation spec.</tool>
+    <tool name="Edit">Add the GET /api/ai/handlers endpoint implementation to HandlerEndpoints.cs.</tool>
+    <tool name="Bash">Run dotnet build to verify compilation after changes.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/HandlerEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/ai/handlers endpoint is registered in HandlerEndpoints.cs using MapGet.</criterion>
+    <criterion testable="true">Response includes all 9 registered handlers with configurationSchema populated.</criterion>
+    <criterion testable="true">IMemoryCache is used with a 5-minute absolute expiration (not sliding) for the response.</criterion>
+    <criterion testable="true">Endpoint registration chains .RequireAuthorization() and .WithTags("AI").</criterion>
+    <criterion testable="true">dotnet build completes with zero errors and zero new warnings.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

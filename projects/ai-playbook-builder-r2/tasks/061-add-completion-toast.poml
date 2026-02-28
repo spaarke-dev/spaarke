@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Add completion toast notification to Analysis Workspace</title>
+    <phase>7: Analysis Workspace UX</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>060</dependencies>
+    <blocks>070</blocks>
+    <tags>frontend, fluent-ui, code-page, react</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New UI component addition, does not modify existing execution behavior, constrained to Fluent v9 toast pattern</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Add a Fluent UI v9 Toast notification to the Analysis Workspace that displays "Analysis complete" for 5 seconds after execution finishes. Wrap the app root in a Toaster provider and wire the toast to the onComplete callback.</prompt>
+  <role>Senior React/TypeScript frontend engineer adding accessible completion feedback to the Analysis Workspace using Fluent UI v9 Toast.</role>
+  <goal>After analysis execution completes, a Fluent UI v9 Toast with "Analysis complete" and intent "success" appears for 5 seconds. App root is wrapped in Toaster. Toast uses semantic color tokens (dark mode compatible). Build succeeds.</goal>
+  <context>
+    <background>When an analysis finishes executing (either via auto-execute or the Run Analysis button), the workspace provides no visual feedback beyond the content appearing. A completion toast gives users clear confirmation that execution finished. Fluent UI v9 provides a Toaster + useToastController pattern for declarative toasts. The Toaster must wrap the app root (or the relevant subtree), and the toast must be dispatched in the onComplete execution callback. Using semantic color tokens (not hard-coded colors) ensures dark mode compatibility per ADR-021.</background>
+    <relevant-files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/App.tsx</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 exclusively. Use semantic color tokens — no hard-coded hex colors. Dark mode must work correctly with the toast appearance.</constraint>
+    <constraint source="ADR-006">Code Page pattern — React 18, bundled Fluent v9. No platform-provided React.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-toast" location=".claude/adr/ADR-021.md">Fluent UI v9 Toast pattern: import useToastController, Toast, ToastTitle, Toaster from @fluentui/react-components. Wrap tree in &lt;Toaster&gt;, call dispatchToast() with intent and timeout.</pattern>
+    </patterns>
+  </knowledge>
+  <steps>
+    <step order="1">Read App.tsx in full to understand the current component structure, where the execution onComplete callback is, and where to add the Toaster wrapper.</step>
+    <step order="2">Read design.md section 6.18 for the toast specification (message text, intent, timeout duration).</step>
+    <step order="3">Import useToastController, Toast, ToastTitle, and Toaster from @fluentui/react-components.</step>
+    <step order="4">Wrap the app's root JSX subtree (inside FluentProvider) with a &lt;Toaster&gt; component, giving it a unique toasterId prop.</step>
+    <step order="5">Use useToastController(toasterId) to get the dispatchToast function.</step>
+    <step order="6">In the onComplete callback (after execution finishes), call dispatchToast with: &lt;Toast&gt;&lt;ToastTitle&gt;Analysis complete&lt;/ToastTitle&gt;&lt;/Toast&gt;, intent: "success", timeout: 5000.</step>
+    <step order="7">Verify no hard-coded colors are used — rely on Fluent v9 intent semantics for theming.</step>
+    <step order="8">Run the build command for AnalysisWorkspace to verify compilation with zero errors.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Read App.tsx and design.md section 6.18 before making changes.</tool>
+    <tool name="Edit">Make targeted edits to App.tsx only.</tool>
+    <tool name="Bash">Run the AnalysisWorkspace build to verify TypeScript compilation.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/code-pages/AnalysisWorkspace/src/App.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">A Fluent UI v9 Toast with message "Analysis complete" and intent "success" appears after execution completes.</criterion>
+    <criterion testable="true">Toast dismisses automatically after 5 seconds.</criterion>
+    <criterion testable="true">Toaster wraps the correct subtree within FluentProvider.</criterion>
+    <criterion testable="true">No hard-coded colors — toast appearance is controlled by Fluent v9 semantic tokens, compatible with dark mode.</criterion>
+    <criterion testable="true">Build succeeds with zero TypeScript errors.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

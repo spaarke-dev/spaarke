@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Register missing DI services (AppOnlyDocumentAnalysisJobHandler + AiAnalysisNodeExecutor)</title>
+    <phase>0: Job Handler Fix</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 003, 004, 005</blocks>
+    <tags>bff-api, di, config</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies Program.cs (DI registration), bff-api tag, blocks all downstream tasks</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Register two missing DI services in Program.cs that are causing dead-letter queue errors and preventing node execution.
+  </prompt>
+
+  <role>Senior .NET backend developer with Minimal API and DI expertise</role>
+
+  <goal>
+    Program.cs has both AppOnlyDocumentAnalysisJobHandler and AiAnalysisNodeExecutor registered in DI.
+    dotnet build succeeds. No dead-letter errors for AppOnlyDocumentAnalysis job type.
+  </goal>
+
+  <context>
+    <background>
+      AppOnlyDocumentAnalysis job type messages go to dead-letter queue because the handler isn't registered in DI.
+      AiAnalysisNodeExecutor is also missing, which means ActionType.AiAnalysis has no executor in NodeExecutorRegistry.
+      Both are zero-risk additions — they don't change behavior, just make services discoverable.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — ≤15 non-framework registrations. Use assembly scanning where possible. AiAnalysisNodeExecutor should register as INodeExecutor (same pattern as DeliverOutputNodeExecutor).</constraint>
+    <constraint source="ADR-004">Job handlers must be idempotent and propagate CorrelationId.</constraint>
+    <constraint source="ADR-001">Minimal API pattern — services registered in Program.cs feature modules.</constraint>
+    <constraint source="spec">MUST NOT leave any stub, hardcoded, or placeholder code.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+      <file>.claude/adr/ADR-004.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="node-executor-registration" location="src/server/api/Sprk.Bff.Api/Program.cs">
+        Follow existing pattern: services.AddSingleton&lt;INodeExecutor, DeliverOutputNodeExecutor&gt;()
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read Program.cs to find existing DI registration section for AI services</step>
+    <step order="2">Find the existing INodeExecutor registrations (DeliverOutputNodeExecutor, ConditionNodeExecutor, etc.)</step>
+    <step order="3">Add: services.AddSingleton&lt;INodeExecutor, AiAnalysisNodeExecutor&gt;() in the same group</step>
+    <step order="4">Find the job handler registrations section</step>
+    <step order="5">Add: services.AddSingleton&lt;IJobHandler, AppOnlyDocumentAnalysisJobHandler&gt;() (or find correct interface)</step>
+    <step order="6">Run dotnet build to verify compilation</step>
+    <step order="7">Verify DI registration count stays ≤15 non-framework (check against ADR-010)</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read Program.cs and existing registrations</tool>
+    <tool name="Edit">Add DI registrations</tool>
+    <tool name="Bash">Run dotnet build</tool>
+    <tool name="Grep">Search for existing registration patterns</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">dotnet build succeeds with zero errors</criterion>
+    <criterion testable="true">AiAnalysisNodeExecutor is registered as INodeExecutor</criterion>
+    <criterion testable="true">AppOnlyDocumentAnalysisJobHandler is registered as IJobHandler</criterion>
+    <criterion testable="true">DI registration count ≤15 non-framework lines</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

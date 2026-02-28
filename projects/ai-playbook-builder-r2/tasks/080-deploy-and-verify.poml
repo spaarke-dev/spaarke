@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Deploy BFF API and Analysis Workspace to dev environment</title>
+    <phase>9: Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>070</dependencies>
+    <blocks>090</blocks>
+    <tags>deploy, azure, bff-api, code-page</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with explicit procedures</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy the BFF API and Analysis Workspace Code Page to the dev environment. Verify in Dataverse.
+  </prompt>
+
+  <role>DevOps engineer with Azure and Dataverse deployment expertise</role>
+
+  <goal>
+    BFF API deployed to spe-api-dev-67e2xz. Analysis Workspace web resource updated in Dataverse.
+    Both verified working in dev environment.
+  </goal>
+
+  <context>
+    <background>
+      All implementation and testing complete. Deploy to dev environment for final verification.
+      Use existing deployment scripts and skills.
+    </background>
+    <relevant-files>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>src/client/code-pages/AnalysisWorkspace/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Deploy to Azure App Service (spe-api-dev-67e2xz)</constraint>
+    <constraint source="ADR-006">Code Page deployed as Dataverse web resource</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load bff-deploy skill and deploy BFF API</step>
+    <step order="2">Verify API health: GET https://spe-api-dev-67e2xz.azurewebsites.net/healthz</step>
+    <step order="3">Load code-page-deploy skill and deploy Analysis Workspace</step>
+    <step order="4">Verify Analysis Workspace loads in Dataverse form</step>
+    <step order="5">Test GET /api/ai/handlers endpoint returns handlers</step>
+    <step order="6">Document deployment results</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Run deployment scripts, curl health checks</tool>
+    <tool name="Skill">Invoke bff-deploy and code-page-deploy skills</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">BFF API deployed and verified</output>
+    <output type="deployment">Analysis Workspace deployed and verified</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF API health check returns 200</criterion>
+    <criterion testable="true">GET /api/ai/handlers returns handler list</criterion>
+    <criterion testable="true">Analysis Workspace loads without console errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

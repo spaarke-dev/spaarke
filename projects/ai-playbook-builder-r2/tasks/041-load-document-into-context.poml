@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Load document text into PlaybookRunContext.Document before node execution</title>
+    <phase>5: Document Loading</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>050</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag, modifies core orchestration service, must follow SpeFileStore facade constraint precisely</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Extract document loading (SpeFileStore download + text extraction) from the legacy path in AnalysisOrchestrationService into a shared private method, then call it before PlaybookOrchestrationService.ExecuteAsync() to populate PlaybookRunContext.Document.</prompt>
+  <role>Senior .NET backend engineer ensuring document context is correctly loaded before node-based playbook execution using the established SpeFileStore facade pattern.</role>
+  <goal>PlaybookRunContext.Document is populated with downloaded and extracted document text before PlaybookOrchestrationService.ExecuteAsync() is called. Shared private method reuses the existing document loading pattern from the legacy path. SpeFileStore facade used exclusively (no direct Graph SDK calls). dotnet build succeeds.</goal>
+  <context>
+    <background>PlaybookRunContext.Document is currently never populated in the node-based execution path. The legacy action-based path in AnalysisOrchestrationService already contains document download (via SpeFileStore.DownloadFileAsUserAsync) and text extraction (via ITextExtractor) logic. Rather than duplicating this, the pattern should be extracted to a shared private method and called before delegating to PlaybookOrchestrationService. Task 040 may have begun this extraction — check current-task.md and the file before making changes to avoid duplication. This task completes and validates that extraction.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookRunContext.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-007">Use SpeFileStore facade for all file operations. Graph SDK types (DriveItem, GraphServiceClient) must not be used above the facade boundary.</constraint>
+    <constraint source="ADR-013">Document loading is part of the AI execution pipeline in the BFF. No separate service or Azure Function for this step.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-007.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>.claude/patterns/ai/text-extraction.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="text-extraction" location=".claude/patterns/ai/text-extraction.md">SpeFileStore.DownloadFileAsUserAsync + ITextExtractor pattern for converting a SharePoint document to plain text for AI consumption.</pattern>
+    </patterns>
+  </knowledge>
+  <steps>
+    <step order="1">Read AnalysisOrchestrationService.cs in full to find the existing document loading code in the legacy action-based path, and check whether task 040 already extracted it to a shared method.</step>
+    <step order="2">Read design.md section 6.12 for the document loading contract: what fields populate PlaybookRunContext.Document (text, filename, contentType, sizeBytes).</step>
+    <step order="3">If a shared private method does not yet exist, extract document download + text extraction to a private method: Task&lt;DocumentContext&gt; LoadDocumentAsync(string documentId, CancellationToken ct).</step>
+    <step order="4">Verify the extracted method uses SpeFileStore.DownloadFileAsUserAsync (OBO user token) and ITextExtractor, not raw Graph SDK types.</step>
+    <step order="5">In the node-based execution branch (added in task 040), call the shared method and set context.Document = await LoadDocumentAsync(documentId, cancellationToken) before the PlaybookOrchestrationService.ExecuteAsync() call.</step>
+    <step order="6">Verify the legacy path also calls the shared method (or still uses it inline if no refactor was done — avoid double-refactoring).</step>
+    <step order="7">Run dotnet build src/server/api/Sprk.Bff.Api/ and resolve any compilation errors.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Read AnalysisOrchestrationService.cs and PlaybookRunContext.cs before making any changes. Also read current-task.md to check what task 040 already completed.</tool>
+    <tool name="Edit">Make targeted edits to AnalysisOrchestrationService.cs only. Do not modify PlaybookRunContext.cs unless DocumentContext fields are missing.</tool>
+    <tool name="Bash">Run dotnet build src/server/api/Sprk.Bff.Api/ to verify compilation.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">PlaybookRunContext.Document is populated with document text, filename, contentType, and sizeBytes before PlaybookOrchestrationService.ExecuteAsync() is called.</criterion>
+    <criterion testable="true">Document loading uses a shared private method reused by both node-based and legacy execution paths (no code duplication).</criterion>
+    <criterion testable="true">SpeFileStore.DownloadFileAsUserAsync is used for file download — no direct GraphServiceClient or DriveItem references above the facade.</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ succeeds with zero errors.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

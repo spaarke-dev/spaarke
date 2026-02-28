@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Add "Run Analysis" toolbar button and source pane toggle</title>
+    <phase>7: Analysis Workspace UX</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>060</dependencies>
+    <blocks>070</blocks>
+    <tags>frontend, fluent-ui, code-page, react</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>UI additions to existing component, no modification of execution logic or core behavior</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Add two toolbar buttons to the Analysis Workspace App.tsx: 1) A "Run Analysis" Button that calls triggerExecute() (from task 060), disabled during execution and when no action/playbook is configured, with a Spinner during execution. 2) A source pane toggle ToggleButton that shows/hides the SourceViewerPanel, giving the EditorPanel full width when hidden.</prompt>
+  <role>Senior React/TypeScript frontend engineer adding user-initiated execution controls and layout toggle to the Analysis Workspace toolbar using Fluent UI v9.</role>
+  <goal>App.tsx has a "Run Analysis" Button wired to triggerExecute() with correct disabled states and execution Spinner, plus a source pane ToggleButton that conditionally renders the PanelSplitter and SourceViewerPanel. Both buttons use Fluent v9 components and semantic tokens (dark mode compatible). Build succeeds.</goal>
+  <context>
+    <background>The Analysis Workspace currently only auto-executes and provides no manual trigger. The Run Analysis button enables users to re-run analysis on demand, even after auto-execute has already fired. The button must be disabled when execution is in progress (isExecuting) or when neither actionId nor playbookId is configured (no operation to perform). A Spinner replaces or accompanies the button icon during execution for visual feedback. The source pane toggle allows users to hide the SourceViewerPanel (document preview) to give the EditorPanel (analysis output) more horizontal space — useful for wide content. The showSourcePane state defaults to true (pane visible).</background>
+    <relevant-files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/App.tsx</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 exclusively: Button, ToggleButton, Spinner — all from @fluentui/react-components. Semantic tokens only, no hard-coded colors. Dark mode must work.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-toolbar" location=".claude/adr/ADR-021.md">Fluent UI v9 toolbar pattern: Button with icon slot, Spinner for loading state, ToggleButton for toggle controls. All from @fluentui/react-components.</pattern>
+    </patterns>
+  </knowledge>
+  <steps>
+    <step order="1">Read App.tsx in full to understand the current toolbar structure, how triggerExecute() is (or will be) imported from useAnalysisExecution, and where PanelSplitter/SourceViewerPanel are rendered.</step>
+    <step order="2">Read design.md sections 6.19 and 6.20 for the precise button specifications and source pane toggle behavior.</step>
+    <step order="3">Import Button, ToggleButton, Spinner from @fluentui/react-components. Import an appropriate play icon from @fluentui/react-icons.</step>
+    <step order="4">Add "Run Analysis" Button to the toolbar area. Set icon to the play icon. Wire onClick to triggerExecute().</step>
+    <step order="5">Set disabled state: isExecuting || (!analysis?.playbookId &amp;&amp; !analysis?.actionId).</step>
+    <step order="6">Show Spinner inside or adjacent to the button icon slot when isExecuting is true.</step>
+    <step order="7">Add showSourcePane state (useState(true)).</step>
+    <step order="8">Add source pane ToggleButton to the toolbar with a document-related icon. Wire checked to showSourcePane, onChange to toggle it.</step>
+    <step order="9">Conditionally render the PanelSplitter and SourceViewerPanel based on showSourcePane: when false, EditorPanel takes full width.</step>
+    <step order="10">Verify no hard-coded colors are used — all styling uses Fluent v9 semantic tokens.</step>
+    <step order="11">Run the AnalysisWorkspace build to verify TypeScript compilation with zero errors.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Read App.tsx and design.md sections 6.19 and 6.20 before making changes.</tool>
+    <tool name="Edit">Make targeted edits to App.tsx only.</tool>
+    <tool name="Bash">Run the AnalysisWorkspace build to verify TypeScript compilation.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/code-pages/AnalysisWorkspace/src/App.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">"Run Analysis" Button is present in the toolbar and calls triggerExecute() on click.</criterion>
+    <criterion testable="true">Button is disabled when isExecuting is true.</criterion>
+    <criterion testable="true">Button is disabled when both analysis.playbookId and analysis.actionId are falsy.</criterion>
+    <criterion testable="true">Spinner appears in the button during execution (isExecuting === true).</criterion>
+    <criterion testable="true">Source pane ToggleButton shows/hides SourceViewerPanel when toggled.</criterion>
+    <criterion testable="true">When source pane is hidden, EditorPanel takes full available width.</criterion>
+    <criterion testable="true">No hard-coded colors — all Fluent v9 semantic tokens, dark mode compatible.</criterion>
+    <criterion testable="true">Build succeeds with zero TypeScript errors.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

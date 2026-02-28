@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Implement GetActionAsync Dataverse query replacing stub dictionary</title>
+    <phase>2c: Action Resolution</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>020</blocks>
+    <tags>bff-api, ai, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag and code modification replacing stub with production Dataverse query</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Replace the stub dictionary implementation of GetActionAsync in ScopeResolverService.cs with a real Dataverse Web API query against the sprk_systemprompts entity. Add ActionEntity and ActionTypeReference private DTOs, extract sort order from the type name prefix using a regex (e.g., "1 - Pre-Analysis" yields sortOrder=1), and map the entity to the AnalysisAction domain model.</prompt>
+  <role>Backend .NET developer implementing a production-quality Dataverse integration for AI scope resolution</role>
+  <goal>GetActionAsync queries Dataverse instead of a stub dictionary, ActionEntity DTO is added, sort order is correctly parsed from the type name prefix, structured logging is present, and dotnet build succeeds</goal>
+  <context>
+    <background>GetActionAsync currently returns data from a hardcoded stub dictionary, blocking production use. It must be replaced with a Dataverse Web API query to sprk_systemprompts, expanding the sprk_ActionTypeId lookup. A distinguishing aspect of this resolver is sort order extraction: the Dataverse type name uses a numeric prefix convention (e.g., "1 - Pre-Analysis", "2 - Analysis", "3 - Post-Analysis"), and this prefix must be parsed via regex into an integer sortOrder field on the AnalysisAction model. Design.md section 6.5 contains the full reference implementation.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-013">Extend BFF for AI features; do not add a separate AI service</constraint>
+    <constraint source="spec">No stubs permitted in production paths — all resolution must query real Dataverse data</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="analysis-scopes" location=".claude/patterns/ai/analysis-scopes.md">Pattern for resolving tool, skill, knowledge, and action scopes from Dataverse via Web API — section 6.5 has the full GetActionAsync implementation including sort order regex extraction</pattern>
+    </patterns>
+  </knowledge>
+  <steps>
+    <step order="1">Read ScopeResolverService.cs to locate the current stub GetActionAsync implementation and understand the existing DTO and mapping patterns used in other resolvers.</step>
+    <step order="2">Read design.md section 6.5 to obtain the reference implementation code for GetActionAsync, including DTO classes and the sort order extraction logic.</step>
+    <step order="3">Replace the stub dictionary implementation with a Dataverse Web API query using the URL pattern: sprk_systemprompts({actionId})?$expand=sprk_ActionTypeId($select=sprk_name).</step>
+    <step order="4">Add private ActionEntity and ActionTypeReference DTO classes to deserialize the Dataverse response, including all relevant fields from the design.md reference.</step>
+    <step order="5">Add sort order extraction: use a regex to parse the leading integer from the type name string (pattern: ^\d+ from "N - TypeName"), defaulting to 0 if no prefix is found.</step>
+    <step order="6">Map the ActionEntity fields to the AnalysisAction domain model, populating the SortOrder property from the parsed integer.</step>
+    <step order="7">Add structured logging: LogInformation on success ("Loaded action from Dataverse: {ActionName}"), LogWarning when not found.</step>
+    <step order="8">Run dotnet build and confirm zero errors.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Read ScopeResolverService.cs and design.md section 6.5</tool>
+    <tool name="Edit">Replace stub with Dataverse query, add DTO classes, sort order regex, and mapping</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GetActionAsync queries Dataverse (no stub dictionary or hardcoded GUIDs)</criterion>
+    <criterion testable="true">ActionEntity and ActionTypeReference private DTO classes are added with correct Dataverse field names</criterion>
+    <criterion testable="true">Sort order regex correctly parses "1 - Pre-Analysis" to sortOrder=1 and defaults to 0 when no prefix is present</criterion>
+    <criterion testable="true">Structured log "Loaded action from Dataverse: {ActionName}" is emitted on successful resolution</criterion>
+    <criterion testable="true">dotnet build reports zero errors</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
