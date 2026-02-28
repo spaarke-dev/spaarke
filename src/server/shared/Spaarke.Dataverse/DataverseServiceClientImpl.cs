@@ -288,6 +288,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         if (request.FilePath != null)
             document["sprk_filepath"] = request.FilePath;
 
+        if (request.FileType != null)
+            document["sprk_filetype"] = request.FileType;
+
         if (request.Status.HasValue)
             document["statuscode"] = new OptionSetValue((int)request.Status.Value);
 

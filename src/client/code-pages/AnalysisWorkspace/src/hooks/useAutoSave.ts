@@ -1,15 +1,13 @@
 /**
  * useAutoSave - Debounced auto-save hook for AnalysisWorkspace
  *
- * Automatically persists editor content to the BFF API after a configurable
- * debounce period (default 3 seconds). Tracks save state for UI feedback
- * (idle/saving/saved/error) and provides a forceSave function for Ctrl+S.
+ * Automatically persists editor content to Dataverse (same-origin Web API)
+ * after a configurable debounce period (default 3 seconds). Tracks save state
+ * for UI feedback (idle/saving/saved/error) and provides a forceSave function
+ * for Ctrl+S.
  *
- * Uses the analysisApi service layer for BFF API calls. Auth token is obtained
- * from the AuthContext.
- *
- * @see ADR-007 - Document access through BFF API (not context.webAPI)
- * @see ADR-019 - ProblemDetails error handling
+ * Writes directly to sprk_workingdocument via Dataverse PATCH — no BFF
+ * round-trip or Bearer token needed.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -33,8 +31,6 @@ const SAVED_INDICATOR_MS = 2000;
 export interface UseAutoSaveOptions {
     /** GUID of the analysis record to save */
     analysisId: string;
-    /** Bearer auth token for BFF API calls */
-    token: string | null;
     /** Whether auto-save is enabled */
     enabled?: boolean;
     /** Debounce delay in milliseconds (default: 3000) */
@@ -59,13 +55,13 @@ export interface UseAutoSaveResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Auto-save hook with 3-second debounce. Calls BFF API to persist content.
+ * Auto-save hook with 3-second debounce. Writes to Dataverse via same-origin PATCH.
  *
  * @example
  * ```tsx
  * const { saveState, lastSavedAt, forceSave, notifyContentChanged } = useAutoSave({
  *     analysisId: "abc-123",
- *     token: authToken,
+ *     enabled: true,
  * });
  *
  * // In editor onChange:
@@ -78,7 +74,6 @@ export interface UseAutoSaveResult {
 export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveResult {
     const {
         analysisId,
-        token,
         enabled = true,
         debounceMs = DEFAULT_DEBOUNCE_MS,
     } = options;
@@ -110,7 +105,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveResult {
      */
     const doSave = useCallback(
         async (content: string) => {
-            if (!analysisId || !token || !enabled) {
+            if (!analysisId || !enabled) {
                 return;
             }
 
@@ -125,7 +120,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveResult {
             setSaveError(null);
 
             try {
-                await saveAnalysisContent(analysisId, content, token);
+                await saveAnalysisContent(analysisId, content);
 
                 const now = new Date().toISOString();
                 setLastSavedAt(now);
@@ -154,7 +149,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveResult {
                 }
             }
         },
-        [analysisId, token, enabled]
+        [analysisId, enabled]
     );
 
     /**
@@ -162,7 +157,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveResult {
      */
     const notifyContentChanged = useCallback(
         (content: string) => {
-            if (!enabled || !analysisId || !token) {
+            if (!enabled || !analysisId) {
                 return;
             }
 
@@ -176,7 +171,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveResult {
                 doSave(content);
             }, debounceMs);
         },
-        [enabled, analysisId, token, debounceMs, doSave]
+        [enabled, analysisId, debounceMs, doSave]
     );
 
     /**

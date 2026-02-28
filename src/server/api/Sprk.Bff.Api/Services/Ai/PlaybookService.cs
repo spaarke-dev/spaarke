@@ -86,6 +86,28 @@ public class PlaybookService : IPlaybookService
         }
     }
 
+    /// <summary>
+    /// Replacement for EnsureSuccessStatusCode that captures the response body for diagnostics.
+    /// </summary>
+    private async Task EnsureSuccessWithDiagnosticsAsync(
+        HttpResponseMessage response,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError(
+                "[DATAVERSE-ERROR] {Operation} failed with {StatusCode}. Response body: {Body}",
+                operation, response.StatusCode, body);
+            throw new HttpRequestException(
+                $"{operation} failed: {(int)response.StatusCode} {response.ReasonPhrase}. " +
+                $"Dataverse error: {(body.Length > 500 ? body[..500] : body)}",
+                null,
+                response.StatusCode);
+        }
+    }
+
     /// <inheritdoc />
     public async Task<PlaybookResponse> CreatePlaybookAsync(
         SavePlaybookRequest request,
@@ -179,15 +201,17 @@ public class PlaybookService : IPlaybookService
 
         // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
         // NOTE: sprk_istemplate removed until Dataverse schema is updated
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon,sprk_playbookcapabilities";
+        // NOTE: sprk_playbookcapabilities removed - column doesn't exist in Dataverse yet (causes 400)
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon";
         var url = $"{EntitySetName}({playbookId})?$select={select}";
 
+        _logger.LogInformation("[GET-PLAYBOOK] URL: {Url}", url);
         var response = await _httpClient.GetAsync(url, cancellationToken);
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
             return null;
         }
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessWithDiagnosticsAsync(response, $"GetPlaybookAsync({playbookId})", cancellationToken);
 
         var entity = await response.Content.ReadFromJsonAsync<PlaybookEntity>(JsonOptions, cancellationToken);
         if (entity == null) return null;
@@ -368,8 +392,8 @@ public class PlaybookService : IPlaybookService
 
         // Query by name - exact match, case-insensitive per Dataverse default
         // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
-        // NOTE: sprk_istemplate removed until Dataverse schema is updated (causes 400 if column doesn't exist)
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon,sprk_playbookcapabilities";
+        // NOTE: sprk_istemplate, sprk_playbookcapabilities removed - columns don't exist in Dataverse yet
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon";
         var filter = $"sprk_name eq '{EscapeODataString(name)}'";
         var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$top=1";
 
@@ -480,8 +504,8 @@ public class PlaybookService : IPlaybookService
 
         // Get paginated results
         // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
-        // NOTE: sprk_istemplate removed until Dataverse schema is updated
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,modifiedon,sprk_playbookcapabilities";
+        // NOTE: sprk_istemplate, sprk_playbookcapabilities removed - columns don't exist in Dataverse yet
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,modifiedon";
         var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$orderby={orderBy}&$top={pageSize}&$skip={skip}";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);

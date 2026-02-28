@@ -118,7 +118,8 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 PlaybookId = request.PlaybookId.Value,
                 DocumentIds = request.DocumentIds,
                 ActionId = request.ActionId,
-                AdditionalContext = null
+                AdditionalContext = null,
+                AnalysisId = request.AnalysisId
             };
 
             await foreach (var chunk in ExecutePlaybookAsync(playbookRequest, httpContext, cancellationToken))
@@ -147,8 +148,10 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             document.Id, document.Name, document.HasFile,
             document.FileName, document.GraphDriveId ?? "(null)", document.GraphItemId ?? "(null)");
 
-        // 2. Create analysis record (in-memory for Phase 1)
-        var analysisId = Guid.NewGuid();
+        // 2. Use existing analysis record ID from Dataverse (if provided) or generate a new one.
+        // When the Code Page passes AnalysisId, we reuse it so WorkingDocumentService
+        // persists content to the correct Dataverse record (sprk_workingdocument).
+        var analysisId = request.AnalysisId ?? Guid.NewGuid();
         var sessionId = Guid.NewGuid().ToString("N")[..12];
 
         var analysis = new AnalysisInternalModel
@@ -272,6 +275,8 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         };
         _analysisStore[analysisId] = analysis;
 
+        // Persist final content to Dataverse (sprk_workingdocument)
+        await _workingDocumentService.UpdateWorkingDocumentAsync(analysisId, finalOutput, cancellationToken);
         await _workingDocumentService.FinalizeAnalysisAsync(analysisId, inputTokens, outputTokens, cancellationToken);
 
         _logger.LogInformation("Analysis {AnalysisId} completed: {InputTokens} input, {OutputTokens} output tokens",
@@ -357,17 +362,14 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     }
 
     /// <inheritdoc />
-    public Task<SavedDocumentResult> SaveWorkingDocumentAsync(
+    public async Task<SavedDocumentResult> SaveWorkingDocumentAsync(
         Guid analysisId,
         AnalysisSaveRequest request,
         CancellationToken cancellationToken)
     {
         _logger.LogInformation("Saving working document for analysis {AnalysisId}", analysisId);
 
-        if (!_analysisStore.TryGetValue(analysisId, out var analysis))
-        {
-            throw new KeyNotFoundException($"Analysis {analysisId} not found");
-        }
+        var analysis = await GetOrReloadFromDataverseAsync(analysisId, cancellationToken);
 
         if (string.IsNullOrWhiteSpace(analysis.WorkingDocument))
         {
@@ -378,7 +380,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         var (content, contentType) = ConvertToFormat(analysis.WorkingDocument, request.Format);
 
         // Save to SPE via working document service
-        return _workingDocumentService.SaveToSpeAsync(
+        return await _workingDocumentService.SaveToSpeAsync(
             analysisId,
             request.FileName,
             content,
@@ -397,10 +399,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
         _logger.LogInformation("Exporting analysis {AnalysisId} to {Format}", analysisId, request.Format);
 
-        if (!_analysisStore.TryGetValue(analysisId, out var analysis))
-        {
-            throw new KeyNotFoundException($"Analysis {analysisId} not found");
-        }
+        var analysis = await GetOrReloadFromDataverseAsync(analysisId, cancellationToken);
 
         // Get the export service for the requested format
         var exportService = _exportRegistry.GetService(request.Format);
@@ -560,18 +559,15 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     }
 
     /// <inheritdoc />
-    public Task<AnalysisDetailResult> GetAnalysisAsync(
+    public async Task<AnalysisDetailResult> GetAnalysisAsync(
         Guid analysisId,
         CancellationToken cancellationToken)
     {
         _logger.LogDebug("Retrieving analysis {AnalysisId}", analysisId);
 
-        if (!_analysisStore.TryGetValue(analysisId, out var analysis))
-        {
-            throw new KeyNotFoundException($"Analysis {analysisId} not found");
-        }
+        var analysis = await GetOrReloadFromDataverseAsync(analysisId, cancellationToken);
 
-        return Task.FromResult(new AnalysisDetailResult
+        return new AnalysisDetailResult
         {
             Id = analysis.Id,
             DocumentId = analysis.DocumentId,
@@ -588,7 +584,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 : null,
             StartedOn = analysis.StartedOn,
             CompletedOn = analysis.CompletedOn
-        });
+        };
     }
 
     /// <inheritdoc />
@@ -1006,6 +1002,71 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     }
 
     /// <summary>
+    /// Get an analysis from the in-memory store, or reload it from Dataverse if not found.
+    /// This is the "lite" version that does NOT extract document text (no HttpContext needed).
+    /// Suitable for GET, save, and export operations that only need the persisted analysis data.
+    /// For chat continuation (which needs document text), use ReloadAnalysisFromDataverseAsync instead.
+    /// </summary>
+    private async Task<AnalysisInternalModel> GetOrReloadFromDataverseAsync(
+        Guid analysisId,
+        CancellationToken cancellationToken)
+    {
+        if (_analysisStore.TryGetValue(analysisId, out var existing))
+        {
+            return existing;
+        }
+
+        _logger.LogInformation("Analysis {AnalysisId} not in memory, loading from Dataverse (lite)", analysisId);
+
+        // 1. Get analysis record from Dataverse
+        var record = await _dataverseService.GetAnalysisAsync(analysisId.ToString(), cancellationToken)
+            ?? throw new KeyNotFoundException($"Analysis {analysisId} not found in Dataverse");
+
+        // 2. Parse chat history
+        var chatHistory = Array.Empty<ChatMessageModel>();
+        if (!string.IsNullOrWhiteSpace(record.ChatHistory))
+        {
+            try
+            {
+                var messages = System.Text.Json.JsonSerializer.Deserialize<ChatMessageModel[]>(
+                    record.ChatHistory,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                if (messages != null)
+                {
+                    chatHistory = messages;
+                }
+            }
+            catch (System.Text.Json.JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to deserialize chat history for analysis {AnalysisId}", analysisId);
+            }
+        }
+
+        // 3. Build internal model (no document text — only needed for chat continuation)
+        var analysis = new AnalysisInternalModel
+        {
+            Id = analysisId,
+            DocumentId = record.DocumentId,
+            DocumentName = record.Name ?? "Analysis",
+            ActionId = Guid.Empty,
+            Status = "Completed",
+            WorkingDocument = record.WorkingDocument,
+            ChatHistory = chatHistory,
+            StartedOn = record.CreatedOn,
+            CompletedOn = record.ModifiedOn,
+        };
+
+        _analysisStore[analysisId] = analysis;
+
+        _logger.LogInformation(
+            "Loaded analysis {AnalysisId} from Dataverse (lite): {DocChars} chars, {ChatCount} messages",
+            analysisId, record.WorkingDocument?.Length ?? 0, chatHistory.Length);
+
+        return analysis;
+    }
+
+    /// <summary>
     /// Reload analysis context from Dataverse when not found in memory.
     /// Extracts document text so chat continuations have context.
     /// </summary>
@@ -1112,16 +1173,29 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     {
         try
         {
-            // Step 1: Create analysis record in Dataverse (critical path)
-            _logger.LogInformation(
-                "Creating analysis record for Document Profile: AnalysisId={AnalysisId}, DocumentId={DocumentId}",
-                analysisId, documentId);
+            // Step 1: Use existing analysis record if analysisId was provided (user-initiated via Code Page),
+            // otherwise create a new one (background worker / app-only path).
+            // This prevents duplicate records when the user triggers analysis from an existing Draft record.
+            Guid dataverseAnalysisId;
 
-            var dataverseAnalysisId = await _dataverseService.CreateAnalysisAsync(
-                documentId,
-                $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
-                playbookId: null,
-                cancellationToken);
+            if (analysisId != Guid.Empty)
+            {
+                _logger.LogInformation(
+                    "Using existing analysis record for Document Profile: AnalysisId={AnalysisId}, DocumentId={DocumentId}",
+                    analysisId, documentId);
+                dataverseAnalysisId = analysisId;
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Creating new analysis record for Document Profile: DocumentId={DocumentId}",
+                    documentId);
+                dataverseAnalysisId = await _dataverseService.CreateAnalysisAsync(
+                    documentId,
+                    $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+                    playbookId: null,
+                    cancellationToken);
+            }
 
             // Step 2: Store outputs in sprk_analysisoutput (critical path)
             _logger.LogInformation(
@@ -1225,22 +1299,26 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     {
         var documentId = request.DocumentIds[0];
 
-        _logger.LogInformation("Starting playbook execution: Playbook {PlaybookId}, Document {DocumentId}",
-            request.PlaybookId, documentId);
+        _logger.LogInformation("Starting playbook execution: Playbook {PlaybookId}, Document {DocumentId}, AnalysisId {AnalysisId}",
+            request.PlaybookId, documentId, request.AnalysisId);
 
         // 1. Load playbook from Dataverse
+        _logger.LogInformation("[PLAYBOOK-EXEC] Step 1: Loading playbook {PlaybookId}", request.PlaybookId);
         var playbook = await _playbookService.GetPlaybookAsync(request.PlaybookId, cancellationToken)
             ?? throw new KeyNotFoundException($"Playbook {request.PlaybookId} not found");
 
-        _logger.LogDebug("Loaded playbook {PlaybookName} with {ToolCount} tools",
-            playbook.Name, playbook.ToolIds?.Length ?? 0);
+        _logger.LogInformation("[PLAYBOOK-EXEC] Step 1 OK: Loaded playbook '{PlaybookName}' with {ToolCount} tools, {SkillCount} skills, {KnowledgeCount} knowledge, {ActionCount} actions",
+            playbook.Name, playbook.ToolIds?.Length ?? 0, playbook.SkillIds?.Length ?? 0,
+            playbook.KnowledgeIds?.Length ?? 0, playbook.ActionIds?.Length ?? 0);
 
         // 2. Get document details from Dataverse
+        _logger.LogInformation("[PLAYBOOK-EXEC] Step 2: Loading document {DocumentId}", documentId);
         var document = await _dataverseService.GetDocumentAsync(documentId.ToString(), cancellationToken)
             ?? throw new KeyNotFoundException($"Document {documentId} not found");
+        _logger.LogInformation("[PLAYBOOK-EXEC] Step 2 OK: Loaded document '{DocumentName}'", document.Name);
 
-        // 3. Create analysis record
-        var analysisId = Guid.NewGuid();
+        // 3. Use existing analysis record ID from Dataverse (if provided) or generate a new one.
+        var analysisId = request.AnalysisId ?? Guid.NewGuid();
 
         // Use first action from playbook if no override specified
         var actionId = request.ActionId ?? playbook.ActionIds?.FirstOrDefault() ?? Guid.Empty;
@@ -1261,12 +1339,17 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         yield return AnalysisStreamChunk.Metadata(analysisId, document.Name ?? "Unknown");
 
         // 4. Resolve playbook scopes (Skills, Knowledge, Tools)
+        _logger.LogInformation("[PLAYBOOK-EXEC] Step 4: Resolving playbook scopes");
+        yield return AnalysisStreamChunk.TextChunk("[Resolving playbook scopes...]\n");
         var scopes = await _scopeResolver.ResolvePlaybookScopesAsync(request.PlaybookId, cancellationToken);
 
-        _logger.LogDebug("Resolved scopes: {SkillCount} skills, {KnowledgeCount} knowledge, {ToolCount} tools",
+        _logger.LogInformation("[PLAYBOOK-EXEC] Step 4 OK: Resolved {SkillCount} skills, {KnowledgeCount} knowledge, {ToolCount} tools",
             scopes.Skills.Length, scopes.Knowledge.Length, scopes.Tools.Length);
+        yield return AnalysisStreamChunk.TextChunk(
+            $"[Scopes resolved: {scopes.Tools.Length} tools, {scopes.Skills.Length} skills, {scopes.Knowledge.Length} knowledge]\n");
 
         // 5. Get action definition
+        _logger.LogInformation("[PLAYBOOK-EXEC] Step 5: Loading action {ActionId}", actionId);
         var action = await _scopeResolver.GetActionAsync(actionId, cancellationToken)
             ?? new AnalysisAction
             {
@@ -1275,12 +1358,17 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 Description = $"Analysis using playbook: {playbook.Name}",
                 SystemPrompt = BuildDefaultSystemPrompt()
             };
+        _logger.LogInformation("[PLAYBOOK-EXEC] Step 5 OK: Action '{ActionName}'", action.Name);
 
         // 6. Extract document text from SPE
+        _logger.LogInformation("[PLAYBOOK-EXEC] Step 6: Extracting document text");
+        yield return AnalysisStreamChunk.TextChunk("[Extracting document text...]\n");
         var documentText = await ExtractDocumentTextAsync(document, httpContext, cancellationToken);
 
-        _logger.LogInformation("Extracted {CharCount} characters from document {DocumentId}",
+        _logger.LogInformation("[PLAYBOOK-EXEC] Step 6 OK: Extracted {CharCount} characters from document {DocumentId}",
             documentText.Length, documentId);
+        yield return AnalysisStreamChunk.TextChunk(
+            $"[Document text: {documentText.Length} chars extracted]\n");
 
         // 7. Process RAG knowledge sources
         // Build a minimal AnalysisDocumentResult for RagQueryBuilder.
@@ -1331,6 +1419,12 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         var totalInputTokens = 0;
         var totalOutputTokens = 0;
         var executedToolResults = new List<ToolResult>(); // Collect tool results for output extraction
+
+        _logger.LogInformation("[PLAYBOOK-EXEC] Step 9: Executing {ToolCount} tools: [{ToolNames}]",
+            scopes.Tools.Length,
+            string.Join(", ", scopes.Tools.Select(t => $"{t.Name} ({t.HandlerClass ?? t.Type.ToString()})")));
+        yield return AnalysisStreamChunk.TextChunk(
+            $"[Executing {scopes.Tools.Length} tools: {string.Join(", ", scopes.Tools.Select(t => t.Name))}]\n");
 
         foreach (var tool in scopes.Tools)
         {
@@ -1384,36 +1478,82 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 continue;
             }
 
+            yield return AnalysisStreamChunk.TextChunk(
+                $"[Tool {tool.Name}: Handler resolved → {handler.HandlerId}]\n");
+
             // Validate
             var validation = handler.Validate(executionContext, tool);
             if (!validation.IsValid)
             {
                 _logger.LogWarning("Tool validation failed for {ToolName}: {Errors}",
                     tool.Name, string.Join(", ", validation.Errors));
-                yield return AnalysisStreamChunk.TextChunk($"[Tool {tool.Name}: Validation failed]\n");
+                yield return AnalysisStreamChunk.TextChunk(
+                    $"[Tool {tool.Name}: Validation FAILED - {string.Join("; ", validation.Errors)}]\n");
                 continue;
             }
 
-            // Execute with error handling
-            try
+            // Execute with error handling — streaming-aware dispatch
+            // Mirrors the per-token pattern from ExecuteAnalysisAsync (action-based path)
+            var streamed = false;
+
+            if (handler is IStreamingAnalysisToolHandler streamingHandler)
             {
-                toolResult = await handler.ExecuteAsync(executionContext, tool, cancellationToken);
+                // Per-token streaming path: emit heading + tokens as they arrive.
+                // No try-catch here because C# forbids yield inside try-catch.
+                // StreamExecuteAsync handles errors internally (yields Completed with error result).
+                yield return AnalysisStreamChunk.TextChunk($"### {tool.Name}\n");
+                toolResults.AppendLine($"### {tool.Name}");
+
+                await foreach (var evt in streamingHandler.StreamExecuteAsync(
+                    executionContext, tool, cancellationToken))
+                {
+                    if (evt is ToolStreamEvent.Token t)
+                    {
+                        toolResults.Append(t.Text);
+                        yield return AnalysisStreamChunk.TextChunk(t.Text);
+                    }
+                    else if (evt is ToolStreamEvent.Completed c)
+                    {
+                        toolResult = c.Result;
+                    }
+                }
+
+                toolResults.AppendLine();
+                toolResults.AppendLine();
+                yield return AnalysisStreamChunk.TextChunk("\n\n");
+                streamed = true;
+
+                // Persist accumulated content (same pattern as action-based path)
+                await _workingDocumentService.UpdateWorkingDocumentAsync(
+                    analysisId, toolResults.ToString(), cancellationToken);
             }
-            catch (Exception ex)
+            else
             {
-                _logger.LogError(ex, "Error executing tool {ToolName}", tool.Name);
-                errorMessage = ex.Message;
+                // Non-streaming fallback — current blocking behavior
+                try
+                {
+                    toolResult = await handler.ExecuteAsync(executionContext, tool, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error executing tool {ToolName}", tool.Name);
+                    errorMessage = ex.Message;
+                }
             }
 
             // Process result (outside try-catch so we can yield)
             if (toolResult != null && toolResult.Success)
             {
-                var summary = toolResult.Summary ?? "No summary available";
-                toolResults.AppendLine($"### {tool.Name}");
-                toolResults.AppendLine(summary);
-                toolResults.AppendLine();
+                if (!streamed)
+                {
+                    // Non-streaming: emit full result as single chunk (existing behavior)
+                    var summary = toolResult.Summary ?? "No summary available";
+                    toolResults.AppendLine($"### {tool.Name}");
+                    toolResults.AppendLine(summary);
+                    toolResults.AppendLine();
 
-                yield return AnalysisStreamChunk.TextChunk($"### {tool.Name}\n{summary}\n\n");
+                    yield return AnalysisStreamChunk.TextChunk($"### {tool.Name}\n{summary}\n\n");
+                }
 
                 totalInputTokens += toolResult.Execution.InputTokens.GetValueOrDefault();
                 totalOutputTokens += toolResult.Execution.OutputTokens.GetValueOrDefault();
@@ -1630,10 +1770,14 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         };
         _analysisStore[analysisId] = analysis;
 
+        // Persist final content to Dataverse (sprk_workingdocument) — matches action-based path
+        await _workingDocumentService.UpdateWorkingDocumentAsync(analysisId, finalOutput, cancellationToken);
         await _workingDocumentService.FinalizeAnalysisAsync(analysisId, totalInputTokens, totalOutputTokens, cancellationToken);
 
-        _logger.LogInformation("Playbook execution completed: Analysis {AnalysisId}, {ToolCount} tools executed",
-            analysisId, scopes.Tools.Length);
+        _logger.LogInformation("Playbook execution completed: Analysis {AnalysisId}, {ToolCount} tools executed, output {OutputLength} chars",
+            analysisId, scopes.Tools.Length, finalOutput.Length);
+        yield return AnalysisStreamChunk.TextChunk(
+            $"\n[Execution complete: {executedToolResults.Count}/{scopes.Tools.Length} tools succeeded, {finalOutput.Length} chars output]\n");
 
         // Enqueue RAG indexing job after playbook execution completes (ADR-001 / ADR-004).
         // Idempotency key: "{tenantId}:{documentId}" — prevents duplicate indexing (ADR-004).

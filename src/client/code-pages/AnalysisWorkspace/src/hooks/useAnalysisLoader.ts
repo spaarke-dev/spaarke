@@ -1,16 +1,15 @@
 /**
  * useAnalysisLoader - Data loading hook for AnalysisWorkspace
  *
- * Fetches the analysis record and document metadata in parallel from the BFF API
- * on mount. Manages loading, loaded, and error states for both resources independently.
- * Provides a retry function for recovering from transient failures.
+ * Loads the analysis record directly from Dataverse Web API (same-origin)
+ * and document metadata from the BFF API in parallel.
+ * Dataverse is the source of truth for analysis content.
  *
  * @see ADR-007 - Document access through BFF API (SpeFileStore facade)
- * @see ADR-019 - ProblemDetails error handling
  */
 
 import { useCallback, useEffect, useState, useRef } from "react";
-import { fetchAnalysis, fetchDocumentMetadata } from "../services/analysisApi";
+import { fetchAnalysis, fetchDocumentMetadata, getDocumentViewUrl } from "../services/analysisApi";
 import type { AnalysisRecord, DocumentMetadata, AnalysisError } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -43,6 +42,8 @@ export interface UseAnalysisLoaderResult {
     documentError: AnalysisError | null;
     /** Retry loading all failed resources */
     retry: () => void;
+    /** Reload only the analysis record (no document refetch) */
+    reloadAnalysis: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -50,22 +51,12 @@ export interface UseAnalysisLoaderResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Data loading hook that fetches analysis and document metadata in parallel.
+ * Data loading hook that fetches analysis (from Dataverse) and
+ * document metadata (from BFF) in parallel.
  *
- * The hook fires when `token` becomes non-null and `analysisId` / `documentId`
- * are provided. This ensures data is loaded only after authentication completes.
- *
- * @example
- * ```tsx
- * const { analysis, document, isLoading, analysisError, retry } = useAnalysisLoader({
- *     analysisId: "abc-123",
- *     documentId: "doc-456",
- *     token: authToken,
- * });
- *
- * if (isLoading) return <Spinner label="Loading analysis..." />;
- * if (analysisError) return <ErrorState error={analysisError} onRetry={retry} />;
- * ```
+ * Analysis loading uses Dataverse Web API directly (same-origin, no token needed).
+ * Document metadata loading uses BFF API (requires Bearer token).
+ * Both fire when `token` becomes non-null so document metadata can load.
  */
 export function useAnalysisLoader(options: UseAnalysisLoaderOptions): UseAnalysisLoaderResult {
     const { analysisId, documentId, token } = options;
@@ -91,16 +82,16 @@ export function useAnalysisLoader(options: UseAnalysisLoaderOptions): UseAnalysi
     }, []);
 
     /**
-     * Load the analysis record from the BFF API.
+     * Load the analysis record from Dataverse Web API (same-origin).
      */
     const loadAnalysis = useCallback(async () => {
-        if (!analysisId || !token) return;
+        if (!analysisId) return;
 
         setIsAnalysisLoading(true);
         setAnalysisError(null);
 
         try {
-            const result = await fetchAnalysis(analysisId, token, documentId);
+            const result = await fetchAnalysis(analysisId);
             if (mountedRef.current) {
                 setAnalysis(result);
             }
@@ -122,10 +113,11 @@ export function useAnalysisLoader(options: UseAnalysisLoaderOptions): UseAnalysi
                 setIsAnalysisLoading(false);
             }
         }
-    }, [analysisId, documentId, token]);
+    }, [analysisId]);
 
     /**
-     * Load document metadata from the BFF API.
+     * Load document metadata and preview URL from the BFF API (requires token).
+     * Fetches metadata first, then preview URL, and merges the viewUrl into metadata.
      */
     const loadDocument = useCallback(async () => {
         if (!documentId || !token) return;
@@ -135,6 +127,20 @@ export function useAnalysisLoader(options: UseAnalysisLoaderOptions): UseAnalysi
 
         try {
             const result = await fetchDocumentMetadata(documentId, token);
+
+            // If metadata loaded but has no viewUrl, fetch the preview URL separately
+            if (!result.viewUrl) {
+                try {
+                    const previewUrl = await getDocumentViewUrl(documentId, token);
+                    if (previewUrl) {
+                        result.viewUrl = previewUrl;
+                    }
+                } catch (previewErr) {
+                    // Non-fatal: metadata is still useful without preview
+                    console.warn("[useAnalysisLoader] Preview URL fetch failed:", previewErr);
+                }
+            }
+
             if (mountedRef.current) {
                 setDocument(result);
             }
@@ -195,6 +201,7 @@ export function useAnalysisLoader(options: UseAnalysisLoaderOptions): UseAnalysi
         analysisError,
         documentError,
         retry,
+        reloadAnalysis: loadAnalysis,
     };
 }
 

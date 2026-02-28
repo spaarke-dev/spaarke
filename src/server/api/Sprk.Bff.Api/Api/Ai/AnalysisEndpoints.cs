@@ -143,10 +143,15 @@ public static class AnalysisEndpoints
             return;
         }
 
-        // Set SSE headers
+        // Set SSE headers + disable response buffering for real-time streaming
         response.ContentType = "text/event-stream";
         response.Headers.CacheControl = "no-cache";
         response.Headers.Connection = "keep-alive";
+        response.Headers["X-Accel-Buffering"] = "no"; // Disable reverse proxy buffering (nginx/ARR)
+
+        // Disable ASP.NET response buffering so FlushAsync sends immediately
+        var bufferingFeature = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>();
+        bufferingFeature?.DisableBuffering();
 
         logger.LogInformation(
             "Starting analysis execution for documents [{DocumentIds}], ActionId={ActionId}, TraceId={TraceId}",
@@ -158,6 +163,10 @@ public static class AnalysisEndpoints
             {
                 await WriteSSEAsync(response, chunk, cancellationToken);
             }
+
+            // Send SSE terminator so clients know the stream is complete
+            await response.WriteAsync("data: [DONE]\n\n", cancellationToken);
+            await response.Body.FlushAsync(cancellationToken);
 
             logger.LogInformation("Analysis execution completed for TraceId={TraceId}", context.TraceIdentifier);
         }
@@ -173,7 +182,17 @@ public static class AnalysisEndpoints
 
             if (!cancellationToken.IsCancellationRequested)
             {
-                var errorChunk = new AnalysisStreamChunk("error", null, true, Error: ex.Message);
+                // Include exception type and inner details for diagnostics
+                var errorDetail = $"{ex.GetType().Name}: {ex.Message}";
+                if (ex.InnerException != null)
+                    errorDetail += $" | Inner: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}";
+                // Include first relevant stack frame for quick diagnosis
+                var stackLines = ex.StackTrace?.Split('\n') ?? [];
+                var relevantFrame = stackLines.FirstOrDefault(l => l.Contains("Sprk.Bff.Api"));
+                if (relevantFrame != null)
+                    errorDetail += $" | At: {relevantFrame.Trim()}";
+
+                var errorChunk = new AnalysisStreamChunk("error", null, true, Error: errorDetail);
                 await WriteSSEAsync(response, errorChunk, CancellationToken.None);
             }
         }
@@ -194,10 +213,14 @@ public static class AnalysisEndpoints
         var cancellationToken = context.RequestAborted;
         var response = context.Response;
 
-        // Set SSE headers
+        // Set SSE headers + disable response buffering for real-time streaming
         response.ContentType = "text/event-stream";
         response.Headers.CacheControl = "no-cache";
         response.Headers.Connection = "keep-alive";
+        response.Headers["X-Accel-Buffering"] = "no";
+
+        var bufferingFeature = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>();
+        bufferingFeature?.DisableBuffering();
 
         logger.LogInformation(
             "Continuing analysis {AnalysisId} with message, TraceId={TraceId}",
@@ -209,6 +232,9 @@ public static class AnalysisEndpoints
             {
                 await WriteSSEAsync(response, chunk, cancellationToken);
             }
+
+            await response.WriteAsync("data: [DONE]\n\n", cancellationToken);
+            await response.Body.FlushAsync(cancellationToken);
 
             logger.LogInformation("Analysis continuation completed for {AnalysisId}", analysisId);
         }

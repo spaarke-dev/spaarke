@@ -95,7 +95,10 @@ function resolveAnalysisId(): string {
 /**
  * Resolve documentId from available sources:
  *   1. Explicit "documentId" param (navigateTo data envelope)
- *   2. Parent Xrm form lookup field (sprk_sourcedocumentid on Analysis form)
+ *   2. Parent Xrm form lookup field (sprk_documentid on Analysis form)
+ *
+ * Note: The Dataverse field is sprk_documentid (not sprk_sourcedocumentid).
+ * Web API returns it as _sprk_documentid_value.
  */
 function resolveDocumentId(): string {
     const explicit = appParams.get("documentId");
@@ -110,7 +113,8 @@ function resolveDocumentId(): string {
         for (const frame of frames) {
             try {
                 const xrm = (frame as any).Xrm;
-                const attr = xrm?.Page?.getAttribute?.("sprk_sourcedocumentid");
+                // Try sprk_documentid (correct field name on sprk_analysis entity)
+                const attr = xrm?.Page?.getAttribute?.("sprk_documentid");
                 if (attr) {
                     const val = attr.getValue();
                     if (Array.isArray(val) && val.length > 0 && val[0].id) {
@@ -122,6 +126,7 @@ function resolveDocumentId(): string {
         /* eslint-enable @typescript-eslint/no-explicit-any */
     } catch { /* frame access error */ }
 
+    console.warn("[AnalysisWorkspace] Could not resolve documentId from URL or Xrm form context");
     return "";
 }
 

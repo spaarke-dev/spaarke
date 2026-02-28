@@ -6,20 +6,14 @@ using Sprk.Bff.Api.Models.Ai;
 namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
-/// Manages transient working document state during analysis refinement.
-/// Handles Dataverse updates and SPE storage operations.
+/// Manages working document persistence to Dataverse during and after analysis.
 /// </summary>
-/// <remarks>
-/// Phase 1 Scaffolding: Uses stub implementations until Dataverse and SPE operations are integrated.
-/// Full implementation will be completed in Task 032.
-/// </remarks>
 public class WorkingDocumentService : IWorkingDocumentService
 {
     private readonly IDataverseService _dataverseService;
     private readonly AnalysisOptions _options;
     private readonly ILogger<WorkingDocumentService> _logger;
 
-    // Track version numbers per analysis (in-memory, reset on service restart)
     private readonly Dictionary<Guid, int> _versionCounters = new();
 
     public WorkingDocumentService(
@@ -33,22 +27,35 @@ public class WorkingDocumentService : IWorkingDocumentService
     }
 
     /// <inheritdoc />
-    public Task UpdateWorkingDocumentAsync(
+    public async Task UpdateWorkingDocumentAsync(
         Guid analysisId,
         string content,
         CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Updating working document for analysis {AnalysisId}, {ContentLength} chars",
+        _logger.LogDebug("Persisting working document for analysis {AnalysisId}, {ContentLength} chars",
             analysisId, content.Length);
 
-        // Phase 1: Log only - actual Dataverse update in Task 032
-        _logger.LogDebug("Phase 1: Working document update logged (Dataverse integration in Task 032)");
+        try
+        {
+            var fields = new Dictionary<string, object>
+            {
+                ["sprk_workingdocument"] = content
+            };
 
-        return Task.CompletedTask;
+            await _dataverseService.UpdateAsync("sprk_analysis", analysisId, fields, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // Log but don't throw — streaming should continue even if a periodic save fails.
+            // The final save in FinalizeAnalysisAsync is the critical one.
+            _logger.LogWarning(ex,
+                "Failed to persist working document for analysis {AnalysisId} ({ContentLength} chars)",
+                analysisId, content.Length);
+        }
     }
 
     /// <inheritdoc />
-    public Task FinalizeAnalysisAsync(
+    public async Task FinalizeAnalysisAsync(
         Guid analysisId,
         int inputTokens,
         int outputTokens,
@@ -57,10 +64,20 @@ public class WorkingDocumentService : IWorkingDocumentService
         _logger.LogInformation("Finalizing analysis {AnalysisId}: {InputTokens} input, {OutputTokens} output tokens",
             analysisId, inputTokens, outputTokens);
 
-        // Phase 1: Log only - actual Dataverse update in Task 032
-        _logger.LogDebug("Phase 1: Analysis finalization logged (Dataverse integration in Task 032)");
+        try
+        {
+            var fields = new Dictionary<string, object>
+            {
+                ["statuscode"] = 2  // Completed
+            };
 
-        return Task.CompletedTask;
+            await _dataverseService.UpdateAsync("sprk_analysis", analysisId, fields, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to update analysis status to Completed for {AnalysisId}", analysisId);
+        }
     }
 
     /// <inheritdoc />
@@ -74,8 +91,8 @@ public class WorkingDocumentService : IWorkingDocumentService
         _logger.LogInformation("Saving analysis {AnalysisId} to SPE: {FileName} ({ContentLength} bytes)",
             analysisId, fileName, content.Length);
 
-        // Phase 1: Return stub result - actual SPE upload in Task 032
-        _logger.LogWarning("Phase 1: SPE upload not implemented, returning stub result");
+        // SPE upload not yet implemented — returns stub result
+        _logger.LogWarning("SPE upload not implemented, returning stub result");
 
         return Task.FromResult(new SavedDocumentResult
         {
@@ -93,7 +110,6 @@ public class WorkingDocumentService : IWorkingDocumentService
         int tokenDelta,
         CancellationToken cancellationToken)
     {
-        // Get or create version counter
         if (!_versionCounters.TryGetValue(analysisId, out var versionNumber))
         {
             versionNumber = 0;
@@ -101,7 +117,6 @@ public class WorkingDocumentService : IWorkingDocumentService
         versionNumber++;
         _versionCounters[analysisId] = versionNumber;
 
-        // Check if we've exceeded max versions
         if (versionNumber > _options.MaxWorkingVersions)
         {
             _logger.LogDebug("Max versions ({MaxVersions}) reached for analysis {AnalysisId}, skipping version creation",
@@ -112,7 +127,6 @@ public class WorkingDocumentService : IWorkingDocumentService
         _logger.LogDebug("Creating working version {VersionNumber} for analysis {AnalysisId}",
             versionNumber, analysisId);
 
-        // Phase 1: Return stub version ID - actual Dataverse creation in Task 032
         return Task.FromResult(Guid.NewGuid());
     }
 }

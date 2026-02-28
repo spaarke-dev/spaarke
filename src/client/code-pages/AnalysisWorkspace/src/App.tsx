@@ -69,6 +69,7 @@ import { useAutoSave } from "./hooks/useAutoSave";
 import { useExportAnalysis } from "./hooks/useExportAnalysis";
 import { useSelectionBroadcast } from "./hooks/useSelectionBroadcast";
 import { useReAnalysisProgress } from "./hooks/useReAnalysisProgress";
+import { useAnalysisExecution } from "./hooks/useAnalysisExecution";
 import { useDiffReview } from "./hooks/useDiffReview";
 
 import { EditorPanel } from "./components/EditorPanel";
@@ -78,6 +79,7 @@ import { DocumentStreamBridge } from "./components/DocumentStreamBridge";
 import { ReAnalysisProgressOverlay } from "./components/ReAnalysisProgressOverlay";
 import { DiffReviewPanel } from "./components/DiffReviewPanel";
 import { usePanelResize } from "./hooks/usePanelResize";
+import { markdownToHtml } from "./utils/markdownToHtml";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -178,6 +180,12 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
     const [isSourceCollapsed, setIsSourceCollapsed] = useState(false);
     const [editorContent, setEditorContent] = useState("");
 
+    // ---- Resolved documentId: URL prop → Dataverse lookup fallback ----
+    // When embedded on the sprk_analysis form, the URL may not include a documentId
+    // parameter. Once the analysis record loads, we resolve it from the Dataverse
+    // lookup field (_sprk_documentid_value → sourceDocumentId).
+    const [resolvedDocumentId, setResolvedDocumentId] = useState(documentId);
+
     // Ref for programmatic access to the RichTextEditor (streaming insert, etc.)
     const editorRef = useRef<RichTextEditorRef>(null);
 
@@ -198,7 +206,9 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
         isRightCollapsed: isSourceCollapsed,
     });
 
-    // ---- Task 065: Analysis and document loading from BFF API ----
+    // ---- Task 065: Analysis loading (Dataverse) + document metadata (BFF) ----
+    // Pass resolvedDocumentId so document metadata loads once the ID is available
+    // (either from URL param initially, or from analysis lookup after first load).
     const {
         analysis,
         document: documentMetadata,
@@ -207,13 +217,47 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
         analysisError,
         documentError,
         retry: retryLoad,
+        reloadAnalysis,
     } = useAnalysisLoader({
         analysisId,
-        documentId,
+        documentId: resolvedDocumentId,
         token,
     });
 
-    // ---- Task 062: Auto-save via BFF API ----
+    // ---- Resolve documentId from Dataverse lookup after analysis loads ----
+    // When the Code Page is embedded on the form, the URL often doesn't include
+    // documentId. The analysis record's lookup (_sprk_documentid_value) provides it.
+    useEffect(() => {
+        if (!resolvedDocumentId && analysis?.sourceDocumentId) {
+            console.log(
+                `[AnalysisWorkspace] Resolved documentId from analysis lookup: ${analysis.sourceDocumentId}`
+            );
+            setResolvedDocumentId(analysis.sourceDocumentId);
+        }
+    }, [resolvedDocumentId, analysis?.sourceDocumentId]);
+
+    // ---- Auto-execute: trigger BFF execution for draft analyses ----
+    const {
+        isExecuting,
+        executionError,
+        progressMessage: executionProgress,
+        chunkCount,
+    } = useAnalysisExecution({
+        analysis,
+        documentId: resolvedDocumentId,
+        token,
+        onComplete: reloadAnalysis, // Reload analysis only (not source document)
+        onStreamContent: (content) => {
+            // Convert markdown to HTML for the RichTextEditor during streaming
+            if (editorRef.current && content) {
+                const html = markdownToHtml(content);
+                editorRef.current.setHtml(html);
+                setEditorContent(html);
+            }
+        },
+    });
+
+    // ---- Task 062: Auto-save via Dataverse PATCH (same-origin) ----
     const {
         saveState,
         lastSavedAt,
@@ -222,8 +266,7 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
         notifyContentChanged,
     } = useAutoSave({
         analysisId,
-        token,
-        enabled: isAuthenticated && !!analysisId,
+        enabled: !!analysisId,
     });
 
     // ---- Task 062: Export to Word via BFF API ----
@@ -320,10 +363,17 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
     });
 
     // ---- Task 065: Populate editor with loaded analysis content ----
+    // Content in sprk_workingdocument may be markdown (from BFF streaming)
+    // or Lexical HTML (from auto-save). Detect format and handle accordingly.
     useEffect(() => {
         if (analysis?.content && editorRef.current) {
-            editorRef.current.setHtml(analysis.content);
-            setEditorContent(analysis.content);
+            const trimmed = analysis.content.trim();
+            // If content starts with an HTML tag, it's already HTML (from auto-save);
+            // pass directly to the editor. Otherwise treat as markdown.
+            const isHtml = trimmed.startsWith("<");
+            const html = isHtml ? trimmed : markdownToHtml(trimmed);
+            editorRef.current.setHtml(html);
+            setEditorContent(html);
         }
     }, [analysis]);
 
@@ -431,24 +481,59 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
                     editorRef={editorRef}
                     enabled={!!analysisId}
                 />
-                <EditorPanel
-                    ref={editorRef}
-                    value={editorContent}
-                    onChange={handleEditorChange}
-                    placeholder="Analysis output will appear here..."
-                    isLoading={isAnalysisLoading}
-                    // Task 062: Toolbar props
-                    saveState={saveState}
-                    onForceSave={forceSave}
-                    saveError={saveError}
-                    exportState={exportState}
-                    onExport={doExport}
-                    onUndo={undo}
-                    onRedo={redo}
-                    canUndo={canUndo}
-                    canRedo={canRedo}
-                    historyLength={historyLength}
-                />
+                {/* Show error state if analysis load or execution failed */}
+                {(analysisError || executionError) && !isAnalysisLoading && !isExecuting ? (
+                    <div
+                        style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            height: "100%",
+                            gap: "12px",
+                            padding: "24px",
+                            textAlign: "center",
+                        }}
+                        role="alert"
+                        data-testid="analysis-load-error"
+                    >
+                        <ErrorCircle20Regular className={styles.errorIcon} />
+                        <Text size={400} className={styles.errorTitle}>
+                            Failed to Load Analysis
+                        </Text>
+                        <Text size={200} className={styles.errorDetail}>
+                            {executionError?.message || analysisError?.message || "Unable to load the analysis record."}
+                        </Text>
+                        <Button
+                            appearance="primary"
+                            icon={<ArrowClockwise20Regular />}
+                            onClick={retryLoad}
+                        >
+                            Retry
+                        </Button>
+                    </div>
+                ) : (
+                    <EditorPanel
+                        ref={editorRef}
+                        value={editorContent}
+                        onChange={handleEditorChange}
+                        placeholder={isExecuting ? (executionProgress || "Running analysis...") : "Analysis output will appear here..."}
+                        isLoading={isAnalysisLoading}
+                        isStreaming={isExecuting}
+                        streamingMessage={executionProgress}
+                        // Task 062: Toolbar props
+                        saveState={saveState}
+                        onForceSave={forceSave}
+                        saveError={saveError}
+                        exportState={exportState}
+                        onExport={doExport}
+                        onUndo={undo}
+                        onRedo={redo}
+                        canUndo={canUndo}
+                        canRedo={canRedo}
+                        historyLength={historyLength}
+                    />
+                )}
                 {/* Task 081: Re-analysis progress overlay (positioned over editor) */}
                 <ReAnalysisProgressOverlay
                     isVisible={isReAnalyzing}

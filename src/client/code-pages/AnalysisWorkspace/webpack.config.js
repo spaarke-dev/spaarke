@@ -61,7 +61,7 @@ module.exports = (env) => {
         new TerserPlugin({
           terserOptions: {
             compress: {
-              drop_console: true,
+              drop_console: false, // TEMP: debug - re-enable after fixing load issue
               drop_debugger: true,
               pure_funcs: ['console.debug', 'console.info'],
               passes: 2,

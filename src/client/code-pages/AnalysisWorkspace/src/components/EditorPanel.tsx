@@ -35,6 +35,10 @@ export interface EditorPanelProps {
     placeholder?: string;
     /** Whether the analysis content is currently loading */
     isLoading?: boolean;
+    /** Whether analysis is currently streaming (editor stays visible) */
+    isStreaming?: boolean;
+    /** Progress message during streaming */
+    streamingMessage?: string;
 
     // ---- Toolbar props (task 062) ----
     /** Current auto-save state */
@@ -107,6 +111,18 @@ const useStyles = makeStyles({
         flex: 1,
         gap: tokens.spacingVerticalM,
     },
+    streamingBar: {
+        display: "flex",
+        alignItems: "center",
+        gap: tokens.spacingHorizontalS,
+        paddingTop: tokens.spacingVerticalXS,
+        paddingBottom: tokens.spacingVerticalXS,
+        paddingLeft: tokens.spacingHorizontalM,
+        paddingRight: tokens.spacingHorizontalM,
+        backgroundColor: tokens.colorNeutralBackground4,
+        borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+        flexShrink: 0,
+    },
 });
 
 // ---------------------------------------------------------------------------
@@ -121,6 +137,8 @@ export const EditorPanel = forwardRef<RichTextEditorRef, EditorPanelProps>(
             readOnly = false,
             placeholder = "Analysis output will appear here...",
             isLoading = false,
+            isStreaming = false,
+            streamingMessage = "",
             // Toolbar props (task 062)
             saveState = "idle",
             onForceSave,
@@ -182,16 +200,27 @@ export const EditorPanel = forwardRef<RichTextEditorRef, EditorPanelProps>(
                         <Spinner size="medium" label="Loading analysis..." />
                     </div>
                 ) : (
-                    /* Editor area */
-                    <div className={styles.editorContainer}>
-                        <RichTextEditor
-                            ref={ref}
-                            value={value}
-                            onChange={onChange}
-                            readOnly={readOnly}
-                            placeholder={placeholder}
-                        />
-                    </div>
+                    <>
+                        {/* Streaming progress indicator (visible during execution) */}
+                        {isStreaming && (
+                            <div className={styles.streamingBar}>
+                                <Spinner size="tiny" />
+                                <Text size={200}>
+                                    {streamingMessage || "Running analysis..."}
+                                </Text>
+                            </div>
+                        )}
+                        {/* Editor area */}
+                        <div className={styles.editorContainer}>
+                            <RichTextEditor
+                                ref={ref}
+                                value={value}
+                                onChange={onChange}
+                                readOnly={readOnly || isStreaming}
+                                placeholder={placeholder}
+                            />
+                        </div>
+                    </>
                 )}
             </div>
         );

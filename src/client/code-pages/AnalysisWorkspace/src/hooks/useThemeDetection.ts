@@ -118,15 +118,19 @@ function getThemeFromXrmFrameWalk(): ThemeName | null {
         }
     }
 
-    // Fallback: check the document body background (content area, not branded navbar)
-    try {
-        const bgColor = window.getComputedStyle(document.body).backgroundColor;
-        if (bgColor && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "transparent") {
-            const dark = isColorDark(bgColor);
-            if (dark !== null) return dark ? "dark" : "light";
+    // Fallback: check body background of this frame AND parent frames.
+    // The code page's own body is typically transparent; the parent Dataverse
+    // form's body carries the actual theme color.
+    for (const frame of frames) {
+        try {
+            const bgColor = (frame as any).getComputedStyle((frame as any).document.body).backgroundColor;
+            if (bgColor && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "transparent") {
+                const dark = isColorDark(bgColor);
+                if (dark !== null) return dark ? "dark" : "light";
+            }
+        } catch {
+            /* cross-origin or DOM access failed */
         }
-    } catch {
-        /* DOM access failed */
     }
 
     return null;

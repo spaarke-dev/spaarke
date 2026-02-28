@@ -10,6 +10,14 @@ namespace Sprk.Bff.Api.Models.Ai;
 public record AnalysisExecuteRequest
 {
     /// <summary>
+    /// Optional existing analysis record ID to update in Dataverse.
+    /// When provided, the BFF writes results (sprk_workingdocument, statuscode)
+    /// to this existing record instead of generating a new GUID.
+    /// Used by AnalysisWorkspace Code Page for auto-execute of draft analyses.
+    /// </summary>
+    public Guid? AnalysisId { get; init; }
+
+    /// <summary>
     /// Document IDs to analyze.
     /// Phase 1: Only DocumentIds[0] is processed.
     /// Phase 2: All documents are processed and synthesized.
