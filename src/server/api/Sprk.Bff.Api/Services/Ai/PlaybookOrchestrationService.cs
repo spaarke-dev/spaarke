@@ -80,6 +80,12 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             request.UserContext,
             request.Parameters);
 
+        // If the caller pre-loaded the document context, attach it so all nodes share it.
+        if (request.Document != null)
+        {
+            context.Document = request.Document;
+        }
+
         _activeRuns[runId] = context;
 
         // Use a channel to handle events from try/catch blocks
@@ -761,8 +767,15 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 return errorOutput;
             }
 
-            // Create node execution context
-            var nodeContext = runContext.CreateNodeContext(node, action, scopes, actionType);
+            // Create node execution context with streaming callback for per-token SSE events
+            var nodeContext = runContext.CreateNodeContext(node, action, scopes, actionType) with
+            {
+                OnTokenReceived = async text =>
+                {
+                    await writer.WriteAsync(PlaybookStreamEvent.NodeProgress(
+                        runContext.RunId, runContext.PlaybookId, node.Id, text), cancellationToken);
+                }
+            };
 
             // Validate before execution
             var validation = executor.Validate(nodeContext);

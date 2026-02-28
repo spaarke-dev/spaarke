@@ -417,6 +417,143 @@ public class NodeService : INodeService
         return Task.FromResult(result);
     }
 
+    /// <inheritdoc />
+    public async Task SyncCanvasToNodesAsync(
+        Guid playbookId,
+        CanvasLayoutDto canvasLayout,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        var nodes = canvasLayout.Nodes;
+        var edges = canvasLayout.Edges;
+
+        _logger.LogInformation(
+            "Syncing canvas to nodes for playbook {PlaybookId}: {NodeCount} canvas nodes, {EdgeCount} edges",
+            playbookId, nodes.Length, edges.Length);
+
+        // Step 1: Load existing Dataverse node records for this playbook
+        var existingEntities = await GetNodesRawAsync(playbookId, cancellationToken);
+        var existingByCanvasId = BuildCanvasIdMap(existingEntities);
+
+        _logger.LogDebug("Found {ExistingCount} existing nodes, {MappedCount} with canvas IDs",
+            existingEntities.Length, existingByCanvasId.Count);
+
+        // Step 2: Compute execution order via topological sort of canvas edges
+        var executionOrders = ComputeExecutionOrders(nodes, edges);
+
+        // Step 3: First pass — create or update each canvas node (without dependsOn yet)
+        var canvasIdToNodeId = new Dictionary<string, Guid>();
+        var processedCanvasIds = new HashSet<string>();
+
+        // Seed mapping with existing canvas→Dataverse ID links
+        foreach (var (canvasId, (nodeId, _)) in existingByCanvasId)
+            canvasIdToNodeId[canvasId] = nodeId;
+
+        foreach (var canvasNode in nodes)
+        {
+            processedCanvasIds.Add(canvasNode.Id);
+            var order = executionOrders.GetValueOrDefault(canvasNode.Id, 0);
+
+            try
+            {
+                if (existingByCanvasId.TryGetValue(canvasNode.Id, out var existing))
+                {
+                    await UpdateNodeFieldsFromCanvasAsync(existing.NodeId, canvasNode, order, cancellationToken);
+                }
+                else
+                {
+                    var newNodeId = await CreateNodeFieldsFromCanvasAsync(
+                        playbookId, canvasNode, order, cancellationToken);
+                    canvasIdToNodeId[canvasNode.Id] = newNodeId;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to sync canvas node {CanvasNodeId} for playbook {PlaybookId}",
+                    canvasNode.Id, playbookId);
+            }
+        }
+
+        // Step 4: Second pass — set dependsOnJson now that all canvas IDs are mapped to GUIDs
+        var incomingEdges = BuildIncomingEdgeMap(edges);
+
+        foreach (var canvasNode in nodes)
+        {
+            if (!canvasIdToNodeId.TryGetValue(canvasNode.Id, out var nodeId)) continue;
+
+            var dependsOnGuids = (incomingEdges.GetValueOrDefault(canvasNode.Id) ?? [])
+                .Where(sourceId => canvasIdToNodeId.ContainsKey(sourceId))
+                .Select(sourceId => canvasIdToNodeId[sourceId])
+                .ToArray();
+
+            try
+            {
+                await UpdateDependsOnAsync(nodeId, dependsOnGuids, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to update dependsOn for node {NodeId}", nodeId);
+            }
+        }
+
+        // Step 5: Sync N:N relationships for each canvas node
+        foreach (var canvasNode in nodes)
+        {
+            if (!canvasIdToNodeId.TryGetValue(canvasNode.Id, out var nodeId)) continue;
+
+            var skillIds = ExtractGuidArray(canvasNode.Data, "skillIds");
+            var knowledgeIds = ExtractGuidArray(canvasNode.Data, "knowledgeIds");
+
+            try
+            {
+                await ClearRelationshipsAsync(nodeId, cancellationToken);
+                await AssociateRelationshipsAsync(nodeId,
+                    skillIds.Length > 0 ? skillIds : null,
+                    knowledgeIds.Length > 0 ? knowledgeIds : null,
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to sync N:N relationships for node {NodeId}", nodeId);
+            }
+        }
+
+        // Step 6: Delete orphaned nodes (exist in Dataverse but not in canvas)
+        var deletedCount = 0;
+        foreach (var entity in existingEntities)
+        {
+            var canvasId = ExtractCanvasNodeId(entity.ConfigJson);
+
+            // Keep the node if its canvas ID is in the current canvas
+            if (canvasId != null && processedCanvasIds.Contains(canvasId))
+                continue;
+
+            try
+            {
+                var url = $"{EntitySetName}({entity.Id})";
+                var response = await _httpClient.DeleteAsync(url, cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    deletedCount++;
+                    _logger.LogInformation("Deleted orphaned node {NodeId} (canvas ID: {CanvasId})",
+                        entity.Id, canvasId ?? "(none)");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to delete orphaned node {NodeId}", entity.Id);
+            }
+        }
+
+        _logger.LogInformation(
+            "Canvas sync complete for playbook {PlaybookId}: {Created} created, {Updated} updated, {Deleted} deleted",
+            playbookId,
+            nodes.Length - existingByCanvasId.Count(e => processedCanvasIds.Contains(e.Key)),
+            existingByCanvasId.Count(e => processedCanvasIds.Contains(e.Key)),
+            deletedCount);
+    }
+
     #region Private Helper Methods
 
     private static string GetSelectFields()
@@ -597,6 +734,330 @@ public class NodeService : INodeService
             return [];
         }
     }
+
+    #region Canvas Sync Helpers
+
+    /// <summary>
+    /// Load all node entities for a playbook without resolving N:N relationships (fast path for sync).
+    /// </summary>
+    private async Task<NodeEntity[]> GetNodesRawAsync(Guid playbookId, CancellationToken cancellationToken)
+    {
+        var select = GetSelectFields();
+        var filter = $"_sprk_playbookid_value eq {playbookId}";
+        var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}";
+
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(JsonOptions, cancellationToken);
+        if (result?.Value == null) return [];
+
+        return result.Value
+            .Select(e => JsonSerializer.Deserialize<NodeEntity>(e.GetRawText(), JsonOptions))
+            .Where(e => e != null)
+            .ToArray()!;
+    }
+
+    /// <summary>
+    /// Build a lookup from canvas node ID → (Dataverse node ID, entity) by parsing __canvasNodeId from configJson.
+    /// </summary>
+    private static Dictionary<string, (Guid NodeId, NodeEntity Entity)> BuildCanvasIdMap(NodeEntity[] entities)
+    {
+        var map = new Dictionary<string, (Guid, NodeEntity)>();
+        foreach (var entity in entities)
+        {
+            var canvasId = ExtractCanvasNodeId(entity.ConfigJson);
+            if (canvasId != null)
+            {
+                map[canvasId] = (entity.Id, entity);
+            }
+        }
+        return map;
+    }
+
+    /// <summary>
+    /// Compute execution order for each canvas node via topological sort (Kahn's algorithm) of canvas edges.
+    /// </summary>
+    private static Dictionary<string, int> ComputeExecutionOrders(CanvasNodeDto[] nodes, CanvasEdgeDto[] edges)
+    {
+        var nodeIds = new HashSet<string>(nodes.Select(n => n.Id));
+        var inDegree = nodes.ToDictionary(n => n.Id, _ => 0);
+        var adjacency = nodes.ToDictionary(n => n.Id, _ => new List<string>());
+
+        foreach (var edge in edges)
+        {
+            if (nodeIds.Contains(edge.Source) && nodeIds.Contains(edge.Target))
+            {
+                adjacency[edge.Source].Add(edge.Target);
+                inDegree[edge.Target]++;
+            }
+        }
+
+        // Kahn's algorithm
+        var queue = new Queue<string>();
+        foreach (var (id, degree) in inDegree)
+        {
+            if (degree == 0) queue.Enqueue(id);
+        }
+
+        var order = new Dictionary<string, int>();
+        var currentOrder = 1;
+
+        while (queue.Count > 0)
+        {
+            var nodeId = queue.Dequeue();
+            order[nodeId] = currentOrder++;
+
+            foreach (var target in adjacency[nodeId])
+            {
+                inDegree[target]--;
+                if (inDegree[target] == 0) queue.Enqueue(target);
+            }
+        }
+
+        // Nodes in cycles get order 0 (should not happen in a valid canvas)
+        foreach (var node in nodes)
+        {
+            order.TryAdd(node.Id, 0);
+        }
+
+        return order;
+    }
+
+    /// <summary>
+    /// Build a map of canvas node ID → list of source canvas node IDs (from incoming edges).
+    /// </summary>
+    private static Dictionary<string, List<string>> BuildIncomingEdgeMap(CanvasEdgeDto[] edges)
+    {
+        var map = new Dictionary<string, List<string>>();
+        foreach (var edge in edges)
+        {
+            if (!map.TryGetValue(edge.Target, out var sources))
+            {
+                sources = [];
+                map[edge.Target] = sources;
+            }
+            sources.Add(edge.Source);
+        }
+        return map;
+    }
+
+    /// <summary>
+    /// Create a new sprk_playbooknode record from canvas node data.
+    /// </summary>
+    private async Task<Guid> CreateNodeFieldsFromCanvasAsync(
+        Guid playbookId, CanvasNodeDto canvasNode, int executionOrder, CancellationToken ct)
+    {
+        var data = canvasNode.Data;
+        var name = ExtractStringValue(data, "label")
+                   ?? ExtractStringValue(data, "name")
+                   ?? canvasNode.Type;
+        var actionId = ExtractGuidValue(data, "actionId");
+        var toolId = ExtractGuidValue(data, "toolId");
+        var modelDeploymentId = ExtractGuidValue(data, "modelDeploymentId");
+        var outputVariable = ExtractStringValue(data, "outputVariable") ?? $"output_{canvasNode.Id}";
+        var timeoutSeconds = ExtractIntValue(data, "timeoutSeconds");
+        var retryCount = ExtractIntValue(data, "retryCount");
+        var conditionJson = ExtractStringValue(data, "conditionJson");
+        var isActive = ExtractBoolValue(data, "isActive") ?? true;
+        var configJson = BuildConfigJson(canvasNode.Id, data);
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_name"] = name,
+            ["sprk_playbookid@odata.bind"] = $"/sprk_analysisplaybooks({playbookId})",
+            ["sprk_executionorder"] = executionOrder,
+            ["sprk_outputvariable"] = outputVariable,
+            ["sprk_configjson"] = configJson,
+            ["sprk_position_x"] = (int)canvasNode.X,
+            ["sprk_position_y"] = (int)canvasNode.Y,
+            ["sprk_isactive"] = isActive
+        };
+
+        if (actionId.HasValue)
+            payload["sprk_actionid@odata.bind"] = $"/sprk_analysisactions({actionId.Value})";
+        if (toolId.HasValue)
+            payload["sprk_toolid@odata.bind"] = $"/sprk_analysistools({toolId.Value})";
+        if (modelDeploymentId.HasValue)
+            payload["sprk_modeldeploymentid@odata.bind"] = $"/sprk_aimodeldeployments({modelDeploymentId.Value})";
+        if (timeoutSeconds.HasValue)
+            payload["sprk_timeoutseconds"] = timeoutSeconds.Value;
+        if (retryCount.HasValue)
+            payload["sprk_retrycount"] = retryCount.Value;
+        if (!string.IsNullOrEmpty(conditionJson))
+            payload["sprk_conditionjson"] = conditionJson;
+
+        var response = await _httpClient.PostAsJsonAsync(EntitySetName, payload, JsonOptions, ct);
+        response.EnsureSuccessStatusCode();
+
+        var entityIdHeader = response.Headers.GetValues("OData-EntityId").FirstOrDefault()
+            ?? throw new InvalidOperationException("Failed to get entity ID from create response");
+        var nodeId = Guid.Parse(entityIdHeader.Split('(', ')')[1]);
+
+        _logger.LogInformation("Created node {NodeId} from canvas node {CanvasNodeId}: {Name}",
+            nodeId, canvasNode.Id, name);
+        return nodeId;
+    }
+
+    /// <summary>
+    /// Update an existing sprk_playbooknode record from canvas node data.
+    /// </summary>
+    private async Task UpdateNodeFieldsFromCanvasAsync(
+        Guid nodeId, CanvasNodeDto canvasNode, int executionOrder, CancellationToken ct)
+    {
+        var data = canvasNode.Data;
+        var name = ExtractStringValue(data, "label") ?? ExtractStringValue(data, "name");
+        var actionId = ExtractGuidValue(data, "actionId");
+        var toolId = ExtractGuidValue(data, "toolId");
+        var modelDeploymentId = ExtractGuidValue(data, "modelDeploymentId");
+        var outputVariable = ExtractStringValue(data, "outputVariable");
+        var timeoutSeconds = ExtractIntValue(data, "timeoutSeconds");
+        var retryCount = ExtractIntValue(data, "retryCount");
+        var conditionJson = ExtractStringValue(data, "conditionJson");
+        var isActive = ExtractBoolValue(data, "isActive");
+        var configJson = BuildConfigJson(canvasNode.Id, data);
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_executionorder"] = executionOrder,
+            ["sprk_configjson"] = configJson,
+            ["sprk_position_x"] = (int)canvasNode.X,
+            ["sprk_position_y"] = (int)canvasNode.Y
+        };
+
+        if (!string.IsNullOrEmpty(name))
+            payload["sprk_name"] = name;
+        if (actionId.HasValue)
+            payload["sprk_actionid@odata.bind"] = $"/sprk_analysisactions({actionId.Value})";
+        if (toolId.HasValue)
+            payload["sprk_toolid@odata.bind"] = $"/sprk_analysistools({toolId.Value})";
+        if (modelDeploymentId.HasValue)
+            payload["sprk_modeldeploymentid@odata.bind"] = $"/sprk_aimodeldeployments({modelDeploymentId.Value})";
+        if (!string.IsNullOrEmpty(outputVariable))
+            payload["sprk_outputvariable"] = outputVariable;
+        if (timeoutSeconds.HasValue)
+            payload["sprk_timeoutseconds"] = timeoutSeconds.Value;
+        if (retryCount.HasValue)
+            payload["sprk_retrycount"] = retryCount.Value;
+        if (conditionJson != null)
+            payload["sprk_conditionjson"] = conditionJson;
+        if (isActive.HasValue)
+            payload["sprk_isactive"] = isActive.Value;
+
+        var url = $"{EntitySetName}({nodeId})";
+        var response = await _httpClient.PatchAsJsonAsync(url, payload, JsonOptions, ct);
+        response.EnsureSuccessStatusCode();
+
+        _logger.LogDebug("Updated node {NodeId} from canvas node {CanvasNodeId}", nodeId, canvasNode.Id);
+    }
+
+    /// <summary>
+    /// Patch only the sprk_dependsonjson field on a node record.
+    /// </summary>
+    private async Task UpdateDependsOnAsync(Guid nodeId, Guid[] dependsOnGuids, CancellationToken ct)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_dependsonjson"] = dependsOnGuids.Length > 0
+                ? JsonSerializer.Serialize(dependsOnGuids)
+                : null
+        };
+
+        var url = $"{EntitySetName}({nodeId})";
+        var response = await _httpClient.PatchAsJsonAsync(url, payload, JsonOptions, ct);
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// Build a configJson string that includes the __canvasNodeId marker plus any unmapped data fields.
+    /// </summary>
+    private static string BuildConfigJson(string canvasNodeId, Dictionary<string, object?>? data)
+    {
+        var config = new Dictionary<string, object?> { ["__canvasNodeId"] = canvasNodeId };
+
+        // Fields that are mapped to dedicated Dataverse columns (not stored in configJson)
+        var mappedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "label", "name", "actionId", "toolId", "skillIds", "knowledgeIds",
+            "outputVariable", "timeoutSeconds", "retryCount", "modelDeploymentId",
+            "conditionJson", "isActive"
+        };
+
+        if (data != null)
+        {
+            foreach (var (key, value) in data)
+            {
+                if (!mappedKeys.Contains(key))
+                    config[key] = value;
+            }
+        }
+
+        return JsonSerializer.Serialize(config, JsonOptions);
+    }
+
+    /// <summary>
+    /// Extract the __canvasNodeId value from a node's configJson.
+    /// </summary>
+    private static string? ExtractCanvasNodeId(string? configJson)
+    {
+        if (string.IsNullOrEmpty(configJson)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(configJson);
+            return doc.RootElement.TryGetProperty("__canvasNodeId", out var prop)
+                ? prop.GetString()
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? ExtractStringValue(Dictionary<string, object?>? data, string key)
+    {
+        if (data == null || !data.TryGetValue(key, out var value) || value == null) return null;
+        if (value is JsonElement je)
+            return je.ValueKind == JsonValueKind.String ? je.GetString() : je.ToString();
+        return value.ToString();
+    }
+
+    private static Guid? ExtractGuidValue(Dictionary<string, object?>? data, string key)
+    {
+        var str = ExtractStringValue(data, key);
+        return Guid.TryParse(str, out var guid) ? guid : null;
+    }
+
+    private static int? ExtractIntValue(Dictionary<string, object?>? data, string key)
+    {
+        if (data == null || !data.TryGetValue(key, out var value) || value == null) return null;
+        if (value is JsonElement je)
+            return je.ValueKind == JsonValueKind.Number ? je.TryGetInt32(out var i) ? i : null : null;
+        return value is int intVal ? intVal : int.TryParse(value.ToString(), out var parsed) ? parsed : null;
+    }
+
+    private static bool? ExtractBoolValue(Dictionary<string, object?>? data, string key)
+    {
+        if (data == null || !data.TryGetValue(key, out var value) || value == null) return null;
+        if (value is JsonElement je)
+            return je.ValueKind is JsonValueKind.True or JsonValueKind.False ? je.GetBoolean() : null;
+        return value is bool b ? b : null;
+    }
+
+    private static Guid[] ExtractGuidArray(Dictionary<string, object?>? data, string key)
+    {
+        if (data == null || !data.TryGetValue(key, out var value) || value == null) return [];
+        if (value is JsonElement je && je.ValueKind == JsonValueKind.Array)
+        {
+            return je.EnumerateArray()
+                .Select(e => Guid.TryParse(e.GetString(), out var g) ? g : Guid.Empty)
+                .Where(g => g != Guid.Empty)
+                .ToArray();
+        }
+        return [];
+    }
+
+    #endregion
 
     #endregion
 

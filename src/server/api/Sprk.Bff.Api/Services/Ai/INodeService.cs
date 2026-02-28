@@ -95,4 +95,17 @@ public interface INodeService
     Task<NodeValidationResult> ValidateAsync(
         CreateNodeRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Synchronise the visual canvas layout to executable sprk_playbooknode Dataverse records.
+    /// Creates new nodes, updates changed nodes, deletes orphaned nodes, recomputes execution
+    /// order via topological sort of canvas edges, and syncs N:N skill/knowledge relationships.
+    /// </summary>
+    /// <param name="playbookId">Playbook to sync nodes for.</param>
+    /// <param name="canvasLayout">Canvas layout containing nodes and edges from the visual designer.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task SyncCanvasToNodesAsync(
+        Guid playbookId,
+        CanvasLayoutDto canvasLayout,
+        CancellationToken cancellationToken = default);
 }

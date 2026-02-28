@@ -9,20 +9,20 @@
 
 | ID | Title | Phase | Status | Est. | Deps | Parallel | Tags |
 |----|-------|-------|--------|------|------|----------|------|
-| 001 | Register missing DI services | 0: Job Handler Fix | 🔲 | 1h | none | — | bff-api, di |
-| 002 | Verify and complete GetToolAsync | 1: Tool Resolution | 🔲 | 3h | 001 | — | bff-api, ai, dataverse |
-| 010 | Implement GetSkillAsync from Dataverse | 2a: Skill Resolution | 🔲 | 3h | 002 | **A** | bff-api, ai, dataverse |
-| 011 | Implement GetKnowledgeAsync from Dataverse | 2b: Knowledge Resolution | 🔲 | 3h | 002 | **A** | bff-api, ai, dataverse |
-| 012 | Implement GetActionAsync from Dataverse | 2c: Action Resolution | 🔲 | 3h | 002 | **A** | bff-api, ai, dataverse |
-| 020 | Remove all stub dictionaries and fake GUIDs | 3: Stub Removal | 🔲 | 4h | 010, 011, 012 | — | bff-api, refactoring |
-| 021 | Add ConfigurationSchema to all 9 handlers | 3: Handler Schemas | 🔲 | 4h | 020 | C | bff-api, ai |
-| 022 | Implement GET /api/ai/handlers endpoint | 3: Handler Discovery | 🔲 | 3h | 021 | — | bff-api, api |
-| 030 | Implement SyncCanvasToNodesAsync | 4: Canvas Sync | 🔲 | 8h | 022 | — | bff-api, ai, dataverse |
-| 031 | Implement ResolveNodeScopesAsync | 4: Node Scopes | 🔲 | 4h | 030 | — | bff-api, ai, dataverse |
-| 040 | Wire ExecutePlaybookAsync delegation | 5: Execution Wiring | 🔲 | 6h | 031 | — | bff-api, ai |
-| 041 | Load document into PlaybookRunContext | 5: Document Loading | 🔲 | 2h | 040 | — | bff-api, ai |
-| 050 | Enable per-token streaming in node executor | 6: Streaming | 🔲 | 4h | 041 | — | bff-api, ai |
-| 051 | Persist Deliver Output to working document | 6: Output Persistence | 🔲 | 3h | 050 | — | bff-api, ai |
+| 001 | Register missing DI services | 0: Job Handler Fix | ✅ | 1h | none | — | bff-api, di |
+| 002 | Verify and complete GetToolAsync | 1: Tool Resolution | ✅ | 3h | 001 | — | bff-api, ai, dataverse |
+| 010 | Implement GetSkillAsync from Dataverse | 2a: Skill Resolution | ✅ | 3h | 002 | **A** | bff-api, ai, dataverse |
+| 011 | Implement GetKnowledgeAsync from Dataverse | 2b: Knowledge Resolution | ✅ | 3h | 002 | **A** | bff-api, ai, dataverse |
+| 012 | Implement GetActionAsync from Dataverse | 2c: Action Resolution | ✅ | 3h | 002 | **A** | bff-api, ai, dataverse |
+| 020 | Remove all stub dictionaries and fake GUIDs | 3: Stub Removal | ✅ | 4h | 010, 011, 012 | — | bff-api, refactoring |
+| 021 | Add ConfigurationSchema to all 9 handlers | 3: Handler Schemas | ✅ | 4h | 020 | C | bff-api, ai |
+| 022 | Implement GET /api/ai/handlers endpoint | 3: Handler Discovery | ✅ | 3h | 021 | — | bff-api, api |
+| 030 | Implement SyncCanvasToNodesAsync | 4: Canvas Sync | ✅ | 8h | 022 | — | bff-api, ai, dataverse |
+| 031 | Implement ResolveNodeScopesAsync | 4: Node Scopes | ✅ | 4h | 030 | — | bff-api, ai, dataverse |
+| 040 | Wire ExecutePlaybookAsync delegation | 5: Execution Wiring | ✅ | 6h | 031 | — | bff-api, ai |
+| 041 | Load document into PlaybookRunContext | 5: Document Loading | ✅ | 2h | 040 | — | bff-api, ai |
+| 050 | Enable per-token streaming in node executor | 6: Streaming | ✅ | 4h | 041 | — | bff-api, ai |
+| 051 | Persist Deliver Output to working document | 6: Output Persistence | ✅ | 3h | 050 | — | bff-api, ai |
 | 060 | Statuscode-based auto-execute + triggerExecute | 7: Workspace UX | 🔲 | 3h | 051 | **B** | frontend, fluent-ui |
 | 061 | Add completion toast notification | 7: Workspace UX | 🔲 | 1h | 060 | — | frontend, fluent-ui |
 | 062 | Add Run Analysis button + source toggle | 7: Workspace UX | 🔲 | 2h | 060 | — | frontend, fluent-ui |

@@ -3,7 +3,7 @@
   <metadata>
     <title>Register missing DI services (AppOnlyDocumentAnalysisJobHandler + AiAnalysisNodeExecutor)</title>
     <phase>0: Job Handler Fix</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>002, 003, 004, 005</blocks>

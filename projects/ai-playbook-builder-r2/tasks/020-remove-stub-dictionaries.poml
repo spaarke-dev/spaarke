@@ -3,7 +3,7 @@
   <metadata>
     <title>Remove all stub dictionaries and fake GUIDs from ScopeResolverService</title>
     <phase>3: Stub Removal</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>010, 011, 012</dependencies>
     <blocks>021, 030</blocks>

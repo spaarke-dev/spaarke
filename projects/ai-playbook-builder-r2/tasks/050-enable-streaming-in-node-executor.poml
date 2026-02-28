@@ -3,7 +3,7 @@
   <metadata>
     <title>Enable per-token streaming in AiAnalysisNodeExecutor via IStreamingAnalysisToolHandler</title>
     <phase>6: Per-Token Streaming</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>041</dependencies>
     <blocks>051, 060</blocks>

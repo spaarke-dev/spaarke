@@ -209,20 +209,135 @@ public class ScopeResolverService : IScopeResolverService
     }
 
     /// <inheritdoc />
-    public Task<ResolvedScopes> ResolveNodeScopesAsync(
+    public async Task<ResolvedScopes> ResolveNodeScopesAsync(
         Guid nodeId,
         CancellationToken cancellationToken)
     {
         _logger.LogDebug("Resolving scopes from node {NodeId}", nodeId);
 
-        // Phase 1: Node scope resolution not yet implemented
-        // In Task 032, this will:
-        // 1. Query sprk_playbooknode_skill N:N relationship for skills
-        // 2. Query sprk_playbooknode_knowledge N:N relationship for knowledge
-        // 3. Query sprk_toolid lookup for the single tool
-        _logger.LogWarning("Node scope resolution not yet implemented, returning empty scopes");
+        await EnsureAuthenticatedAsync(cancellationToken);
 
-        return Task.FromResult(new ResolvedScopes([], [], []));
+        try
+        {
+            // Step 1: Query the sprk_playbooknode record for the tool lookup
+            Guid? toolId = null;
+            var nodeUrl = $"sprk_playbooknodes({nodeId})?$select=_sprk_toolid_value";
+            var nodeResponse = await _httpClient.GetAsync(nodeUrl, cancellationToken);
+
+            if (nodeResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                _logger.LogWarning("Node {NodeId} not found in Dataverse", nodeId);
+                return new ResolvedScopes([], [], []);
+            }
+
+            await EnsureSuccessWithDiagnosticsAsync(nodeResponse, $"ResolveNodeScopes-GetNode({nodeId})", cancellationToken);
+
+            using (var nodeDoc = await JsonDocument.ParseAsync(
+                await nodeResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken))
+            {
+                if (nodeDoc.RootElement.TryGetProperty("_sprk_toolid_value", out var toolProp) &&
+                    toolProp.ValueKind != JsonValueKind.Null)
+                {
+                    toolId = Guid.TryParse(toolProp.GetString(), out var tid) ? tid : null;
+                }
+            }
+
+            _logger.LogDebug("Node {NodeId} has toolId: {ToolId}", nodeId, toolId?.ToString() ?? "(none)");
+
+            // Step 2: Query N:N skill relationship
+            var skillIds = await QueryNodeRelatedIdsAsync(
+                nodeId, "sprk_playbooknode_skill", "sprk_analysisskillid", cancellationToken);
+
+            // Step 3: Query N:N knowledge relationship
+            var knowledgeIds = await QueryNodeRelatedIdsAsync(
+                nodeId, "sprk_playbooknode_knowledge", "sprk_analysisknowledgeid", cancellationToken);
+
+            _logger.LogDebug(
+                "Node {NodeId} relationships: {SkillCount} skills, {KnowledgeCount} knowledge, tool={HasTool}",
+                nodeId, skillIds.Length, knowledgeIds.Length, toolId.HasValue);
+
+            // Step 4: Resolve tools
+            var tools = Array.Empty<AnalysisTool>();
+            if (toolId.HasValue)
+            {
+                var tool = await GetToolAsync(toolId.Value, cancellationToken);
+                tools = tool != null ? [tool] : [];
+            }
+
+            // Step 5: Resolve skills in parallel
+            var skills = Array.Empty<AnalysisSkill>();
+            if (skillIds.Length > 0)
+            {
+                var skillTasks = skillIds.Select(id => GetSkillAsync(id, cancellationToken));
+                var skillResults = await Task.WhenAll(skillTasks);
+                skills = skillResults.Where(s => s != null).Cast<AnalysisSkill>().ToArray();
+            }
+
+            // Step 6: Resolve knowledge in parallel
+            var knowledge = Array.Empty<AnalysisKnowledge>();
+            if (knowledgeIds.Length > 0)
+            {
+                var knowledgeTasks = knowledgeIds.Select(id => GetKnowledgeAsync(id, cancellationToken));
+                var knowledgeResults = await Task.WhenAll(knowledgeTasks);
+                knowledge = knowledgeResults.Where(k => k != null).Cast<AnalysisKnowledge>().ToArray();
+            }
+
+            _logger.LogInformation(
+                "Resolved node {NodeId} scopes: {SkillCount} skills, {KnowledgeCount} knowledge, {ToolCount} tools",
+                nodeId, skills.Length, knowledge.Length, tools.Length);
+
+            return new ResolvedScopes(skills, knowledge, tools);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to resolve scopes from node {NodeId}", nodeId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Query a node's N:N relationship table to retrieve related entity IDs.
+    /// </summary>
+    private async Task<Guid[]> QueryNodeRelatedIdsAsync(
+        Guid nodeId,
+        string relationshipName,
+        string targetIdField,
+        CancellationToken cancellationToken)
+    {
+        var url = $"sprk_playbooknodes({nodeId})/{relationshipName}?$select={targetIdField}";
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Failed to query {Relationship} for node {NodeId}: {StatusCode}",
+                    relationshipName, nodeId, response.StatusCode);
+                return [];
+            }
+
+            using var doc = await JsonDocument.ParseAsync(
+                await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+
+            if (!doc.RootElement.TryGetProperty("value", out var valueArray) ||
+                valueArray.ValueKind != JsonValueKind.Array)
+            {
+                return [];
+            }
+
+            return valueArray.EnumerateArray()
+                .Select(e => e.TryGetProperty(targetIdField, out var idProp) && idProp.ValueKind != JsonValueKind.Null
+                    ? Guid.TryParse(idProp.GetString(), out var id) ? id : Guid.Empty
+                    : Guid.Empty)
+                .Where(id => id != Guid.Empty)
+                .ToArray();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to query {Relationship} for node {NodeId}", relationshipName, nodeId);
+            return [];
+        }
     }
 
     /// <inheritdoc />
@@ -230,17 +345,16 @@ public class ScopeResolverService : IScopeResolverService
         Guid actionId,
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("[GET ACTION] Loading action {ActionId} from Dataverse", actionId);
+        _logger.LogDebug("Loading action {ActionId} from Dataverse", actionId);
 
         await EnsureAuthenticatedAsync(cancellationToken);
 
         var url = $"sprk_analysisactions({actionId})?$expand=sprk_ActionTypeId($select=sprk_name)";
-        _logger.LogInformation("[GET ACTION] URL: {Url}", url);
         var response = await _httpClient.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            _logger.LogWarning("[GET ACTION] Action {ActionId} not found in Dataverse", actionId);
+            _logger.LogWarning("Action {ActionId} not found in Dataverse", actionId);
             return null;
         }
 
@@ -249,12 +363,17 @@ public class ScopeResolverService : IScopeResolverService
         var entity = await response.Content.ReadFromJsonAsync<ActionEntity>(cancellationToken);
         if (entity == null)
         {
-            _logger.LogWarning("[GET ACTION] Failed to deserialize action {ActionId}", actionId);
+            _logger.LogWarning("Failed to deserialize action {ActionId} from Dataverse response", actionId);
             return null;
         }
 
         // Extract SortOrder from type name prefix (e.g., "01 - Extraction" → 1)
         var sortOrder = ExtractSortOrderFromTypeName(entity.ActionTypeId?.Name);
+
+        // Map sprk_actiontype choice value to ActionType enum
+        var actionType = entity.ActionTypeValue.HasValue
+            ? (Nodes.ActionType)entity.ActionTypeValue.Value
+            : Nodes.ActionType.AiAnalysis;
 
         var action = new AnalysisAction
         {
@@ -262,11 +381,13 @@ public class ScopeResolverService : IScopeResolverService
             Name = entity.Name ?? "Unnamed Action",
             Description = entity.Description,
             SystemPrompt = entity.SystemPrompt ?? "You are an AI assistant that analyzes documents.",
-            SortOrder = sortOrder
+            SortOrder = sortOrder,
+            ActionType = actionType,
+            OwnerType = ScopeOwnerType.System,
+            IsImmutable = false
         };
 
-        _logger.LogInformation("[GET ACTION] Loaded action from Dataverse: {ActionName} (SortOrder: {SortOrder})",
-            action.Name, action.SortOrder);
+        _logger.LogInformation("Loaded action from Dataverse: {ActionName}", action.Name);
 
         return action;
     }
@@ -786,17 +907,16 @@ public class ScopeResolverService : IScopeResolverService
     /// <inheritdoc />
     public async Task<AnalysisSkill?> GetSkillAsync(Guid skillId, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("[GET SKILL] Loading skill {SkillId} from Dataverse", skillId);
+        _logger.LogDebug("Loading skill {SkillId} from Dataverse", skillId);
 
         await EnsureAuthenticatedAsync(cancellationToken);
 
-        var url = $"sprk_analysisskills({skillId})?$expand=sprk_SkillTypeId($select=sprk_name)";
-        _logger.LogInformation("[GET SKILL] URL: {Url}", url);
+        var url = $"sprk_promptfragments({skillId})?$expand=sprk_SkillTypeId($select=sprk_name)";
         var response = await _httpClient.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            _logger.LogWarning("[GET SKILL] Skill {SkillId} not found in Dataverse", skillId);
+            _logger.LogWarning("Skill {SkillId} not found in Dataverse", skillId);
             return null;
         }
 
@@ -805,7 +925,7 @@ public class ScopeResolverService : IScopeResolverService
         var entity = await response.Content.ReadFromJsonAsync<SkillEntity>(cancellationToken);
         if (entity == null)
         {
-            _logger.LogWarning("[GET SKILL] Failed to deserialize skill {SkillId}", skillId);
+            _logger.LogWarning("Failed to deserialize skill {SkillId} from Dataverse response", skillId);
             return null;
         }
 
@@ -820,8 +940,7 @@ public class ScopeResolverService : IScopeResolverService
             IsImmutable = false
         };
 
-        _logger.LogInformation("[GET SKILL] Loaded skill from Dataverse: {SkillName} (Category: {Category})",
-            skill.Name, skill.Category);
+        _logger.LogInformation("Loaded skill from Dataverse: {SkillName}", skill.Name);
 
         return skill;
     }
@@ -1197,17 +1316,16 @@ public class ScopeResolverService : IScopeResolverService
     /// <inheritdoc />
     public async Task<AnalysisTool?> GetToolAsync(Guid toolId, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("[GET TOOL] Loading tool {ToolId} from Dataverse", toolId);
+        _logger.LogDebug("Loading tool {ToolId} from Dataverse", toolId);
 
         await EnsureAuthenticatedAsync(cancellationToken);
 
         var url = $"sprk_analysistools({toolId})?$expand=sprk_ToolTypeId($select=sprk_name)";
-        _logger.LogInformation("[GET TOOL] URL: {Url}", url);
         var response = await _httpClient.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            _logger.LogWarning("[GET TOOL] Tool {ToolId} not found in Dataverse", toolId);
+            _logger.LogWarning("Tool {ToolId} not found in Dataverse", toolId);
             return null;
         }
 
@@ -1216,11 +1334,18 @@ public class ScopeResolverService : IScopeResolverService
         var entity = await response.Content.ReadFromJsonAsync<ToolEntity>(cancellationToken);
         if (entity == null)
         {
-            _logger.LogWarning("[GET TOOL] Failed to deserialize tool {ToolId}", toolId);
+            _logger.LogWarning("Failed to deserialize tool {ToolId} from Dataverse response", toolId);
             return null;
         }
 
-        // Map from HandlerClass if available, otherwise fall back to type name from lookup
+        // Handler resolution chain:
+        //   1. Use HandlerClass field if non-empty (preferred, deterministic)
+        //   2. Fall back to "GenericAnalysisHandler" (default handler for all tool types)
+        //   3. ToolType mapped from HandlerClass or type name for categorization
+        var handlerClass = !string.IsNullOrWhiteSpace(entity.HandlerClass)
+            ? entity.HandlerClass
+            : "GenericAnalysisHandler";
+
         var toolType = !string.IsNullOrEmpty(entity.HandlerClass)
             ? MapHandlerClassToToolType(entity.HandlerClass)
             : MapToolTypeName(entity.ToolTypeId?.Name ?? "");
@@ -1231,15 +1356,15 @@ public class ScopeResolverService : IScopeResolverService
             Name = entity.Name ?? "Unnamed Tool",
             Description = entity.Description,
             Type = toolType,
-            HandlerClass = entity.HandlerClass,
+            HandlerClass = handlerClass,
             Configuration = entity.Configuration,
             OwnerType = ScopeOwnerType.System,
             IsImmutable = false
         };
 
-        var mappingSource = !string.IsNullOrEmpty(entity.HandlerClass) ? "HandlerClass" : "TypeName";
-        _logger.LogInformation("[GET TOOL] Loaded tool from Dataverse: {ToolName} (Type: {ToolType}, MappedFrom: {MappingSource}, HandlerClass: {HandlerClass})",
-            tool.Name, tool.Type, mappingSource, entity.HandlerClass ?? "null");
+        var mappingSource = !string.IsNullOrEmpty(entity.HandlerClass) ? "HandlerClass" : "GenericAnalysisHandler (fallback)";
+        _logger.LogInformation("Loaded tool from Dataverse: {ToolName} (Type: {ToolType}, MappedFrom: {MappingSource}, HandlerClass: {HandlerClass})",
+            tool.Name, tool.Type, mappingSource, handlerClass);
 
         return tool;
     }
@@ -1826,7 +1951,10 @@ public class ScopeResolverService : IScopeResolverService
     #region Private DTOs
 
     /// <summary>
-    /// DTO for deserializing sprk_analysistool entity from Dataverse Web API
+    /// DTO for deserializing sprk_analysistool entity from Dataverse Web API.
+    /// Schema verified against design.md section 10.1 (sprk_analysistoolid, sprk_name,
+    /// sprk_description, sprk_tooltypeid, sprk_handlerclass, sprk_configuration).
+    /// Requires integration test against live Dataverse to confirm field casing.
     /// </summary>
     private class ToolEntity
     {
@@ -1856,11 +1984,12 @@ public class ScopeResolverService : IScopeResolverService
     }
 
     /// <summary>
-    /// DTO for deserializing sprk_analysisskill entity from Dataverse Web API (Skills)
+    /// DTO for deserializing sprk_promptfragment entity from Dataverse Web API (Skills).
+    /// Skills are stored in the sprk_promptfragments entity set in Dataverse.
     /// </summary>
     private class SkillEntity
     {
-        [JsonPropertyName("sprk_analysisskillid")]
+        [JsonPropertyName("sprk_promptfragmentid")]
         public Guid Id { get; set; }
 
         [JsonPropertyName("sprk_name")]
@@ -1913,7 +2042,9 @@ public class ScopeResolverService : IScopeResolverService
     }
 
     /// <summary>
-    /// DTO for deserializing sprk_analysisaction entity from Dataverse Web API (Actions)
+    /// DTO for deserializing sprk_analysisaction entity from Dataverse Web API (Actions).
+    /// Schema: sprk_analysisactionid (PK), sprk_name, sprk_description,
+    /// sprk_systemprompt, sprk_actiontype (choice), sprk_ActionTypeId (lookup).
     /// </summary>
     private class ActionEntity
     {
@@ -1928,6 +2059,9 @@ public class ScopeResolverService : IScopeResolverService
 
         [JsonPropertyName("sprk_systemprompt")]
         public string? SystemPrompt { get; set; }
+
+        [JsonPropertyName("sprk_actiontype")]
+        public int? ActionTypeValue { get; set; }
 
         [JsonPropertyName("sprk_ActionTypeId")]
         public ActionTypeReference? ActionTypeId { get; set; }

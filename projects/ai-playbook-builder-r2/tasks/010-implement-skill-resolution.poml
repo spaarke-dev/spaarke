@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement GetSkillAsync Dataverse query replacing stub dictionary</title>
     <phase>2a: Skill Resolution</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>002</dependencies>
     <blocks>020</blocks>

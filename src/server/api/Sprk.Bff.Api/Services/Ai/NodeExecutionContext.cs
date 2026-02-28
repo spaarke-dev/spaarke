@@ -108,6 +108,14 @@ public record NodeExecutionContext
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 
     /// <summary>
+    /// Optional callback invoked for each streaming token from the AI model.
+    /// When set, node executors supporting streaming will invoke this for each token,
+    /// enabling per-token SSE events (NodeProgress) to reach the client.
+    /// When null, executors use the blocking (non-streaming) path.
+    /// </summary>
+    public Func<string, ValueTask>? OnTokenReceived { get; init; }
+
+    /// <summary>
     /// Gets the configured timeout for this node in seconds.
     /// Uses node-specific timeout or default of 300 seconds.
     /// </summary>

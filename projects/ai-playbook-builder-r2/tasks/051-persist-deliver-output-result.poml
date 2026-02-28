@@ -3,7 +3,7 @@
   <metadata>
     <title>Persist Deliver Output result to sprk_workingdocument and finalize analysis</title>
     <phase>6: Output Persistence</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>050</dependencies>
     <blocks>060</blocks>

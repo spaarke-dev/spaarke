@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai.Nodes;
@@ -17,17 +18,21 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// <item>Executes the handler and converts ToolResult to NodeOutput</item>
 /// <item>Tracks metrics (tokens, duration) from the tool execution</item>
 /// </list>
+/// <para>
+/// Registered as Singleton (required by NodeExecutorRegistry). Uses IServiceProvider
+/// to resolve IToolHandlerRegistry per execution since the registry is Scoped.
+/// </para>
 /// </remarks>
 public sealed class AiAnalysisNodeExecutor : INodeExecutor
 {
-    private readonly IToolHandlerRegistry _toolHandlerRegistry;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<AiAnalysisNodeExecutor> _logger;
 
     public AiAnalysisNodeExecutor(
-        IToolHandlerRegistry toolHandlerRegistry,
+        IServiceProvider serviceProvider,
         ILogger<AiAnalysisNodeExecutor> logger)
     {
-        _toolHandlerRegistry = toolHandlerRegistry;
+        _serviceProvider = serviceProvider;
         _logger = logger;
     }
 
@@ -56,11 +61,13 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             }
             else
             {
-                // Handler must exist in registry
-                var handler = _toolHandlerRegistry.GetHandler(context.Tool.HandlerClass);
+                // Handler must exist in registry (resolved per-call since IToolHandlerRegistry is Scoped)
+                using var scope = _serviceProvider.CreateScope();
+                var toolHandlerRegistry = scope.ServiceProvider.GetRequiredService<IToolHandlerRegistry>();
+                var handler = toolHandlerRegistry.GetHandler(context.Tool.HandlerClass);
                 if (handler is null)
                 {
-                    var availableHandlers = _toolHandlerRegistry.GetRegisteredHandlerIds();
+                    var availableHandlers = toolHandlerRegistry.GetRegisteredHandlerIds();
                     errors.Add(
                         $"Tool handler '{context.Tool.HandlerClass}' is not registered. " +
                         $"Available handlers: [{string.Join(", ", availableHandlers)}]");
@@ -110,12 +117,16 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
                     NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
             }
 
+            // Resolve IToolHandlerRegistry from scope (Scoped service, executor is Singleton)
+            using var scope = _serviceProvider.CreateScope();
+            var toolHandlerRegistry = scope.ServiceProvider.GetRequiredService<IToolHandlerRegistry>();
+
             // Get the tool handler
             var tool = context.Tool!;
-            var handler = _toolHandlerRegistry.GetHandler(tool.HandlerClass!);
+            var handler = toolHandlerRegistry.GetHandler(tool.HandlerClass!);
             if (handler is null)
             {
-                var availableHandlers = _toolHandlerRegistry.GetRegisteredHandlerIds();
+                var availableHandlers = toolHandlerRegistry.GetRegisteredHandlerIds();
                 _logger.LogWarning(
                     "Tool handler '{HandlerClass}' not found for tool '{ToolName}'. " +
                     "Available handlers: [{AvailableHandlers}]",
@@ -152,16 +163,54 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
                     NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
             }
 
-            // Execute the tool handler
+            // Execute the tool handler — streaming or blocking path
             _logger.LogDebug(
                 "Calling tool handler {HandlerId} for node {NodeId}",
                 handler.HandlerId,
                 context.Node.Id);
 
-            var toolResult = await handler.ExecuteAsync(
-                toolContext,
-                analysisTool,
-                cancellationToken);
+            ToolResult toolResult;
+
+            // Per-token streaming path: use StreamExecuteAsync when the handler supports it
+            // and the caller provided a token callback (ADR-014: do not cache tokens).
+            if (handler is IStreamingAnalysisToolHandler streamingHandler
+                && context.OnTokenReceived != null)
+            {
+                _logger.LogDebug(
+                    "Using streaming path for node {NodeId} with handler {HandlerId}",
+                    context.Node.Id, handler.HandlerId);
+
+                ToolResult? streamResult = null;
+
+                await foreach (var evt in streamingHandler.StreamExecuteAsync(
+                    toolContext, analysisTool, cancellationToken))
+                {
+                    if (evt is ToolStreamEvent.Token token)
+                    {
+                        // Forward immediately to SSE — no buffering per ADR-014
+                        await context.OnTokenReceived(token.Text);
+                    }
+                    else if (evt is ToolStreamEvent.Completed completed)
+                    {
+                        streamResult = completed.Result;
+                    }
+                }
+
+                toolResult = streamResult ?? ToolResult.Error(
+                    handler.HandlerId,
+                    analysisTool.Id,
+                    analysisTool.Name,
+                    "Streaming completed without a Completed event",
+                    "STREAM_INCOMPLETE");
+            }
+            else
+            {
+                // Blocking path: handler does not support streaming or no callback provided
+                toolResult = await handler.ExecuteAsync(
+                    toolContext,
+                    analysisTool,
+                    cancellationToken);
+            }
 
             // Convert tool result to node output
             var nodeOutput = ConvertToNodeOutput(context, toolResult, startedAt);

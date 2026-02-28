@@ -116,6 +116,13 @@ public record PlaybookRunRequest
     /// Used for template substitution in node prompts.
     /// </summary>
     public IReadOnlyDictionary<string, string>? Parameters { get; init; }
+
+    /// <summary>
+    /// Pre-loaded document context with extracted text.
+    /// When provided, PlaybookOrchestrationService sets this on PlaybookRunContext.Document
+    /// so all nodes share the same extracted text without re-downloading from SPE.
+    /// </summary>
+    public DocumentContext? Document { get; init; }
 }
 
 /// <summary>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement ResolveNodeScopesAsync for per-node scope resolution</title>
     <phase>4: Node Scope Resolution</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>030</dependencies>
     <blocks>040</blocks>

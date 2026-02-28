@@ -46,6 +46,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     private readonly IRagService _ragService;
     private readonly IPlaybookService _playbookService;
     private readonly IToolHandlerRegistry _toolHandlerRegistry;
+    private readonly INodeService _nodeService;
     private readonly RagQueryBuilder _ragQueryBuilder;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IStorageRetryPolicy _storageRetryPolicy;
@@ -70,6 +71,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         RagQueryBuilder ragQueryBuilder,
         IPlaybookService playbookService,
         IToolHandlerRegistry toolHandlerRegistry,
+        INodeService nodeService,
         IHttpContextAccessor httpContextAccessor,
         IStorageRetryPolicy storageRetryPolicy,
         IOptions<AnalysisOptions> options,
@@ -89,6 +91,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _ragQueryBuilder = ragQueryBuilder;
         _playbookService = playbookService;
         _toolHandlerRegistry = toolHandlerRegistry;
+        _nodeService = nodeService;
         _httpContextAccessor = httpContextAccessor;
         _storageRetryPolicy = storageRetryPolicy;
         _options = options.Value;
@@ -1338,6 +1341,196 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         // Emit metadata chunk
         yield return AnalysisStreamChunk.Metadata(analysisId, document.Name ?? "Unknown");
 
+        // 3b. Node-based execution detection
+        // If the playbook has sprk_playbooknode records, delegate to PlaybookOrchestrationService
+        // which executes nodes in topological order with per-node scope resolution.
+        var nodes = await _nodeService.GetNodesAsync(request.PlaybookId, cancellationToken);
+        if (nodes.Length > 0)
+        {
+            _logger.LogInformation(
+                "[PLAYBOOK-EXEC] Node-based mode: {NodeCount} nodes found for playbook {PlaybookId}, delegating to PlaybookOrchestrationService",
+                nodes.Length, request.PlaybookId);
+            yield return AnalysisStreamChunk.TextChunk(
+                $"[Node-based execution: {nodes.Length} nodes detected]\n");
+
+            // Load document text before delegating — nodes need extracted text for AI analysis.
+            // Uses the existing SpeFileStore facade (ADR-007) and ITextExtractor pattern.
+            yield return AnalysisStreamChunk.TextChunk("[Extracting document text...]\n");
+            var nodeDocText = await ExtractDocumentTextAsync(document, httpContext, cancellationToken);
+            _logger.LogInformation(
+                "[PLAYBOOK-EXEC] Document text extracted: {CharCount} characters", nodeDocText.Length);
+            yield return AnalysisStreamChunk.TextChunk(
+                $"[Document text: {nodeDocText.Length} chars extracted]\n");
+
+            var documentContext = new DocumentContext
+            {
+                DocumentId = documentId,
+                Name = document.Name ?? "Unknown",
+                FileName = document.FileName,
+                ExtractedText = nodeDocText,
+                Metadata = new Dictionary<string, object?>
+                {
+                    ["PlaybookId"] = request.PlaybookId,
+                    ["PlaybookName"] = playbook.Name
+                }
+            };
+
+            // Resolve PlaybookOrchestrationService from request services to avoid circular DI.
+            // PlaybookOrchestrationService depends on IAnalysisOrchestrationService (for legacy fallback),
+            // so we cannot inject it via constructor without creating a circular dependency.
+            var playbookOrchestrator = httpContext.RequestServices
+                .GetRequiredService<IPlaybookOrchestrationService>();
+
+            var runRequest = new PlaybookRunRequest
+            {
+                PlaybookId = request.PlaybookId,
+                DocumentIds = request.DocumentIds,
+                UserContext = request.AdditionalContext,
+                Document = documentContext
+            };
+
+            var totalTokensIn = 0;
+            var totalTokensOut = 0;
+            var allContent = new StringBuilder();
+            string? deliverOutputContent = null;
+            var hasFailedNodes = false;
+
+            await foreach (var evt in playbookOrchestrator.ExecuteAsync(
+                runRequest, httpContext, cancellationToken))
+            {
+                var chunk = BridgePlaybookEventToStreamChunk(evt, analysisId);
+                if (chunk != null)
+                {
+                    yield return chunk;
+                }
+
+                // Accumulate streamed content for working document fallback
+                if (evt.Type == PlaybookEventType.NodeProgress && evt.Content != null)
+                {
+                    allContent.Append(evt.Content);
+                }
+
+                // Capture Deliver Output node's rendered markdown from NodeCompleted events.
+                // The Deliver Output node aggregates all previous results into a final document.
+                if (evt.Type == PlaybookEventType.NodeCompleted && evt.NodeOutput != null)
+                {
+                    // Identify Deliver Output by output variable name or node name convention
+                    var outputVar = evt.NodeOutput.OutputVariable;
+                    if (outputVar != null &&
+                        (outputVar.Contains("output", StringComparison.OrdinalIgnoreCase) ||
+                         outputVar.Contains("deliver", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        deliverOutputContent = evt.NodeOutput.TextContent;
+                    }
+                }
+
+                // Track node failures for partial data handling
+                if (evt.Type == PlaybookEventType.NodeFailed)
+                {
+                    hasFailedNodes = true;
+                }
+
+                // Capture run-level metrics from completion event
+                if (evt.Type == PlaybookEventType.RunCompleted && evt.Metrics != null)
+                {
+                    totalTokensIn = evt.Metrics.TotalTokensIn;
+                    totalTokensOut = evt.Metrics.TotalTokensOut;
+                }
+
+                // On run-level failure, persist what we have and finalize with error status
+                if (evt.Type == PlaybookEventType.RunFailed)
+                {
+                    var partialContent = allContent.ToString();
+                    if (!string.IsNullOrEmpty(partialContent))
+                    {
+                        await _workingDocumentService.UpdateWorkingDocumentAsync(
+                            analysisId, partialContent, cancellationToken);
+                    }
+
+                    analysis = analysis with { Status = "Failed", CompletedOn = DateTime.UtcNow };
+                    _analysisStore[analysisId] = analysis;
+
+                    yield return AnalysisStreamChunk.FromError(
+                        evt.Error ?? "Playbook execution failed");
+                    yield break;
+                }
+            }
+
+            // Determine final content: prefer Deliver Output node's rendered result,
+            // fall back to accumulated streamed content from all nodes.
+            var finalContent = !string.IsNullOrEmpty(deliverOutputContent)
+                ? deliverOutputContent
+                : allContent.ToString();
+
+            // Determine status: "Completed with warnings" if some nodes failed but we have output
+            var finalStatus = "Completed";
+            bool? partialStorage = null;
+            string? storageMessage = null;
+
+            if (hasFailedNodes && !string.IsNullOrEmpty(finalContent))
+            {
+                finalStatus = "CompletedWithWarnings";
+                partialStorage = true;
+                storageMessage = "Some nodes failed during execution but partial results are available.";
+                _logger.LogWarning(
+                    "[PLAYBOOK-EXEC] Node-based execution completed with warnings: some nodes failed. AnalysisId={AnalysisId}",
+                    analysisId);
+            }
+            else if (string.IsNullOrEmpty(finalContent))
+            {
+                finalStatus = "Failed";
+                _logger.LogError(
+                    "[PLAYBOOK-EXEC] Node-based execution produced no output. AnalysisId={AnalysisId}",
+                    analysisId);
+            }
+
+            // Persist to working document (skip if no content to write)
+            if (!string.IsNullOrEmpty(finalContent))
+            {
+                await _workingDocumentService.UpdateWorkingDocumentAsync(
+                    analysisId, finalContent, cancellationToken);
+            }
+
+            await _workingDocumentService.FinalizeAnalysisAsync(
+                analysisId, totalTokensIn, totalTokensOut, cancellationToken);
+
+            // Update in-memory analysis store
+            analysis = analysis with
+            {
+                WorkingDocument = finalContent,
+                FinalOutput = finalContent,
+                Status = finalStatus,
+                CompletedOn = DateTime.UtcNow,
+                InputTokens = totalTokensIn,
+                OutputTokens = totalTokensOut
+            };
+            _analysisStore[analysisId] = analysis;
+
+            _logger.LogInformation(
+                "[PLAYBOOK-EXEC] Node-based execution {Status}: Analysis {AnalysisId}, {NodeCount} nodes, output {OutputLength} chars",
+                finalStatus, analysisId, nodes.Length, finalContent?.Length ?? 0);
+
+            if (finalStatus == "Failed")
+            {
+                yield return AnalysisStreamChunk.FromError(
+                    "Node-based execution produced no output");
+            }
+            else
+            {
+                yield return AnalysisStreamChunk.Completed(
+                    analysisId,
+                    new TokenUsage(totalTokensIn, totalTokensOut),
+                    partialStorage: partialStorage,
+                    storageMessage: storageMessage);
+            }
+            yield break;
+        }
+
+        // Legacy path: No nodes — execute tools sequentially using playbook-level scopes
+        _logger.LogInformation(
+            "[PLAYBOOK-EXEC] Legacy mode: No nodes found for playbook {PlaybookId}, using sequential tool execution",
+            request.PlaybookId);
+
         // 4. Resolve playbook scopes (Skills, Knowledge, Tools)
         _logger.LogInformation("[PLAYBOOK-EXEC] Step 4: Resolving playbook scopes");
         yield return AnalysisStreamChunk.TextChunk("[Resolving playbook scopes...]\n");
@@ -1795,6 +1988,42 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             new TokenUsage(totalInputTokens, totalOutputTokens),
             partialStorage: storageResult?.PartialStorage,
             storageMessage: storageResult?.PartialStorage == true ? storageResult.Message : null);
+    }
+
+    /// <summary>
+    /// Bridge a PlaybookStreamEvent from node-based orchestration to an AnalysisStreamChunk
+    /// for the SSE channel. Maps node lifecycle events to text chunks and completion/error events.
+    /// </summary>
+    private static AnalysisStreamChunk? BridgePlaybookEventToStreamChunk(
+        PlaybookStreamEvent evt, Guid analysisId)
+    {
+        return evt.Type switch
+        {
+            PlaybookEventType.RunStarted =>
+                AnalysisStreamChunk.TextChunk(
+                    $"[Playbook execution started: {evt.Metrics?.TotalNodes ?? 0} nodes]\n"),
+
+            PlaybookEventType.NodeStarted =>
+                AnalysisStreamChunk.TextChunk($"### {evt.NodeName ?? "Node"}\n"),
+
+            PlaybookEventType.NodeProgress when evt.Content != null =>
+                AnalysisStreamChunk.TextChunk(evt.Content),
+
+            PlaybookEventType.NodeCompleted =>
+                AnalysisStreamChunk.TextChunk(
+                    $"\n[Node '{evt.NodeName ?? "Node"}' completed]\n\n"),
+
+            PlaybookEventType.NodeSkipped =>
+                AnalysisStreamChunk.TextChunk(
+                    $"[Node '{evt.NodeName ?? "Node"}' skipped: {evt.Content}]\n"),
+
+            PlaybookEventType.NodeFailed =>
+                AnalysisStreamChunk.TextChunk(
+                    $"\n[Node '{evt.NodeName ?? "Node"}' failed: {evt.Error}]\n"),
+
+            // RunCompleted/RunFailed/RunCancelled are handled in the calling loop
+            _ => null
+        };
     }
 
     /// <summary>

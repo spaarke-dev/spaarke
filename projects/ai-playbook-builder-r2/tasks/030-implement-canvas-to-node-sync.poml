@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement SyncCanvasToNodesAsync for canvas-to-node auto-sync</title>
     <phase>4: Canvas-to-Node Sync</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <dependencies>022</dependencies>
     <blocks>031, 040</blocks>

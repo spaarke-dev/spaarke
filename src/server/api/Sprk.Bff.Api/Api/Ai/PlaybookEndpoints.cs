@@ -581,7 +581,9 @@ public static class PlaybookEndpoints
         Guid id,
         SaveCanvasLayoutRequest request,
         IPlaybookService playbookService,
-        ILoggerFactory loggerFactory)
+        INodeService nodeService,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken)
     {
         var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
 
@@ -595,8 +597,13 @@ public static class PlaybookEndpoints
 
         try
         {
+            // Persist the raw canvas JSON to the playbook record
             var result = await playbookService.SaveCanvasLayoutAsync(id, request.Layout);
-            logger.LogInformation("Saved canvas layout for playbook {PlaybookId}", id);
+
+            // Sync canvas visual design → executable sprk_playbooknode Dataverse records
+            await nodeService.SyncCanvasToNodesAsync(id, request.Layout, cancellationToken);
+
+            logger.LogInformation("Saved canvas layout and synced nodes for playbook {PlaybookId}", id);
             return Results.Ok(result);
         }
         catch (Exception ex)
