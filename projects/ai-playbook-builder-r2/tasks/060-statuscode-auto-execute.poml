@@ -3,7 +3,7 @@
   <metadata>
     <title>Replace age-based auto-execute with statuscode-based logic in Analysis Workspace</title>
     <phase>7: Analysis Workspace UX</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>051</dependencies>
     <blocks>061, 062, 063</blocks>

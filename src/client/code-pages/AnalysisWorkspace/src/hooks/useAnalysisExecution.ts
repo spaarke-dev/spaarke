@@ -13,11 +13,9 @@
  *   4. Has an actionId OR playbookId
  *   5. Token is available (BFF auth)
  *   6. Not already executing
- *   7. Record was created within the last 60 seconds (newly created, not reopened)
  *
- * Condition 7 distinguishes new records (user just created → auto-execute)
- * from reopened existing records (user browsing → require explicit action).
- * This prevents overwriting user edits in sprk_workingdocument.
+ * Also exports triggerExecute() for manual invocation from the
+ * Run Analysis button, bypassing the shouldAutoExecute guard.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -26,13 +24,6 @@ import type { AnalysisStreamChunk } from "../services/analysisApi";
 import type { AnalysisRecord, AnalysisError } from "../types";
 
 const LOG_PREFIX = "[AnalysisWorkspace:useAnalysisExecution]";
-
-/**
- * Max age (in ms) for a record to be considered "newly created".
- * If createdOn is within this window, the record was just created and
- * should auto-execute. Older records are "reopened" and require explicit trigger.
- */
-const NEW_RECORD_AGE_MS = 60_000; // 60 seconds
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,6 +51,8 @@ export interface UseAnalysisExecutionResult {
     progressMessage: string;
     /** Number of content chunks received */
     chunkCount: number;
+    /** Manually trigger execution (bypasses shouldAutoExecute guard). Used by Run Analysis button. */
+    triggerExecute: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,9 +76,8 @@ export function useAnalysisExecution(
     /**
      * Check if the analysis should auto-execute.
      *
-     * Auto-executes ONLY for newly created records (createdOn within 60s).
-     * Reopened existing records require explicit user action to prevent
-     * overwriting edits in sprk_workingdocument (no versioning yet).
+     * Uses statuscode-based logic: auto-execute when the record is Draft
+     * (statusCode===1), has no content, and has an action/playbook configured.
      */
     const shouldAutoExecute = useCallback((): boolean => {
         if (!analysis) return false;
@@ -93,26 +85,14 @@ export function useAnalysisExecution(
         if (isExecuting) return false;
         if (executedRef.current === analysis.id) return false;
 
-        // Must be draft with empty content
         const isDraft = analysis.statusCode === 1 || analysis.status === "draft";
         const isEmpty = !analysis.content || analysis.content.trim().length === 0;
-        if (!isDraft || !isEmpty) return false;
+        const hasAction = !!analysis.actionId || !!analysis.playbookId;
 
-        // Must have an action or playbook to execute
-        if (!analysis.actionId && !analysis.playbookId) return false;
-
-        // Only auto-execute newly created records (within 60 seconds)
-        if (!analysis.createdOn) return false;
-        const ageMs = Date.now() - new Date(analysis.createdOn).getTime();
-        if (ageMs > NEW_RECORD_AGE_MS) {
-            console.log(
-                `${LOG_PREFIX} Skipping auto-execute: record is ${Math.round(ageMs / 1000)}s old (max ${NEW_RECORD_AGE_MS / 1000}s)`
-            );
-            return false;
-        }
+        if (!isDraft || !isEmpty || !hasAction) return false;
 
         console.log(
-            `${LOG_PREFIX} Auto-execute conditions met: draft=${isDraft}, empty=${isEmpty}, age=${Math.round(ageMs / 1000)}s`
+            `${LOG_PREFIX} Auto-execute conditions met: draft=${isDraft}, empty=${isEmpty}, hasAction=${hasAction}`
         );
         return true;
     }, [analysis, token, isExecuting]);
@@ -123,7 +103,7 @@ export function useAnalysisExecution(
     const doExecute = useCallback(async () => {
         if (!analysis || !token) return;
 
-        console.log(`${LOG_PREFIX} Auto-executing analysis: ${analysis.id}`);
+        console.log(`${LOG_PREFIX} Executing analysis: ${analysis.id}`);
         console.log(`${LOG_PREFIX}   actionId: ${analysis.actionId ?? "none"}`);
         console.log(`${LOG_PREFIX}   playbookId: ${analysis.playbookId ?? "none"}`);
         console.log(`${LOG_PREFIX}   documentId: ${documentId}`);
@@ -219,6 +199,15 @@ export function useAnalysisExecution(
     }, [shouldAutoExecute, doExecute]);
 
     /**
+     * Manually trigger execution — bypasses shouldAutoExecute guard.
+     * Used by the Run Analysis button (task 062).
+     */
+    const triggerExecute = useCallback(() => {
+        if (!analysis || !token || isExecuting) return;
+        doExecute();
+    }, [analysis, token, isExecuting, doExecute]);
+
+    /**
      * Cleanup: abort on unmount.
      */
     useEffect(() => {
@@ -232,5 +221,6 @@ export function useAnalysisExecution(
         executionError,
         progressMessage,
         chunkCount,
+        triggerExecute,
     };
 }

@@ -55,11 +55,19 @@ import {
     Spinner,
     Text,
     Button,
+    ToggleButton,
+    Toaster,
+    Toast,
+    ToastTitle,
+    useToastController,
+    useId,
 } from "@fluentui/react-components";
 import {
     ErrorCircle20Regular,
     LockClosed20Regular,
     ArrowClockwise20Regular,
+    Play20Regular,
+    PanelRight20Regular,
 } from "@fluentui/react-icons";
 import type { RichTextEditorRef } from "@spaarke/ui-components";
 import { useDocumentHistory } from "@spaarke/ui-components/hooks/useDocumentHistory";
@@ -101,11 +109,28 @@ export interface AppProps {
 const useStyles = makeStyles({
     root: {
         display: "flex",
-        flexDirection: "row",
+        flexDirection: "column",
         width: "100vw",
         height: "100vh",
         overflow: "hidden",
         backgroundColor: tokens.colorNeutralBackground1,
+    },
+    toolbar: {
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        ...shorthands.gap(tokens.spacingHorizontalS),
+        ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
+        backgroundColor: tokens.colorNeutralBackground2,
+        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        height: "40px",
+        flexShrink: 0,
+    },
+    content: {
+        display: "flex",
+        flexDirection: "row",
+        flex: 1,
+        overflow: "hidden",
     },
     leftPanel: {
         overflow: "hidden",
@@ -176,8 +201,13 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
         retryAuth,
     } = useAuth();
 
+    // ---- Task 061: Toast notification ----
+    const toasterId = useId("workspace-toast");
+    const { dispatchToast } = useToastController(toasterId);
+
     // ---- State (all hooks must be called before any early return) ----
     const [isSourceCollapsed, setIsSourceCollapsed] = useState(false);
+    const [showSourcePane, setShowSourcePane] = useState(true);
     const [editorContent, setEditorContent] = useState("");
 
     // ---- Resolved documentId: URL prop → Dataverse lookup fallback ----
@@ -242,11 +272,21 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
         executionError,
         progressMessage: executionProgress,
         chunkCount,
+        triggerExecute,
     } = useAnalysisExecution({
         analysis,
         documentId: resolvedDocumentId,
         token,
-        onComplete: reloadAnalysis, // Reload analysis only (not source document)
+        onComplete: () => {
+            reloadAnalysis();
+            // Task 061: Show completion toast
+            dispatchToast(
+                <Toast>
+                    <ToastTitle>Analysis complete</ToastTitle>
+                </Toast>,
+                { intent: "success", timeout: 5000 }
+            );
+        },
         onStreamContent: (content) => {
             // Convert markdown to HTML for the RichTextEditor during streaming
             if (editorRef.current && content) {
@@ -362,6 +402,52 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
         pushUndoVersion: pushVersion,
     });
 
+    // ---- Task 063: Auto-load SprkChat side pane ----
+    useEffect(() => {
+        if (!analysisId || !resolvedDocumentId) return;
+
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const xrm = (window as any).Xrm;
+            if (!xrm?.App?.sidePanes) {
+                console.warn(
+                    "[AnalysisWorkspace] SprkChat side pane unavailable — Xrm.App.sidePanes not found"
+                );
+                return;
+            }
+
+            xrm.App.sidePanes
+                .createPane({
+                    title: "SprkChat",
+                    paneId: "sprkchat-analysis",
+                    canClose: true,
+                    width: 400,
+                })
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                .then((pane: any) => {
+                    pane.navigate({
+                        pageType: "webresource",
+                        webresourceName: "sprk_SprkChatPane",
+                        data: new URLSearchParams({
+                            analysisId,
+                            documentId: resolvedDocumentId,
+                        }).toString(),
+                    });
+                })
+                .catch((err: unknown) => {
+                    console.warn(
+                        "[AnalysisWorkspace] SprkChat side pane failed to create:",
+                        err
+                    );
+                });
+        } catch (err) {
+            console.warn(
+                "[AnalysisWorkspace] SprkChat side pane unavailable:",
+                err
+            );
+        }
+    }, [analysisId, resolvedDocumentId]);
+
     // ---- Task 065: Populate editor with loaded analysis content ----
     // Content in sprk_workingdocument may be markdown (from BFF streaming)
     // or Lexical HTML (from auto-save). Detect format and handle accordingly.
@@ -467,118 +553,148 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
         );
     }
 
-    // ---- Authenticated: Render 2-panel workspace layout ----
+    // ---- Authenticated: Render workspace layout ----
+    // Column: toolbar → content (2-panel row)
     return (
         <div className={styles.root} ref={containerRef}>
-            {/* Left Panel -- Editor + Streaming Bridge + Re-Analysis Overlay */}
-            <div
-                className={styles.leftPanel}
-                style={{ width: leftPanelWidth }}
-            >
-                {/* Task 063: SprkChatBridge document streaming wiring */}
-                <DocumentStreamBridge
-                    context={analysisId}
-                    editorRef={editorRef}
-                    enabled={!!analysisId}
-                />
-                {/* Show error state if analysis load or execution failed */}
-                {(analysisError || executionError) && !isAnalysisLoading && !isExecuting ? (
-                    <div
-                        style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            height: "100%",
-                            gap: "12px",
-                            padding: "24px",
-                            textAlign: "center",
-                        }}
-                        role="alert"
-                        data-testid="analysis-load-error"
-                    >
-                        <ErrorCircle20Regular className={styles.errorIcon} />
-                        <Text size={400} className={styles.errorTitle}>
-                            Failed to Load Analysis
-                        </Text>
-                        <Text size={200} className={styles.errorDetail}>
-                            {executionError?.message || analysisError?.message || "Unable to load the analysis record."}
-                        </Text>
-                        <Button
-                            appearance="primary"
-                            icon={<ArrowClockwise20Regular />}
-                            onClick={retryLoad}
-                        >
-                            Retry
-                        </Button>
-                    </div>
-                ) : (
-                    <EditorPanel
-                        ref={editorRef}
-                        value={editorContent}
-                        onChange={handleEditorChange}
-                        placeholder={isExecuting ? (executionProgress || "Running analysis...") : "Analysis output will appear here..."}
-                        isLoading={isAnalysisLoading}
-                        isStreaming={isExecuting}
-                        streamingMessage={executionProgress}
-                        // Task 062: Toolbar props
-                        saveState={saveState}
-                        onForceSave={forceSave}
-                        saveError={saveError}
-                        exportState={exportState}
-                        onExport={doExport}
-                        onUndo={undo}
-                        onRedo={redo}
-                        canUndo={canUndo}
-                        canRedo={canRedo}
-                        historyLength={historyLength}
-                    />
-                )}
-                {/* Task 081: Re-analysis progress overlay (positioned over editor) */}
-                <ReAnalysisProgressOverlay
-                    isVisible={isReAnalyzing}
-                    percent={reAnalysisPercent}
-                    message={reAnalysisMessage}
-                />
-                {/* Task 103: Diff review panel for AI-proposed revisions */}
-                <DiffReviewPanel
-                    isOpen={diffState.isOpen}
-                    originalText={diffState.originalText}
-                    proposedText={diffState.proposedText}
-                    onAccept={acceptDiff}
-                    onReject={rejectDiff}
-                />
+            {/* Task 061: Toast provider */}
+            <Toaster toasterId={toasterId} />
+
+            {/* Task 062: Workspace toolbar — Run Analysis + Source toggle */}
+            <div className={styles.toolbar}>
+                <Button
+                    appearance="primary"
+                    icon={isExecuting ? <Spinner size="tiny" /> : <Play20Regular />}
+                    onClick={triggerExecute}
+                    disabled={isExecuting || (!analysis?.playbookId && !analysis?.actionId)}
+                    data-testid="run-analysis-button"
+                >
+                    {isExecuting ? "Running..." : "Run Analysis"}
+                </Button>
+                <ToggleButton
+                    icon={<PanelRight20Regular />}
+                    checked={showSourcePane}
+                    onClick={() => setShowSourcePane((prev) => !prev)}
+                    data-testid="source-pane-toggle"
+                >
+                    Source
+                </ToggleButton>
             </div>
 
-            {/* Splitter -- visible only when right panel is expanded */}
-            {!isSourceCollapsed && (
-                <PanelSplitter
-                    onMouseDown={onSplitterMouseDown}
-                    onKeyDown={onSplitterKeyDown}
-                    onDoubleClick={resetToDefault}
-                    isDragging={isDragging}
-                    currentRatio={currentRatio}
-                />
-            )}
+            {/* Content area: 2-panel layout */}
+            <div className={styles.content}>
+                {/* Left Panel -- Editor + Streaming Bridge + Re-Analysis Overlay */}
+                <div
+                    className={styles.leftPanel}
+                    style={{ width: showSourcePane ? leftPanelWidth : "100%" }}
+                >
+                    {/* Task 063: SprkChatBridge document streaming wiring */}
+                    <DocumentStreamBridge
+                        context={analysisId}
+                        editorRef={editorRef}
+                        enabled={!!analysisId}
+                    />
+                    {/* Show error state if analysis load or execution failed */}
+                    {(analysisError || executionError) && !isAnalysisLoading && !isExecuting ? (
+                        <div
+                            style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                height: "100%",
+                                gap: "12px",
+                                padding: "24px",
+                                textAlign: "center",
+                            }}
+                            role="alert"
+                            data-testid="analysis-load-error"
+                        >
+                            <ErrorCircle20Regular className={styles.errorIcon} />
+                            <Text size={400} className={styles.errorTitle}>
+                                Failed to Load Analysis
+                            </Text>
+                            <Text size={200} className={styles.errorDetail}>
+                                {executionError?.message || analysisError?.message || "Unable to load the analysis record."}
+                            </Text>
+                            <Button
+                                appearance="primary"
+                                icon={<ArrowClockwise20Regular />}
+                                onClick={retryLoad}
+                            >
+                                Retry
+                            </Button>
+                        </div>
+                    ) : (
+                        <EditorPanel
+                            ref={editorRef}
+                            value={editorContent}
+                            onChange={handleEditorChange}
+                            placeholder={isExecuting ? (executionProgress || "Running analysis...") : "Analysis output will appear here..."}
+                            isLoading={isAnalysisLoading}
+                            isStreaming={isExecuting}
+                            streamingMessage={executionProgress}
+                            // Task 062: Toolbar props
+                            saveState={saveState}
+                            onForceSave={forceSave}
+                            saveError={saveError}
+                            exportState={exportState}
+                            onExport={doExport}
+                            onUndo={undo}
+                            onRedo={redo}
+                            canUndo={canUndo}
+                            canRedo={canRedo}
+                            historyLength={historyLength}
+                        />
+                    )}
+                    {/* Task 081: Re-analysis progress overlay (positioned over editor) */}
+                    <ReAnalysisProgressOverlay
+                        isVisible={isReAnalyzing}
+                        percent={reAnalysisPercent}
+                        message={reAnalysisMessage}
+                    />
+                    {/* Task 103: Diff review panel for AI-proposed revisions */}
+                    <DiffReviewPanel
+                        isOpen={diffState.isOpen}
+                        originalText={diffState.originalText}
+                        proposedText={diffState.proposedText}
+                        onAccept={acceptDiff}
+                        onReject={rejectDiff}
+                    />
+                </div>
 
-            {/* Right Panel -- Source Document Viewer */}
-            <div
-                className={`${styles.rightPanel} ${
-                    isSourceCollapsed
-                        ? styles.rightPanelCollapsed
-                        : styles.rightPanelExpanded
-                }`}
-                style={isSourceCollapsed ? undefined : { width: rightPanelWidth }}
-            >
-                <SourceViewerPanel
-                    isCollapsed={isSourceCollapsed}
-                    onToggleCollapse={handleToggleCollapse}
-                    // Task 065: Document viewer props
-                    documentMetadata={documentMetadata}
-                    isLoading={isDocumentLoading}
-                    documentError={documentError}
-                    onRetry={retryLoad}
-                />
+                {/* Splitter + Right Panel — visible only when source pane is shown */}
+                {showSourcePane && (
+                    <>
+                        {!isSourceCollapsed && (
+                            <PanelSplitter
+                                onMouseDown={onSplitterMouseDown}
+                                onKeyDown={onSplitterKeyDown}
+                                onDoubleClick={resetToDefault}
+                                isDragging={isDragging}
+                                currentRatio={currentRatio}
+                            />
+                        )}
+                        <div
+                            className={`${styles.rightPanel} ${
+                                isSourceCollapsed
+                                    ? styles.rightPanelCollapsed
+                                    : styles.rightPanelExpanded
+                            }`}
+                            style={isSourceCollapsed ? undefined : { width: rightPanelWidth }}
+                        >
+                            <SourceViewerPanel
+                                isCollapsed={isSourceCollapsed}
+                                onToggleCollapse={handleToggleCollapse}
+                                // Task 065: Document viewer props
+                                documentMetadata={documentMetadata}
+                                isLoading={isDocumentLoading}
+                                documentError={documentError}
+                                onRetry={retryLoad}
+                            />
+                        </div>
+                    </>
+                )}
             </div>
         </div>
     );

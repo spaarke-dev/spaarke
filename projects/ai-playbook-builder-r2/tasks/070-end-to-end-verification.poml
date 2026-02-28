@@ -3,7 +3,7 @@
   <metadata>
     <title>End-to-end verification and integration testing</title>
     <phase>8: End-to-End Testing</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>060, 061, 062, 063</dependencies>
     <blocks>080</blocks>

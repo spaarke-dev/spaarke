@@ -3,7 +3,7 @@
   <metadata>
     <title>Auto-load SprkChat side pane with Analysis Workspace</title>
     <phase>7: SprkChat Integration</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>060</dependencies>
     <blocks>070</blocks>

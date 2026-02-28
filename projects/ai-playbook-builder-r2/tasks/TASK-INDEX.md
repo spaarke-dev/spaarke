@@ -23,11 +23,11 @@
 | 041 | Load document into PlaybookRunContext | 5: Document Loading | ✅ | 2h | 040 | — | bff-api, ai |
 | 050 | Enable per-token streaming in node executor | 6: Streaming | ✅ | 4h | 041 | — | bff-api, ai |
 | 051 | Persist Deliver Output to working document | 6: Output Persistence | ✅ | 3h | 050 | — | bff-api, ai |
-| 060 | Statuscode-based auto-execute + triggerExecute | 7: Workspace UX | 🔲 | 3h | 051 | **B** | frontend, fluent-ui |
-| 061 | Add completion toast notification | 7: Workspace UX | 🔲 | 1h | 060 | — | frontend, fluent-ui |
-| 062 | Add Run Analysis button + source toggle | 7: Workspace UX | 🔲 | 2h | 060 | — | frontend, fluent-ui |
-| 063 | Auto-load SprkChat side pane | 7: SprkChat | 🔲 | 2h | 060 | — | frontend, code-page |
-| 070 | End-to-end verification | 8: Testing | 🔲 | 4h | 060, 061, 062, 063 | — | testing, verification |
+| 060 | Statuscode-based auto-execute + triggerExecute | 7: Workspace UX | ✅ | 3h | 051 | **B** | frontend, fluent-ui |
+| 061 | Add completion toast notification | 7: Workspace UX | ✅ | 1h | 060 | — | frontend, fluent-ui |
+| 062 | Add Run Analysis button + source toggle | 7: Workspace UX | ✅ | 2h | 060 | — | frontend, fluent-ui |
+| 063 | Auto-load SprkChat side pane | 7: SprkChat | ✅ | 2h | 060 | — | frontend, code-page |
+| 070 | End-to-end verification | 8: Testing | ✅ | 4h | 060, 061, 062, 063 | — | testing, verification |
 | 080 | Deploy to dev environment | 9: Deployment | 🔲 | 2h | 070 | — | deploy, azure |
 | 090 | Project wrap-up | 9: Wrap-up | 🔲 | 1h | 080 | — | wrap-up |
 
