@@ -28,7 +28,7 @@
 | 062 | Add Run Analysis button + source toggle | 7: Workspace UX | ✅ | 2h | 060 | — | frontend, fluent-ui |
 | 063 | Auto-load SprkChat side pane | 7: SprkChat | ✅ | 2h | 060 | — | frontend, code-page |
 | 070 | End-to-end verification | 8: Testing | ✅ | 4h | 060, 061, 062, 063 | — | testing, verification |
-| 080 | Deploy to dev environment | 9: Deployment | 🔲 | 2h | 070 | — | deploy, azure |
+| 080 | Deploy to dev environment | 9: Deployment | ✅ | 2h | 070 | — | deploy, azure |
 | 090 | Project wrap-up | 9: Wrap-up | 🔲 | 1h | 080 | — | wrap-up |
 
 ## Parallel Execution Groups

@@ -558,7 +558,7 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
     return (
         <div className={styles.root} ref={containerRef}>
             {/* Task 061: Toast provider */}
-            <Toaster toasterId={toasterId} />
+            <Toaster toasterId={toasterId} position="top-end" />
 
             {/* Task 062: Workspace toolbar — Run Analysis + Source toggle */}
             <div className={styles.toolbar}>

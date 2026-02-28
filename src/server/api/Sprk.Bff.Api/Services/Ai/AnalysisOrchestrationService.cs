@@ -1341,7 +1341,27 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         // Emit metadata chunk
         yield return AnalysisStreamChunk.Metadata(analysisId, document.Name ?? "Unknown");
 
-        // 3b. Node-based execution detection
+        // 3b. Just-in-time canvas-to-node sync.
+        // The PlaybookBuilder PCF saves canvas JSON directly to Dataverse via webAPI.updateRecord(),
+        // bypassing the BFF API endpoint where SyncCanvasToNodesAsync is wired. To ensure
+        // sprk_playbooknode records exist before execution, sync from the stored canvas layout now.
+        var canvasLayout = await _playbookService.GetCanvasLayoutAsync(request.PlaybookId, cancellationToken);
+        if (canvasLayout?.Layout?.Nodes is { Length: > 0 })
+        {
+            _logger.LogInformation(
+                "[PLAYBOOK-EXEC] Step 3b: Syncing canvas to nodes — {NodeCount} canvas nodes, {EdgeCount} edges",
+                canvasLayout.Layout.Nodes.Length, canvasLayout.Layout.Edges?.Length ?? 0);
+            await _nodeService.SyncCanvasToNodesAsync(
+                request.PlaybookId, canvasLayout.Layout, cancellationToken);
+        }
+        else
+        {
+            _logger.LogInformation(
+                "[PLAYBOOK-EXEC] Step 3b: No canvas layout found for playbook {PlaybookId} — skipping node sync",
+                request.PlaybookId);
+        }
+
+        // 3c. Node-based execution detection
         // If the playbook has sprk_playbooknode records, delegate to PlaybookOrchestrationService
         // which executes nodes in topological order with per-node scope resolution.
         var nodes = await _nodeService.GetNodesAsync(request.PlaybookId, cancellationToken);

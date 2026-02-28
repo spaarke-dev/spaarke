@@ -21,6 +21,7 @@ import * as React from "react";
 import * as ReactDOM from "react-dom";
 import { FluentProvider, webLightTheme, webDarkTheme, Theme } from "@fluentui/react-components";
 import { PlaybookBuilderHost as PlaybookBuilderHostApp } from "./PlaybookBuilderHost";
+import { syncCanvasToNodes, CanvasNode, CanvasEdge } from "./services/playbookNodeSync";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme Utilities
@@ -452,6 +453,10 @@ export class PlaybookBuilderHost
       this.context.webAPI.updateRecord(entityName, entityId, updateData).then(
         (result: unknown) => {
           logInfo('Canvas auto-saved successfully', { result });
+
+          // After canvas JSON is persisted, sync canvas nodes to sprk_playbooknode records.
+          // This ensures the playbook's executable node records stay in sync with the visual design.
+          this.syncNodesToDataverse(entityId);
         },
         (error: unknown) => {
           logError('Canvas auto-save FAILED', {
@@ -465,6 +470,42 @@ export class PlaybookBuilderHost
       );
     } catch (error) {
       logError('Failed to auto-save canvas', error);
+    }
+  }
+
+  /**
+   * Sync canvas nodes to sprk_playbooknode Dataverse records.
+   * Called after canvas JSON is successfully saved.
+   */
+  private syncNodesToDataverse(playbookId: string): void {
+    if (!this.context || !this.canvasJsonOutput) return;
+
+    try {
+      const canvas = JSON.parse(this.canvasJsonOutput);
+      const nodes: CanvasNode[] = (canvas.nodes ?? []).map((n: Record<string, unknown>) => ({
+        id: n.id as string,
+        type: n.type as string,
+        position: n.position as { x: number; y: number },
+        data: (n.data ?? {}) as Record<string, unknown>,
+      }));
+      const edges: CanvasEdge[] = (canvas.edges ?? []).map((e: Record<string, unknown>) => ({
+        id: e.id as string,
+        source: e.source as string,
+        target: e.target as string,
+      }));
+
+      if (nodes.length === 0) {
+        logInfo('No canvas nodes to sync');
+        return;
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const webApi = this.context.webAPI as any;
+      syncCanvasToNodes(webApi, playbookId, nodes, edges).catch((err: unknown) => {
+        logError('Node sync failed', err);
+      });
+    } catch (err) {
+      logError('Failed to parse canvas for node sync', err);
     }
   }
 
