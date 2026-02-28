@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -24,7 +26,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// See ADR-013 for AI architecture patterns.
 /// </para>
 /// </remarks>
-public sealed class GenericAnalysisHandler : IAnalysisToolHandler
+public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
 {
     private const string HandlerIdValue = "GenericAnalysisHandler";
 
@@ -304,6 +306,91 @@ public sealed class GenericAnalysisHandler : IAnalysisToolHandler
                     CompletedAt = DateTimeOffset.UtcNow
                 });
         }
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<ToolStreamEvent> StreamExecuteAsync(
+        ToolExecutionContext context,
+        AnalysisTool tool,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var startedAt = DateTimeOffset.UtcNow;
+
+        ToolResult? errorResult = null;
+
+        // Parse configuration and build prompt (reuses same logic as ExecuteAsync)
+        GenericToolConfig config = null!;
+        string prompt = null!;
+        int inputTokens = 0;
+
+        try
+        {
+            _logger.LogInformation(
+                "Starting streaming generic tool execution for analysis {AnalysisId}, tool {ToolId} ({ToolName})",
+                context.AnalysisId, tool.Id, tool.Name);
+
+            config = JsonSerializer.Deserialize<GenericToolConfig>(tool.Configuration!, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            })!;
+
+            prompt = BuildExecutionPrompt(context, tool, config);
+            inputTokens = EstimateTokens(prompt);
+
+            _logger.LogDebug(
+                "Streaming generic tool with operation: {Operation}, estimated input tokens: {Tokens}",
+                config.Operation, inputTokens);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to prepare streaming execution for analysis {AnalysisId}", context.AnalysisId);
+            errorResult = ToolResult.Error(
+                HandlerId, tool.Id, tool.Name,
+                $"Tool preparation failed: {ex.Message}",
+                ToolErrorCodes.InternalError,
+                new ToolExecutionMetadata { StartedAt = startedAt, CompletedAt = DateTimeOffset.UtcNow });
+        }
+
+        if (errorResult != null)
+        {
+            yield return new ToolStreamEvent.Completed(errorResult);
+            yield break;
+        }
+
+        // Stream tokens from OpenAI — same pattern as action-based path in
+        // AnalysisOrchestrationService.ExecuteAnalysisAsync (lines 248-262)
+        var responseBuilder = new StringBuilder();
+
+        await foreach (var token in _openAiClient.StreamCompletionAsync(prompt!, cancellationToken: cancellationToken))
+        {
+            responseBuilder.Append(token);
+            yield return new ToolStreamEvent.Token(token);
+        }
+
+        stopwatch.Stop();
+        var response = responseBuilder.ToString();
+        var outputTokens = EstimateTokens(response);
+
+        // Parse the accumulated response — same as ExecuteAsync
+        var (resultData, confidence) = ParseAiResponse(response, config!);
+
+        var executionMetadata = new ToolExecutionMetadata
+        {
+            StartedAt = startedAt,
+            CompletedAt = DateTimeOffset.UtcNow,
+            InputTokens = inputTokens,
+            OutputTokens = outputTokens,
+            ModelCalls = 1,
+            ModelName = "gpt-4o"
+        };
+
+        _logger.LogInformation(
+            "Streaming generic tool execution complete for {AnalysisId}: {Operation} in {Duration}ms, {OutputTokens} output tokens",
+            context.AnalysisId, config!.Operation, stopwatch.ElapsedMilliseconds, outputTokens);
+
+        yield return new ToolStreamEvent.Completed(
+            ToolResult.Ok(HandlerId, tool.Id, tool.Name, resultData, response, confidence, executionMetadata));
     }
 
     /// <summary>

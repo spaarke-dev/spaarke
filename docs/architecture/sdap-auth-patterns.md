@@ -1,14 +1,14 @@
 # SDAP Authentication Patterns
 
 > **Source**: SDAP-ARCHITECTURE-GUIDE.md (Authentication & Security section)
-> **Last Updated**: January 13, 2026
+> **Last Updated**: February 26, 2026
 > **Applies To**: Authentication code, token handling, Azure AD configuration
 
 ---
 
 ## TL;DR
 
-SDAP uses three authentication patterns: (1) MSAL.js in PCF for user tokens, (2) On-Behalf-Of (OBO) flow for Graph API, (3) ClientSecret for server-to-Dataverse. User identity flows through OBO to Graph; app identity used for Dataverse metadata queries.
+SDAP uses seven authentication patterns: (1) MSAL.js in PCF for user tokens, (2) OBO for Graph API, (3) ClientSecret for server-to-Dataverse, (4) OBO for AI file access, (5) OBO for Dataverse authorization, (6) App-only for email processing, (7) MSAL ssoSilent for Code Pages embedded on forms. Patterns 1-3 cover the core flows. Pattern 7 enables HTML web resources to call the BFF API when embedded as iframes (where Xrm token APIs are unavailable).
 
 ---
 
@@ -733,16 +733,174 @@ AnalysisOrchestrationService     AppOnlyAnalysisService (planned)
 
 ---
 
+## Pattern 7: Code Page Embedded Auth via MSAL ssoSilent
+
+**When**: A React Code Page (HTML web resource) needs to call the BFF API and may be loaded either via `Xrm.Navigation.navigateTo` (dialog mode) or embedded directly on a Dataverse form (iframe mode).
+
+**Problem**: `Xrm.Utility.getGlobalContext().getAccessToken()` only works when the page is opened via `navigateTo`. When the same HTML web resource is embedded as an iframe on a form, the Xrm token APIs are not available.
+
+**Solution**: Dual-strategy token acquisition — try Xrm platform strategies first (fast, no MSAL overhead), then fall back to MSAL `ssoSilent()` for embedded scenarios.
+
+### Why ssoSilent Works
+
+The user is already authenticated in Dataverse via Azure AD. The browser holds a valid session cookie for `login.microsoftonline.com`. MSAL's `ssoSilent()` opens a hidden iframe to the Azure AD authorize endpoint and uses the existing session to obtain a token — no user interaction required.
+
+### Token Acquisition Priority
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  1. In-memory cache (fastest — no I/O)                         │
+│     Return cached token if not within 5-min expiry buffer      │
+└────────────────────────────────────┬────────────────────────────┘
+                                     │ cache miss
+                                     ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  2. Xrm platform strategies (navigateTo mode)                  │
+│     a. getGlobalContext().getAccessToken()  (modern 2024+)     │
+│     b. __crmTokenProvider.getToken()       (legacy global)     │
+│     c. AUTHENTICATION_TOKEN                (some configs)      │
+│     d. Xrm.Page.context.getAuthToken()     (deprecated)       │
+│     e. __SPAARKE_BFF_TOKEN__               (PCF bridge token)  │
+└────────────────────────────────────┬────────────────────────────┘
+                                     │ all fail (embedded mode)
+                                     ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  3. MSAL ssoSilent (embedded web resource fallback)            │
+│     a. acquireTokenSilent (cached account + refresh token)     │
+│     b. ssoSilent (Azure AD session cookie via hidden iframe)   │
+│     Scope: api://1e40baad-.../user_impersonation               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Code Implementation
+
+**MSAL Configuration**: `src/client/code-pages/AnalysisWorkspace/src/config/msalConfig.ts`
+
+```typescript
+export const msalConfig: Configuration = {
+    auth: {
+        clientId: CLIENT_ID,  // 170c98e1-d486-4355-bcbe-170454e0207c (DSM-SPE Dev 2)
+        authority: "https://login.microsoftonline.com/organizations",  // multi-tenant
+        redirectUri: window.location.origin,  // auto-detect from environment
+        navigateToLoginRequestUrl: false,
+    },
+    cache: {
+        cacheLocation: "sessionStorage",
+        storeAuthStateInCookie: false,
+    },
+};
+
+export const BFF_API_SCOPE =
+    "api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation";
+```
+
+**Auth Service**: `src/client/code-pages/AnalysisWorkspace/src/services/authService.ts`
+
+```typescript
+// Lazy MSAL initialization (avoid blocking initial render)
+async function ensureMsalInitialized(): Promise<PublicClientApplication | null> {
+    if (_msalInstance) return _msalInstance;
+    const instance = new PublicClientApplication(msalConfig);
+    await instance.initialize();
+    await instance.handleRedirectPromise();
+    _msalInstance = instance;
+    return _msalInstance;
+}
+
+// MSAL token acquisition (embedded fallback)
+async function acquireTokenViaMsal(): Promise<TokenCache | null> {
+    const msal = await ensureMsalInitialized();
+    if (!msal) return null;
+
+    // Try cached account first
+    const accounts = msal.getAllAccounts();
+    if (accounts.length > 0) {
+        const result = await msal.acquireTokenSilent({
+            scopes: [BFF_API_SCOPE],
+            account: accounts[0],
+        });
+        if (result?.accessToken) return { token: result.accessToken, expiresAt: ... };
+    }
+
+    // Fall back to ssoSilent (Azure AD session cookie)
+    const ssoResult = await msal.ssoSilent({ scopes: [BFF_API_SCOPE] });
+    if (ssoResult?.accessToken) return { token: ssoResult.accessToken, expiresAt: ... };
+
+    return null;
+}
+
+// Combined: Xrm first → MSAL fallback
+async function acquireToken(): Promise<TokenCache> {
+    const platformToken = await extractPlatformToken();
+    if (platformToken) return platformToken;
+
+    const msalToken = await acquireTokenViaMsal();
+    if (msalToken) return msalToken;
+
+    throw new AuthError("Could not acquire BFF API token");
+}
+```
+
+### Reference Implementation
+
+The MSAL ssoSilent pattern originates from:
+- **LegalWorkspace**: `src/solutions/LegalWorkspace/src/services/bffAuthProvider.ts`
+- **AnalysisWorkspace**: `src/client/code-pages/AnalysisWorkspace/src/services/authService.ts`
+
+Both share identical MSAL config (CLIENT_ID, BFF_API_SCOPE, authority). A future shared package (`@spaarke/auth`) should consolidate this.
+
+### App Registration Requirements
+
+**DSM-SPE Dev 2** (`170c98e1-d486-4355-bcbe-170454e0207c`):
+```
+Platform: Single-page application (SPA)
+Redirect URIs:
+  - https://spaarkedev1.crm.dynamics.com  (dev Dataverse origin)
+  - Additional Dataverse environment origins as needed
+
+API Permissions (Delegated):
+  - BFF API: user_impersonation (api://1e40baad-.../user_impersonation)
+
+Known Client Applications (on BFF app):
+  - 170c98e1-d486-4355-bcbe-170454e0207c  (DSM-SPE Dev 2)
+```
+
+### When to Use This Pattern
+
+| Scenario | Pattern |
+|----------|---------|
+| Code Page opened via navigateTo | Xrm strategies work → MSAL not needed (but loaded as fallback) |
+| Code Page embedded as iframe on form | Xrm strategies fail → MSAL ssoSilent acquires token |
+| PCF control on form | Use Pattern 1 (MSAL.js in PCF — platform React context) |
+| Server-to-server API calls | Use Pattern 2/3 (OBO or ClientSecret) |
+
+### Debugging
+
+```
+// Browser console — successful navigateTo mode:
+[AnalysisWorkspace:AuthService] Dataverse org: https://spaarkedev1.crm.dynamics.com
+[AnalysisWorkspace:AuthService] Token acquired via Xrm platform strategy
+
+// Browser console — successful embedded mode:
+[AnalysisWorkspace:AuthService] Xrm SDK not available, will use MSAL ssoSilent
+[AnalysisWorkspace:AuthService] MSAL initialized successfully
+[AnalysisWorkspace:AuthService] Token acquired via MSAL ssoSilent
+```
+
+---
+
 ## Token Scopes Reference
 
 | Token For | Scope | Pattern |
 |-----------|-------|---------|
-| BFF API (from PCF) | `api://1e40baad-.../user_impersonation` | MSAL.js |
-| Graph API (from BFF) | `https://graph.microsoft.com/.default` | OBO |
-| Graph API for AI Analysis | `https://graph.microsoft.com/.default` | OBO (via HttpContext) |
-| Graph API for Email Processing | `https://graph.microsoft.com/.default` | ClientCredentials (App-Only) |
-| Dataverse (from BFF, metadata queries) | `https://{org}.crm.dynamics.com/.default` | ClientCredentials |
-| Dataverse (from BFF, authorization checks) | `https://{org}.crm.dynamics.com/.default` | OBO (via HttpContext) |
+| BFF API (from PCF) | `api://1e40baad-.../user_impersonation` | MSAL.js (Pattern 1) |
+| BFF API (from Code Page - navigateTo) | `api://1e40baad-.../user_impersonation` | Xrm platform (Pattern 7) |
+| BFF API (from Code Page - embedded) | `api://1e40baad-.../user_impersonation` | MSAL ssoSilent (Pattern 7) |
+| Graph API (from BFF) | `https://graph.microsoft.com/.default` | OBO (Pattern 2) |
+| Graph API for AI Analysis | `https://graph.microsoft.com/.default` | OBO via HttpContext (Pattern 4) |
+| Graph API for Email Processing | `https://graph.microsoft.com/.default` | ClientCredentials (Pattern 6) |
+| Dataverse (from BFF, metadata queries) | `https://{org}.crm.dynamics.com/.default` | ClientCredentials (Pattern 3) |
+| Dataverse (from BFF, authorization checks) | `https://{org}.crm.dynamics.com/.default` | OBO via HttpContext (Pattern 5) |
 
 ---
 

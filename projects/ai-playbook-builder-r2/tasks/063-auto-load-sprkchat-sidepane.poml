@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Auto-load SprkChat side pane with Analysis Workspace</title>
+    <phase>7: SprkChat Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>060</dependencies>
+    <blocks>070</blocks>
+    <tags>frontend, code-page, react</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>UI integration with external Xrm API, graceful fallback required, new useEffect only</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Add a useEffect to Analysis Workspace App.tsx (or index.tsx) that auto-opens the SprkChat side pane via Xrm.App.sidePanes.createPane() when the workspace loads and an analysisId is available. Pass analysisId and documentId as pane data parameters. Implement graceful fallback (console.warn) if the sidePanes API is unavailable.</prompt>
+  <role>Senior React/TypeScript frontend engineer integrating the SprkChat Dataverse side pane with the Analysis Workspace using the Xrm.App.sidePanes API.</role>
+  <goal>When Analysis Workspace loads with a valid analysisId, SprkChat opens as a persistent Dataverse side pane (title "SprkChat", paneId "sprkchat-analysis", canClose true, width 400) navigated to the sprk_SprkChatPane webresource with analysisId and documentId query params. If Xrm.App.sidePanes is unavailable, a console.warn is logged and the workspace functions normally without the pane. Build succeeds.</goal>
+  <context>
+    <background>SprkChat is an AI chat assistant surfaced as a Dataverse side pane (rail button). When users are in the Analysis Workspace, they should have SprkChat automatically available with the current analysis context pre-loaded (analysisId and documentId). The Xrm.App.sidePanes API creates a persistent pane that appears in the Dataverse rail — users can close it and reopen it via the rail button, and it retains its context. The side pane navigates to the sprk_SprkChatPane webresource URL. This only works inside a Dataverse form context (the Code Page is embedded in a Dataverse form), so we must gracefully handle environments where Xrm.App.sidePanes is not available (e.g., standalone testing, iframe previews).</background>
+    <relevant-files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/App.tsx</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-006">Code Page pattern — the workspace runs as a webresource inside a Dataverse form. Xrm global is available in this context but must not be assumed available in all environments.</constraint>
+    <constraint source="spec">Graceful fallback: if Xrm.App.sidePanes is not available, log a console.warn and continue — the workspace must be fully functional without the chat pane.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-006.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="xrm-side-panes" location="projects/ai-playbook-builder-r2/design.md">Xrm.App.sidePanes.createPane() API for opening persistent Dataverse side panes from a webresource context. createPane returns a pane object; call pane.navigate() with a webresource page type to load the target.</pattern>
+    </patterns>
+  </knowledge>
+  <steps>
+    <step order="1">Read App.tsx (and optionally index.tsx) to understand where analysisId becomes available and the component lifecycle.</step>
+    <step order="2">Read design.md section 6.21 for the precise Xrm.App.sidePanes.createPane() call specification, pane configuration, and webresource navigation parameters.</step>
+    <step order="3">Add a useEffect with [analysisId] dependency that fires when analysisId becomes truthy.</step>
+    <step order="4">Inside the useEffect: check if Xrm?.App?.sidePanes is available (typeof Xrm !== "undefined" &amp;&amp; Xrm?.App?.sidePanes).</step>
+    <step order="5">If available: call Xrm.App.sidePanes.createPane({ title: "SprkChat", paneId: "sprkchat-analysis", canClose: true, width: 400 }) wrapped in a try/catch.</step>
+    <step order="6">After createPane: call pane.navigate({ pageType: "webresource", webresourceName: "sprk_SprkChatPane", data: new URLSearchParams({ analysisId, documentId }).toString() }).</step>
+    <step order="7">In the catch block and in the unavailable branch: log console.warn("SprkChat side pane unavailable — workspace continues without chat") and return without throwing.</step>
+    <step order="8">Ensure the useEffect has no memory leaks (pane navigation is fire-and-forget; no cleanup needed unless pane object needs to be closed on unmount per design.md spec).</step>
+    <step order="9">Run the AnalysisWorkspace build to verify TypeScript compilation with zero errors.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Read App.tsx and design.md section 6.21 before making changes. Also check if index.tsx is a better location for this effect.</tool>
+    <tool name="Edit">Make targeted edits to App.tsx (or index.tsx if more appropriate). Only one file should be modified.</tool>
+    <tool name="Bash">Run the AnalysisWorkspace build to verify TypeScript compilation.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/code-pages/AnalysisWorkspace/src/App.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">SprkChat side pane opens automatically when Analysis Workspace loads with a valid analysisId.</criterion>
+    <criterion testable="true">Pane is created with paneId "sprkchat-analysis", title "SprkChat", canClose true, and width 400.</criterion>
+    <criterion testable="true">Pane navigates to sprk_SprkChatPane webresource with analysisId and documentId as query parameters.</criterion>
+    <criterion testable="true">When Xrm.App.sidePanes is unavailable, a console.warn is logged and the workspace continues to function normally (no thrown error, no broken UI).</criterion>
+    <criterion testable="true">When sidePanes.createPane() throws (e.g., pane already exists), the error is caught gracefully and logged — workspace does not crash.</criterion>
+    <criterion testable="true">Build succeeds with zero TypeScript errors.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

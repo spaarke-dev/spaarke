@@ -67,6 +67,28 @@ public class ScopeResolverService : IScopeResolverService
         }
     }
 
+    /// <summary>
+    /// Replacement for EnsureSuccessStatusCode that captures the response body for diagnostics.
+    /// </summary>
+    private async Task EnsureSuccessWithDiagnosticsAsync(
+        HttpResponseMessage response,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError(
+                "[DATAVERSE-ERROR] {Operation} failed with {StatusCode}. Response body: {Body}",
+                operation, response.StatusCode, body);
+            throw new HttpRequestException(
+                $"{operation} failed: {(int)response.StatusCode} {response.ReasonPhrase}. " +
+                $"Dataverse error: {(body.Length > 500 ? body[..500] : body)}",
+                null,
+                response.StatusCode);
+        }
+    }
+
     /// <inheritdoc />
     public Task<ResolvedScopes> ResolveScopesAsync(
         Guid[] skillIds,
@@ -213,6 +235,7 @@ public class ScopeResolverService : IScopeResolverService
         await EnsureAuthenticatedAsync(cancellationToken);
 
         var url = $"sprk_analysisactions({actionId})?$expand=sprk_ActionTypeId($select=sprk_name)";
+        _logger.LogInformation("[GET ACTION] URL: {Url}", url);
         var response = await _httpClient.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -221,7 +244,7 @@ public class ScopeResolverService : IScopeResolverService
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessWithDiagnosticsAsync(response, $"GetActionAsync({actionId})", cancellationToken);
 
         var entity = await response.Content.ReadFromJsonAsync<ActionEntity>(cancellationToken);
         if (entity == null)
@@ -768,6 +791,7 @@ public class ScopeResolverService : IScopeResolverService
         await EnsureAuthenticatedAsync(cancellationToken);
 
         var url = $"sprk_analysisskills({skillId})?$expand=sprk_SkillTypeId($select=sprk_name)";
+        _logger.LogInformation("[GET SKILL] URL: {Url}", url);
         var response = await _httpClient.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -776,7 +800,7 @@ public class ScopeResolverService : IScopeResolverService
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessWithDiagnosticsAsync(response, $"GetSkillAsync({skillId})", cancellationToken);
 
         var entity = await response.Content.ReadFromJsonAsync<SkillEntity>(cancellationToken);
         if (entity == null)
@@ -958,6 +982,7 @@ public class ScopeResolverService : IScopeResolverService
         await EnsureAuthenticatedAsync(cancellationToken);
 
         var url = $"sprk_analysisknowledges({knowledgeId})?$expand=sprk_KnowledgeTypeId($select=sprk_name)";
+        _logger.LogInformation("[GET KNOWLEDGE] URL: {Url}", url);
         var response = await _httpClient.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -966,7 +991,7 @@ public class ScopeResolverService : IScopeResolverService
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessWithDiagnosticsAsync(response, $"GetKnowledgeAsync({knowledgeId})", cancellationToken);
 
         var entity = await response.Content.ReadFromJsonAsync<KnowledgeEntity>(cancellationToken);
         if (entity == null)
@@ -1177,6 +1202,7 @@ public class ScopeResolverService : IScopeResolverService
         await EnsureAuthenticatedAsync(cancellationToken);
 
         var url = $"sprk_analysistools({toolId})?$expand=sprk_ToolTypeId($select=sprk_name)";
+        _logger.LogInformation("[GET TOOL] URL: {Url}", url);
         var response = await _httpClient.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -1185,7 +1211,7 @@ public class ScopeResolverService : IScopeResolverService
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessWithDiagnosticsAsync(response, $"GetToolAsync({toolId})", cancellationToken);
 
         var entity = await response.Content.ReadFromJsonAsync<ToolEntity>(cancellationToken);
         if (entity == null)

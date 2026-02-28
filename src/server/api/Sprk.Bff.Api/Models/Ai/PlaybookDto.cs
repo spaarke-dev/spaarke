@@ -124,6 +124,13 @@ public record PlaybookResponse
     public Guid OwnerId { get; init; }
 
     /// <summary>
+    /// Playbook capability strings from the sprk_playbookcapabilities multi-select choice.
+    /// Maps to <see cref="Chat.PlaybookCapabilities"/> constants (search, analyze, write_back, etc.).
+    /// Empty array means no capabilities set — callers should fall back to all capabilities.
+    /// </summary>
+    public string[] Capabilities { get; init; } = [];
+
+    /// <summary>
     /// Associated action IDs.
     /// </summary>
     public Guid[] ActionIds { get; init; } = [];

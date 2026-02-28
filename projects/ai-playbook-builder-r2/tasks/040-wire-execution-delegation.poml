@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Wire ExecutePlaybookAsync to delegate to PlaybookOrchestrationService when nodes exist</title>
+    <phase>5: Execution Wiring</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>041, 050, 051</blocks>
+    <tags>bff-api, ai, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Architecture-critical wiring, bff-api tag, modifies core orchestration flow</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Wire AnalysisOrchestrationService.ExecutePlaybookAsync to delegate to PlaybookOrchestrationService.ExecuteAsync() when nodes exist, including statuscode transitions, document loading, and SSE bridging. Legacy path must remain fully intact when no nodes are configured.</prompt>
+  <role>Senior .NET backend engineer implementing architecture-critical execution delegation in the AI playbook pipeline.</role>
+  <goal>When GetNodesAsync returns one or more nodes, ExecutePlaybookAsync delegates to PlaybookOrchestrationService with proper statuscode lifecycle (Draft→In Progress→Completed/Error), document context loaded, and PlaybookStreamEvent bridged to AnalysisStreamChunk for SSE. Legacy path unchanged when no nodes exist. dotnet build succeeds.</goal>
+  <context>
+    <background>AnalysisOrchestrationService.ExecutePlaybookAsync currently falls through to legacy sequential tool execution. The node-based pipeline (PlaybookOrchestrationService) is fully implemented but not yet activated. This task is the key wiring step: check for nodes via GetNodesAsync(), and when they exist, delegate to the new orchestrator instead of the legacy path. Statuscode transitions must be managed here: Draft→In Progress before execution, Completed after success, Error on failure, and "Completed with warnings" if any node failed but Deliver Output succeeded. Document loading (SpeFileStore download + text extraction) must happen before delegating. PlaybookStreamEvent emitted by PlaybookOrchestrationService must be bridged to AnalysisStreamChunk for the existing SSE channel.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookRunContext.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-013">AI features extend the BFF; no separate AI service. PlaybookOrchestrationService lives in the BFF alongside AnalysisOrchestrationService.</constraint>
+    <constraint source="ADR-001">Minimal API patterns; no global middleware. Keep orchestration in services, not endpoint handlers.</constraint>
+    <constraint source="ADR-007">Use SpeFileStore facade for document download (OBO auth). Do not call Graph SDK types above the facade boundary.</constraint>
+    <constraint source="spec">No stubs or placeholders. Implementation must be production quality, ready for end-to-end testing.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>.claude/adr/ADR-007.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/patterns/ai/text-extraction.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="streaming-endpoints" location=".claude/patterns/ai/streaming-endpoints.md">SSE streaming pattern used by AiToolEndpoints — how PlaybookStreamEvent maps to AnalysisStreamChunk for the existing SSE channel.</pattern>
+      <pattern name="text-extraction" location=".claude/patterns/ai/text-extraction.md">Document download via SpeFileStore + ITextExtractor to populate PlaybookRunContext.Document.</pattern>
+    </patterns>
+  </knowledge>
+  <steps>
+    <step order="1">Read AnalysisOrchestrationService.cs in full to understand ExecutePlaybookAsync, the legacy sequential tool execution path, and existing document loading code.</step>
+    <step order="2">Read design.md sections 6.12 and 6.13 for the precise implementation contract for execution delegation and statuscode transitions.</step>
+    <step order="3">Add document loading: download via SpeFileStore.DownloadFileAsUserAsync() and extract text via ITextExtractor. Set PlaybookRunContext.Document with the extracted text and metadata.</step>
+    <step order="4">Add node check: var nodes = await _nodeService.GetNodesAsync(playbookId).</step>
+    <step order="5">If nodes.Length > 0: set statuscode to In Progress, then delegate to PlaybookOrchestrationService.ExecuteAsync(context, cancellationToken).</step>
+    <step order="6">Bridge PlaybookStreamEvent to AnalysisStreamChunk: map each event emitted by PlaybookOrchestrationService to the existing SSE write pattern for the response stream.</step>
+    <step order="7">After successful completion: set statuscode to Completed.</step>
+    <step order="8">Else (nodes.Length == 0): fall through to the existing legacy path, which must remain completely unchanged.</step>
+    <step order="9">Add error handling: on any unhandled exception from PlaybookOrchestrationService.ExecuteAsync(), set statuscode to Error and rethrow or surface through SSE error event.</step>
+    <step order="10">Add "Completed with warnings" status: if execution completed but any node reported a failure (check PlaybookRunContext.NodeOutputs for error states), set the appropriate statuscode value instead of Completed.</step>
+    <step order="11">Extract shared document loading into a private method so it can be reused from the legacy path (preparation for task 041 refactor).</step>
+    <step order="12">Run dotnet build and resolve any compilation errors.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Read AnalysisOrchestrationService.cs, PlaybookRunContext.cs, and design.md before making changes.</tool>
+    <tool name="Edit">Make targeted edits to AnalysisOrchestrationService.cs. Do not modify IAnalysisOrchestrationService.cs unless the interface requires a new overload.</tool>
+    <tool name="Bash">Run dotnet build src/server/api/Sprk.Bff.Api/ to verify compilation.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">When GetNodesAsync returns one or more nodes, execution delegates to PlaybookOrchestrationService.ExecuteAsync() — legacy sequential tool path is NOT entered.</criterion>
+    <criterion testable="true">When GetNodesAsync returns zero nodes, legacy sequential tool path executes unchanged.</criterion>
+    <criterion testable="true">Statuscode transitions are applied: Draft→In Progress before execution, Completed after success, Error on failure.</criterion>
+    <criterion testable="true">"Completed with warnings" statuscode applied when any node in PlaybookRunContext.NodeOutputs is in error state but Deliver Output node succeeded.</criterion>
+    <criterion testable="true">PlaybookRunContext.Document is populated with document text and metadata before PlaybookOrchestrationService.ExecuteAsync() is called.</criterion>
+    <criterion testable="true">PlaybookStreamEvent emitted by PlaybookOrchestrationService is bridged to AnalysisStreamChunk and written to the SSE response stream.</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ succeeds with zero errors.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

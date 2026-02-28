@@ -18,6 +18,10 @@ module.exports = (env) => {
         // Resolve workspace dependency to shared library source for bundling
         '@spaarke/ui-components': path.resolve(__dirname, '../../shared/Spaarke.UI.Components/src'),
       },
+      modules: [
+        path.resolve(__dirname, 'node_modules'),
+        'node_modules',
+      ],
     },
     module: {
       rules: [
@@ -57,7 +61,7 @@ module.exports = (env) => {
         new TerserPlugin({
           terserOptions: {
             compress: {
-              drop_console: true,
+              drop_console: false, // TEMP: debug - re-enable after fixing load issue
               drop_debugger: true,
               pure_funcs: ['console.debug', 'console.info'],
               passes: 2,

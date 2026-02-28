@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Verify and complete GetToolAsync Dataverse query</title>
+    <phase>1: Tool Resolution</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>010, 011, 012, 020</blocks>
+    <tags>bff-api, ai, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag and code modification of production service</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Verify that GetToolAsync in ScopeResolverService.cs is correctly implemented against real Dataverse data. Check DTO deserialization, structured logging, and handler resolution fallback logic (HandlerClass field → GenericAnalysisHandler → type-based). Fix any mismatches found.</prompt>
+  <role>Backend .NET developer verifying a Dataverse Web API integration is production-ready</role>
+  <goal>GetToolAsync compiles without errors, DTO fields match the Dataverse sprk_analysistools entity schema, and structured logging emits "Loaded tool from Dataverse: {ToolName}"</goal>
+  <context>
+    <background>GetToolAsync is approximately 80% complete. It queries Dataverse for analysis tool configuration but has not been validated against real entity data. The handler resolution fallback chain must be confirmed: prefer the HandlerClass field value, fall back to GenericAnalysisHandler, and finally fall back to a type-based default. Any schema mismatches in the DTO will cause silent deserialization failures at runtime.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-013">Extend BFF for AI features; do not add a separate AI service</constraint>
+    <constraint source="ADR-008">Authorization via endpoint filters, not global middleware</constraint>
+    <constraint source="spec">No stubs permitted in production paths — all resolution must query real Dataverse data</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="analysis-scopes" location=".claude/patterns/ai/analysis-scopes.md">Pattern for resolving tool, skill, knowledge, and action scopes from Dataverse via Web API</pattern>
+    </patterns>
+  </knowledge>
+  <steps>
+    <step order="1">Read ScopeResolverService.cs in full to understand the current GetToolAsync implementation, including the HTTP call, deserialization path, and handler resolution logic.</step>
+    <step order="2">Verify that the ToolEntity private DTO class contains all required Dataverse fields: sprk_analysistoolid, sprk_name, sprk_description, sprk_tooltypeid, sprk_handlerclass, sprk_configuration. Add or correct any missing or misnamed fields.</step>
+    <step order="3">Verify the Web API URL pattern uses the correct entity set name (sprk_analysistools) and includes $expand=sprk_ToolTypeId with the appropriate $select clause.</step>
+    <step order="4">Verify the $expand for sprk_ToolTypeId returns the type name needed for type-based fallback resolution.</step>
+    <step order="5">Confirm the handler resolution chain: (1) use HandlerClass field if non-empty, (2) fall back to GenericAnalysisHandler, (3) fall back to a type-name-based default. Fix the chain if any branch is missing or incorrect.</step>
+    <step order="6">Add or improve structured logging: log at Information level when a tool is successfully loaded ("Loaded tool from Dataverse: {ToolName}"), and at Warning level when a tool is not found.</step>
+    <step order="7">Run dotnet build and confirm zero errors and zero new warnings.</step>
+    <step order="8">Document in a code comment any Dataverse schema fields that could not be verified without a live environment, so they are flagged for integration testing.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Read ScopeResolverService.cs and IScopeResolverService.cs</tool>
+    <tool name="Edit">Correct DTO field names, handler resolution chain, and logging</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GetToolAsync compiles without errors after dotnet build</criterion>
+    <criterion testable="true">ToolEntity DTO fields match the Dataverse sprk_analysistools schema (sprk_analysistoolid, sprk_name, sprk_description, sprk_tooltypeid, sprk_handlerclass, sprk_configuration)</criterion>
+    <criterion testable="true">Structured log message "Loaded tool from Dataverse: {ToolName}" is emitted on successful resolution</criterion>
+    <criterion testable="true">Handler resolution fallback chain is present: HandlerClass field → GenericAnalysisHandler → type-based default</criterion>
+    <criterion testable="true">dotnet build reports zero errors</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

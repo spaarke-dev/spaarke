@@ -4,8 +4,8 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 /// String constants for playbook capability values.
 ///
 /// Each constant corresponds to a value in the Dataverse <c>sprk_playbookcapabilities</c>
-/// multi-select option set on the Playbook entity. Using constants avoids magic strings
-/// when filtering tools and actions by capability.
+/// global multi-select choice on the <c>sprk_analysisplaybook</c> entity. Using constants
+/// avoids magic strings when filtering tools and actions by capability.
 ///
 /// Dataverse option set integer codes:
 ///   search          = 100000000
@@ -16,8 +16,8 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 ///   web_search      = 100000005
 ///   summarize       = 100000006
 ///
-/// NOTE: The Dataverse schema update (sprk_capabilities field on sprk_playbook entity)
-/// must be deployed via solution import. See task R2-047 for Dataverse-backed lookup.
+/// The <see cref="PlaybookService"/> reads this field via OData Web API and maps the
+/// integer option values to these string constants via <c>ParseCapabilities</c>.
 /// </summary>
 public static class PlaybookCapabilities
 {

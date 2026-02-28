@@ -29,6 +29,9 @@ public class UpdateDocumentRequest
     /// <summary>SharePoint file URL (enables "Open in SharePoint" links). Maps to sprk_filepath.</summary>
     public string? FilePath { get; set; }
 
+    /// <summary>File extension without dot, lowercase (e.g. "pdf", "docx", "xlsx"). Maps to sprk_filetype.</summary>
+    public string? FileType { get; set; }
+
     public bool? HasFile { get; set; }
     public DocumentStatus? Status { get; set; }
 

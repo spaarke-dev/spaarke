@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Implement GetSkillAsync Dataverse query replacing stub dictionary</title>
+    <phase>2a: Skill Resolution</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>020</blocks>
+    <tags>bff-api, ai, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag and code modification replacing stub with production Dataverse query</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Replace the stub dictionary implementation of GetSkillAsync in ScopeResolverService.cs with a real Dataverse Web API query against the sprk_promptfragments entity. Follow the same pattern established by GetToolAsync. Add a SkillEntity private DTO class and map it to the AnalysisSkill domain model.</prompt>
+  <role>Backend .NET developer implementing a production-quality Dataverse integration for AI scope resolution</role>
+  <goal>GetSkillAsync queries Dataverse instead of a stub dictionary, a SkillEntity DTO class is added, structured logging confirms successful loads, null is returned for non-existent IDs, and dotnet build succeeds</goal>
+  <context>
+    <background>GetSkillAsync currently returns data from a hardcoded stub dictionary with fake GUIDs, which blocks production use. It must be replaced with a real Dataverse Web API query to sprk_promptfragments, expanding the sprk_SkillTypeId lookup. The implementation pattern is identical to GetToolAsync, which was verified in task 002. Design.md section 6.3 contains the full reference implementation including DTO class definitions and the mapping logic.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-013">Extend BFF for AI features; do not add a separate AI service</constraint>
+    <constraint source="ADR-010">DI registrations must stay at or below 15 non-framework registrations</constraint>
+    <constraint source="spec">No stubs permitted in production paths — all resolution must query real Dataverse data</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="analysis-scopes" location=".claude/patterns/ai/analysis-scopes.md">Pattern for resolving tool, skill, knowledge, and action scopes from Dataverse via Web API — section 6.3 has the full GetSkillAsync implementation</pattern>
+    </patterns>
+  </knowledge>
+  <steps>
+    <step order="1">Read ScopeResolverService.cs to locate the current stub GetSkillAsync implementation and understand how GetToolAsync is structured so the same pattern can be followed.</step>
+    <step order="2">Read design.md section 6.3 to obtain the reference implementation code for GetSkillAsync, including the SkillEntity DTO and AnalysisSkill mapping.</step>
+    <step order="3">Replace the stub dictionary implementation with a Dataverse Web API query using the URL pattern: sprk_promptfragments({skillId})?$expand=sprk_SkillTypeId($select=sprk_name).</step>
+    <step order="4">Add private SkillEntity and SkillTypeReference DTO classes to deserialize the Dataverse response — include all relevant fields from the design.md reference.</step>
+    <step order="5">Map the SkillEntity fields to the AnalysisSkill domain model, ensuring all required properties are populated.</step>
+    <step order="6">Add structured logging: LogInformation when a skill is successfully loaded ("Loaded skill from Dataverse: {SkillName}"), LogWarning when the skill is not found.</step>
+    <step order="7">Run dotnet build and confirm zero errors.</step>
+    <step order="8">Verify that no references to the old stub dictionary for skills remain anywhere in the service file.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Read ScopeResolverService.cs and design.md section 6.3</tool>
+    <tool name="Edit">Replace stub with Dataverse query, add DTO classes and mapping</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GetSkillAsync queries Dataverse (no stub dictionary or hardcoded GUIDs)</criterion>
+    <criterion testable="true">SkillEntity private DTO class is added with correct Dataverse field names</criterion>
+    <criterion testable="true">Structured log "Loaded skill from Dataverse: {SkillName}" is emitted on successful resolution</criterion>
+    <criterion testable="true">Method returns null for non-existent skill IDs without throwing</criterion>
+    <criterion testable="true">dotnet build reports zero errors</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

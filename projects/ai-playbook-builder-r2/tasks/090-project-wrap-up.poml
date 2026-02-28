@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Project wrap-up — update docs, run quality gates, create lessons learned</title>
+    <phase>9: Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>080</dependencies>
+    <blocks>none</blocks>
+    <tags>wrap-up, documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation and cleanup task</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Complete project wrap-up: update README status, run code-review and adr-check, create lessons-learned.md, run repo-cleanup.
+  </prompt>
+
+  <role>Project manager completing project closeout</role>
+
+  <goal>
+    README.md shows 100% complete. All quality gates pass. Lessons learned documented.
+    Project ready for PR merge.
+  </goal>
+
+  <context>
+    <background>
+      All implementation, testing, and deployment complete. Final wrap-up tasks before merging PR.
+    </background>
+    <relevant-files>
+      <file>projects/ai-playbook-builder-r2/README.md</file>
+      <file>projects/ai-playbook-builder-r2/plan.md</file>
+      <file>projects/ai-playbook-builder-r2/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">All graduation criteria must be met before marking complete.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run /code-review on all changed files</step>
+    <step order="2">Run /adr-check to validate ADR compliance</step>
+    <step order="3">Update README.md: all phases to 100%, status to Complete</step>
+    <step order="4">Update plan.md status to Complete</step>
+    <step order="5">Update TASK-INDEX.md: all tasks to completed status</step>
+    <step order="6">Create notes/lessons-learned.md with implementation insights</step>
+    <step order="7">Run /repo-cleanup to validate structure</step>
+    <step order="8">Final commit with wrap-up changes</step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">Invoke code-review, adr-check, repo-cleanup</tool>
+    <tool name="Edit">Update README, plan, TASK-INDEX</tool>
+    <tool name="Write">Create lessons-learned.md</tool>
+    <tool name="Bash">Git commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">Updated README.md (100% complete)</output>
+    <output type="documentation">Updated plan.md (Complete)</output>
+    <output type="documentation">notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">README.md shows all phases at 100%</criterion>
+    <criterion testable="true">code-review passes with no critical issues</criterion>
+    <criterion testable="true">adr-check passes with no violations</criterion>
+    <criterion testable="true">All graduation criteria from README.md are met</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

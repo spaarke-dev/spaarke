@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Add ConfigurationSchema (JSON Schema Draft 07) to all 9 tool handlers</title>
+    <phase>3: Handler Discovery</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>022</blocks>
+    <tags>bff-api, ai, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifying 9+ handler files with structured schema additions; bff-api tag requires full protocol</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add a JSON Schema Draft 07 ConfigurationSchema to the metadata of all 9 registered tool handlers.
+    First verify (and add if missing) a ConfigurationSchema property on the ToolHandlerMetadata record.
+    Then for each handler, derive the schema from its existing parameters and update the Metadata property
+    accordingly. All 9 handlers must compile and expose their schema before the handler discovery endpoint
+    (task 022) can surface them.
+  </prompt>
+
+  <role>
+    Senior .NET backend engineer extending an AI tool-handler framework to expose rich configuration
+    metadata, with careful attention to JSON Schema Draft 07 structure and handler-specific parameter semantics.
+  </role>
+
+  <goal>
+    All 9 tool handlers expose a valid JSON Schema Draft 07 object via their Metadata.ConfigurationSchema
+    property. ToolHandlerMetadata record contains a ConfigurationSchema property. dotnet build succeeds.
+  </goal>
+
+  <context>
+    <background>
+      The playbook builder UI needs to render a configuration form for each tool node the user drops onto
+      the canvas. The form is driven by JSON Schema Draft 07 so it can be rendered generically. Each of the
+      9 handlers already knows its own parameters; this task formalises those parameters as a discoverable
+      schema attached to the handler's metadata. Task 022 will then expose all schemas via a REST endpoint.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/EntityExtractorHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SummaryHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/ClauseAnalyzerHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/DocumentClassifierHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/RiskDetectorHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/ClauseComparisonHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/DateExtractorHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/FinancialCalculatorHandler.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">All AI tool extensions must follow the AI Tool Framework pattern; handler metadata is the canonical discovery surface.</constraint>
+    <constraint source="spec">ConfigurationSchema must be valid JSON Schema Draft 07 with $schema, type, properties, and required fields derived from each handler's actual parameters.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="design-section-6.8" location="projects/ai-playbook-builder-r2/design.md">Section 6.8 — Handler schema specification and example schema structures for each handler type.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the ToolHandlerMetadata class/record to check whether a ConfigurationSchema property (object? or JsonElement? or equivalent) already exists.</step>
+    <step order="2">If ConfigurationSchema is missing from ToolHandlerMetadata, add it as a nullable property (e.g. object? ConfigurationSchema = null) following the existing property style.</step>
+    <step order="3">Read each of the 9 handler files to understand its constructor parameters, option properties, and any existing parameter documentation.</step>
+    <step order="4">For GenericAnalysisHandler: create a JSON Schema Draft 07 object reflecting its parameters (prompt, maxTokens, temperature, etc.) and set it in the handler's Metadata property.</step>
+    <step order="5">For EntityExtractorHandler: create schema reflecting its entity type and extraction configuration parameters.</step>
+    <step order="6">For SummaryHandler: create schema reflecting summarisation style, length, and focus parameters.</step>
+    <step order="7">For ClauseAnalyzerHandler: create schema reflecting clause type identifiers and analysis depth parameters.</step>
+    <step order="8">For DocumentClassifierHandler: create schema reflecting classification taxonomy and confidence threshold parameters.</step>
+    <step order="9">For RiskDetectorHandler: create schema reflecting risk categories, severity thresholds, and detection sensitivity parameters.</step>
+    <step order="10">For ClauseComparisonHandler: create schema reflecting comparison mode and baseline clause parameters.</step>
+    <step order="11">For DateExtractorHandler: create schema reflecting date format preferences and extraction scope parameters.</step>
+    <step order="12">For FinancialCalculatorHandler: create schema reflecting calculation type, currency, and rounding parameters.</step>
+    <step order="13">Run dotnet build after all handlers are updated and fix any compilation errors.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read ToolHandlerMetadata and each handler file to understand parameters and existing structure.</tool>
+    <tool name="Edit">Add ConfigurationSchema to ToolHandlerMetadata (if missing) and to each handler's Metadata property.</tool>
+    <tool name="Bash">Run dotnet build to verify compilation after all changes.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/EntityExtractorHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SummaryHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/ClauseAnalyzerHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/DocumentClassifierHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/RiskDetectorHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/ClauseComparisonHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/DateExtractorHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/FinancialCalculatorHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 9 handler Metadata objects include a non-null ConfigurationSchema value.</criterion>
+    <criterion testable="true">Each ConfigurationSchema is a valid JSON Schema Draft 07 object (contains $schema, type: "object", and properties).</criterion>
+    <criterion testable="true">ToolHandlerMetadata type compiles with a ConfigurationSchema property accessible by the discovery endpoint.</criterion>
+    <criterion testable="true">dotnet build completes with zero errors and zero new warnings.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

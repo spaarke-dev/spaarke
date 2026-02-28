@@ -140,4 +140,11 @@ public record PlaybookExecuteRequest
 
     /// <summary>Additional context or instructions for the analysis.</summary>
     public string? AdditionalContext { get; init; }
+
+    /// <summary>
+    /// Optional existing analysis record ID to update in Dataverse.
+    /// When provided, the orchestrator writes results to this existing record
+    /// instead of generating a new GUID.
+    /// </summary>
+    public Guid? AnalysisId { get; init; }
 }

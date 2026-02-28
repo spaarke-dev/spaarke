@@ -377,6 +377,7 @@ public class DataverseWebApiService : IDataverseService
         if (request.MimeType != null) payload["sprk_mimetype"] = request.MimeType;
         if (request.GraphItemId != null) payload["sprk_graphitemid"] = request.GraphItemId;
         if (request.GraphDriveId != null) payload["sprk_graphdriveid"] = request.GraphDriveId;
+        if (request.FileType != null) payload["sprk_filetype"] = request.FileType;
         if (request.HasFile.HasValue) payload["sprk_hasfile"] = request.HasFile.Value;
         if (request.Status.HasValue) payload["statuscode"] = (int)request.Status.Value;
 

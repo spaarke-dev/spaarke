@@ -33,8 +33,12 @@ export interface AnalysisRecord {
     createdOn: string;
     /** ISO 8601 timestamp of last modification */
     modifiedOn: string;
+    /** ID of the action used to generate this analysis (if any) */
+    actionId?: string;
     /** ID of the playbook used to generate this analysis (if any) */
     playbookId?: string;
+    /** Raw Dataverse statuscode value (1=Draft, 2=Completed, etc.) */
+    statusCode?: number;
     /** Display name of the user who created the analysis */
     createdBy?: string;
 }

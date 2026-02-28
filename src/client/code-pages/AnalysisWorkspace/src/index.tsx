@@ -1,25 +1,32 @@
 /**
  * AnalysisWorkspace -- React 19 Code Page Entry Point
  *
- * Opened as a full-page HTML web resource via Dataverse command bar or SprkChat:
- *   Xrm.Navigation.navigateTo(
- *     { pageType: "webresource", webresourceName: "sprk_analysisworkspace",
- *       data: "analysisId=...&documentId=...&tenantId=..." },
- *     { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" } }
- *   )
+ * Supports two hosting modes:
  *
- * URL parameters (via Dataverse data envelope):
- *   analysisId  - Analysis session ID to load or resume (required)
- *   documentId  - Document ID for contextual analysis (optional)
- *   tenantId    - SharePoint Embedded tenant/container ID (optional)
- *   theme       - Theme override: light | dark | highcontrast (optional)
+ *   1. Embedded on sprk_analysis form (primary):
+ *      Added as a Web Resource control on the form. Dataverse passes record context
+ *      via URL parameters when "Pass record object-type code and unique identifier
+ *      as parameters" is checked in the form designer:
+ *        ?id={analysisGuid}&typename=sprk_analysis&...
  *
- * Authentication (task 066):
- *   Token acquisition is handled independently by AuthProvider + authService.ts.
- *   The authService uses Xrm.Utility.getGlobalContext() to acquire Bearer tokens
- *   for the BFF API. No tokens are passed via URL parameters or BroadcastChannel.
+ *   2. Opened via Xrm.Navigation.navigateTo (programmatic):
+ *      Xrm.Navigation.navigateTo(
+ *        { pageType: "webresource", webresourceName: "sprk_AnalysisWorkspace",
+ *          data: "analysisId=...&documentId=..." },
+ *        { target: 2, width: { value: 95, unit: "%" }, height: { value: 95, unit: "%" } }
+ *      )
  *
- * Theme detection follows 4-level priority (resolves PH-060-B light-theme-only):
+ * Parameter resolution order:
+ *   analysisId: data.analysisId → URL "id" (Dataverse form pass-through) → parent Xrm form context
+ *   documentId: data.documentId → parent Xrm lookup field (sprk_sourcedocumentid)
+ *   tenantId:   data.tenantId → parent Xrm organizationSettings.tenantId
+ *
+ * Authentication:
+ *   Token acquisition is handled by AuthProvider + authService.ts.
+ *   The authService walks the frame hierarchy (window → parent → top) to find
+ *   Xrm.Utility.getGlobalContext() and acquire Bearer tokens for the BFF API.
+ *
+ * Theme detection follows 4-level priority:
  *   1. URL parameter (?theme=dark|light|highcontrast)
  *   2. Xrm frame-walk (Dataverse host theme)
  *   3. System preference (prefers-color-scheme media query)
@@ -28,7 +35,6 @@
  * @see ADR-006 - Code Pages for standalone dialogs (not PCF)
  * @see ADR-008 - Endpoint filters for auth (token acquisition via Xrm SDK)
  * @see ADR-021 - Fluent UI v9 design system (React 19 createRoot for Code Pages)
- * @see ADR-022 - PCF platform libraries (does NOT apply to Code Pages)
  */
 
 import { useEffect } from "react";
@@ -39,7 +45,7 @@ import { AuthProvider } from "./context/AuthContext";
 import { useThemeDetection } from "./hooks/useThemeDetection";
 
 // ---------------------------------------------------------------------------
-// Parse URL parameters (Dataverse data envelope unwrap)
+// Parse URL parameters (multi-source resolution)
 // ---------------------------------------------------------------------------
 
 const rawUrlParams = new URLSearchParams(window.location.search);
@@ -48,9 +54,113 @@ const appParams = dataEnvelope
     ? new URLSearchParams(decodeURIComponent(dataEnvelope))
     : rawUrlParams;
 
-const analysisId = appParams.get("analysisId") ?? "";
-const documentId = appParams.get("documentId") ?? "";
-const tenantId = appParams.get("tenantId") ?? "";
+/**
+ * Resolve analysisId from available sources:
+ *   1. Explicit "analysisId" param (navigateTo data envelope)
+ *   2. Dataverse form pass-through "id" param (embedded web resource with
+ *      "Pass record object-type code and unique identifier" checked)
+ *   3. Parent Xrm form context (fallback for embedded without pass-through)
+ */
+function resolveAnalysisId(): string {
+    // Source 1: Explicit analysisId (navigateTo)
+    const explicit = appParams.get("analysisId");
+    if (explicit) return explicit;
+
+    // Source 2: Dataverse "id" param (form web resource pass-through)
+    const dvId = rawUrlParams.get("id");
+    if (dvId) return dvId.replace(/[{}]/g, "").toLowerCase();
+
+    // Source 3: Parent Xrm form context (embedded iframe)
+    try {
+        /* eslint-disable @typescript-eslint/no-explicit-any */
+        const frames: Window[] = [];
+        try { if (window.parent && window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
+        try { if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!); } catch { /* cross-origin */ }
+
+        for (const frame of frames) {
+            try {
+                const xrm = (frame as any).Xrm;
+                if (xrm?.Page?.data?.entity) {
+                    const id = xrm.Page.data.entity.getId();
+                    if (id) return id.replace(/[{}]/g, "").toLowerCase();
+                }
+            } catch { /* unavailable */ }
+        }
+        /* eslint-enable @typescript-eslint/no-explicit-any */
+    } catch { /* frame access error */ }
+
+    return "";
+}
+
+/**
+ * Resolve documentId from available sources:
+ *   1. Explicit "documentId" param (navigateTo data envelope)
+ *   2. Parent Xrm form lookup field (sprk_documentid on Analysis form)
+ *
+ * Note: The Dataverse field is sprk_documentid (not sprk_sourcedocumentid).
+ * Web API returns it as _sprk_documentid_value.
+ */
+function resolveDocumentId(): string {
+    const explicit = appParams.get("documentId");
+    if (explicit) return explicit;
+
+    try {
+        /* eslint-disable @typescript-eslint/no-explicit-any */
+        const frames: Window[] = [];
+        try { if (window.parent && window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
+        try { if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!); } catch { /* cross-origin */ }
+
+        for (const frame of frames) {
+            try {
+                const xrm = (frame as any).Xrm;
+                // Try sprk_documentid (correct field name on sprk_analysis entity)
+                const attr = xrm?.Page?.getAttribute?.("sprk_documentid");
+                if (attr) {
+                    const val = attr.getValue();
+                    if (Array.isArray(val) && val.length > 0 && val[0].id) {
+                        return val[0].id.replace(/[{}]/g, "").toLowerCase();
+                    }
+                }
+            } catch { /* unavailable */ }
+        }
+        /* eslint-enable @typescript-eslint/no-explicit-any */
+    } catch { /* frame access error */ }
+
+    console.warn("[AnalysisWorkspace] Could not resolve documentId from URL or Xrm form context");
+    return "";
+}
+
+/**
+ * Resolve tenantId from available sources:
+ *   1. Explicit "tenantId" param (navigateTo data envelope)
+ *   2. Xrm organizationSettings.tenantId (frame-walk)
+ */
+function resolveTenantId(): string {
+    const explicit = appParams.get("tenantId");
+    if (explicit) return explicit;
+
+    try {
+        /* eslint-disable @typescript-eslint/no-explicit-any */
+        const frames: Window[] = [window];
+        try { if (window.parent && window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
+        try { if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!); } catch { /* cross-origin */ }
+
+        for (const frame of frames) {
+            try {
+                const xrm = (frame as any).Xrm;
+                const tid = xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId;
+                if (tid) return tid.replace(/[{}]/g, "").toLowerCase();
+            } catch { /* unavailable */ }
+        }
+        /* eslint-enable @typescript-eslint/no-explicit-any */
+    } catch { /* frame access error */ }
+
+    return "";
+}
+
+const analysisId = resolveAnalysisId();
+const documentId = resolveDocumentId();
+const tenantId = resolveTenantId();
 
 // ---------------------------------------------------------------------------
 // ThemeRoot -- wrapper component that uses useThemeDetection hook

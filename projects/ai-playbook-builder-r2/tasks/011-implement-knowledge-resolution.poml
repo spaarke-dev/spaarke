@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Implement GetKnowledgeAsync Dataverse query replacing stub dictionary</title>
+    <phase>2b: Knowledge Resolution</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>020</blocks>
+    <tags>bff-api, ai, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag and code modification replacing stub with production Dataverse query</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Replace the stub dictionary implementation of GetKnowledgeAsync in ScopeResolverService.cs with a real Dataverse Web API query against the sprk_contents entity. Add KnowledgeEntity and KnowledgeTypeReference private DTOs, a MapKnowledgeTypeName static helper, and map the entity to the AnalysisKnowledge domain model.</prompt>
+  <role>Backend .NET developer implementing a production-quality Dataverse integration for AI scope resolution</role>
+  <goal>GetKnowledgeAsync queries Dataverse instead of a stub dictionary, KnowledgeEntity DTO is added, MapKnowledgeTypeName maps type names correctly (Standards→Inline, Regulations→RagIndex), structured logging is present, and dotnet build succeeds</goal>
+  <context>
+    <background>GetKnowledgeAsync currently returns data from a hardcoded stub dictionary, blocking production use. It must be replaced with a Dataverse Web API query to sprk_contents, expanding the sprk_KnowledgeTypeId lookup. A MapKnowledgeTypeName static helper is required to translate Dataverse type names into the internal KnowledgeType enum values (e.g., "Standards" maps to Inline, "Regulations" maps to RagIndex). Design.md section 6.4 contains the full reference implementation.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-013">Extend BFF for AI features; do not add a separate AI service</constraint>
+    <constraint source="spec">No stubs permitted in production paths — all resolution must query real Dataverse data</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="analysis-scopes" location=".claude/patterns/ai/analysis-scopes.md">Pattern for resolving tool, skill, knowledge, and action scopes from Dataverse via Web API — section 6.4 has the full GetKnowledgeAsync implementation including MapKnowledgeTypeName</pattern>
+    </patterns>
+  </knowledge>
+  <steps>
+    <step order="1">Read ScopeResolverService.cs to locate the current stub GetKnowledgeAsync implementation and understand the existing DTO and mapping patterns.</step>
+    <step order="2">Read design.md section 6.4 to obtain the reference implementation code for GetKnowledgeAsync, including DTO classes and the type name mapping table.</step>
+    <step order="3">Replace the stub dictionary implementation with a Dataverse Web API query using the URL pattern: sprk_contents({knowledgeId})?$expand=sprk_KnowledgeTypeId($select=sprk_name).</step>
+    <step order="4">Add private KnowledgeEntity and KnowledgeTypeReference DTO classes to deserialize the Dataverse response.</step>
+    <step order="5">Add a private static MapKnowledgeTypeName helper method that maps Dataverse type name strings to internal KnowledgeType enum values (at minimum: "Standards" → Inline, "Regulations" → RagIndex; include any additional mappings from design.md).</step>
+    <step order="6">Map the KnowledgeEntity fields to the AnalysisKnowledge domain model using MapKnowledgeTypeName for the type field.</step>
+    <step order="7">Add structured logging: LogInformation on success, LogWarning when not found.</step>
+    <step order="8">Run dotnet build and confirm zero errors.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Read ScopeResolverService.cs and design.md section 6.4</tool>
+    <tool name="Edit">Replace stub with Dataverse query, add DTO classes, MapKnowledgeTypeName helper, and mapping</tool>
+    <tool name="Bash">Run dotnet build to verify compilation</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GetKnowledgeAsync queries Dataverse (no stub dictionary or hardcoded GUIDs)</criterion>
+    <criterion testable="true">KnowledgeEntity and KnowledgeTypeReference private DTO classes are added with correct Dataverse field names</criterion>
+    <criterion testable="true">MapKnowledgeTypeName static helper correctly maps "Standards" to Inline and "Regulations" to RagIndex</criterion>
+    <criterion testable="true">Structured logging is present for success and not-found cases</criterion>
+    <criterion testable="true">dotnet build reports zero errors</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

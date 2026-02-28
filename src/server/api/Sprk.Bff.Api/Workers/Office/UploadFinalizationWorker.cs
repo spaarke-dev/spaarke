@@ -698,6 +698,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             FileSize = payload.FileSize,
             MimeType = payload.MimeType,
             FilePath = webUrl,
+            FileType = ExtractFileExtension(payload.FileName),
             HasFile = true
         };
 
@@ -1185,6 +1186,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             FileName = attachment.FileName,
             FileSize = attachment.SizeBytes,
             MimeType = attachment.MimeType,
+            FileType = ExtractFileExtension(attachment.FileName),
             GraphItemId = fileHandle.Id,
             GraphDriveId = driveId,
             FilePath = fileHandle.WebUrl,
@@ -1314,6 +1316,18 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 "Failed to enqueue RAG indexing job for document {DocumentId}: {Error}. Processing will continue.",
                 documentId, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Extracts the file extension (without dot, lowercase) from a filename.
+    /// Returns null if no extension can be determined.
+    /// </summary>
+    private static string? ExtractFileExtension(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName)) return null;
+        var ext = Path.GetExtension(fileName);
+        if (string.IsNullOrEmpty(ext)) return null;
+        return ext.TrimStart('.').ToLowerInvariant();
     }
 
     /// <summary>

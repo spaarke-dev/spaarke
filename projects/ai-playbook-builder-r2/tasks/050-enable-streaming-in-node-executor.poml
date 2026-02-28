@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="ai-playbook-builder-r2">
+  <metadata>
+    <title>Enable per-token streaming in AiAnalysisNodeExecutor via IStreamingAnalysisToolHandler</title>
+    <phase>6: Per-Token Streaming</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>041</dependencies>
+    <blocks>051, 060</blocks>
+    <tags>bff-api, ai, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag, streaming architecture, modifies core node execution path</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Upgrade AiAnalysisNodeExecutor to check if a handler implements IStreamingAnalysisToolHandler and, if so, use StreamExecuteAsync for per-token streaming. Non-streaming handlers continue to use the existing blocking ExecuteAsync. Map ToolStreamEvent.Token through NodeProgress→PlaybookStreamEvent→SSE to the client.</prompt>
+  <role>Senior .NET backend engineer implementing per-token streaming in the node executor, following established AI streaming patterns in the BFF.</role>
+  <goal>AiAnalysisNodeExecutor uses StreamExecuteAsync for handlers that implement IStreamingAnalysisToolHandler, emitting per-token NodeProgress events through the PlaybookStreamEvent SSE channel. Handlers that do not implement IStreamingAnalysisToolHandler continue to use the blocking ExecuteAsync. ToolStreamEvent.Completed carries the final toolResult. dotnet build succeeds.</goal>
+  <context>
+    <background>AiAnalysisNodeExecutor currently calls handler.ExecuteAsync() which blocks until the tool completes, then emits a single NodeProgress event with the result. IStreamingAnalysisToolHandler already exists and provides StreamExecuteAsync returning IAsyncEnumerable&lt;ToolStreamEvent&gt;. Implementing this interface in a handler signals that it supports per-token streaming. AiAnalysisNodeExecutor must be upgraded to check for this interface via type-check and use StreamExecuteAsync when available. Each ToolStreamEvent.Token maps to a NodeProgress SSE event, and ToolStreamEvent.Completed carries the final tool result. Tokens must NOT be cached (ADR-014).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IStreamingAnalysisToolHandler.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-013">AI tool handlers follow the IAiToolHandler / IStreamingAnalysisToolHandler interface contracts. Extend BFF, no separate streaming service.</constraint>
+    <constraint source="ADR-014">MUST NOT cache streaming tokens. Each ToolStreamEvent.Token must be forwarded immediately to the SSE channel without accumulation.</constraint>
+    <constraint source="spec">Production quality — no stubs. Both streaming and non-streaming paths must be fully functional.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013.md</file>
+      <file>.claude/adr/ADR-014.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>projects/ai-playbook-builder-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="streaming-endpoints" location=".claude/patterns/ai/streaming-endpoints.md">Established SSE streaming pattern in the BFF — how IAsyncEnumerable events map to NodeProgress and then PlaybookStreamEvent for the SSE channel.</pattern>
+    </patterns>
+  </knowledge>
+  <steps>
+    <step order="1">Read AiAnalysisNodeExecutor.cs in full to understand the current ExecuteAsync flow, how it calls handler.ExecuteAsync(), and how NodeProgress events are emitted.</step>
+    <step order="2">Read IStreamingAnalysisToolHandler.cs to confirm the StreamExecuteAsync signature and ToolStreamEvent shape (Token, Completed, Error variants).</step>
+    <step order="3">Read design.md section 6.14 for the precise streaming implementation contract and event mapping specification.</step>
+    <step order="4">In AiAnalysisNodeExecutor.ExecuteAsync (or equivalent node execution method): add type check — if (handler is IStreamingAnalysisToolHandler streamingHandler).</step>
+    <step order="5">If streaming path: await foreach (var evt in streamingHandler.StreamExecuteAsync(input, context, ct)) — handle each event type.</step>
+    <step order="6">For ToolStreamEvent.Token: immediately invoke the onTokenReceived callback (or equivalent NodeProgress SSE emit) with the token text. Do not buffer or cache tokens.</step>
+    <step order="7">For ToolStreamEvent.Completed: extract finalToolResult and break out of the async enumeration loop.</step>
+    <step order="8">For ToolStreamEvent.Error: surface as a node failure (set NodeOutput to error state, break loop).</step>
+    <step order="9">If non-streaming path (handler does not implement IStreamingAnalysisToolHandler): use existing handler.ExecuteAsync() — no changes to this branch.</step>
+    <step order="10">Ensure the final toolResult from both paths is stored consistently in PlaybookRunContext.NodeOutputs.</step>
+    <step order="11">Run dotnet build src/server/api/Sprk.Bff.Api/ and resolve any compilation errors.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Read AiAnalysisNodeExecutor.cs and IStreamingAnalysisToolHandler.cs before making changes.</tool>
+    <tool name="Edit">Make targeted edits to AiAnalysisNodeExecutor.cs. Do not modify IStreamingAnalysisToolHandler.cs.</tool>
+    <tool name="Bash">Run dotnet build src/server/api/Sprk.Bff.Api/ to verify compilation.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Handlers implementing IStreamingAnalysisToolHandler use StreamExecuteAsync with per-token callbacks — not ExecuteAsync.</criterion>
+    <criterion testable="true">Handlers not implementing IStreamingAnalysisToolHandler continue to use the blocking ExecuteAsync path unchanged.</criterion>
+    <criterion testable="true">Each ToolStreamEvent.Token is forwarded immediately to NodeProgress SSE without buffering or caching.</criterion>
+    <criterion testable="true">ToolStreamEvent.Completed carries the final toolResult and terminates the streaming loop.</criterion>
+    <criterion testable="true">ToolStreamEvent.Error sets the node to error state in PlaybookRunContext.NodeOutputs.</criterion>
+    <criterion testable="true">Final toolResult is stored in PlaybookRunContext.NodeOutputs consistently from both streaming and non-streaming paths.</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ succeeds with zero errors.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

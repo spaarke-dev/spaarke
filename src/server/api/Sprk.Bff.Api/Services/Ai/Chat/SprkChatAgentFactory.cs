@@ -103,10 +103,9 @@ public sealed class SprkChatAgentFactory
             additionalDocumentIds,
             cancellationToken);
 
-        // Resolve playbook capabilities to determine which tools should be available.
-        // TODO: Wire Dataverse lookup for sprk_capabilities field (task 047 added the field;
-        //       server-side query awaits generic Dataverse OData query path — post-R2).
-        var capabilities = GetPlaybookCapabilities(context.PlaybookId);
+        // Resolve playbook capabilities from Dataverse to determine which tools should be available.
+        var capabilities = await GetPlaybookCapabilitiesAsync(
+            scope.ServiceProvider, playbookId, cancellationToken);
 
         // Create a shared CitationContext for search tools to populate with source metadata.
         // This context is passed to DocumentSearchTools and KnowledgeRetrievalTools so they
@@ -333,22 +332,45 @@ public sealed class SprkChatAgentFactory
     }
 
     /// <summary>
-    /// Returns the set of capabilities for a given playbook.
+    /// Returns the set of capabilities for a given playbook by querying Dataverse.
     ///
-    /// Returns all capabilities as a permissive default.
-    ///
-    /// Task 047 (R2) added the <c>sprk_capabilities</c> multi-select field on the Playbook entity
-    /// in Dataverse. This method should be replaced with a Dataverse lookup query once the
-    /// generic OData query path is available (post-R2 work).
+    /// Reads the <c>sprk_playbookcapabilities</c> multi-select choice field from the playbook
+    /// record. If the field is empty or the playbook is not found, falls back to all capabilities
+    /// (permissive default for backwards compatibility).
     /// </summary>
+    /// <param name="serviceProvider">Scoped service provider to resolve IPlaybookService.</param>
     /// <param name="playbookId">The playbook ID to look up capabilities for.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A set of capability strings from <see cref="PlaybookCapabilities"/>.</returns>
-    private static IReadOnlySet<string> GetPlaybookCapabilities(Guid playbookId)
+    private async Task<IReadOnlySet<string>> GetPlaybookCapabilitiesAsync(
+        IServiceProvider serviceProvider,
+        Guid playbookId,
+        CancellationToken cancellationToken)
     {
-        // TODO: Replace with Dataverse lookup of sprk_capabilities field (post-R2).
-        // Task 047 added the Dataverse field; server-side query awaits generic OData path.
-        // Until then, all playbooks get all capabilities for development/testing purposes.
-        _ = playbookId; // Suppress unused parameter warning until Dataverse lookup is wired
+        try
+        {
+            var playbookService = serviceProvider.GetRequiredService<IPlaybookService>();
+            var playbook = await playbookService.GetPlaybookAsync(playbookId, cancellationToken);
+
+            if (playbook?.Capabilities is { Length: > 0 })
+            {
+                _logger.LogInformation(
+                    "Playbook {PlaybookId} capabilities from Dataverse: [{Capabilities}]",
+                    playbookId, string.Join(", ", playbook.Capabilities));
+                return new HashSet<string>(playbook.Capabilities);
+            }
+
+            _logger.LogInformation(
+                "Playbook {PlaybookId} has no capabilities set in Dataverse; using all capabilities as default",
+                playbookId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to load capabilities for playbook {PlaybookId}; falling back to all capabilities",
+                playbookId);
+        }
+
         return new HashSet<string>(PlaybookCapabilities.All);
     }
 }
