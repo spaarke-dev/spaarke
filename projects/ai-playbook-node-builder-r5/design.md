@@ -607,9 +607,364 @@ import { getLayoutedElements } from '@xyflow/react';
 
 ---
 
-## 7. Data Architecture
+## 7. Canvas-to-Execution Integration (Critical Gap Analysis)
 
-### 7.1 Dataverse Entity Model (Unchanged)
+**The canvas was built as a visual POC.** It lets you draw nodes and connect them, but most node types cannot be configured for actual execution. This section maps every execution requirement to a canvas configuration element and identifies what must be built.
+
+### 7.1 Current State: What Works vs. What Doesn't
+
+| Node Type | Canvas Creates | Canvas Configures | Execution Result |
+|-----------|---------------|-------------------|------------------|
+| **AI Analysis** | Yes | Tool, Skills, Knowledge, Model, Timeout, Retry | Executes if tool selected |
+| **Condition** | Yes | Operator, Left/Right expressions, Branches | Executes if condition configured |
+| **AI Completion** | Yes | Model only (partial) | No executor implemented yet |
+| **Deliver Output** | Yes | Nothing — no config UI | Fails: "Delivery configuration required" |
+| **Send Email** | Yes | Nothing — no config UI | Fails: "At least one recipient required" |
+| **Create Task** | Yes | Nothing — no config UI | Fails: "Task subject is required" |
+| **Wait** | Yes | Nothing — no config UI | No executor implemented yet |
+
+**Bottom line: Only 2 of 7 node types are usable end-to-end.** The rest create visual boxes on the canvas that produce execution errors.
+
+### 7.2 Per-Node Execution Requirements
+
+Each node type's executor reads `sprk_configjson` (a JSON blob) for its type-specific configuration. The canvas must provide UI to build this JSON.
+
+#### AI Analysis Node — `AiAnalysisNodeExecutor`
+
+```
+Execution reads:
+  ToolId          → Required. Determines which handler runs (e.g., EntityExtractionHandler)
+  SkillIds[]      → Optional. Augments prompt with skill definitions
+  KnowledgeIds[]  → Optional. Injects knowledge context
+  ModelDeploymentId → Optional. Overrides default AI model
+  ConfigJson      → Optional. Handler-specific settings
+
+Canvas provides:
+  ✅ Tool selector       (ScopeSelector — but MOCK DATA)
+  ✅ Skills multi-select  (ScopeSelector — but MOCK DATA)
+  ✅ Knowledge multi-select (ScopeSelector — but MOCK DATA)
+  ✅ Model selector       (ModelSelector — but MOCK DATA)
+  ✅ Timeout / Retry      (SpinButton inputs)
+  ❌ Action selector      (MISSING — no UI to set actionId)
+  ❌ isActive toggle      (MISSING — no way to disable a node)
+
+Status: Structurally complete, blocked by mock data + missing action selector
+```
+
+#### Condition Node — `ConditionNodeExecutor`
+
+```
+Execution reads ConfigJson:
+  {
+    "condition": {
+      "operator": "eq|ne|gt|lt|contains|exists|and|or|not",
+      "left": "{{nodeName.output.fieldName}}",
+      "right": "value or {{variable}}"
+    },
+    "trueBranch": "branchNodeOutputVar",
+    "falseBranch": "branchNodeOutputVar"
+  }
+
+Canvas provides:
+  ✅ ConditionEditor with operator dropdown
+  ✅ Left/right expression fields (support {{}} templates)
+  ✅ Edge routing for true/false branches
+
+Status: Complete — fully configurable
+```
+
+#### Deliver Output Node — `DeliverOutputNodeExecutor`
+
+```
+Execution reads ConfigJson:
+  {
+    "deliveryType": "markdown|html|text|json",          ← REQUIRED
+    "template": "## Report\n{{extract.output.summary}}", ← REQUIRED for non-JSON
+    "outputFormat": {
+      "includeMetadata": true,
+      "includeSourceCitations": false,
+      "maxLength": 10000
+    }
+  }
+
+Canvas provides:
+  ❌ No delivery type selector
+  ❌ No template editor (Handlebars syntax)
+  ❌ No output format options
+  ❌ No variable reference helper (list available {{variables}})
+
+Status: COMPLETELY MISSING — node is a visual placeholder only
+```
+
+**What must be built:**
+- Delivery type dropdown (markdown, html, text, json)
+- Handlebars template editor with syntax highlighting
+- Variable reference panel showing available `{{nodeName.output.*}}` from upstream nodes
+- Output format options (metadata, citations, max length)
+
+#### Send Email Node — `SendEmailNodeExecutor`
+
+```
+Execution reads ConfigJson:
+  {
+    "to": ["user@example.com", "{{node1.output.recipientEmail}}"],
+    "cc": ["cc@example.com"],
+    "subject": "Analysis: {{extract.output.documentName}}",
+    "body": "{{deliverOutput.output.content}}",
+    "isHtml": true
+  }
+
+Canvas provides:
+  ❌ No recipient fields (To, CC)
+  ❌ No subject field
+  ❌ No body editor
+  ❌ No HTML toggle
+  ❌ No template variable support
+
+Status: COMPLETELY MISSING — node is a visual placeholder only
+```
+
+**What must be built:**
+- Recipients input (To/CC with tag-style multi-entry)
+- Subject line input with `{{variable}}` autocomplete
+- Body text editor with `{{variable}}` support
+- HTML/plain text toggle
+
+#### Create Task Node — `CreateTaskNodeExecutor`
+
+```
+Execution reads ConfigJson:
+  {
+    "subject": "Review {{extract.output.documentName}}",
+    "description": "{{deliverOutput.output.content}}",
+    "regardingObjectId": "{{recordId}}",
+    "regardingObjectType": "sprk_document",
+    "ownerId": "{{assigneeId}}",
+    "dueDate": "{{dueDate}}"
+  }
+
+Canvas provides:
+  ❌ No subject field
+  ❌ No description field
+  ❌ No regarding object picker
+  ❌ No owner/assignee picker
+  ❌ No due date field
+
+Status: COMPLETELY MISSING — node is a visual placeholder only
+```
+
+**What must be built:**
+- Subject input with `{{variable}}` support
+- Description textarea with `{{variable}}` support
+- Regarding object type selector + record lookup
+- Owner/assignee user lookup
+- Due date picker (relative or absolute)
+
+#### Wait Node — No Executor Yet
+
+```
+Execution reads ConfigJson:
+  {
+    "waitType": "duration|until|condition",
+    "duration": { "hours": 24 },
+    "untilDateTime": "2026-03-01T00:00:00Z",
+    "resumeCondition": { ... }
+  }
+
+Canvas provides:
+  ❌ No wait type selector
+  ❌ No duration input
+  ❌ No date/time picker
+
+Status: No executor AND no config UI — fully placeholder
+```
+
+#### AI Completion Node — No Executor Yet
+
+```
+Execution reads ConfigJson:
+  {
+    "systemPrompt": "You are a legal analyst...",
+    "userPromptTemplate": "Analyze: {{document.text}}",
+    "temperature": 0.7,
+    "maxTokens": 4000
+  }
+
+Canvas provides:
+  ❌ No system prompt editor
+  ❌ No user prompt template editor
+  ❌ No temperature/token controls
+
+Status: No executor AND minimal config UI — mostly placeholder
+```
+
+### 7.3 Cross-Cutting Gaps (All Node Types)
+
+| Gap | Impact | Current State |
+|-----|--------|---------------|
+| **Action selector** | Cannot associate node with execution action | No UI — `actionId` field exists in data type but no picker |
+| **isActive toggle** | Cannot disable nodes without deleting | No UI — field exists in Dataverse but not exposed |
+| **ConfigJson editor** | Node-specific config never gets written | No typed forms; only generic `config` field in PlaybookNodeData |
+| **Variable reference** | Users can't see available `{{variables}}` | No UI showing upstream node outputs |
+| **Validation feedback** | Users don't know if config is complete | No per-node validation indicators |
+| **Mock scope data** | Selected IDs won't match Dataverse at execution | All scope stores use hardcoded arrays |
+
+### 7.4 The ConfigJson Problem
+
+The execution pipeline reads `sprk_configjson` for all node-specific configuration. Currently:
+
+1. **Canvas stores generic data** in `PlaybookNodeData` (label, timeout, retry, skillIds, etc.)
+2. **`playbookNodeSync.ts` strips known fields** and puts the rest into `sprk_configjson` as a blob
+3. **No node type has a form that writes type-specific config** — the config JSON field is empty for Deliver Output, Send Email, Create Task, Wait
+4. **Executors validate ConfigJson and fail** when it's missing or incomplete
+
+The fix: each node type needs a **typed configuration form** that writes its specific config into the canvas store, which then flows through sync into `sprk_configjson`.
+
+### 7.5 Template Variable System
+
+Multiple node types support Handlebars-style `{{variable}}` references in their config:
+
+```
+{{nodeName.output.fieldName}}   — Reference a specific output field from an upstream node
+{{nodeName.text}}               — Reference the raw text output from an upstream node
+{{document.text}}               — Reference the source document text
+{{recordId}}                    — Reference the triggering record ID
+```
+
+The canvas needs a **variable reference panel** that:
+1. Lists all upstream nodes (from edge connections)
+2. Shows their output variable names
+3. Provides insert-into-field functionality
+4. Validates that referenced variables exist
+
+### 7.6 PlaybookNodeData Interface (Required Expansion)
+
+```typescript
+// Current — minimal, insufficient
+export interface PlaybookNodeData {
+  label: string;
+  type: PlaybookNodeType;
+  actionId?: string;
+  outputVariable?: string;
+  config?: Record<string, unknown>;    // ← Generic, never populated by UI
+  skillIds?: string[];
+  knowledgeIds?: string[];
+  toolId?: string;
+  modelDeploymentId?: string;
+  timeoutSeconds?: number;
+  retryCount?: number;
+  conditionJson?: string;
+}
+
+// Required — typed config per node type
+export interface PlaybookNodeData {
+  label: string;
+  type: PlaybookNodeType;
+  actionId?: string;
+  outputVariable?: string;
+  isActive?: boolean;                   // NEW — enable/disable toggle
+  skillIds?: string[];
+  knowledgeIds?: string[];
+  toolId?: string;
+  modelDeploymentId?: string;
+  timeoutSeconds?: number;
+  retryCount?: number;
+
+  // Type-specific config (maps to sprk_configjson)
+  conditionJson?: string;               // Condition nodes
+
+  // Deliver Output config
+  deliveryType?: 'markdown' | 'html' | 'text' | 'json';
+  template?: string;                    // Handlebars template
+  includeMetadata?: boolean;
+  includeSourceCitations?: boolean;
+  maxOutputLength?: number;
+
+  // Send Email config
+  emailTo?: string[];                   // Recipients
+  emailCc?: string[];                   // CC recipients
+  emailSubject?: string;                // Subject (template supported)
+  emailBody?: string;                   // Body (template supported)
+  emailIsHtml?: boolean;
+
+  // Create Task config
+  taskSubject?: string;                 // Subject (template supported)
+  taskDescription?: string;             // Description (template supported)
+  taskRegardingType?: string;           // Entity type
+  taskRegardingId?: string;             // Record ID (template supported)
+  taskOwnerId?: string;                 // Assignee
+  taskDueDate?: string;                 // Due date
+
+  // AI Completion config
+  systemPrompt?: string;
+  userPromptTemplate?: string;
+  temperature?: number;
+  maxTokens?: number;
+
+  // Wait config
+  waitType?: 'duration' | 'until' | 'condition';
+  waitDurationHours?: number;
+  waitUntilDateTime?: string;
+}
+```
+
+### 7.7 New Properties Forms Required
+
+| Node Type | New Component | Sections |
+|-----------|--------------|----------|
+| **Deliver Output** | `DeliverOutputForm.tsx` | Delivery type dropdown, Template editor (Handlebars with variable picker), Output format options |
+| **Send Email** | `SendEmailForm.tsx` | Recipients (To/CC), Subject, Body editor, HTML toggle |
+| **Create Task** | `CreateTaskForm.tsx` | Subject, Description, Regarding object, Owner lookup, Due date |
+| **AI Completion** | `AiCompletionForm.tsx` | System prompt editor, User prompt template, Temperature slider, Max tokens |
+| **Wait** | `WaitForm.tsx` | Wait type selector, Duration input, DateTime picker |
+| **Variable Reference** | `VariableReferencePanel.tsx` | Lists upstream node outputs, click-to-insert |
+| **Node Validation** | `NodeValidationBadge.tsx` | Shows config completeness per node |
+
+### 7.8 Updated playbookNodeSync Mapping
+
+`playbookNodeSync.ts` must map all new fields into `sprk_configjson`:
+
+```typescript
+function buildConfigJson(data: PlaybookNodeData): string {
+  const config: Record<string, unknown> = { __canvasNodeId: data.id };
+
+  switch (data.type) {
+    case 'deliverOutput':
+      config.deliveryType = data.deliveryType;
+      config.template = data.template;
+      config.outputFormat = {
+        includeMetadata: data.includeMetadata,
+        includeSourceCitations: data.includeSourceCitations,
+        maxLength: data.maxOutputLength,
+      };
+      break;
+    case 'sendEmail':
+      config.to = data.emailTo;
+      config.cc = data.emailCc;
+      config.subject = data.emailSubject;
+      config.body = data.emailBody;
+      config.isHtml = data.emailIsHtml;
+      break;
+    case 'createTask':
+      config.subject = data.taskSubject;
+      config.description = data.taskDescription;
+      config.regardingObjectId = data.taskRegardingId;
+      config.regardingObjectType = data.taskRegardingType;
+      config.ownerId = data.taskOwnerId;
+      config.dueDate = data.taskDueDate;
+      break;
+    // ... etc
+  }
+
+  return JSON.stringify(config);
+}
+```
+
+---
+
+## 8. Data Architecture
+
+### 8.1 Dataverse Entity Model (Unchanged)
 
 ```
 sprk_analysisplaybook (Playbook Record)
@@ -632,7 +987,7 @@ sprk_analysisplaybook (Playbook Record)
     └── sprk_modeldeploymentid   # Lookup → sprk_aimodeldeployment
 ```
 
-### 7.2 Scope Tables (Read by Code Page)
+### 8.2 Scope Tables (Read by Code Page)
 
 | Table | Fields to Query | Used For |
 |-------|-----------------|----------|
@@ -642,7 +997,7 @@ sprk_analysisplaybook (Playbook Record)
 | `sprk_analysisactions` | `sprk_name`, `sprk_description` | Action selector (NEW) |
 | `sprk_aimodeldeployments` | `sprk_name`, `sprk_provider`, `sprk_capability`, `sprk_modelid`, `sprk_contextwindow`, `sprk_isactive` | Model deployment picker |
 
-### 7.3 N:N Relationship Tables (Node Scope Resolution)
+### 8.3 N:N Relationship Tables (Node Scope Resolution)
 
 These tables link nodes to their scope items. They are written by the code page during canvas-to-node sync and read by the BFF API at execution time:
 
@@ -653,7 +1008,7 @@ These tables link nodes to their scope items. They are written by the code page 
 
 Tool and Action are stored as direct lookups on the node record (single-select).
 
-### 7.4 Canvas-to-Node Sync Flow (Preserved)
+### 8.4 Canvas-to-Node Sync Flow (Preserved)
 
 ```
 User edits canvas (drag, connect, configure)
@@ -673,9 +1028,11 @@ Sync canvas nodes to sprk_playbooknode records:
 
 ---
 
-## 8. New Components Detail
+## 9. New Components Detail
 
-### 8.1 ActionSelector Component (New)
+> **Note**: In addition to the components below, Section 7.7 defines **7 new node configuration forms** (DeliverOutputForm, SendEmailForm, CreateTaskForm, AiCompletionForm, WaitForm, VariableReferencePanel, NodeValidationBadge) that close the canvas-to-execution gap.
+
+### 9.1 ActionSelector Component (New)
 
 The Properties panel currently has no way to select an action. This component adds an action dropdown:
 
@@ -691,7 +1048,7 @@ interface ActionSelectorProps {
 // Saves actionId to canvas store → synced to sprk_playbooknode.sprk_actionid
 ```
 
-### 8.2 DataverseClient Service (New)
+### 9.2 DataverseClient Service (New)
 
 Thin wrapper around `fetch()` matching the Dataverse Web API v9.2 contract:
 
@@ -718,11 +1075,11 @@ class DataverseClient {
 }
 ```
 
-### 8.3 AuthService (New — From AnalysisWorkspace)
+### 9.3 AuthService (New — From AnalysisWorkspace)
 
 Copied from the established AnalysisWorkspace pattern. Multi-strategy token acquisition with in-memory caching and proactive refresh.
 
-### 8.4 usePlaybookLoader Hook (New)
+### 9.4 usePlaybookLoader Hook (New)
 
 ```typescript
 function usePlaybookLoader(playbookId: string, client: DataverseClient) {
@@ -734,7 +1091,7 @@ function usePlaybookLoader(playbookId: string, client: DataverseClient) {
 }
 ```
 
-### 8.5 useAutoSave Hook (New)
+### 9.5 useAutoSave Hook (New)
 
 ```typescript
 function useAutoSave(playbookId: string, client: DataverseClient) {
@@ -746,7 +1103,7 @@ function useAutoSave(playbookId: string, client: DataverseClient) {
 }
 ```
 
-### 8.6 PlaybookCanvas Component (Rewritten)
+### 9.6 PlaybookCanvas Component (Rewritten)
 
 ```typescript
 // Upgraded from React Flow v10 → @xyflow/react v12
@@ -789,7 +1146,7 @@ function PlaybookCanvas() {
 
 ---
 
-## 9. Architecture Decisions
+## 10. Architecture Decisions
 
 ### AD-01: Code Page Over PCF
 
@@ -854,7 +1211,7 @@ function PlaybookCanvas() {
 
 ---
 
-## 10. Migration Strategy
+## 11. Migration Strategy
 
 ### Phase 1: Scaffold & Core Infrastructure (Week 1)
 
@@ -874,39 +1231,60 @@ function PlaybookCanvas() {
 5. Migrate canvasStore to use v12 types (useNodesState, useEdgesState)
 6. Wire drag-and-drop with `screenToFlowPosition()` (replaces `project()`)
 
-### Phase 3: Properties & Scope Resolution (Week 3)
+### Phase 3: Scope Resolution — Real Dataverse Lookups (Week 3)
 
-1. Rewrite scopeStore — real Dataverse queries for skills, knowledge, tools
+1. Rewrite scopeStore — real Dataverse queries for skills, knowledge, tools, actions
 2. Rewrite modelStore — real Dataverse queries for model deployments
-3. Add ActionSelector component + actions query
-4. Migrate PropertiesPanel, NodePropertiesForm, ScopeSelector, ModelSelector
-5. Update playbookNodeSync to use DataverseClient
+3. Add ActionSelector component (queries `sprk_analysisaction`)
+4. Add isActive toggle to all node types
+5. Migrate ScopeSelector, ModelSelector to use real data
+6. Update playbookNodeSync to use DataverseClient + map all config fields
 
-### Phase 4: AI Assistant & Templates (Week 3-4)
+### Phase 4: Node Configuration Forms — Execution Integration (Week 3-4)
+
+**This is the critical phase that makes the canvas actually useful for building playbooks.**
+
+1. Build `DeliverOutputForm.tsx` — delivery type, Handlebars template editor, output format
+2. Build `SendEmailForm.tsx` — recipients, subject, body with template variable support
+3. Build `CreateTaskForm.tsx` — subject, description, regarding object, owner, due date
+4. Build `AiCompletionForm.tsx` — system prompt, user prompt template, temperature, max tokens
+5. Build `WaitForm.tsx` — wait type, duration, datetime picker
+6. Build `VariableReferencePanel.tsx` — lists upstream node outputs, click-to-insert `{{var}}`
+7. Build `NodeValidationBadge.tsx` — shows config completeness per node (red/yellow/green)
+8. Expand `PlaybookNodeData` interface with all type-specific fields
+9. Update `playbookNodeSync.ts` `buildConfigJson()` to map all fields into `sprk_configjson`
+10. Wire `NodePropertiesForm.tsx` to render the correct type-specific form per node type
+
+### Phase 5: AI Assistant & Templates (Week 4-5)
 
 1. Migrate AiAssistantModal and all 12 sub-components (no changes needed)
 2. Migrate aiAssistantStore (update token acquisition)
 3. Migrate templateStore (switch to DataverseClient)
 4. Migrate ExecutionOverlay + ConfidenceBadge
 
-### Phase 5: Integration & Polish (Week 4)
+### Phase 6: Integration & Polish (Week 5-6)
 
 1. Wire BuilderLayout with all panels
 2. Keyboard shortcuts integration
 3. Auto-save + node sync end-to-end testing
-4. Theme / dark mode verification (ADR-021)
-5. Build, deploy as web resource, test in Dataverse
+4. Per-node validation: warn user when config is incomplete
+5. Template variable resolution: verify `{{var}}` references resolve against upstream outputs
+6. Theme / dark mode verification (ADR-021)
+7. Build, deploy as web resource, test in Dataverse
 
-### Phase 6: Cleanup (Week 5)
+### Phase 7: Execution Verification & Cleanup (Week 6-7)
 
-1. Remove PCF PlaybookBuilderHost control from solution
-2. Update any form scripts that reference the PCF control
-3. Add navigation from playbook form to code page
-4. End-to-end verification: build → save → execute → output
+1. **End-to-end execution test**: Build playbook in canvas → save → execute from AnalysisWorkspace → verify all nodes execute
+2. Verify `sprk_configjson` contains correct typed config for each node type
+3. Verify Deliver Output renders formatted markdown (not raw JSON)
+4. Verify condition branching routes correctly
+5. Remove PCF PlaybookBuilderHost control from solution
+6. Update form scripts to open code page instead of PCF
+7. Add navigation from playbook form to code page
 
 ---
 
-## 11. Risk Assessment
+## 12. Risk Assessment
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
@@ -920,9 +1298,9 @@ function PlaybookCanvas() {
 
 ---
 
-## 12. Verification Plan
+## 13. Verification Plan
 
-### 12.1 Migration Verification
+### 13.1 Migration Verification
 
 - [ ] All 7 node types render correctly on @xyflow/react v12 canvas
 - [ ] Drag-and-drop from palette creates nodes at correct position
@@ -933,7 +1311,7 @@ function PlaybookCanvas() {
 - [ ] Keyboard shortcuts work (Ctrl+Z, Ctrl+S, Delete)
 - [ ] Dark mode renders correctly (ADR-021)
 
-### 12.2 Dataverse Integration
+### 13.2 Dataverse Integration
 
 - [ ] Skills load from `sprk_analysisskills` (not mock data)
 - [ ] Knowledge loads from `sprk_aiknowledges` (not mock data)
@@ -944,16 +1322,30 @@ function PlaybookCanvas() {
 - [ ] Node sync creates/updates/deletes `sprk_playbooknode` records
 - [ ] Selected scope IDs are real Dataverse GUIDs (not 'skill-1', etc.)
 
-### 12.3 End-to-End
+### 13.3 Execution Integration (Per-Node ConfigJson)
+
+- [ ] **AI Analysis node**: ConfigJson contains `modelDeploymentId`, `systemPrompt`, scope IDs; executor receives complete config
+- [ ] **AI Completion node**: ConfigJson contains `systemPrompt`, `userPromptTemplate`, `temperature`, `maxTokens`; executor receives complete config
+- [ ] **Deliver Output node**: ConfigJson contains `deliveryType`, `template` (Handlebars), output format options; executor renders formatted output (not raw JSON)
+- [ ] **Send Email node**: ConfigJson contains `to`, `cc`, `subject`, `body`, `isHtml`; executor sends email with resolved template variables
+- [ ] **Create Task node**: ConfigJson contains `subject`, `description`, `regardingObjectId`, `ownerId`, `dueDate`; executor creates Dataverse task record
+- [ ] **Wait node**: ConfigJson contains `waitType`, `duration` or `untilDateTime`; executor pauses correctly
+- [ ] **Condition node**: `conditionJson` evaluates correctly against upstream node outputs; branching routes to correct edge
+- [ ] **Template variables**: `{{nodeName.output.fieldName}}` references resolve to actual upstream output values
+- [ ] **Node validation**: Incomplete node config shows warning badge; prevents save with missing required fields
+
+### 13.4 End-to-End
 
 - [ ] Open code page from playbook form → canvas loads
 - [ ] Design playbook → auto-save → close → reopen → canvas intact
 - [ ] Node records exist in Dataverse after save
 - [ ] Execute playbook from AnalysisWorkspace → node-based path activates
+- [ ] All 7 node types execute end-to-end without ConfigJson errors
+- [ ] Deliver Output produces formatted markdown/HTML (not raw JSON)
 - [ ] AI Assistant chat works (SSE streaming to BFF API)
 - [ ] Template library loads and applies templates
 
-### 12.4 Graduation from R4 PCF
+### 13.5 Graduation from R4 PCF
 
 - [ ] Zero mock/hardcoded data in any store
 - [ ] PCF control removed from solution XML
@@ -963,7 +1355,7 @@ function PlaybookCanvas() {
 
 ---
 
-## 13. Dependencies
+## 14. Dependencies
 
 ### Internal
 
@@ -984,12 +1376,12 @@ function PlaybookCanvas() {
 
 ---
 
-## 14. Out of Scope
+## 15. Out of Scope
 
-- New node types (beyond the existing 7)
-- Playbook execution changes (BFF API / orchestration unchanged)
-- AnalysisWorkspace changes
-- New Dataverse entities or schema changes
+- New node types beyond the existing 7 (adding new node types is out of scope; **building configuration forms for all 7 existing types IS in scope** — see Section 7)
+- Playbook execution engine changes (BFF API / orchestration service / executors unchanged — they already read ConfigJson, the gap is that the canvas never writes it)
+- AnalysisWorkspace changes (it already supports node-based execution)
+- New Dataverse entities or schema changes (all tables exist; this project populates them correctly)
 - Office add-in integration
 - Staging/production deployment
 
