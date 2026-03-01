@@ -1,0 +1,39 @@
+{
+  "name": "playbook-builder-code-page",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PlaybookBuilder React Code Page — full-page HTML web resource for AI Playbook visual node builder",
+  "scripts": {
+    "build": "webpack --config webpack.config.js",
+    "build:dev": "webpack --config webpack.config.js --mode development",
+    "build:analyze": "webpack --config webpack.config.js --env analyze",
+    "dev": "webpack serve --config webpack.config.js --mode development --open",
+    "lint": "eslint src --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "@azure/msal-browser": "^4.29.0",
+    "@fluentui/react-components": "^9.54.0",
+    "@fluentui/react-icons": "^2.0.0",
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
+    "@xyflow/react": "^12.8.3",
+    "d3-force": "^3.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/d3-force": "^3.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/xrm": "^9.0.0",
+    "css-loader": "^7.1.2",
+    "esbuild-loader": "^4.4.2",
+    "style-loader": "^4.0.0",
+    "terser-webpack-plugin": "^5.3.16",
+    "typescript": "^5.4.0",
+    "webpack": "^5.91.0",
+    "webpack-bundle-analyzer": "^5.2.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^5.0.4"
+  }
+}

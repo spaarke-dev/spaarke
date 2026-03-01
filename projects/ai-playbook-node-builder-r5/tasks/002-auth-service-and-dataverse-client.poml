@@ -1,7 +1,7 @@
 <task id="R5-002" project="AI Playbook Node Builder R5">
   <metadata>
     <title>AuthService and DataverseClient</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>1</phase>
     <tags>auth, dataverse, services, code-page</tags>
     <estimated-effort>3 hours</estimated-effort>

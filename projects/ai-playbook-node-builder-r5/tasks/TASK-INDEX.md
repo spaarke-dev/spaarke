@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-02-28
 > **Total Tasks**: 25
-> **Completed**: 0 / 25
+> **Completed**: 3 / 25
 
 ## Status Legend
 
@@ -19,8 +19,8 @@
 
 | # | Task | Status | Dependencies | Est. |
 |---|------|--------|-------------|------|
-| 001 | [Project Scaffold and Build Pipeline](001-project-scaffold-and-build-pipeline.poml) | 🔲 | none | 3h |
-| 002 | [AuthService and DataverseClient](002-auth-service-and-dataverse-client.poml) | 🔲 | 001 | 3h |
+| 001 | [Project Scaffold and Build Pipeline](001-project-scaffold-and-build-pipeline.poml) | ✅ | none | 3h |
+| 002 | [AuthService and DataverseClient](002-auth-service-and-dataverse-client.poml) | ✅ | 001 | 3h |
 | 003 | [Entry Point, FluentProvider, Theme Detection](003-entry-point-theme-detection.poml) | 🔲 | 001, 002 | 2h |
 
 ## Phase 2: Canvas Migration (Parallel — after Phase 1)

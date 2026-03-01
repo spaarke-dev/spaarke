@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none |
-| **Step** | — |
-| **Status** | none (waiting for first task) |
-| **Next Action** | Begin Task 001: Project scaffold |
+| **Task** | 001 - Project Scaffold and Build Pipeline |
+| **Step** | 1 of 5: Copy scaffold from AnalysisWorkspace |
+| **Status** | in-progress |
+| **Next Action** | Create project directory + all scaffold files |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
@@ -32,12 +32,12 @@ Project initialized. All artifacts created (README, PLAN, CLAUDE.md). Task files
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
-| **Started** | — |
+| **Task ID** | 001 |
+| **Task File** | tasks/001-project-scaffold-and-build-pipeline.poml |
+| **Title** | Project Scaffold and Build Pipeline |
+| **Phase** | 1 (Foundation) |
+| **Status** | in-progress |
+| **Started** | 2026-02-28 |
 
 ---
 
