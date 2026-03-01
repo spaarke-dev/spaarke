@@ -1,0 +1,53 @@
+<task id="R5-041" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Migrate aiAssistantStore</title>
+    <status>not-started</status>
+    <phase>5</phase>
+    <tags>zustand, store, ai-assistant</tags>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Migrate aiAssistantStore.ts from R4 PCF. Update token acquisition source
+    from PCF context to AuthService. Store is mostly framework-agnostic.
+  </prompt>
+
+  <role>Frontend developer experienced with Zustand stores.</role>
+
+  <goal>
+    aiAssistantStore.ts using AuthService for token acquisition instead of PCF context.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Token from AuthService (not PCF context)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>zustand, ai-assistant-store</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="R4 aiAssistantStore" location="src/client/pcf/PlaybookBuilderHost/control/stores/aiAssistantStore.ts">
+        Source store to migrate
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Copy store">Copy from R4.</step>
+    <step order="2" name="Update auth">Replace PCF token acquisition with AuthService.</step>
+    <step order="3" name="Verify">Ensure store compiles and functions correctly.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/stores/aiAssistantStore.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Store uses AuthService for token acquisition</criterion>
+    <criterion testable="true">No PCF context references remain</criterion>
+    <criterion testable="true">Store compiles without errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,67 @@
+<task id="R5-042" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Migrate templateStore and ExecutionOverlay</title>
+    <status>not-started</status>
+    <phase>5</phase>
+    <tags>zustand, store, templates, execution</tags>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Migrate templateStore.ts (switch from PCF webAPI to DataverseClient) and
+    ExecutionOverlay component. Also migrate executionStore.ts, useExecutionStream.ts,
+    and AiPlaybookService.ts.
+  </prompt>
+
+  <role>Frontend developer experienced with Zustand stores and Dataverse queries.</role>
+
+  <goal>
+    templateStore.ts using DataverseClient, executionStore.ts, ExecutionOverlay,
+    useExecutionStream, and AiPlaybookService all migrated to Code Page context.
+  </goal>
+
+  <constraints>
+    <constraint source="project">templateStore uses DataverseClient (not PCF webAPI)</constraint>
+    <constraint source="project">AiPlaybookService uses AuthService for token</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>zustand, templates, execution</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="R4 stores" location="src/client/pcf/PlaybookBuilderHost/control/stores/">
+        templateStore.ts, executionStore.ts
+      </pattern>
+      <pattern name="R4 services" location="src/client/pcf/PlaybookBuilderHost/control/services/">
+        AiPlaybookService.ts
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Migrate templateStore">Replace webAPI with DataverseClient.</step>
+    <step order="2" name="Migrate executionStore">Copy as-is (framework-agnostic).</step>
+    <step order="3" name="Migrate AiPlaybookService">Update token source to AuthService.</step>
+    <step order="4" name="Migrate useExecutionStream">Copy hook (framework-agnostic).</step>
+    <step order="5" name="Migrate ExecutionOverlay">Copy component, update imports.</step>
+    <step order="6" name="Verify">Ensure all compile correctly.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/stores/templateStore.ts</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/stores/executionStore.ts</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/services/AiPlaybookService.ts</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/hooks/useExecutionStream.ts</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/execution/ExecutionOverlay.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">templateStore uses DataverseClient for CRUD</criterion>
+    <criterion testable="true">AiPlaybookService uses AuthService for token</criterion>
+    <criterion testable="true">No PCF context references in any migrated file</criterion>
+    <criterion testable="true">All files compile without errors</criterion>
+  </acceptance-criteria>
+</task>

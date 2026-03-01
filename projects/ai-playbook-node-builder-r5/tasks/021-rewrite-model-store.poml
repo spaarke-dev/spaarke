@@ -1,0 +1,58 @@
+<task id="R5-021" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Rewrite modelStore with Real Dataverse Queries</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <tags>dataverse, store, scope-resolution</tags>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Rewrite modelStore.ts to load model deployments from sprk_aimodeldeployment
+    Dataverse table via DataverseClient. Replace all mock data.
+  </prompt>
+
+  <role>Frontend developer experienced with Dataverse Web API and Zustand stores.</role>
+
+  <goal>
+    modelStore.ts that loads AI model deployments from sprk_aimodeldeployment
+    with provider, capability, and deployment name fields.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Zero mock data — query sprk_aimodeldeployment table</constraint>
+    <constraint source="project">Use DataverseClient.retrieveMultipleRecords()</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse-web-api, model-deployments</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="R4 modelStore" location="src/client/pcf/PlaybookBuilderHost/control/stores/modelStore.ts">
+        Source store with mock data to replace
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read R4 modelStore">Identify mock data.</step>
+    <step order="2" name="Implement loadModelDeployments">
+      Query sprk_aimodeldeployment: select sprk_name, sprk_provider, sprk_capability,
+      sprk_deploymentname. Return typed AiModelDeployment[].
+    </step>
+    <step order="3" name="Verify zero mock data">Ensure no hardcoded model data remains.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/stores/modelStore.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Models loaded from sprk_aimodeldeployment table</criterion>
+    <criterion testable="true">Zero mock data</criterion>
+    <criterion testable="true">Loading and error states tracked</criterion>
+  </acceptance-criteria>
+</task>

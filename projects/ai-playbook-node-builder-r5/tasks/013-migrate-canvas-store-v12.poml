@@ -1,0 +1,64 @@
+<task id="R5-013" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Migrate canvasStore to v12 Types</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <tags>canvas, xyflow, zustand, store, migration</tags>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Migrate canvasStore.ts from react-flow-renderer v10 types to @xyflow/react v12 types.
+    Update Node, Edge, ReactFlowInstance types. Update onNodesChange, onEdgesChange,
+    and other callbacks to v12 API. Wire usePlaybookLoader hook for loading canvas data.
+  </prompt>
+
+  <role>Frontend developer experienced with Zustand state management and @xyflow/react v12.</role>
+
+  <goal>
+    canvasStore.ts using v12 types (Node, Edge from @xyflow/react), with usePlaybookLoader
+    hook that loads playbook data from DataverseClient on mount.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Use @xyflow/react Node, Edge types (not react-flow-renderer)</constraint>
+    <constraint source="project">Store must support Node&lt;PlaybookNodeData&gt; typed nodes</constraint>
+    <constraint source="project">usePlaybookLoader loads canvas JSON from sprk_canvaslayoutjson</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>zustand, xyflow-v12-store</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="R4 canvasStore" location="src/client/pcf/PlaybookBuilderHost/control/stores/canvasStore.ts">
+        Source store to migrate
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read R4 canvasStore">Study current store implementation.</step>
+    <step order="2" name="Migrate types">Update all v10 types to v12 equivalents.</step>
+    <step order="3" name="Create usePlaybookLoader">
+      Hook that takes playbookId, loads sprk_canvaslayoutjson via DataverseClient,
+      parses JSON, initializes canvasStore with nodes and edges.
+    </step>
+    <step order="4" name="Verify compilation">Ensure store and hook compile correctly.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/stores/canvasStore.ts</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/hooks/usePlaybookLoader.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">canvasStore uses @xyflow/react Node, Edge types</criterion>
+    <criterion testable="true">Node type is Node&lt;PlaybookNodeData&gt;</criterion>
+    <criterion testable="true">onNodesChange, onEdgesChange use v12 callbacks</criterion>
+    <criterion testable="true">usePlaybookLoader loads canvas JSON from Dataverse</criterion>
+    <criterion testable="true">No react-flow-renderer imports</criterion>
+  </acceptance-criteria>
+</task>

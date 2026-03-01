@@ -1,0 +1,63 @@
+<task id="R5-035" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>VariableReferencePanel Component</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <tags>fluent-ui, component, template-variables</tags>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Build VariableReferencePanel.tsx — a panel that lists available template variables
+    from upstream nodes in the format {{nodeName.output.fieldName}}. Clicking a
+    variable inserts it into the currently focused text field in a node config form.
+  </prompt>
+
+  <role>Frontend developer experienced with Fluent UI v9 and Handlebars template systems.</role>
+
+  <goal>
+    VariableReferencePanel.tsx that analyzes the canvas graph to find upstream nodes,
+    lists their output variables, and allows click-to-insert into active form fields.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 components</constraint>
+    <constraint source="project">Variables use {{nodeName.output.fieldName}} Handlebars syntax</constraint>
+    <constraint source="project">Must resolve upstream nodes from canvas graph edges</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>template-variables, graph-traversal</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/design.md</file>
+      <file>projects/ai-playbook-node-builder-r5/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Build upstream node resolver">
+      Given a node ID, traverse edges backward to find all upstream nodes.
+      Extract their output variable names.
+    </step>
+    <step order="2" name="Create panel component">
+      List variables grouped by source node. Each variable is clickable.
+      Use Fluent Tree or List component.
+    </step>
+    <step order="3" name="Implement click-to-insert">
+      When clicked, insert {{variable}} text at cursor position in active field.
+    </step>
+    <step order="4" name="Verify">Ensure panel shows correct variables and insertion works.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/properties/VariableReferencePanel.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Panel lists upstream node output variables</criterion>
+    <criterion testable="true">Variables formatted as {{nodeName.output.fieldName}}</criterion>
+    <criterion testable="true">Click inserts variable text into active field</criterion>
+    <criterion testable="true">Variables grouped by source node name</criterion>
+  </acceptance-criteria>
+</task>

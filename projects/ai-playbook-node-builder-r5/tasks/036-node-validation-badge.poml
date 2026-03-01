@@ -1,0 +1,63 @@
+<task id="R5-036" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>NodeValidationBadge Component</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <tags>fluent-ui, component, validation</tags>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Build NodeValidationBadge.tsx — per-node config completeness indicator that shows
+    red (missing required fields), yellow (partial config), or green (complete config).
+    Each node type has different required fields; the badge evaluates completeness
+    based on the node type's ConfigJson schema.
+  </prompt>
+
+  <role>Frontend developer experienced with Fluent UI v9 and validation logic.</role>
+
+  <goal>
+    NodeValidationBadge.tsx that evaluates node config completeness per node type
+    and displays a colored badge (red/yellow/green) with tooltip listing missing fields.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 Badge and Tooltip components</constraint>
+    <constraint source="ADR-021">Colors must use Fluent design tokens</constraint>
+    <constraint source="project">Must evaluate all 7 node types differently</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>validation, node-config-schemas</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Define validation rules per node type">
+      For each of 7 types, define required and optional config fields.
+    </step>
+    <step order="2" name="Create badge component">
+      Badge evaluates node data against rules. Red = missing required.
+      Yellow = has required but missing optional. Green = all fields present.
+      Tooltip shows missing field names.
+    </step>
+    <step order="3" name="Verify">Ensure badge renders correctly for each node type.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/properties/NodeValidationBadge.tsx</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/utils/nodeValidation.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Badge shows red for missing required fields</criterion>
+    <criterion testable="true">Badge shows yellow for partial config</criterion>
+    <criterion testable="true">Badge shows green for complete config</criterion>
+    <criterion testable="true">Tooltip lists missing field names</criterion>
+    <criterion testable="true">Validation rules defined for all 7 node types</criterion>
+    <criterion testable="true">Badge updates in real-time as user fills config</criterion>
+  </acceptance-criteria>
+</task>

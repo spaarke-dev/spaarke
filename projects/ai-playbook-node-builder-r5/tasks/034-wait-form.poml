@@ -1,0 +1,55 @@
+<task id="R5-034" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>WaitForm Configuration Form</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <tags>fluent-ui, form, node-config, wait</tags>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Build WaitForm.tsx — configuration form for Wait nodes.
+    Fields: wait type (dropdown: duration, datetime, event), duration input
+    (when type=duration), datetime picker (when type=datetime).
+  </prompt>
+
+  <role>Frontend developer experienced with Fluent UI v9 forms.</role>
+
+  <goal>
+    WaitForm.tsx with wait type selection and conditional fields for duration
+    or datetime. Writes to PlaybookNodeData for ConfigJson mapping.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 form components</constraint>
+    <constraint source="project">Fields map to ConfigJson: waitType, duration, datetime</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>fluent-ui-forms, wait-config</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create form component">
+      Dropdown for wait type. Conditional: SpinButton for duration (minutes/hours),
+      DatePicker for datetime.
+    </step>
+    <step order="2" name="Wire to node data">Form reads/writes to canvasStore.</step>
+    <step order="3" name="Verify build">Ensure component compiles.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/properties/WaitForm.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Form has wait type dropdown (duration, datetime, event)</criterion>
+    <criterion testable="true">Duration field shown when type=duration</criterion>
+    <criterion testable="true">Datetime picker shown when type=datetime</criterion>
+    <criterion testable="true">Changes write to PlaybookNodeData for ConfigJson mapping</criterion>
+  </acceptance-criteria>
+</task>

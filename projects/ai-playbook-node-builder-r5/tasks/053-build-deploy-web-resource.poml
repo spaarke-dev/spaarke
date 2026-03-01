@@ -1,0 +1,57 @@
+<task id="R5-053" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Build and Deploy as Web Resource</title>
+    <status>not-started</status>
+    <phase>6</phase>
+    <tags>build, deploy, code-page, dataverse</tags>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>050, 051, 052</dependencies>
+  </metadata>
+
+  <prompt>
+    Final build of the Code Page. Verify bundle size (target: less than 1.5 MB gzipped).
+    Deploy as web resource sprk_playbookbuilder to Dataverse dev environment.
+    Verify it opens correctly from a Dataverse form.
+  </prompt>
+
+  <role>Frontend developer experienced with Code Page deployment to Dataverse.</role>
+
+  <goal>
+    Code Page deployed as sprk_playbookbuilder.html web resource, opening correctly
+    from Dataverse forms with bundle size under 1.5 MB gzipped.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Bundle size less than 1.5 MB gzipped</constraint>
+    <constraint source="project">Deploy as single inline HTML file</constraint>
+    <constraint source="project">Web resource name: sprk_playbookbuilder</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page-deploy, web-resource</topic>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/constraints/webresource.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Production build">Run npm run build with production settings.</step>
+    <step order="2" name="Run build-webresource.ps1">Generate inline HTML file.</step>
+    <step order="3" name="Check bundle size">Verify less than 1.5 MB gzipped.</step>
+    <step order="4" name="Deploy to Dataverse">Use pac webresource push or code-page-deploy skill.</step>
+    <step order="5" name="Verify">Open from Dataverse form, verify canvas loads.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/out/sprk_playbookbuilder.html</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Build produces out/sprk_playbookbuilder.html</criterion>
+    <criterion testable="true">Bundle size less than 1.5 MB gzipped</criterion>
+    <criterion testable="true">Web resource deployed to Dataverse</criterion>
+    <criterion testable="true">Code page opens from Dataverse form</criterion>
+    <criterion testable="true">Canvas loads with playbook data</criterion>
+  </acceptance-criteria>
+</task>

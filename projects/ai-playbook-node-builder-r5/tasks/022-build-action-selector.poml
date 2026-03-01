@@ -1,0 +1,58 @@
+<task id="R5-022" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Build ActionSelector Component</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <tags>dataverse, component, scope-resolution, fluent-ui</tags>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Build a new ActionSelector dropdown component that queries sprk_analysisaction
+    Dataverse table. This component is entirely missing from R4 — it's needed for
+    AI Analysis nodes to select which action to execute.
+  </prompt>
+
+  <role>Frontend developer experienced with Fluent UI v9 dropdowns and Dataverse queries.</role>
+
+  <goal>
+    ActionSelector.tsx — a Fluent v9 Dropdown component that loads actions from
+    sprk_analysisaction and allows selection for AI Analysis node configuration.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 Dropdown component</constraint>
+    <constraint source="project">Query sprk_analysisaction via DataverseClient</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>fluent-ui-dropdown, dataverse-query</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/ai-playbook-node-builder-r5/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create ActionSelector component">
+      Fluent v9 Dropdown that loads actions from sprk_analysisaction on mount.
+      Display action name, description. Support single selection.
+    </step>
+    <step order="2" name="Add to scopeStore or standalone">
+      Add loadActions() to scopeStore or create separate hook. Load via DataverseClient.
+    </step>
+    <step order="3" name="Verify">Ensure component renders and populates from Dataverse.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/properties/ActionSelector.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ActionSelector renders Fluent v9 Dropdown</criterion>
+    <criterion testable="true">Actions loaded from sprk_analysisaction table</criterion>
+    <criterion testable="true">Selected action ID is a real Dataverse GUID</criterion>
+    <criterion testable="true">Loading state shown while fetching</criterion>
+  </acceptance-criteria>
+</task>

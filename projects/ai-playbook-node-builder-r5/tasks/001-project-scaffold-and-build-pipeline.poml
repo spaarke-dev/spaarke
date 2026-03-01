@@ -1,0 +1,112 @@
+<task id="R5-001" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Project Scaffold and Build Pipeline</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <tags>code-page, scaffold, webpack, build-pipeline</tags>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the Code Page project structure for the Playbook Builder at
+    `src/client/code-pages/PlaybookBuilder/`. Set up Webpack 5, build-webresource.ps1,
+    package.json with all required dependencies, tsconfig, and entry point.
+    Follow the AnalysisWorkspace and DocumentRelationshipViewer patterns exactly.
+  </prompt>
+
+  <role>
+    Frontend developer experienced with React 19, Webpack 5, Fluent UI v9,
+    and Dataverse Code Page build pipelines.
+  </role>
+
+  <goal>
+    A compilable React 19 Code Page project at `src/client/code-pages/PlaybookBuilder/`
+    that builds successfully via `npm run build` and produces a single inline HTML
+    file at `out/sprk_playbookbuilder.html` via build-webresource.ps1.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-006">Place in src/client/code-pages/PlaybookBuilder/</constraint>
+    <constraint source="ADR-021">Use React 19, Fluent UI v9, makeStyles for styling</constraint>
+    <constraint source="ADR-022">Code Pages bundle React 19 (exempt from PCF React 16)</constraint>
+    <constraint source="project">Build must produce single inline HTML via build-webresource.ps1</constraint>
+    <constraint source="project">Use Webpack 5 + esbuild-loader (match AnalysisWorkspace)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page, webpack, build-pipeline</topic>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>projects/ai-playbook-node-builder-r5/spec.md</file>
+      <file>projects/ai-playbook-node-builder-r5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Code Page scaffold" location="src/client/code-pages/AnalysisWorkspace/">
+        Copy webpack.config.js, tsconfig.json, build-webresource.ps1 structure
+      </pattern>
+      <pattern name="Package dependencies" location="src/client/code-pages/DocumentRelationshipViewer/package.json">
+        Copy @xyflow/react, React 19, Fluent v9 dependency versions
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the foundation task. All other phases depend on this scaffold existing.
+      The project structure must match existing Code Page patterns for consistency.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Copy scaffold from AnalysisWorkspace">
+      Create project directory. Copy webpack.config.js, tsconfig.json, tsconfig.node.json,
+      build-webresource.ps1 from AnalysisWorkspace. Adapt paths and names.
+    </step>
+    <step order="2" name="Create package.json">
+      Create package.json with all dependencies: @xyflow/react ^12.8.3, react ^19.0.0,
+      react-dom ^19.0.0, @fluentui/react-components ^9.54.0, @fluentui/react-icons ^2.0.0,
+      zustand ^5.x, @azure/msal-browser ^4.x, @spaarke/ui-components workspace:*,
+      d3-force ^3.0.0. Add devDependencies from AnalysisWorkspace.
+    </step>
+    <step order="3" name="Create entry point">
+      Create src/index.tsx with React 19 createRoot, FluentProvider, URLSearchParams
+      for playbookId. Create minimal src/App.tsx placeholder.
+    </step>
+    <step order="4" name="Create folder structure">
+      Create directories: src/components/, src/stores/, src/services/, src/hooks/,
+      src/types/, src/config/
+    </step>
+    <step order="5" name="Build and verify">
+      Run npm install, npm run build. Verify out/sprk_playbookbuilder.html is produced.
+      Verify single inline HTML file.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="webpack">Bundle TypeScript/React</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/webpack.config.js</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/package.json</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/tsconfig.json</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/build-webresource.ps1</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/index.tsx</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/App.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Project directory exists at src/client/code-pages/PlaybookBuilder/</criterion>
+    <criterion testable="true">npm install completes without errors</criterion>
+    <criterion testable="true">npm run build produces bundle</criterion>
+    <criterion testable="true">build-webresource.ps1 produces out/sprk_playbookbuilder.html</criterion>
+    <criterion testable="true">HTML file is self-contained (single file, inline JS)</criterion>
+    <criterion testable="true">Package.json includes @xyflow/react ^12.8.3, React 19, Fluent v9</criterion>
+  </acceptance-criteria>
+</task>

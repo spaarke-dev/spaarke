@@ -1,0 +1,63 @@
+<task id="R5-050" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Wire BuilderLayout with All Panels</title>
+    <status>not-started</status>
+    <phase>6</phase>
+    <tags>integration, layout, fluent-ui</tags>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>010, 011, 012, 013, 020, 021, 022, 023, 037, 040, 041, 042</dependencies>
+  </metadata>
+
+  <prompt>
+    Wire BuilderLayout.tsx with all panels: PlaybookCanvas (center), PropertiesPanel
+    (right), node palette (left toolbar), AI Assistant modal, template library,
+    execution overlay. Connect all stores and hooks.
+  </prompt>
+
+  <role>Frontend developer experienced with complex layout composition and React state management.</role>
+
+  <goal>
+    Fully wired BuilderLayout with canvas, properties panel, toolbar, AI assistant,
+    and template library. All panels communicate via shared Zustand stores.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Layout must be responsive and support dark mode</constraint>
+    <constraint source="project">Must use FluentProvider theme throughout</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>layout, integration</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/plan.md</file>
+    </files>
+    <patterns>
+      <pattern name="R4 BuilderLayout" location="src/client/pcf/PlaybookBuilderHost/control/components/">
+        Source layout to migrate and enhance
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Rewrite BuilderLayout">
+      Replace placeholder with full layout: left toolbar, center canvas, right properties.
+    </step>
+    <step order="2" name="Wire stores">Connect all Zustand stores to layout tree.</step>
+    <step order="3" name="Add modal triggers">AI Assistant button, template library button.</step>
+    <step order="4" name="Add execution overlay">Wire ExecutionOverlay component.</step>
+    <step order="5" name="Verify integration">All panels render and communicate correctly.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/BuilderLayout.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Canvas renders in center panel</criterion>
+    <criterion testable="true">Properties panel shows on right when node selected</criterion>
+    <criterion testable="true">Node palette/toolbar on left</criterion>
+    <criterion testable="true">AI Assistant modal opens from button</criterion>
+    <criterion testable="true">Template library accessible</criterion>
+    <criterion testable="true">All panels communicate via Zustand stores</criterion>
+  </acceptance-criteria>
+</task>

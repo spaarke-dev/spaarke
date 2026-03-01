@@ -1,0 +1,61 @@
+<task id="R5-030" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>DeliverOutputForm Configuration Form</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <tags>fluent-ui, form, node-config, deliver-output</tags>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Build DeliverOutputForm.tsx — configuration form for Deliver Output nodes.
+    Fields: delivery type (dropdown), Handlebars template (multiline editor),
+    output format (dropdown). Must write typed fields to PlaybookNodeData so
+    buildConfigJson() can map to sprk_configjson.
+  </prompt>
+
+  <role>Frontend developer experienced with Fluent UI v9 forms and template editors.</role>
+
+  <goal>
+    DeliverOutputForm.tsx that lets users configure delivery type, Handlebars
+    template, and output format. Changes write to PlaybookNodeData for ConfigJson sync.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 form components (Dropdown, Textarea, Field)</constraint>
+    <constraint source="project">Fields must map to ConfigJson: deliveryType, template, outputFormat</constraint>
+    <constraint source="project">Template field supports {{nodeName.output.fieldName}} syntax</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>fluent-ui-forms, deliver-output-config</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/design.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create form component">
+      DeliverOutputForm with Fluent v9 Dropdown for delivery type (workingDocument,
+      email, notification), Textarea for Handlebars template, Dropdown for output
+      format (html, markdown, plaintext).
+    </step>
+    <step order="2" name="Wire to node data">
+      Form reads/writes to canvasStore node data fields.
+    </step>
+    <step order="3" name="Verify build">Ensure component compiles.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/properties/DeliverOutputForm.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Form has delivery type dropdown with workingDocument, email, notification options</criterion>
+    <criterion testable="true">Form has multiline Handlebars template editor</criterion>
+    <criterion testable="true">Form has output format dropdown (html, markdown, plaintext)</criterion>
+    <criterion testable="true">Changes write to PlaybookNodeData for ConfigJson mapping</criterion>
+  </acceptance-criteria>
+</task>

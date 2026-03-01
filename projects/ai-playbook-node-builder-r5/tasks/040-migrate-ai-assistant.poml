@@ -1,0 +1,69 @@
+<task id="R5-040" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Migrate AiAssistantModal and Sub-Components</title>
+    <status>not-started</status>
+    <phase>5</phase>
+    <tags>ai-assistant, migration, sse-streaming</tags>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Migrate AiAssistantModal and all 12 sub-components from R4 PCF. These are
+    mostly framework-agnostic — primary change is updating token acquisition
+    from PCF context to AuthService.
+  </prompt>
+
+  <role>Frontend developer experienced with SSE streaming and AI chat interfaces.</role>
+
+  <goal>
+    Working AiAssistantModal with all 12 sub-components that streams AI responses
+    via BFF SSE endpoint using AuthService for token acquisition.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-013">AI streaming via BFF only — no direct Azure AI calls</constraint>
+    <constraint source="project">Token from AuthService (not PCF context)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai-assistant, sse-streaming</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>projects/ai-playbook-node-builder-r5/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="R4 AiAssistant" location="src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/">
+        12 sub-components to migrate
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Copy AI Assistant components">
+      Copy all 12 sub-components from R4 PlaybookBuilderHost.
+    </step>
+    <step order="2" name="Update token acquisition">
+      Replace PCF context-based token with AuthService.getToken().
+    </step>
+    <step order="3" name="Update imports">
+      Replace any PCF-specific imports with Code Page equivalents.
+    </step>
+    <step order="4" name="Verify SSE streaming">
+      Ensure chat connects to BFF SSE endpoint and streams responses.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/ai-assistant/AiAssistantModal.tsx</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/ai-assistant/ (12 sub-components)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AiAssistantModal and all 12 sub-components migrated</criterion>
+    <criterion testable="true">Token acquired from AuthService (not PCF context)</criterion>
+    <criterion testable="true">SSE streaming to BFF endpoint works</criterion>
+    <criterion testable="true">Chat, command palette, operation feedback all functional</criterion>
+  </acceptance-criteria>
+</task>

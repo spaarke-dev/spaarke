@@ -1,0 +1,79 @@
+<task id="R5-020" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Rewrite scopeStore with Real Dataverse Queries</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <tags>dataverse, store, scope-resolution</tags>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Complete rewrite of scopeStore.ts to replace all mock/hardcoded data with real
+    Dataverse queries. Skills from sprk_analysisskill, Knowledge from sprk_aiknowledge,
+    Tools from sprk_analysistool. All using DataverseClient.
+  </prompt>
+
+  <role>Frontend developer experienced with Dataverse Web API and Zustand stores.</role>
+
+  <goal>
+    scopeStore.ts that loads skills, knowledge, and tools from real Dataverse tables
+    via DataverseClient with proper OData queries, loading states, and error handling.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Zero mock data — all from Dataverse tables</constraint>
+    <constraint source="project">Use DataverseClient.retrieveMultipleRecords() for queries</constraint>
+    <constraint source="project">Load data in parallel for performance (NFR-02: within 2 seconds)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse-web-api, scope-resolution</topic>
+    <files>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>projects/ai-playbook-node-builder-r5/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="R4 scopeStore" location="src/client/pcf/PlaybookBuilderHost/control/stores/scopeStore.ts">
+        Source store with mock data to replace
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read R4 scopeStore">Identify all mock data arrays and fake GUIDs.</step>
+    <step order="2" name="Implement loadSkills">
+      Query sprk_analysisskill: select sprk_name, sprk_description, sprk_category.
+      Return typed AnalysisSkill[].
+    </step>
+    <step order="3" name="Implement loadKnowledge">
+      Query sprk_aiknowledge: select sprk_name, sprk_description, sprk_sourcetype.
+      Return typed AiKnowledge[].
+    </step>
+    <step order="4" name="Implement loadTools">
+      Query sprk_analysistool: select sprk_name, sprk_description, sprk_tooltype.
+      Return typed AnalysisTool[].
+    </step>
+    <step order="5" name="Add parallel loading">
+      loadAllScopes() loads skills, knowledge, tools in parallel via Promise.all().
+    </step>
+    <step order="6" name="Verify zero mock data">
+      Grep for hardcoded arrays, fake GUIDs, 'skill-1' patterns. Ensure none remain.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/stores/scopeStore.ts</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/types/scopeTypes.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Skills loaded from sprk_analysisskill table</criterion>
+    <criterion testable="true">Knowledge loaded from sprk_aiknowledge table</criterion>
+    <criterion testable="true">Tools loaded from sprk_analysistool table</criterion>
+    <criterion testable="true">Zero mock data (no 'skill-1', no fake GUIDs)</criterion>
+    <criterion testable="true">Parallel loading via Promise.all()</criterion>
+    <criterion testable="true">Loading and error states tracked in store</criterion>
+  </acceptance-criteria>
+</task>

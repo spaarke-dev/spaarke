@@ -1,0 +1,88 @@
+<task id="R5-023" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Rewrite playbookNodeSync with DataverseClient</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <tags>dataverse, sync, node-records, config-json</tags>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Rewrite playbookNodeSync.ts to use DataverseClient instead of PCF context.webAPI.
+    The critical function buildConfigJson() must map ALL 7 node types' typed fields
+    into sprk_configjson. Handle N:N relationships (skills, knowledge) via
+    DataverseClient.associate/disassociate.
+  </prompt>
+
+  <role>
+    Frontend developer experienced with Dataverse Web API, N:N relationships,
+    and complex data synchronization logic.
+  </role>
+
+  <goal>
+    playbookNodeSync.ts that: (1) syncs canvas nodes to sprk_playbooknode records
+    via DataverseClient, (2) writes complete sprk_configjson for all 7 node types
+    via buildConfigJson(), (3) manages N:N relationships for skills and knowledge.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Use DataverseClient for all CRUD and N:N operations</constraint>
+    <constraint source="project">buildConfigJson() must handle all 7 node types</constraint>
+    <constraint source="project">Write sprk_executionorder via Kahn's algorithm topological sort</constraint>
+    <constraint source="project">Write sprk_dependsonjson with upstream node GUIDs</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse-sync, config-json, topological-sort</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/design.md</file>
+      <file>projects/ai-playbook-node-builder-r5/spec.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+    </files>
+    <patterns>
+      <pattern name="R4 playbookNodeSync" location="src/client/pcf/PlaybookBuilderHost/control/services/playbookNodeSync.ts">
+        Source sync service with PCF context.webAPI calls to replace
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read R4 playbookNodeSync">
+      Understand current sync logic, buildConfigJson() coverage, N:N handling.
+    </step>
+    <step order="2" name="Replace webAPI calls">
+      Replace all context.webAPI calls with DataverseClient equivalents.
+    </step>
+    <step order="3" name="Complete buildConfigJson()">
+      Ensure all 7 node types map typed fields into ConfigJson:
+      - AiAnalysis: scope IDs, model, tool, action
+      - AiCompletion: systemPrompt, userPromptTemplate, temperature, maxTokens
+      - DeliverOutput: deliveryType, template, outputFormat
+      - SendEmail: to, cc, subject, body, isHtml
+      - CreateTask: subject, description, regarding, owner, dueDate
+      - Wait: waitType, duration, datetime
+      - Condition: conditionJson (already complete)
+    </step>
+    <step order="4" name="Implement N:N sync">
+      Use DataverseClient.associate/disassociate for sprk_playbooknode_analysisskill
+      and sprk_playbooknode_aiknowledge relationships.
+    </step>
+    <step order="5" name="Verify topological sort">
+      Ensure Kahn's algorithm sets sprk_executionorder correctly.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All CRUD uses DataverseClient (no PCF context.webAPI)</criterion>
+    <criterion testable="true">buildConfigJson() produces valid config for all 7 node types</criterion>
+    <criterion testable="true">N:N relationships synced via associate/disassociate</criterion>
+    <criterion testable="true">sprk_executionorder set via topological sort</criterion>
+    <criterion testable="true">sprk_dependsonjson contains upstream node GUIDs</criterion>
+    <criterion testable="true">sprk_isactive written from node data</criterion>
+  </acceptance-criteria>
+</task>

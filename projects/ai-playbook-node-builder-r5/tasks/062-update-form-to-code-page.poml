@@ -1,0 +1,61 @@
+<task id="R5-062" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Update Form to Open Code Page</title>
+    <status>not-started</status>
+    <phase>7</phase>
+    <tags>form, navigation, code-page, cleanup</tags>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>061</dependencies>
+  </metadata>
+
+  <prompt>
+    Update the playbook form button/script to open the Code Page via
+    Xrm.Navigation.navigateTo instead of embedding the PCF control.
+    The navigateTo call passes playbookId as a URL parameter.
+  </prompt>
+
+  <role>Developer experienced with Dataverse form customization and Xrm.Navigation.</role>
+
+  <goal>
+    Playbook form opens the Code Page (sprk_playbookbuilder) via navigateTo
+    with playbookId parameter instead of embedding the PCF control.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-006">Use Xrm.Navigation.navigateTo for Code Page dialogs</constraint>
+    <constraint source="project">Pass playbookId via data parameter</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>xrm-navigation, code-page-launch</topic>
+    <files>
+      <file>.claude/patterns/webresource/custom-dialogs-in-dataverse.md</file>
+      <file>projects/ai-playbook-node-builder-r5/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Find form script">
+      Locate the playbook form button that currently opens/embeds the PCF.
+    </step>
+    <step order="2" name="Update to navigateTo">
+      Replace with Xrm.Navigation.navigateTo({
+        pageType: "webresource",
+        webresourceName: "sprk_playbookbuilder",
+        data: `playbookId=${recordId}`
+      }, { target: 2, width: { value: 95, unit: "%" }, height: { value: 95, unit: "%" } });
+    </step>
+    <step order="3" name="Verify">Test form button opens Code Page with correct playbook.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">Form script or ribbon command updated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Form button opens Code Page via navigateTo</criterion>
+    <criterion testable="true">playbookId passed correctly as URL parameter</criterion>
+    <criterion testable="true">Code Page loads with correct playbook data</criterion>
+    <criterion testable="true">No PCF embedding references remain</criterion>
+  </acceptance-criteria>
+</task>

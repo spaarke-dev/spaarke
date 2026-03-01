@@ -1,0 +1,83 @@
+<task id="R5-010" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Canvas Migration to @xyflow/react v12</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <tags>canvas, xyflow, react, migration</tags>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Rewrite PlaybookCanvas.tsx from react-flow-renderer v10 to @xyflow/react v12.
+    Use named imports, hooks API, typed generics, screenToFlowPosition() instead of
+    project(). Follow DocumentRelationshipViewer patterns for v12 usage.
+  </prompt>
+
+  <role>
+    Frontend developer experienced with @xyflow/react v12, React Flow migration,
+    and canvas-based visual editors.
+  </role>
+
+  <goal>
+    A working PlaybookCanvas.tsx using @xyflow/react v12 that renders a node-based
+    canvas with drag-and-drop, connection handling, selection, deletion, MiniMap,
+    snap-to-grid, zoom, and pan. All using v12 named imports and hooks API.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Use @xyflow/react v12 named imports (ReactFlow, Background, Controls, MiniMap)</constraint>
+    <constraint source="project">Use screenToFlowPosition() instead of project()</constraint>
+    <constraint source="project">Use typed generics: Node&lt;PlaybookNodeData&gt;, Edge</constraint>
+    <constraint source="ADR-021">No hard-coded colors in canvas background or controls</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>xyflow-v12, canvas, react-flow-migration</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/design.md</file>
+      <file>projects/ai-playbook-node-builder-r5/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="@xyflow/react v12 usage" location="src/client/code-pages/DocumentRelationshipViewer/">
+        Named imports, hooks, typed nodes
+      </pattern>
+      <pattern name="R4 Canvas" location="src/client/pcf/PlaybookBuilderHost/control/components/Canvas/">
+        Source canvas to migrate from
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read R4 Canvas.tsx">
+      Understand current v10 canvas implementation, callbacks, node types, edge types.
+    </step>
+    <step order="2" name="Read DocumentRelationshipViewer canvas">
+      Study v12 patterns: imports, hooks, typed generics.
+    </step>
+    <step order="3" name="Create PlaybookCanvas.tsx">
+      Rewrite canvas using v12 API. Register 7 custom node types and ConditionEdge.
+      Implement onDrop with screenToFlowPosition(). Wire to canvasStore.
+    </step>
+    <step order="4" name="Add canvas chrome">
+      Add Background, Controls, MiniMap with Fluent design token colors.
+    </step>
+    <step order="5" name="Verify canvas renders">
+      Build and verify canvas component renders with placeholder nodes.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/canvas/PlaybookCanvas.tsx</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/types/PlaybookNodeData.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PlaybookCanvas uses @xyflow/react v12 named imports</criterion>
+    <criterion testable="true">7 custom node types registered in nodeTypes map</criterion>
+    <criterion testable="true">ConditionEdge registered in edgeTypes map</criterion>
+    <criterion testable="true">Drag-and-drop creates nodes at correct position via screenToFlowPosition()</criterion>
+    <criterion testable="true">MiniMap, Background, Controls render with Fluent tokens</criterion>
+    <criterion testable="true">No react-flow-renderer imports remain</criterion>
+  </acceptance-criteria>
+</task>

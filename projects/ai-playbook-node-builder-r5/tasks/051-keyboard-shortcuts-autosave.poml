@@ -1,0 +1,67 @@
+<task id="R5-051" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Keyboard Shortcuts and Auto-Save</title>
+    <status>not-started</status>
+    <phase>6</phase>
+    <tags>hooks, autosave, keyboard, integration</tags>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>050</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement keyboard shortcuts (Ctrl+Z undo, Ctrl+S save, Delete remove selected)
+    and auto-save with 500ms debounce. Auto-save writes canvas JSON to
+    sprk_canvaslayoutjson and triggers node sync.
+  </prompt>
+
+  <role>Frontend developer experienced with keyboard event handling and debounced saves.</role>
+
+  <goal>
+    Working keyboard shortcuts and auto-save that persists canvas state to Dataverse
+    with 500ms debounce, plus triggers playbookNodeSync on save.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Auto-save debounce: 500ms</constraint>
+    <constraint source="project">Save writes to sprk_canvaslayoutjson field</constraint>
+    <constraint source="project">Save triggers playbookNodeSync to create/update node records</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>keyboard-shortcuts, autosave, debounce</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="R4 useKeyboardShortcuts" location="src/client/pcf/PlaybookBuilderHost/control/hooks/useKeyboardShortcuts.ts">
+        Source hook to migrate
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create useAutoSave hook">
+      Debounced 500ms save: serialize canvas to JSON, write to Dataverse,
+      trigger playbookNodeSync.
+    </step>
+    <step order="2" name="Migrate useKeyboardShortcuts">
+      Copy from R4, adapt to Code Page context. Wire Ctrl+S to save.
+    </step>
+    <step order="3" name="Wire into BuilderLayout">Connect hooks to layout.</step>
+    <step order="4" name="Verify">Test save/load cycle, keyboard shortcuts.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/hooks/useAutoSave.ts</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/hooks/useKeyboardShortcuts.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Auto-save fires with 500ms debounce after canvas changes</criterion>
+    <criterion testable="true">Save writes canvas JSON to sprk_canvaslayoutjson</criterion>
+    <criterion testable="true">Save triggers playbookNodeSync</criterion>
+    <criterion testable="true">Ctrl+Z undoes last action</criterion>
+    <criterion testable="true">Ctrl+S triggers immediate save</criterion>
+    <criterion testable="true">Delete removes selected nodes/edges</criterion>
+  </acceptance-criteria>
+</task>

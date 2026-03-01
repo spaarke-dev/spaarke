@@ -1,0 +1,89 @@
+<task id="R5-003" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Entry Point, FluentProvider, and Theme Detection</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <tags>code-page, fluent-ui, theme, dark-mode</tags>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>001, 002</dependencies>
+  </metadata>
+
+  <prompt>
+    Complete the entry point (index.tsx) with FluentProvider wrapping, theme detection
+    (light/dark/high-contrast), and URL parameter parsing for playbookId. Create the
+    useThemeDetection hook and App.tsx shell with auth initialization.
+  </prompt>
+
+  <role>
+    Frontend developer experienced with Fluent UI v9 theming, React 19, and
+    Dataverse form integration via Xrm.Navigation.navigateTo.
+  </role>
+
+  <goal>
+    A working entry point that reads playbookId from URL, initializes auth,
+    detects the current theme (light/dark/high-contrast), wraps the app in
+    FluentProvider with the correct theme, and renders a placeholder BuilderLayout.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Must support light, dark, and high-contrast modes</constraint>
+    <constraint source="ADR-021">Must use Fluent design tokens for all colors</constraint>
+    <constraint source="ADR-021">Must wrap root in FluentProvider with theme</constraint>
+    <constraint source="project">Read playbookId from URLSearchParams (not PCF context)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>theme-detection, fluent-provider, code-page-entry</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>projects/ai-playbook-node-builder-r5/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Entry point" location="src/client/code-pages/AnalysisWorkspace/index.tsx">
+        createRoot + FluentProvider + theme
+      </pattern>
+      <pattern name="Theme detection" location="src/client/code-pages/DocumentRelationshipViewer/">
+        Theme detection hook for Dataverse forms
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create useThemeDetection hook">
+      Detect current Dataverse theme (light/dark/high-contrast). Use Xrm frame-walk
+      if available, fall back to prefers-color-scheme media query.
+    </step>
+    <step order="2" name="Complete index.tsx">
+      Parse URLSearchParams for playbookId. Initialize createRoot. Wrap in
+      FluentProvider with detected theme. Render App component.
+    </step>
+    <step order="3" name="Create App.tsx shell">
+      Initialize auth via useAuth hook. Show loading state while auth initializes.
+      Pass playbookId and DataverseClient to BuilderLayout placeholder.
+    </step>
+    <step order="4" name="Create BuilderLayout placeholder">
+      Create minimal BuilderLayout.tsx that displays playbookId and auth status.
+      This will be replaced in Phase 6 integration.
+    </step>
+    <step order="5" name="Verify build">
+      Build and verify the HTML file renders correctly with theme applied.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/hooks/useThemeDetection.ts</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/index.tsx</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/App.tsx</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/BuilderLayout.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">index.tsx uses React 19 createRoot()</criterion>
+    <criterion testable="true">FluentProvider wraps entire app with detected theme</criterion>
+    <criterion testable="true">playbookId parsed from URLSearchParams</criterion>
+    <criterion testable="true">useThemeDetection detects light, dark, and high-contrast</criterion>
+    <criterion testable="true">App shows loading state during auth initialization</criterion>
+    <criterion testable="true">Build produces working HTML file</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,56 @@
+<task id="R5-033" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>AiCompletionForm Configuration Form</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <tags>fluent-ui, form, node-config, ai-completion</tags>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Build AiCompletionForm.tsx — configuration form for AI Completion nodes.
+    Fields: system prompt (multiline), user prompt template (multiline with variable support),
+    temperature (slider 0-2), max tokens (number input). Write typed fields for ConfigJson.
+  </prompt>
+
+  <role>Frontend developer experienced with Fluent UI v9 forms and AI prompt configuration.</role>
+
+  <goal>
+    AiCompletionForm.tsx with system prompt, user prompt template, temperature,
+    and max tokens fields that write to PlaybookNodeData for ConfigJson mapping.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 form components</constraint>
+    <constraint source="project">Fields map to ConfigJson: systemPrompt, userPromptTemplate, temperature, maxTokens</constraint>
+    <constraint source="project">Prompt fields support template variables {{nodeName.output.fieldName}}</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>fluent-ui-forms, ai-completion-config</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create form component">
+      Textarea for system prompt, Textarea for user prompt template,
+      Slider for temperature (0-2, step 0.1), SpinButton for max tokens.
+    </step>
+    <step order="2" name="Wire to node data">Form reads/writes to canvasStore.</step>
+    <step order="3" name="Verify build">Ensure component compiles.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/properties/AiCompletionForm.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Form has system prompt and user prompt template textareas</criterion>
+    <criterion testable="true">Form has temperature slider (0-2 range)</criterion>
+    <criterion testable="true">Form has max tokens number input</criterion>
+    <criterion testable="true">Changes write to PlaybookNodeData for ConfigJson mapping</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,67 @@
+<task id="R5-052" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Dark Mode Verification (ADR-021)</title>
+    <status>not-started</status>
+    <phase>6</phase>
+    <tags>dark-mode, fluent-ui, verification, adr-021</tags>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>050</dependencies>
+  </metadata>
+
+  <prompt>
+    Verify and fix dark mode, light mode, and high-contrast rendering across all
+    components. Ensure no hard-coded colors in node renderers, edges, forms, or
+    panels. All must use Fluent design tokens via makeStyles.
+  </prompt>
+
+  <role>Frontend developer experienced with Fluent UI v9 theming and accessibility.</role>
+
+  <goal>
+    All components render correctly in light, dark, and high-contrast modes
+    with zero hard-coded colors.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">All colors must use Fluent design tokens</constraint>
+    <constraint source="ADR-021">Must support light, dark, and high-contrast</constraint>
+    <constraint source="ADR-021">No hard-coded hex/rgb values</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dark-mode, fluent-tokens, accessibility</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Audit for hard-coded colors">
+      Grep all .tsx/.ts files for hex (#), rgb(), hard-coded color values.
+    </step>
+    <step order="2" name="Replace with Fluent tokens">
+      Replace any hard-coded colors with tokens.colorNeutralBackground1, etc.
+    </step>
+    <step order="3" name="Verify canvas elements">
+      Ensure @xyflow Background, MiniMap, Controls use theme-aware colors.
+    </step>
+    <step order="4" name="Verify node renderers">
+      All 7 node types must use Fluent tokens for backgrounds and borders.
+    </step>
+    <step order="5" name="Document compliance">
+      Note any remaining issues or exceptions.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">Multiple .tsx files updated to use Fluent tokens</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero hard-coded colors in any component</criterion>
+    <criterion testable="true">Light mode renders correctly</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+    <criterion testable="true">High-contrast mode renders correctly</criterion>
+    <criterion testable="true">Canvas background adapts to theme</criterion>
+    <criterion testable="true">Node and edge colors use Fluent tokens</criterion>
+  </acceptance-criteria>
+</task>

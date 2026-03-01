@@ -1,0 +1,70 @@
+<task id="R5-037" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Wire NodePropertiesForm to Type-Specific Forms</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <tags>fluent-ui, form, node-config, routing</tags>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>001, 002, 003, 030, 031, 032, 033, 034, 035, 036</dependencies>
+  </metadata>
+
+  <prompt>
+    Update NodePropertiesForm.tsx to route to the correct type-specific form based
+    on the selected node's nodeType. Add accordion sections for common fields (name,
+    description, isActive, timeout, retry), type-specific config form, scope selectors,
+    variable reference panel, and validation badge.
+  </prompt>
+
+  <role>Frontend developer experienced with Fluent UI v9 Accordion and form composition.</role>
+
+  <goal>
+    NodePropertiesForm.tsx that renders the correct config form based on node type,
+    plus common fields, scope selectors, and variable reference panel.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 Accordion for sections</constraint>
+    <constraint source="project">Must render correct form for each of 7 node types</constraint>
+    <constraint source="project">Include NodeValidationBadge in header</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>form-routing, node-properties</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="R4 NodePropertiesForm" location="src/client/pcf/PlaybookBuilderHost/control/components/Properties/">
+        Source form to enhance with type-specific routing
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read R4 NodePropertiesForm">Understand current structure.</step>
+    <step order="2" name="Add form router">
+      Switch on nodeType to render correct form component.
+    </step>
+    <step order="3" name="Add accordion sections">
+      Common fields, type-specific form, scope selectors (for AI nodes),
+      variable reference panel, isActive toggle.
+    </step>
+    <step order="4" name="Add validation badge">
+      NodeValidationBadge in form header.
+    </step>
+    <step order="5" name="Verify">Ensure each node type shows correct form.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesForm.tsx</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/properties/PropertiesPanel.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of 7 node types renders correct config form</criterion>
+    <criterion testable="true">Common fields (name, description, isActive) shown for all types</criterion>
+    <criterion testable="true">Scope selectors shown for AI Analysis nodes</criterion>
+    <criterion testable="true">Variable reference panel accessible from all form types</criterion>
+    <criterion testable="true">NodeValidationBadge shown in form header</criterion>
+  </acceptance-criteria>
+</task>

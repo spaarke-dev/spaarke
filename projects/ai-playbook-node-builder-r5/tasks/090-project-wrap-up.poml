@@ -1,0 +1,64 @@
+<task id="R5-090" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <status>not-started</status>
+    <phase>wrap-up</phase>
+    <tags>cleanup, documentation, wrap-up</tags>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>060, 061, 062</dependencies>
+  </metadata>
+
+  <prompt>
+    Final project wrap-up: update README status to Complete, create lessons-learned.md,
+    run /repo-cleanup, verify all graduation criteria met, prompt for /merge-to-master.
+  </prompt>
+
+  <role>Project manager ensuring clean project closure.</role>
+
+  <goal>
+    Project archived with complete documentation, all graduation criteria verified,
+    and branch ready for merge to master.
+  </goal>
+
+  <constraints>
+    <constraint source="project">All graduation criteria from README must be met</constraint>
+    <constraint source="project">Run /repo-cleanup before marking complete</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project-wrap-up</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Verify graduation criteria">
+      Check all items in README Graduation Criteria section.
+    </step>
+    <step order="2" name="Update README">
+      Set status to Complete, update progress to 100%.
+    </step>
+    <step order="3" name="Create lessons-learned.md">
+      Document key learnings, gotchas, patterns discovered.
+    </step>
+    <step order="4" name="Run /repo-cleanup">
+      Validate structure and clean up ephemeral files.
+    </step>
+    <step order="5" name="Prompt for merge">
+      Recommend running /merge-to-master to merge branch into master.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/ai-playbook-node-builder-r5/README.md (updated)</output>
+    <output type="docs">projects/ai-playbook-node-builder-r5/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All graduation criteria met</criterion>
+    <criterion testable="true">README status set to Complete</criterion>
+    <criterion testable="true">Lessons-learned.md created</criterion>
+    <criterion testable="true">/repo-cleanup passes</criterion>
+  </acceptance-criteria>
+</task>

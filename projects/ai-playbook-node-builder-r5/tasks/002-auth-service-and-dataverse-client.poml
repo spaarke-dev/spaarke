@@ -1,0 +1,91 @@
+<task id="R5-002" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>AuthService and DataverseClient</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <tags>auth, dataverse, services, code-page</tags>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the AuthService (multi-strategy token acquisition from AnalysisWorkspace)
+    and DataverseClient (fetch-based Dataverse Web API CRUD). These two services are
+    the foundation for all data access in the Code Page.
+  </prompt>
+
+  <role>
+    Frontend developer experienced with Azure AD authentication, MSAL browser,
+    Xrm platform APIs, and Dataverse Web API REST calls.
+  </role>
+
+  <goal>
+    Working AuthService that acquires tokens via 5 Xrm platform strategies + MSAL
+    ssoSilent fallback, and a DataverseClient that performs CRUD operations, N:N
+    associate/disassociate, and retrieveMultipleRecords via fetch() + Bearer token.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-013">AI calls through BFF only; no API keys in browser</constraint>
+    <constraint source="project">Direct Dataverse REST API for CRUD (not BFF); BFF only for AI streaming</constraint>
+    <constraint source="project">Multi-strategy auth: Xrm platform (5 methods) then MSAL ssoSilent fallback</constraint>
+    <constraint source="project">Token refresh every 4 minutes proactively</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>auth, msal, dataverse-web-api</topic>
+    <files>
+      <file>.claude/patterns/auth/msal-client.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>projects/ai-playbook-node-builder-r5/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="AuthService" location="src/client/code-pages/AnalysisWorkspace/services/authService.ts">
+        Copy multi-strategy token acquisition pattern
+      </pattern>
+      <pattern name="MSAL config" location="src/client/code-pages/AnalysisWorkspace/config/msalConfig.ts">
+        Copy Azure AD configuration
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Copy and adapt AuthService">
+      Copy authService.ts from AnalysisWorkspace. Adapt imports and config.
+      Ensure 5 Xrm strategies + MSAL fallback. Add 4-minute proactive refresh.
+    </step>
+    <step order="2" name="Copy MSAL config">
+      Copy msalConfig.ts from AnalysisWorkspace. Verify client ID and scopes.
+    </step>
+    <step order="3" name="Create DataverseClient">
+      Build DataverseClient service with methods: createRecord, retrieveRecord,
+      updateRecord, deleteRecord, retrieveMultipleRecords, associate, disassociate.
+      All use fetch() with Bearer token from AuthService. Include OData query support.
+    </step>
+    <step order="4" name="Create useAuth hook">
+      Create React hook that provides auth state, token, and DataverseClient
+      instance to the component tree.
+    </step>
+    <step order="5" name="Verify auth flow">
+      Add minimal test that AuthService initializes and DataverseClient
+      can construct proper request URLs.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/services/authService.ts</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/services/dataverseClient.ts</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/config/msalConfig.ts</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/hooks/useAuth.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AuthService tries 5 Xrm strategies then MSAL ssoSilent</criterion>
+    <criterion testable="true">DataverseClient has createRecord, retrieveRecord, updateRecord, deleteRecord, retrieveMultipleRecords methods</criterion>
+    <criterion testable="true">DataverseClient has associate and disassociate methods for N:N relationships</criterion>
+    <criterion testable="true">All Dataverse calls use fetch() with Authorization: Bearer header</criterion>
+    <criterion testable="true">Token refresh interval configured at 4 minutes</criterion>
+    <criterion testable="true">Project still builds successfully</criterion>
+  </acceptance-criteria>
+</task>

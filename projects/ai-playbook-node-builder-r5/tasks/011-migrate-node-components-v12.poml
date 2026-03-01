@@ -1,0 +1,84 @@
+<task id="R5-011" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Migrate 7 Node Components to v12 Generics</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <tags>canvas, xyflow, nodes, migration</tags>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Migrate all 7 custom node type components from react-flow-renderer v10 NodeProps
+    to @xyflow/react v12 NodeProps&lt;Node&lt;PlaybookNodeData&gt;&gt; typed generics.
+    Update Handle imports, position enums, and styling to use Fluent design tokens.
+  </prompt>
+
+  <role>
+    Frontend developer experienced with @xyflow/react v12 custom nodes
+    and Fluent UI v9 styling.
+  </role>
+
+  <goal>
+    All 7 node type components (AiAnalysisNode, AiCompletionNode, ConditionNode,
+    CreateTaskNode, DeliverOutputNode, SendEmailNode, WaitNode) migrated to v12
+    NodeProps generics with Fluent design token styling.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Use NodeProps&lt;Node&lt;PlaybookNodeData&gt;&gt; typed generics</constraint>
+    <constraint source="project">Use @xyflow/react Handle, Position imports</constraint>
+    <constraint source="ADR-021">All node colors must use Fluent design tokens (no hard-coded hex)</constraint>
+    <constraint source="ADR-021">Use makeStyles for node styling</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>xyflow-v12-nodes, custom-node-migration</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="R4 node components" location="src/client/pcf/PlaybookBuilderHost/control/components/Nodes/">
+        Source node components to migrate
+      </pattern>
+      <pattern name="v12 custom node" location="src/client/code-pages/DocumentRelationshipViewer/">
+        Custom node with typed NodeProps
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read R4 node components">
+      Study all 7 node type components in PlaybookBuilderHost.
+    </step>
+    <step order="2" name="Create PlaybookNodeData type">
+      Define typed PlaybookNodeData interface with all fields for all 7 node types.
+      Include nodeType, name, description, configJson fields, scope selections.
+    </step>
+    <step order="3" name="Migrate each node component">
+      For each of 7 nodes: update NodeProps to v12 generics, update Handle imports,
+      replace hard-coded colors with Fluent tokens via makeStyles.
+    </step>
+    <step order="4" name="Verify build">
+      Ensure all node components compile and type-check correctly.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/nodes/AiAnalysisNode.tsx</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/nodes/AiCompletionNode.tsx</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/nodes/ConditionNode.tsx</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/nodes/CreateTaskNode.tsx</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/nodes/DeliverOutputNode.tsx</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/nodes/SendEmailNode.tsx</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/nodes/WaitNode.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 7 node components use NodeProps&lt;Node&lt;PlaybookNodeData&gt;&gt;</criterion>
+    <criterion testable="true">All use @xyflow/react Handle and Position imports</criterion>
+    <criterion testable="true">No hard-coded colors — all use Fluent design tokens</criterion>
+    <criterion testable="true">All use makeStyles for styling</criterion>
+    <criterion testable="true">TypeScript compiles without errors</criterion>
+  </acceptance-criteria>
+</task>

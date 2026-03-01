@@ -1,0 +1,61 @@
+<task id="R5-012" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Migrate ConditionEdge to v12 EdgeProps</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <tags>canvas, xyflow, edges, migration</tags>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Migrate ConditionEdge component from react-flow-renderer v10 to @xyflow/react v12
+    EdgeProps. Update imports, styling, and edge labels for true/false branches.
+  </prompt>
+
+  <role>Frontend developer experienced with @xyflow/react v12 custom edges.</role>
+
+  <goal>
+    ConditionEdge component using v12 EdgeProps with Fluent design token styling
+    and proper true/false branch labeling.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Use @xyflow/react EdgeProps generics</constraint>
+    <constraint source="ADR-021">Edge colors use Fluent design tokens</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>xyflow-v12-edges</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="R4 ConditionEdge" location="src/client/pcf/PlaybookBuilderHost/control/components/Edges/">
+        Source edge component to migrate
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read R4 ConditionEdge">
+      Study current edge component implementation.
+    </step>
+    <step order="2" name="Migrate to v12">
+      Update EdgeProps to v12, use @xyflow/react imports, replace colors with Fluent tokens.
+    </step>
+    <step order="3" name="Verify">
+      Ensure component compiles and edge labels render correctly.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/edges/ConditionEdge.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ConditionEdge uses @xyflow/react v12 EdgeProps</criterion>
+    <criterion testable="true">True/false branch labels render correctly</criterion>
+    <criterion testable="true">Edge colors use Fluent design tokens</criterion>
+  </acceptance-criteria>
+</task>

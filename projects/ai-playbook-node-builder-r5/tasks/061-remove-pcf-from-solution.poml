@@ -1,0 +1,55 @@
+<task id="R5-061" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>Remove PCF PlaybookBuilderHost from Solution</title>
+    <status>not-started</status>
+    <phase>7</phase>
+    <tags>cleanup, solution, pcf-removal</tags>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>060</dependencies>
+  </metadata>
+
+  <prompt>
+    Remove the PCF PlaybookBuilderHost control from the Dataverse solution XML.
+    Verify no references remain. The PCF source code in src/client/pcf/PlaybookBuilderHost/
+    stays as reference but is not deployed.
+  </prompt>
+
+  <role>Developer experienced with Dataverse solution XML and PCF control management.</role>
+
+  <goal>
+    PCF PlaybookBuilderHost removed from solution XML. No PlaybookBuilderHost
+    references in any solution component.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Remove from solution XML only (source code stays as reference)</constraint>
+    <constraint source="project">Verify no form references to the PCF control</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>solution-xml, pcf-removal</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Find PCF references">
+      Grep solution XML for PlaybookBuilderHost references.
+    </step>
+    <step order="2" name="Remove from solution">
+      Remove component entries from Solution.xml.
+    </step>
+    <step order="3" name="Verify">Grep confirms zero PlaybookBuilderHost references in solution.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/ (updated Solution.xml)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No PlaybookBuilderHost references in solution XML</criterion>
+    <criterion testable="true">No react-flow-renderer references in deployed code</criterion>
+    <criterion testable="true">Solution builds without errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,61 @@
+<task id="R5-060" project="AI Playbook Node Builder R5">
+  <metadata>
+    <title>End-to-End Execution Test (All 7 Node Types)</title>
+    <status>not-started</status>
+    <phase>7</phase>
+    <tags>testing, e2e, execution, verification</tags>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>053</dependencies>
+  </metadata>
+
+  <prompt>
+    Verify all 7 node types execute end-to-end: build playbook in Code Page canvas,
+    save, execute from AnalysisWorkspace, verify each node type produces output
+    without ConfigJson errors. Document any executor gaps (Wait, AI Completion).
+  </prompt>
+
+  <role>QA engineer experienced with end-to-end testing of playbook execution pipelines.</role>
+
+  <goal>
+    All 7 node types verified to produce valid ConfigJson that the BFF execution
+    engine can process. Document results per node type.
+  </goal>
+
+  <constraints>
+    <constraint source="project">All 7 node types must be tested</constraint>
+    <constraint source="project">ConfigJson must match what executors expect</constraint>
+    <constraint source="project">Wait and AI Completion may lack BFF executors (document)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>e2e-testing, playbook-execution</topic>
+    <files>
+      <file>projects/ai-playbook-node-builder-r5/spec.md</file>
+      <file>projects/ai-playbook-node-builder-r5/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create test playbook">Build playbook with all 7 node types in Code Page.</step>
+    <step order="2" name="Configure all nodes">Fill in config forms for each node type.</step>
+    <step order="3" name="Save and verify records">Check sprk_playbooknode records have valid ConfigJson.</step>
+    <step order="4" name="Execute from AnalysisWorkspace">Run playbook, monitor execution.</step>
+    <step order="5" name="Verify each node">Check output/errors for each of 7 node types.</step>
+    <step order="6" name="Document results">Record pass/fail per node type with details.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/ai-playbook-node-builder-r5/notes/e2e-test-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AI Analysis node executes without ConfigJson errors</criterion>
+    <criterion testable="true">Condition node evaluates and branches correctly</criterion>
+    <criterion testable="true">Deliver Output node produces formatted output (not raw JSON)</criterion>
+    <criterion testable="true">Send Email node ConfigJson valid (execution depends on executor)</criterion>
+    <criterion testable="true">Create Task node ConfigJson valid (execution depends on executor)</criterion>
+    <criterion testable="true">Wait node ConfigJson valid (executor may not exist yet)</criterion>
+    <criterion testable="true">AI Completion node ConfigJson valid (executor may not exist yet)</criterion>
+    <criterion testable="true">Template variables resolve to upstream values</criterion>
+  </acceptance-criteria>
+</task>
