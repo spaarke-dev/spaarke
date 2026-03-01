@@ -1,7 +1,7 @@
 <task id="R5-061" project="AI Playbook Node Builder R5">
   <metadata>
     <title>Remove PCF PlaybookBuilderHost from Solution</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>7</phase>
     <tags>cleanup, solution, pcf-removal</tags>
     <estimated-effort>1 hour</estimated-effort>

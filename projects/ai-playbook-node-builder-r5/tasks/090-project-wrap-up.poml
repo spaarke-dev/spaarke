@@ -1,7 +1,7 @@
 <task id="R5-090" project="AI Playbook Node Builder R5">
   <metadata>
     <title>Project Wrap-Up</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>wrap-up</phase>
     <tags>cleanup, documentation, wrap-up</tags>
     <estimated-effort>1 hour</estimated-effort>

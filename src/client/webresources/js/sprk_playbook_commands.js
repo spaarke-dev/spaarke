@@ -1,12 +1,12 @@
 /**
  * Playbook Builder Command Script
  *
- * PURPOSE: Opens Playbook Builder in a full-screen Custom Page dialog
+ * PURPOSE: Opens Playbook Builder Code Page in a near-full-screen dialog
  * WORKS WITH: sprk_analysisplaybook entity (Analysis Playbook)
  * DEPLOYMENT: Ribbon buttons on entity list view and form command bar
- * ARCHITECTURE: Custom Page dialog approach (near full-screen)
+ * ARCHITECTURE: Code Page (web resource) dialog via Xrm.Navigation.navigateTo (ADR-006)
  *
- * @version 1.1.0
+ * @version 2.0.0
  * @namespace Spaarke.Commands.Playbook
  */
 
@@ -14,7 +14,7 @@
 // CONSTANTS
 // ============================================================================
 
-var CUSTOM_PAGE_NAME = "sprk_playbookbuilder_c0199";
+var WEBRESOURCE_NAME = "sprk_playbookbuilder";
 var LOG_PREFIX = "[Spaarke.Playbook]";
 
 // ============================================================================
@@ -30,7 +30,7 @@ var LOG_PREFIX = "[Spaarke.Playbook]";
 function Spaarke_OpenPlaybookBuilder(primaryControl) {
     try {
         console.log(LOG_PREFIX, "========================================");
-        console.log(LOG_PREFIX, "OpenPlaybookBuilder: Starting v1.1.0");
+        console.log(LOG_PREFIX, "OpenPlaybookBuilder: Starting v2.0.0");
         console.log(LOG_PREFIX, "========================================");
 
         // Get form context
@@ -83,7 +83,7 @@ function Spaarke_OpenPlaybookBuilder(primaryControl) {
 function Spaarke_NewPlaybookBuilder(primaryControl) {
     try {
         console.log(LOG_PREFIX, "========================================");
-        console.log(LOG_PREFIX, "NewPlaybookBuilder: Starting v1.1.0");
+        console.log(LOG_PREFIX, "NewPlaybookBuilder: Starting v2.0.0");
         console.log(LOG_PREFIX, "========================================");
 
         // Open Playbook Builder Custom Page for new playbook
@@ -108,7 +108,7 @@ function Spaarke_NewPlaybookBuilder(primaryControl) {
 function Spaarke_NewPlaybookFromList(commandProperties) {
     try {
         console.log(LOG_PREFIX, "========================================");
-        console.log(LOG_PREFIX, "NewPlaybookFromList: Starting v1.1.0");
+        console.log(LOG_PREFIX, "NewPlaybookFromList: Starting v2.0.0");
         console.log(LOG_PREFIX, "========================================");
 
         // Open Playbook Builder Custom Page for new playbook
@@ -129,7 +129,10 @@ function Spaarke_NewPlaybookFromList(commandProperties) {
 // ============================================================================
 
 /**
- * Open Playbook Builder Custom Page dialog in near-full-screen mode
+ * Open Playbook Builder Code Page dialog in near-full-screen mode.
+ *
+ * Uses Xrm.Navigation.navigateTo with pageType "webresource" (ADR-006).
+ * The Code Page reads playbookId from URLSearchParams.
  *
  * @param {object} params - Dialog parameters
  * @param {object} formContext - Form context for refresh after close (optional)
@@ -138,22 +141,20 @@ function openPlaybookBuilderDialog(params, formContext) {
     console.log(LOG_PREFIX, "Opening Playbook Builder with parameters:", params);
 
     try {
-        // Prepare data payload
-        var dataPayload = {
-            playbookId: params.playbookId,
-            playbookName: params.playbookName,
-            isNew: params.isNew
-        };
+        // Build data string for Code Page URL parameters
+        var dataParams = "playbookId=" + encodeURIComponent(params.playbookId || "");
+        if (params.playbookName) {
+            dataParams += "&playbookName=" + encodeURIComponent(params.playbookName);
+        }
+        if (params.isNew) {
+            dataParams += "&isNew=true";
+        }
 
-        // Store data in sessionStorage (Custom Page can read this)
-        sessionStorage.setItem("playbookBuilderParams", JSON.stringify(dataPayload));
-        console.log(LOG_PREFIX, "Stored params in sessionStorage:", dataPayload);
-
-        // Pass playbook ID via recordId parameter (empty string for new)
+        // Navigate to Code Page web resource (not Custom Page)
         var pageInput = {
-            pageType: "custom",
-            name: CUSTOM_PAGE_NAME,
-            recordId: params.playbookId || ""
+            pageType: "webresource",
+            webresourceName: WEBRESOURCE_NAME,
+            data: dataParams
         };
 
         // Dialog options for near-full-screen experience
@@ -170,8 +171,6 @@ function openPlaybookBuilderDialog(params, formContext) {
         Xrm.Navigation.navigateTo(pageInput, navigationOptions).then(
             function success(result) {
                 console.log(LOG_PREFIX, "Playbook Builder dialog closed", result);
-                // Clean up sessionStorage
-                sessionStorage.removeItem("playbookBuilderParams");
 
                 // Refresh form if we have form context (editing existing)
                 if (formContext && formContext.data && typeof formContext.data.refresh === "function") {
@@ -182,7 +181,6 @@ function openPlaybookBuilderDialog(params, formContext) {
                 // Refresh list view if on list (creating new)
                 if (params.isNew) {
                     try {
-                        // Try to refresh the grid
                         if (Xrm.Page && Xrm.Page.getControl) {
                             var grid = Xrm.Page.getControl("grid");
                             if (grid && typeof grid.refresh === "function") {
@@ -196,7 +194,6 @@ function openPlaybookBuilderDialog(params, formContext) {
             },
             function error(err) {
                 console.error(LOG_PREFIX, "navigateTo error:", err);
-                sessionStorage.removeItem("playbookBuilderParams");
                 // errorCode 2 means user closed the dialog - not an error
                 if (err && err.errorCode !== 2) {
                     showPlaybookErrorDialog("Error opening Playbook Builder: " + (err.message || "Unknown error"));
@@ -364,11 +361,16 @@ Menu: "Analysis Builder"
      - Icon: Add
 
 ================================================================================
-CUSTOM PAGE
+CODE PAGE WEB RESOURCE (replaces Custom Page since v2.0.0)
 ================================================================================
-Name: sprk_playbookbuilder_c0199
+Web Resource: sprk_playbookbuilder (HTML web resource)
+Navigation: Xrm.Navigation.navigateTo({ pageType: "webresource" })
+Parameters: playbookId, playbookName, isNew (via data query string)
+
+DEPRECATED: Custom Page sprk_playbookbuilder_c0199 (replaced by Code Page)
 
 VERSION HISTORY:
-- 1.0.0: Initial release
+- 1.0.0: Initial release (Custom Page)
 - 1.1.0: Added list view button and form menu with Open/New options
+- 2.0.0: Migrated from Custom Page to Code Page web resource (ADR-006)
 */

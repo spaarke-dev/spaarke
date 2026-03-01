@@ -6,9 +6,9 @@
   2. Form Command Bar - "Analysis Builder" menu with "Open" and "+ New"
 
   Web Resource: sprk_playbook_commands.js
-  Custom Page: sprk_playbookbuilder_c0199
+  Code Page: sprk_playbookbuilder (HTML web resource, replaces Custom Page)
 
-  Version: 1.1.0
+  Version: 2.0.0
 -->
 <RibbonDiffXml>
   <CustomActions>
