@@ -1,8 +1,8 @@
 # Task Index — AI Playbook Node Builder R5
 
-> **Last Updated**: 2026-02-28
+> **Last Updated**: 2026-03-01
 > **Total Tasks**: 25
-> **Completed**: 3 / 25
+> **Completed**: 22 / 25
 
 ## Status Legend
 
@@ -21,55 +21,55 @@
 |---|------|--------|-------------|------|
 | 001 | [Project Scaffold and Build Pipeline](001-project-scaffold-and-build-pipeline.poml) | ✅ | none | 3h |
 | 002 | [AuthService and DataverseClient](002-auth-service-and-dataverse-client.poml) | ✅ | 001 | 3h |
-| 003 | [Entry Point, FluentProvider, Theme Detection](003-entry-point-theme-detection.poml) | 🔲 | 001, 002 | 2h |
+| 003 | [Entry Point, FluentProvider, Theme Detection](003-entry-point-theme-detection.poml) | ✅ | 001, 002 | 2h |
 
 ## Phase 2: Canvas Migration (Parallel — after Phase 1)
 
 | # | Task | Status | Dependencies | Est. |
 |---|------|--------|-------------|------|
-| 010 | [Canvas Migration to @xyflow/react v12](010-canvas-migration-xyflow-v12.poml) | 🔲 | 001, 002, 003 | 4h |
-| 011 | [Migrate 7 Node Components to v12 Generics](011-migrate-node-components-v12.poml) | 🔲 | 001, 002, 003 | 3h |
-| 012 | [Migrate ConditionEdge to v12 EdgeProps](012-migrate-condition-edge-v12.poml) | 🔲 | 001, 002, 003 | 1h |
-| 013 | [Migrate canvasStore to v12 Types](013-migrate-canvas-store-v12.poml) | 🔲 | 001, 002, 003 | 2h |
+| 010 | [Canvas Migration to @xyflow/react v12](010-canvas-migration-xyflow-v12.poml) | ✅ | 001, 002, 003 | 4h |
+| 011 | [Migrate 7 Node Components to v12 Generics](011-migrate-node-components-v12.poml) | ✅ | 001, 002, 003 | 3h |
+| 012 | [Migrate ConditionEdge to v12 EdgeProps](012-migrate-condition-edge-v12.poml) | ✅ | 001, 002, 003 | 1h |
+| 013 | [Migrate canvasStore to v12 Types](013-migrate-canvas-store-v12.poml) | ✅ | 001, 002, 003 | 2h |
 
 ## Phase 3: Scope Resolution (Parallel — after Phase 1)
 
 | # | Task | Status | Dependencies | Est. |
 |---|------|--------|-------------|------|
-| 020 | [Rewrite scopeStore with Real Dataverse Queries](020-rewrite-scope-store.poml) | 🔲 | 001, 002, 003 | 3h |
-| 021 | [Rewrite modelStore with Real Dataverse Queries](021-rewrite-model-store.poml) | 🔲 | 001, 002, 003 | 2h |
-| 022 | [Build ActionSelector Component](022-build-action-selector.poml) | 🔲 | 001, 002, 003 | 2h |
-| 023 | [Rewrite playbookNodeSync with DataverseClient](023-rewrite-playbook-node-sync.poml) | 🔲 | 001, 002, 003 | 4h |
+| 020 | [Rewrite scopeStore with Real Dataverse Queries](020-rewrite-scope-store.poml) | ✅ | 001, 002, 003 | 3h |
+| 021 | [Rewrite modelStore with Real Dataverse Queries](021-rewrite-model-store.poml) | ✅ | 001, 002, 003 | 2h |
+| 022 | [Build ActionSelector Component](022-build-action-selector.poml) | ✅ | 001, 002, 003 | 2h |
+| 023 | [Rewrite playbookNodeSync with DataverseClient](023-rewrite-playbook-node-sync.poml) | ✅ | 001, 002, 003 | 4h |
 
 ## Phase 4: Node Config Forms (Parallel — after Phase 1)
 
 | # | Task | Status | Dependencies | Est. |
 |---|------|--------|-------------|------|
-| 030 | [DeliverOutputForm Configuration Form](030-deliver-output-form.poml) | 🔲 | 001, 002, 003 | 2h |
-| 031 | [SendEmailForm Configuration Form](031-send-email-form.poml) | 🔲 | 001, 002, 003 | 2h |
-| 032 | [CreateTaskForm Configuration Form](032-create-task-form.poml) | 🔲 | 001, 002, 003 | 2h |
-| 033 | [AiCompletionForm Configuration Form](033-ai-completion-form.poml) | 🔲 | 001, 002, 003 | 2h |
-| 034 | [WaitForm Configuration Form](034-wait-form.poml) | 🔲 | 001, 002, 003 | 1h |
-| 035 | [VariableReferencePanel Component](035-variable-reference-panel.poml) | 🔲 | 001, 002, 003 | 2h |
-| 036 | [NodeValidationBadge Component](036-node-validation-badge.poml) | 🔲 | 001, 002, 003 | 2h |
-| 037 | [Wire NodePropertiesForm to Type-Specific Forms](037-wire-node-properties-form.poml) | 🔲 | 030-036 | 2h |
+| 030 | [DeliverOutputForm Configuration Form](030-deliver-output-form.poml) | ✅ | 001, 002, 003 | 2h |
+| 031 | [SendEmailForm Configuration Form](031-send-email-form.poml) | ✅ | 001, 002, 003 | 2h |
+| 032 | [CreateTaskForm Configuration Form](032-create-task-form.poml) | ✅ | 001, 002, 003 | 2h |
+| 033 | [AiCompletionForm Configuration Form](033-ai-completion-form.poml) | ✅ | 001, 002, 003 | 2h |
+| 034 | [WaitForm Configuration Form](034-wait-form.poml) | ✅ | 001, 002, 003 | 1h |
+| 035 | [VariableReferencePanel Component](035-variable-reference-panel.poml) | ✅ | 001, 002, 003 | 2h |
+| 036 | [NodeValidationBadge Component](036-node-validation-badge.poml) | ✅ | 001, 002, 003 | 2h |
+| 037 | [Wire NodePropertiesForm to Type-Specific Forms](037-wire-node-properties-form.poml) | ✅ | 030-036 | 2h |
 
 ## Phase 5: AI Assistant & Templates (Parallel — after Phase 1)
 
 | # | Task | Status | Dependencies | Est. |
 |---|------|--------|-------------|------|
-| 040 | [Migrate AiAssistantModal and Sub-Components](040-migrate-ai-assistant.poml) | 🔲 | 001, 002, 003 | 3h |
-| 041 | [Migrate aiAssistantStore](041-migrate-ai-assistant-store.poml) | 🔲 | 001, 002, 003 | 1h |
-| 042 | [Migrate templateStore and ExecutionOverlay](042-migrate-template-store-execution.poml) | 🔲 | 001, 002, 003 | 2h |
+| 040 | [Migrate AiAssistantModal and Sub-Components](040-migrate-ai-assistant.poml) | ✅ | 001, 002, 003 | 3h |
+| 041 | [Migrate aiAssistantStore](041-migrate-ai-assistant-store.poml) | ✅ | 001, 002, 003 | 1h |
+| 042 | [Migrate templateStore and ExecutionOverlay](042-migrate-template-store-execution.poml) | ✅ | 001, 002, 003 | 2h |
 
 ## Phase 6: Integration & Polish (Serial — requires Phases 2-5)
 
 | # | Task | Status | Dependencies | Est. |
 |---|------|--------|-------------|------|
-| 050 | [Wire BuilderLayout with All Panels](050-wire-builder-layout.poml) | 🔲 | 010-013, 020-023, 037, 040-042 | 3h |
-| 051 | [Keyboard Shortcuts and Auto-Save](051-keyboard-shortcuts-autosave.poml) | 🔲 | 050 | 2h |
-| 052 | [Dark Mode Verification (ADR-021)](052-dark-mode-verification.poml) | 🔲 | 050 | 2h |
-| 053 | [Build and Deploy as Web Resource](053-build-deploy-web-resource.poml) | 🔲 | 050, 051, 052 | 2h |
+| 050 | [Wire BuilderLayout with All Panels](050-wire-builder-layout.poml) | ✅ | 010-013, 020-023, 037, 040-042 | 3h |
+| 051 | [Keyboard Shortcuts and Auto-Save](051-keyboard-shortcuts-autosave.poml) | ✅ | 050 | 2h |
+| 052 | [Dark Mode Verification (ADR-021)](052-dark-mode-verification.poml) | ✅ | 050 | 2h |
+| 053 | [Build and Deploy as Web Resource](053-build-deploy-web-resource.poml) | ✅ | 050, 051, 052 | 2h |
 
 ## Phase 7: Verification & Cleanup (Serial — final)
 
