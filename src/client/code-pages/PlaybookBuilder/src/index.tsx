@@ -36,11 +36,27 @@ const appParams = dataEnvelope
     : rawUrlParams;
 
 function resolvePlaybookId(): string {
+    // 1. Explicit URL parameter (navigateTo data envelope)
     const explicit = appParams.get("playbookId");
-    if (explicit) return explicit;
+    if (explicit) return explicit.replace(/[{}]/g, "").toLowerCase();
 
+    // 2. Dataverse ?id= parameter
     const dvId = rawUrlParams.get("id");
     if (dvId) return dvId.replace(/[{}]/g, "").toLowerCase();
+
+    // 3. Embedded web resource on form — get record ID from parent Xrm context
+    try {
+        /* eslint-disable @typescript-eslint/no-explicit-any */
+        const xrm = (window as any).parent?.Xrm;
+        const formContext = xrm?.Page;
+        if (formContext?.data?.entity) {
+            const entityId = formContext.data.entity.getId();
+            if (entityId) return entityId.replace(/[{}]/g, "").toLowerCase();
+        }
+        /* eslint-enable @typescript-eslint/no-explicit-any */
+    } catch {
+        // Cross-origin or Xrm not available — continue
+    }
 
     return "";
 }

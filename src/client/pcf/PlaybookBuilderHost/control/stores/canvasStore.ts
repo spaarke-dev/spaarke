@@ -214,15 +214,22 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   // Drag and drop handler
   onDrop: (position, nodeType, label) => {
+    const baseData: Record<string, unknown> = {
+      label,
+      type: nodeType,
+      outputVariable: `output_${nodeType}`,
+    };
+
+    // Set type-specific defaults for structural nodes
+    if (nodeType === "deliverOutput") {
+      baseData.deliveryType = "markdown";
+    }
+
     const newNode: PlaybookNode = {
       id: generateNodeId(),
       type: nodeType, // Uses custom node component from nodeTypes registry
       position,
-      data: {
-        label,
-        type: nodeType,
-        outputVariable: `output_${nodeType}`,
-      },
+      data: baseData,
     };
     get().addNode(newNode);
     get().selectNode(newNode.id);

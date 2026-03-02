@@ -51,42 +51,16 @@ public sealed class DeliverOutputNodeExecutor : INodeExecutor
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {
+        // When no explicit delivery config is present, default to auto-assembly mode
+        var config = ParseConfigOrDefault(context.Node.ConfigJson);
+        if (config == null)
+            return NodeValidationResult.Success(); // auto-assembly mode
+
         var errors = new List<string>();
 
-        if (string.IsNullOrWhiteSpace(context.Node.ConfigJson))
+        if (!string.IsNullOrWhiteSpace(config.DeliveryType) && !IsValidDeliveryType(config.DeliveryType))
         {
-            errors.Add("DeliverOutput node requires configuration (ConfigJson)");
-            return NodeValidationResult.Failure(errors.ToArray());
-        }
-
-        try
-        {
-            var config = JsonSerializer.Deserialize<DeliveryNodeConfig>(context.Node.ConfigJson, JsonOptions);
-            if (config is null)
-            {
-                errors.Add("Failed to parse delivery configuration");
-            }
-            else
-            {
-                if (string.IsNullOrWhiteSpace(config.DeliveryType))
-                {
-                    errors.Add("Delivery type is required (json, text, html, markdown)");
-                }
-                else if (!IsValidDeliveryType(config.DeliveryType))
-                {
-                    errors.Add($"Invalid delivery type: {config.DeliveryType}. Must be: json, text, html, or markdown");
-                }
-
-                // Template is optional for JSON delivery type (auto-assembles from outputs)
-                if (config.DeliveryType != "json" && string.IsNullOrWhiteSpace(config.Template))
-                {
-                    errors.Add("Template is required for non-JSON delivery types");
-                }
-            }
-        }
-        catch (JsonException ex)
-        {
-            errors.Add($"Invalid delivery configuration JSON: {ex.Message}");
+            errors.Add($"Invalid delivery type: {config.DeliveryType}. Must be: json, text, html, or markdown");
         }
 
         return errors.Count > 0
@@ -120,22 +94,39 @@ public sealed class DeliverOutputNodeExecutor : INodeExecutor
                     NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
             }
 
-            // Parse configuration
-            var config = JsonSerializer.Deserialize<DeliveryNodeConfig>(context.Node.ConfigJson!, JsonOptions)!;
+            // Parse configuration (may be null/minimal — use auto-assembly defaults)
+            var config = ParseConfigOrDefault(context.Node.ConfigJson)
+                ?? new DeliveryNodeConfig { DeliveryType = "markdown" };
+
+            var effectiveDeliveryType = string.IsNullOrWhiteSpace(config.DeliveryType)
+                ? "markdown"
+                : config.DeliveryType;
 
             // Build template context from previous outputs
             var templateContext = BuildTemplateContext(context);
 
             // Render output based on delivery type
             await Task.CompletedTask; // Placeholder for future async operations (e.g., file export)
-            var (textOutput, structuredOutput) = config.DeliveryType!.ToLowerInvariant() switch
+            string textOutput;
+            object structuredOutput;
+
+            if (!string.IsNullOrWhiteSpace(config.Template))
             {
-                "json" => RenderJsonOutput(context, config, templateContext),
-                "text" => RenderTextOutput(config, templateContext),
-                "html" => RenderHtmlOutput(config, templateContext),
-                "markdown" => RenderMarkdownOutput(config, templateContext),
-                _ => throw new InvalidOperationException($"Unsupported delivery type: {config.DeliveryType}")
-            };
+                // Explicit template provided — render it
+                (textOutput, structuredOutput) = effectiveDeliveryType.ToLowerInvariant() switch
+                {
+                    "json" => RenderJsonOutput(context, config, templateContext),
+                    "text" => RenderTextOutput(config, templateContext),
+                    "html" => RenderHtmlOutput(config, templateContext),
+                    "markdown" => RenderMarkdownOutput(config, templateContext),
+                    _ => RenderMarkdownOutput(config, templateContext)
+                };
+            }
+            else
+            {
+                // Auto-assembly: combine all previous outputs into markdown
+                (textOutput, structuredOutput) = AutoAssembleOutputs(context);
+            }
 
             // Apply output format constraints
             if (config.OutputFormat?.MaxLength.HasValue == true && textOutput.Length > config.OutputFormat.MaxLength)
@@ -146,7 +137,7 @@ public sealed class DeliverOutputNodeExecutor : INodeExecutor
             _logger.LogInformation(
                 "DeliverOutput node {NodeId} completed - rendered {DeliveryType} output ({Length} chars)",
                 context.Node.Id,
-                config.DeliveryType,
+                effectiveDeliveryType,
                 textOutput.Length);
 
             return NodeOutput.Ok(
@@ -270,6 +261,57 @@ public sealed class DeliverOutputNodeExecutor : INodeExecutor
     {
         var rendered = _templateEngine.Render(config.Template!, templateContext);
         return (rendered, new { content = rendered, format = "markdown" });
+    }
+
+    /// <summary>
+    /// Parses delivery config from ConfigJson, returning null if absent or unparseable.
+    /// </summary>
+    private static DeliveryNodeConfig? ParseConfigOrDefault(string? configJson)
+    {
+        if (string.IsNullOrWhiteSpace(configJson))
+            return null;
+
+        try
+        {
+            var config = JsonSerializer.Deserialize<DeliveryNodeConfig>(configJson, JsonOptions);
+            // If deliveryType is missing, treat as unconfigured
+            return config;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Auto-assembles all previous node outputs into a markdown document.
+    /// Used when no explicit delivery template is configured.
+    /// </summary>
+    private static (string textOutput, object structuredOutput) AutoAssembleOutputs(NodeExecutionContext context)
+    {
+        var sb = new System.Text.StringBuilder();
+
+        foreach (var (varName, output) in context.PreviousOutputs)
+        {
+            if (!output.Success)
+                continue;
+
+            if (!string.IsNullOrWhiteSpace(output.TextContent))
+            {
+                sb.AppendLine(output.TextContent);
+                sb.AppendLine();
+            }
+            else if (output.StructuredData.HasValue)
+            {
+                sb.AppendLine($"### {varName}");
+                sb.AppendLine();
+                sb.AppendLine(output.StructuredData.Value.GetRawText());
+                sb.AppendLine();
+            }
+        }
+
+        var text = sb.ToString().TrimEnd();
+        return (text, new { content = text, format = "markdown" });
     }
 
     /// <summary>

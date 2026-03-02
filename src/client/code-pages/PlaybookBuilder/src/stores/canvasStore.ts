@@ -201,17 +201,24 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     // -----------------------------------------------------------------------
 
     onDrop: (position, nodeType, label) => {
+        const baseData: Record<string, unknown> = {
+            label,
+            type: nodeType,
+            outputVariable: nodeType === "start" ? undefined : `output_${nodeType}`,
+            isConfigured: false,
+            validationErrors: [],
+        };
+
+        // Set type-specific defaults for structural nodes
+        if (nodeType === "deliverOutput") {
+            baseData.deliveryType = "markdown";
+        }
+
         const newNode: PlaybookNode = {
             id: generateNodeId(),
             type: nodeType,
             position,
-            data: {
-                label,
-                type: nodeType,
-                outputVariable: nodeType === "start" ? undefined : `output_${nodeType}`,
-                isConfigured: false,
-                validationErrors: [],
-            },
+            data: baseData,
         };
         get().addNode(newNode);
         get().selectNode(newNode.id);

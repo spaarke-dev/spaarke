@@ -29,7 +29,12 @@ import {
     disassociate,
 } from "./dataverseClient";
 import type { DataverseRecord } from "./dataverseClient";
-import type { PlaybookNodeData } from "../types/playbook";
+import {
+    type PlaybookNodeData,
+    type PlaybookNodeType,
+    NodeTypeToDataverse,
+    NodeTypeToActionType,
+} from "../types/playbook";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -56,6 +61,7 @@ interface ExistingNode {
     configJson: string | null;
     skillIds: string[];
     knowledgeIds: string[];
+    toolIds: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -64,6 +70,12 @@ interface ExistingNode {
 
 const ENTITY_SET_NAME = "sprk_playbooknodes";
 const LOG_PREFIX = "[PlaybookBuilder:PlaybookNodeSync]";
+
+/** Validate that a string is a Dataverse GUID (with or without braces). */
+const GUID_RE = /^[{(]?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[)}]?$/i;
+function isGuid(value: string): boolean {
+    return GUID_RE.test(value);
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -80,7 +92,7 @@ export async function loadPlaybookNodes(playbookId: string): Promise<DataverseRe
         "sprk_outputvariable,sprk_configjson,sprk_position_x,sprk_position_y," +
         "sprk_isactive,sprk_timeoutseconds,sprk_retrycount,sprk_conditionjson," +
         "sprk_dependsonjson,_sprk_playbookid_value,_sprk_actionid_value," +
-        "_sprk_toolid_value,_sprk_modeldeploymentid_value" +
+        "_sprk_modeldeploymentid_value" +
         `&$filter=_sprk_playbookid_value eq ${playbookId}` +
         "&$orderby=sprk_executionorder asc";
 
@@ -137,7 +149,7 @@ export async function syncNodesToDataverse(
                 const newId = await createNodeRecord(playbookId, node, order);
                 canvasIdToNodeId.set(node.id, newId);
                 // Create N:N relationships for new nodes
-                await syncNodeRelationships(newId, node.data, { id: newId, configJson: null, skillIds: [], knowledgeIds: [] });
+                await syncNodeRelationships(newId, node.data, { id: newId, configJson: null, skillIds: [], knowledgeIds: [], toolIds: [] });
             }
         } catch (err) {
             console.error(`${LOG_PREFIX} Failed to sync node ${node.id}:`, err);
@@ -199,7 +211,11 @@ export async function syncNodesToDataverse(
  * @returns JSON string for sprk_configjson.
  */
 export function buildConfigJson(canvasNodeId: string, data: PlaybookNodeData): string {
-    const config: Record<string, unknown> = { __canvasNodeId: canvasNodeId };
+    const actionType = NodeTypeToActionType[data.type as PlaybookNodeType];
+    const config: Record<string, unknown> = {
+        __canvasNodeId: canvasNodeId,
+        __actionType: actionType ?? 0,
+    };
 
     switch (data.type) {
         case "aiAnalysis":
@@ -274,15 +290,17 @@ async function getExistingNodes(playbookId: string): Promise<ExistingNode[]> {
     const queryOptions =
         "$select=sprk_playbooknodeid,sprk_configjson" +
         `&$filter=_sprk_playbookid_value eq ${playbookId}` +
-        "&$expand=sprk_playbooknode_analysisskill($select=sprk_analysisskillid)" +
-        ",sprk_playbooknode_aiknowledge($select=sprk_aiknowledgeid)";
+        "&$expand=sprk_playbooknode_skill($select=sprk_analysisskillid)" +
+        ",sprk_playbooknode_knowledge($select=sprk_analysisknowledgeid)" +
+        ",sprk_playbooknode_tool($select=sprk_analysistoolid)";
 
     const result = await retrieveMultipleRecords(ENTITY_SET_NAME, queryOptions);
     return (result.entities ?? []).map((e) => ({
         id: (e["sprk_playbooknodeid"] as string) ?? "",
         configJson: (e["sprk_configjson"] as string) ?? null,
-        skillIds: extractRelatedIds(e["sprk_playbooknode_analysisskill"], "sprk_analysisskillid"),
-        knowledgeIds: extractRelatedIds(e["sprk_playbooknode_aiknowledge"], "sprk_aiknowledgeid"),
+        skillIds: extractRelatedIds(e["sprk_playbooknode_skill"], "sprk_analysisskillid"),
+        knowledgeIds: extractRelatedIds(e["sprk_playbooknode_knowledge"], "sprk_analysisknowledgeid"),
+        toolIds: extractRelatedIds(e["sprk_playbooknode_tool"], "sprk_analysistoolid"),
     }));
 }
 
@@ -303,9 +321,11 @@ async function createNodeRecord(
     const name = asString(data.label) ?? asString(data.name as unknown) ?? node.type;
     const outputVariable = asString(data.outputVariable) ?? `output_${node.id}`;
     const configJson = buildConfigJson(node.id, data);
+    const nodeType = NodeTypeToDataverse[node.type as PlaybookNodeType];
 
     const payload: Record<string, unknown> = {
         sprk_name: name,
+        sprk_nodetype: nodeType,
         "sprk_playbookid@odata.bind": `/sprk_analysisplaybooks(${playbookId})`,
         sprk_executionorder: executionOrder,
         sprk_outputvariable: outputVariable,
@@ -315,15 +335,14 @@ async function createNodeRecord(
         sprk_isactive: data.isActive ?? true,
     };
 
-    // Optional lookup bindings
+    // Optional lookup bindings (only if real GUIDs, skip mock IDs)
     const actionId = asString(data.actionId);
-    if (actionId) payload["sprk_actionid@odata.bind"] = `/sprk_analysisactions(${actionId})`;
+    if (actionId && isGuid(actionId)) payload["sprk_actionid@odata.bind"] = `/sprk_analysisactions(${actionId})`;
 
-    const toolId = asString(data.toolId);
-    if (toolId) payload["sprk_toolid@odata.bind"] = `/sprk_analysistools(${toolId})`;
+    // Tool is now N:N — handled via syncNodeRelationships, not lookup binding
 
     const modelDeploymentId = asString(data.modelDeploymentId);
-    if (modelDeploymentId)
+    if (modelDeploymentId && isGuid(modelDeploymentId))
         payload["sprk_modeldeploymentid@odata.bind"] = `/sprk_aimodeldeployments(${modelDeploymentId})`;
 
     const timeoutSeconds = asNumber(data.timeoutSeconds);
@@ -347,8 +366,10 @@ async function updateNodeRecord(
 ): Promise<void> {
     const data = node.data;
     const configJson = buildConfigJson(node.id, data);
+    const nodeType = NodeTypeToDataverse[node.type as PlaybookNodeType];
 
     const payload: Record<string, unknown> = {
+        sprk_nodetype: nodeType,
         sprk_executionorder: executionOrder,
         sprk_configjson: configJson,
         sprk_position_x: Math.round(node.position.x),
@@ -362,13 +383,12 @@ async function updateNodeRecord(
     if (outputVariable) payload["sprk_outputvariable"] = outputVariable;
 
     const actionId = asString(data.actionId);
-    if (actionId) payload["sprk_actionid@odata.bind"] = `/sprk_analysisactions(${actionId})`;
+    if (actionId && isGuid(actionId)) payload["sprk_actionid@odata.bind"] = `/sprk_analysisactions(${actionId})`;
 
-    const toolId = asString(data.toolId);
-    if (toolId) payload["sprk_toolid@odata.bind"] = `/sprk_analysistools(${toolId})`;
+    // Tool is now N:N — handled via syncNodeRelationships, not lookup binding
 
     const modelDeploymentId = asString(data.modelDeploymentId);
-    if (modelDeploymentId)
+    if (modelDeploymentId && isGuid(modelDeploymentId))
         payload["sprk_modeldeploymentid@odata.bind"] = `/sprk_aimodeldeployments(${modelDeploymentId})`;
 
     const timeoutSeconds = asNumber(data.timeoutSeconds);
@@ -391,8 +411,10 @@ async function updateNodeRecord(
 // ---------------------------------------------------------------------------
 
 /**
- * Sync N:N relationships for a node: sprk_playbooknode_analysisskill
- * and sprk_playbooknode_aiknowledge.
+ * Sync N:N relationships for a node:
+ *   - sprk_playbooknode_skill (PlaybookNode ↔ AnalysisSkill)
+ *   - sprk_playbooknode_knowledge (PlaybookNode ↔ AnalysisKnowledge)
+ *   - sprk_playbooknode_tool (PlaybookNode ↔ AnalysisTool)
  *
  * Computes the diff between current canvas selections and existing
  * Dataverse associations, then adds/removes as needed.
@@ -402,8 +424,10 @@ async function syncNodeRelationships(
     data: PlaybookNodeData,
     existingRecord: ExistingNode,
 ): Promise<void> {
-    const desiredSkillIds = data.skillIds ?? [];
-    const desiredKnowledgeIds = data.knowledgeIds ?? [];
+    // Filter out non-GUID IDs (e.g. mock/placeholder IDs like "skill-5")
+    const desiredSkillIds = (data.skillIds ?? []).filter(isGuid);
+    const desiredKnowledgeIds = (data.knowledgeIds ?? []).filter(isGuid);
+    const desiredToolIds = (data.toolIds ?? []).filter(isGuid);
 
     // Sync skills
     const skillsToAdd = desiredSkillIds.filter((id) => !existingRecord.skillIds.includes(id));
@@ -414,7 +438,7 @@ async function syncNodeRelationships(
             await associate(
                 ENTITY_SET_NAME,
                 nodeId,
-                "sprk_playbooknode_analysisskill",
+                "sprk_playbooknode_skill",
                 "sprk_analysisskills",
                 skillId,
             );
@@ -428,7 +452,7 @@ async function syncNodeRelationships(
             await disassociate(
                 ENTITY_SET_NAME,
                 nodeId,
-                "sprk_playbooknode_analysisskill",
+                "sprk_playbooknode_skill",
                 skillId,
             );
         } catch (err) {
@@ -445,8 +469,8 @@ async function syncNodeRelationships(
             await associate(
                 ENTITY_SET_NAME,
                 nodeId,
-                "sprk_playbooknode_aiknowledge",
-                "sprk_aiknowledges",
+                "sprk_playbooknode_knowledge",
+                "sprk_analysisknowledges",
                 knowledgeId,
             );
         } catch (err) {
@@ -459,7 +483,7 @@ async function syncNodeRelationships(
             await disassociate(
                 ENTITY_SET_NAME,
                 nodeId,
-                "sprk_playbooknode_aiknowledge",
+                "sprk_playbooknode_knowledge",
                 knowledgeId,
             );
         } catch (err) {
@@ -467,11 +491,47 @@ async function syncNodeRelationships(
         }
     }
 
-    if (skillsToAdd.length + skillsToRemove.length + knowledgeToAdd.length + knowledgeToRemove.length > 0) {
+    // Sync tools
+    const toolsToAdd = desiredToolIds.filter((id) => !existingRecord.toolIds.includes(id));
+    const toolsToRemove = existingRecord.toolIds.filter((id) => !desiredToolIds.includes(id));
+
+    for (const toolId of toolsToAdd) {
+        try {
+            await associate(
+                ENTITY_SET_NAME,
+                nodeId,
+                "sprk_playbooknode_tool",
+                "sprk_analysistools",
+                toolId,
+            );
+        } catch (err) {
+            console.error(`${LOG_PREFIX} Failed to associate tool ${toolId} with node ${nodeId}:`, err);
+        }
+    }
+
+    for (const toolId of toolsToRemove) {
+        try {
+            await disassociate(
+                ENTITY_SET_NAME,
+                nodeId,
+                "sprk_playbooknode_tool",
+                toolId,
+            );
+        } catch (err) {
+            console.error(`${LOG_PREFIX} Failed to disassociate tool ${toolId} from node ${nodeId}:`, err);
+        }
+    }
+
+    const totalChanges = skillsToAdd.length + skillsToRemove.length +
+        knowledgeToAdd.length + knowledgeToRemove.length +
+        toolsToAdd.length + toolsToRemove.length;
+
+    if (totalChanges > 0) {
         console.info(
             `${LOG_PREFIX} Node ${nodeId} N:N sync: ` +
             `skills +${skillsToAdd.length}/-${skillsToRemove.length}, ` +
-            `knowledge +${knowledgeToAdd.length}/-${knowledgeToRemove.length}`,
+            `knowledge +${knowledgeToAdd.length}/-${knowledgeToRemove.length}, ` +
+            `tools +${toolsToAdd.length}/-${toolsToRemove.length}`,
         );
     }
 }

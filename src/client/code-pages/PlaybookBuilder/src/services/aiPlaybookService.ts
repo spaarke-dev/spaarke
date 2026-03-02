@@ -64,7 +64,7 @@ export interface CanvasPatchNode {
     outputVariable?: string;
     skillIds?: string[];
     knowledgeIds?: string[];
-    toolId?: string;
+    toolIds?: string[];
     modelDeploymentId?: string;
 }
 

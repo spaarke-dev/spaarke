@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using Azure.Core;
 using Azure.Identity;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai.Nodes;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -26,6 +27,7 @@ public class NodeService : INodeService
     // N:N relationship names
     private const string SkillRelationship = "sprk_playbooknode_skill";
     private const string KnowledgeRelationship = "sprk_playbooknode_knowledge";
+    private const string ToolRelationship = "sprk_playbooknode_tool";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -157,10 +159,6 @@ public class NodeService : INodeService
         };
 
         // Optional lookups
-        if (request.ToolId.HasValue)
-        {
-            payload["sprk_toolid@odata.bind"] = $"/sprk_analysistools({request.ToolId.Value})";
-        }
         if (request.ModelDeploymentId.HasValue)
         {
             payload["sprk_modeldeploymentid@odata.bind"] = $"/sprk_aimodeldeployments({request.ModelDeploymentId.Value})";
@@ -207,7 +205,7 @@ public class NodeService : INodeService
         _logger.LogInformation("Created node {NodeId}: {Name}", nodeId, request.Name);
 
         // Associate N:N relationships
-        await AssociateRelationshipsAsync(nodeId, request.SkillIds, request.KnowledgeIds, cancellationToken);
+        await AssociateRelationshipsAsync(nodeId, request.SkillIds, request.KnowledgeIds, request.ToolIds, cancellationToken);
 
         // Return the created node
         return await GetNodeAsync(nodeId, cancellationToken)
@@ -234,10 +232,6 @@ public class NodeService : INodeService
         if (request.ActionId.HasValue)
         {
             payload["sprk_actionid@odata.bind"] = $"/sprk_analysisactions({request.ActionId.Value})";
-        }
-        if (request.ToolId.HasValue)
-        {
-            payload["sprk_toolid@odata.bind"] = $"/sprk_analysistools({request.ToolId.Value})";
         }
         if (request.ModelDeploymentId.HasValue)
         {
@@ -290,10 +284,10 @@ public class NodeService : INodeService
         }
 
         // Update N:N relationships if specified
-        if (request.SkillIds != null || request.KnowledgeIds != null)
+        if (request.SkillIds != null || request.KnowledgeIds != null || request.ToolIds != null)
         {
             await ClearRelationshipsAsync(nodeId, cancellationToken);
-            await AssociateRelationshipsAsync(nodeId, request.SkillIds, request.KnowledgeIds, cancellationToken);
+            await AssociateRelationshipsAsync(nodeId, request.SkillIds, request.KnowledgeIds, request.ToolIds, cancellationToken);
         }
 
         _logger.LogInformation("Updated node {NodeId}", nodeId);
@@ -364,7 +358,7 @@ public class NodeService : INodeService
 
         // Clear existing and re-associate
         await ClearRelationshipsAsync(nodeId, cancellationToken);
-        await AssociateRelationshipsAsync(nodeId, scopes.SkillIds, scopes.KnowledgeIds, cancellationToken);
+        await AssociateRelationshipsAsync(nodeId, scopes.SkillIds, scopes.KnowledgeIds, scopes.ToolIds, cancellationToken);
 
         return await GetNodeAsync(nodeId, cancellationToken)
             ?? throw new InvalidOperationException("Failed to retrieve updated node");
@@ -504,6 +498,7 @@ public class NodeService : INodeService
 
             var skillIds = ExtractGuidArray(canvasNode.Data, "skillIds");
             var knowledgeIds = ExtractGuidArray(canvasNode.Data, "knowledgeIds");
+            var toolIds = ExtractGuidArray(canvasNode.Data, "toolIds");
 
             try
             {
@@ -511,6 +506,7 @@ public class NodeService : INodeService
                 await AssociateRelationshipsAsync(nodeId,
                     skillIds.Length > 0 ? skillIds : null,
                     knowledgeIds.Length > 0 ? knowledgeIds : null,
+                    toolIds.Length > 0 ? toolIds : null,
                     cancellationToken);
             }
             catch (Exception ex)
@@ -558,7 +554,7 @@ public class NodeService : INodeService
 
     private static string GetSelectFields()
     {
-        return "sprk_playbooknodeid,sprk_name,_sprk_playbookid_value,_sprk_actionid_value,_sprk_toolid_value," +
+        return "sprk_playbooknodeid,sprk_name,sprk_nodetype,_sprk_playbookid_value,_sprk_actionid_value," +
                "_sprk_modeldeploymentid_value,sprk_executionorder,sprk_dependsonjson,sprk_outputvariable," +
                "sprk_conditionjson,sprk_configjson,sprk_timeoutseconds,sprk_retrycount," +
                "sprk_position_x,sprk_position_y,sprk_isactive,createdon,modifiedon";
@@ -587,6 +583,7 @@ public class NodeService : INodeService
         // Load N:N relationships
         var skillIds = await GetRelatedIdsAsync(entity.Id, SkillRelationship, "sprk_analysisskillid", cancellationToken);
         var knowledgeIds = await GetRelatedIdsAsync(entity.Id, KnowledgeRelationship, "sprk_analysisknowledgeid", cancellationToken);
+        var toolIds = await GetRelatedIdsAsync(entity.Id, ToolRelationship, "sprk_analysistoolid", cancellationToken);
 
         // Parse depends on JSON
         var dependsOn = Array.Empty<Guid>();
@@ -606,8 +603,9 @@ public class NodeService : INodeService
         {
             Id = entity.Id,
             PlaybookId = entity.PlaybookId ?? Guid.Empty,
+            NodeType = (Nodes.NodeType)(entity.NodeType ?? (int)Nodes.NodeType.AIAnalysis),
             ActionId = entity.ActionId ?? Guid.Empty,
-            ToolId = entity.ToolId,
+            ToolIds = toolIds,
             Name = entity.Name ?? string.Empty,
             ExecutionOrder = entity.ExecutionOrder ?? 0,
             DependsOn = dependsOn,
@@ -631,6 +629,7 @@ public class NodeService : INodeService
         Guid nodeId,
         Guid[]? skillIds,
         Guid[]? knowledgeIds,
+        Guid[]? toolIds,
         CancellationToken cancellationToken)
     {
         if (skillIds?.Length > 0)
@@ -646,6 +645,14 @@ public class NodeService : INodeService
             foreach (var knowledgeId in knowledgeIds)
             {
                 await AssociateAsync(nodeId, KnowledgeRelationship, "sprk_analysisknowledges", knowledgeId, cancellationToken);
+            }
+        }
+
+        if (toolIds?.Length > 0)
+        {
+            foreach (var toolId in toolIds)
+            {
+                await AssociateAsync(nodeId, ToolRelationship, "sprk_analysistools", toolId, cancellationToken);
             }
         }
     }
@@ -679,6 +686,7 @@ public class NodeService : INodeService
     {
         await ClearRelationshipAsync(nodeId, SkillRelationship, "sprk_analysisskillid", cancellationToken);
         await ClearRelationshipAsync(nodeId, KnowledgeRelationship, "sprk_analysisknowledgeid", cancellationToken);
+        await ClearRelationshipAsync(nodeId, ToolRelationship, "sprk_analysistoolid", cancellationToken);
     }
 
     private async Task ClearRelationshipAsync(
@@ -853,18 +861,20 @@ public class NodeService : INodeService
                    ?? ExtractStringValue(data, "name")
                    ?? canvasNode.Type;
         var actionId = ExtractGuidValue(data, "actionId");
-        var toolId = ExtractGuidValue(data, "toolId");
         var modelDeploymentId = ExtractGuidValue(data, "modelDeploymentId");
         var outputVariable = ExtractStringValue(data, "outputVariable") ?? $"output_{canvasNode.Id}";
         var timeoutSeconds = ExtractIntValue(data, "timeoutSeconds");
         var retryCount = ExtractIntValue(data, "retryCount");
         var conditionJson = ExtractStringValue(data, "conditionJson");
         var isActive = ExtractBoolValue(data, "isActive") ?? true;
-        var configJson = BuildConfigJson(canvasNode.Id, data);
+        var nodeType = MapCanvasTypeToNodeType(canvasNode.Type);
+        var actionType = MapCanvasTypeToActionType(canvasNode.Type);
+        var configJson = BuildConfigJson(canvasNode.Id, actionType, data);
 
         var payload = new Dictionary<string, object?>
         {
             ["sprk_name"] = name,
+            ["sprk_nodetype"] = (int)nodeType,
             ["sprk_playbookid@odata.bind"] = $"/sprk_analysisplaybooks({playbookId})",
             ["sprk_executionorder"] = executionOrder,
             ["sprk_outputvariable"] = outputVariable,
@@ -876,8 +886,6 @@ public class NodeService : INodeService
 
         if (actionId.HasValue)
             payload["sprk_actionid@odata.bind"] = $"/sprk_analysisactions({actionId.Value})";
-        if (toolId.HasValue)
-            payload["sprk_toolid@odata.bind"] = $"/sprk_analysistools({toolId.Value})";
         if (modelDeploymentId.HasValue)
             payload["sprk_modeldeploymentid@odata.bind"] = $"/sprk_aimodeldeployments({modelDeploymentId.Value})";
         if (timeoutSeconds.HasValue)
@@ -894,8 +902,8 @@ public class NodeService : INodeService
             ?? throw new InvalidOperationException("Failed to get entity ID from create response");
         var nodeId = Guid.Parse(entityIdHeader.Split('(', ')')[1]);
 
-        _logger.LogInformation("Created node {NodeId} from canvas node {CanvasNodeId}: {Name}",
-            nodeId, canvasNode.Id, name);
+        _logger.LogInformation("Created node {NodeId} from canvas node {CanvasNodeId}: {Name} (NodeType: {NodeType})",
+            nodeId, canvasNode.Id, name, nodeType);
         return nodeId;
     }
 
@@ -908,17 +916,19 @@ public class NodeService : INodeService
         var data = canvasNode.Data;
         var name = ExtractStringValue(data, "label") ?? ExtractStringValue(data, "name");
         var actionId = ExtractGuidValue(data, "actionId");
-        var toolId = ExtractGuidValue(data, "toolId");
         var modelDeploymentId = ExtractGuidValue(data, "modelDeploymentId");
         var outputVariable = ExtractStringValue(data, "outputVariable");
         var timeoutSeconds = ExtractIntValue(data, "timeoutSeconds");
         var retryCount = ExtractIntValue(data, "retryCount");
         var conditionJson = ExtractStringValue(data, "conditionJson");
         var isActive = ExtractBoolValue(data, "isActive");
-        var configJson = BuildConfigJson(canvasNode.Id, data);
+        var nodeType = MapCanvasTypeToNodeType(canvasNode.Type);
+        var actionType = MapCanvasTypeToActionType(canvasNode.Type);
+        var configJson = BuildConfigJson(canvasNode.Id, actionType, data);
 
         var payload = new Dictionary<string, object?>
         {
+            ["sprk_nodetype"] = (int)nodeType,
             ["sprk_executionorder"] = executionOrder,
             ["sprk_configjson"] = configJson,
             ["sprk_position_x"] = (int)canvasNode.X,
@@ -929,8 +939,6 @@ public class NodeService : INodeService
             payload["sprk_name"] = name;
         if (actionId.HasValue)
             payload["sprk_actionid@odata.bind"] = $"/sprk_analysisactions({actionId.Value})";
-        if (toolId.HasValue)
-            payload["sprk_toolid@odata.bind"] = $"/sprk_analysistools({toolId.Value})";
         if (modelDeploymentId.HasValue)
             payload["sprk_modeldeploymentid@odata.bind"] = $"/sprk_aimodeldeployments({modelDeploymentId.Value})";
         if (!string.IsNullOrEmpty(outputVariable))
@@ -948,7 +956,7 @@ public class NodeService : INodeService
         var response = await _httpClient.PatchAsJsonAsync(url, payload, JsonOptions, ct);
         response.EnsureSuccessStatusCode();
 
-        _logger.LogDebug("Updated node {NodeId} from canvas node {CanvasNodeId}", nodeId, canvasNode.Id);
+        _logger.LogDebug("Updated node {NodeId} from canvas node {CanvasNodeId} (NodeType: {NodeType})", nodeId, canvasNode.Id, nodeType);
     }
 
     /// <summary>
@@ -969,16 +977,54 @@ public class NodeService : INodeService
     }
 
     /// <summary>
+    /// Maps a canvas node type string to the coarse NodeType category.
+    /// Determines which scopes the orchestrator will resolve for this node.
+    /// </summary>
+    private static NodeType MapCanvasTypeToNodeType(string canvasType) => canvasType switch
+    {
+        "aiAnalysis" or "aiCompletion" or "aiEmbedding" => NodeType.AIAnalysis,
+        "deliverOutput" => NodeType.Output,
+        "condition" or "parallel" or "wait" or "start" => NodeType.Control,
+        "createTask" or "sendEmail" or "updateRecord" or "callWebhook" or "sendTeamsMessage" => NodeType.Workflow,
+        _ => NodeType.AIAnalysis // Default to AI for unknown types
+    };
+
+    /// <summary>
+    /// Maps canvas node type string to specific ActionType for executor dispatch.
+    /// Stored in ConfigJson so the orchestrator can dispatch structural nodes correctly.
+    /// </summary>
+    private static ActionType MapCanvasTypeToActionType(string canvasType) => canvasType switch
+    {
+        "aiAnalysis" => ActionType.AiAnalysis,
+        "aiCompletion" => ActionType.AiCompletion,
+        "aiEmbedding" => ActionType.AiEmbedding,
+        "deliverOutput" => ActionType.DeliverOutput,
+        "condition" => ActionType.Condition,
+        "parallel" => ActionType.Parallel,
+        "wait" => ActionType.Wait,
+        "createTask" => ActionType.CreateTask,
+        "sendEmail" => ActionType.SendEmail,
+        "updateRecord" => ActionType.UpdateRecord,
+        "callWebhook" => ActionType.CallWebhook,
+        "sendTeamsMessage" => ActionType.SendTeamsMessage,
+        _ => ActionType.AiAnalysis // Default for unknown types
+    };
+
+    /// <summary>
     /// Build a configJson string that includes the __canvasNodeId marker plus any unmapped data fields.
     /// </summary>
-    private static string BuildConfigJson(string canvasNodeId, Dictionary<string, object?>? data)
+    private static string BuildConfigJson(string canvasNodeId, ActionType actionType, Dictionary<string, object?>? data)
     {
-        var config = new Dictionary<string, object?> { ["__canvasNodeId"] = canvasNodeId };
+        var config = new Dictionary<string, object?>
+        {
+            ["__canvasNodeId"] = canvasNodeId,
+            ["__actionType"] = (int)actionType
+        };
 
         // Fields that are mapped to dedicated Dataverse columns (not stored in configJson)
         var mappedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "label", "name", "actionId", "toolId", "skillIds", "knowledgeIds",
+            "label", "name", "type", "actionId", "toolId", "toolIds", "skillIds", "knowledgeIds",
             "outputVariable", "timeoutSeconds", "retryCount", "modelDeploymentId",
             "conditionJson", "isActive"
         };
@@ -1071,14 +1117,14 @@ public class NodeService : INodeService
         [JsonPropertyName("sprk_name")]
         public string? Name { get; set; }
 
+        [JsonPropertyName("sprk_nodetype")]
+        public int? NodeType { get; set; }
+
         [JsonPropertyName("_sprk_playbookid_value")]
         public Guid? PlaybookId { get; set; }
 
         [JsonPropertyName("_sprk_actionid_value")]
         public Guid? ActionId { get; set; }
-
-        [JsonPropertyName("_sprk_toolid_value")]
-        public Guid? ToolId { get; set; }
 
         [JsonPropertyName("_sprk_modeldeploymentid_value")]
         public Guid? ModelDeploymentId { get; set; }

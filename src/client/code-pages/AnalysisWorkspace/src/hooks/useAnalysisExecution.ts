@@ -180,9 +180,6 @@ export function useAnalysisExecution(
                       };
             setExecutionError(analysisErr);
             setProgressMessage("Execution failed");
-
-            // Allow retry by clearing the executed ref
-            executedRef.current = null;
         } finally {
             setIsExecuting(false);
             abortRef.current = null;

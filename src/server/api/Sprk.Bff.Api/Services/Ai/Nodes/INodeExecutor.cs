@@ -45,6 +45,33 @@ public interface INodeExecutor
 }
 
 /// <summary>
+/// Coarse node category stored as a choice/option set on sprk_playbooknode.
+/// Determines which scopes the orchestrator resolves before execution.
+/// </summary>
+/// <remarks>
+/// <list type="bullet">
+/// <item><description>AI — requires Action record + resolves Skills, Knowledge, Tools scopes</description></item>
+/// <item><description>Output — structural; no Action or scopes needed</description></item>
+/// <item><description>Control — structural; no Action or scopes needed</description></item>
+/// <item><description>Workflow — future; rule-based actions, scope TBD</description></item>
+/// </list>
+/// </remarks>
+public enum NodeType
+{
+    /// <summary>AI-powered node (analysis, completion, embedding). Requires Action + all scopes.</summary>
+    AIAnalysis = 100_000_000,
+
+    /// <summary>Delivery/output node. No Action or scopes — assembles previous outputs.</summary>
+    Output = 100_000_001,
+
+    /// <summary>Control flow node (condition, parallel, wait). No Action or scopes.</summary>
+    Control = 100_000_002,
+
+    /// <summary>Workflow action node (create task, send email, etc.). Future — scope TBD.</summary>
+    Workflow = 100_000_003
+}
+
+/// <summary>
 /// Action types available in the node-based playbook system.
 /// Maps to sprk_analysisaction.sprk_actiontype choice values.
 /// </summary>

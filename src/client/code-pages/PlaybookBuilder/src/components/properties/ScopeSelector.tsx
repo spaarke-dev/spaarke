@@ -2,7 +2,8 @@
  * ScopeSelector — Multi-select for Skills, Knowledge, and Tools.
  *
  * Reads from scopeStore, filters by node-type capabilities.
- * Three modes: skills checkbox list, knowledge checkbox list, tool single-select dropdown.
+ * Three modes: skills checkbox list, knowledge checkbox list, tools checkbox list.
+ * All three scope types use N:N relationships to PlaybookNode.
  */
 
 import { memo, useEffect, useCallback } from "react";
@@ -11,8 +12,6 @@ import {
     tokens,
     shorthands,
     Checkbox,
-    Dropdown,
-    Option,
     Spinner,
     Text,
 } from "@fluentui/react-components";
@@ -27,13 +26,13 @@ interface ScopeSelectorProps {
     nodeType: PlaybookNodeType;
     skillIds: string[];
     knowledgeIds: string[];
-    toolId?: string;
+    toolIds: string[];
     showSkills?: boolean;
     showKnowledge?: boolean;
     showTools?: boolean;
     onSkillsChange: (ids: string[]) => void;
     onKnowledgeChange: (ids: string[]) => void;
-    onToolChange: (id: string | undefined) => void;
+    onToolsChange: (ids: string[]) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,13 +74,13 @@ export const ScopeSelector = memo(function ScopeSelector({
     nodeType,
     skillIds,
     knowledgeIds,
-    toolId,
+    toolIds,
     showSkills = false,
     showKnowledge = false,
     showTools = false,
     onSkillsChange,
     onKnowledgeChange,
-    onToolChange,
+    onToolsChange,
 }: ScopeSelectorProps) {
     const styles = useStyles();
 
@@ -125,11 +124,15 @@ export const ScopeSelector = memo(function ScopeSelector({
         [knowledgeIds, onKnowledgeChange],
     );
 
-    const handleToolSelect = useCallback(
-        (_: unknown, data: { optionValue?: string }) => {
-            onToolChange(data.optionValue === "__none__" ? undefined : data.optionValue);
+    const handleToolToggle = useCallback(
+        (toolId: string, checked: boolean) => {
+            if (checked) {
+                onToolsChange([...toolIds, toolId]);
+            } else {
+                onToolsChange(toolIds.filter((id) => id !== toolId));
+            }
         },
-        [onToolChange],
+        [toolIds, onToolsChange],
     );
 
     // Skills section
@@ -195,23 +198,18 @@ export const ScopeSelector = memo(function ScopeSelector({
         if (tools.length === 0) {
             return <Text className={styles.empty}>No tools available.</Text>;
         }
-        const selectedTool = tools.find((t) => t.id === toolId);
         return (
-            <Dropdown
-                size="small"
-                value={selectedTool?.name ?? "(None)"}
-                selectedOptions={toolId ? [toolId] : ["__none__"]}
-                onOptionSelect={handleToolSelect}
-            >
-                <Option key="__none__" value="__none__">
-                    (None)
-                </Option>
+            <div className={styles.checkboxList}>
                 {tools.map((tool) => (
-                    <Option key={tool.id} value={tool.id}>
-                        {tool.name}
-                    </Option>
+                    <Checkbox
+                        key={tool.id}
+                        size="medium"
+                        label={tool.name}
+                        checked={toolIds.includes(tool.id)}
+                        onChange={(_, data) => handleToolToggle(tool.id, data.checked === true)}
+                    />
                 ))}
-            </Dropdown>
+            </div>
         );
     }
 

@@ -17,7 +17,7 @@ export interface AnalysisSkill {
 }
 
 // ---------------------------------------------------------------------------
-// AI Knowledge (sprk_aiknowledges)
+// Analysis Knowledge (sprk_analysisknowledges)
 // ---------------------------------------------------------------------------
 
 export interface AiKnowledge {
@@ -35,7 +35,6 @@ export interface AnalysisTool {
     id: string;
     name: string;
     description: string;
-    handlerType: string;
 }
 
 // ---------------------------------------------------------------------------

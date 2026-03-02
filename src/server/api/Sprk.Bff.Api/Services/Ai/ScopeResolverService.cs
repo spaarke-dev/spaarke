@@ -219,49 +219,29 @@ public class ScopeResolverService : IScopeResolverService
 
         try
         {
-            // Step 1: Query the sprk_playbooknode record for the tool lookup
-            Guid? toolId = null;
-            var nodeUrl = $"sprk_playbooknodes({nodeId})?$select=_sprk_toolid_value";
-            var nodeResponse = await _httpClient.GetAsync(nodeUrl, cancellationToken);
-
-            if (nodeResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
-            {
-                _logger.LogWarning("Node {NodeId} not found in Dataverse", nodeId);
-                return new ResolvedScopes([], [], []);
-            }
-
-            await EnsureSuccessWithDiagnosticsAsync(nodeResponse, $"ResolveNodeScopes-GetNode({nodeId})", cancellationToken);
-
-            using (var nodeDoc = await JsonDocument.ParseAsync(
-                await nodeResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken))
-            {
-                if (nodeDoc.RootElement.TryGetProperty("_sprk_toolid_value", out var toolProp) &&
-                    toolProp.ValueKind != JsonValueKind.Null)
-                {
-                    toolId = Guid.TryParse(toolProp.GetString(), out var tid) ? tid : null;
-                }
-            }
-
-            _logger.LogDebug("Node {NodeId} has toolId: {ToolId}", nodeId, toolId?.ToString() ?? "(none)");
-
-            // Step 2: Query N:N skill relationship
+            // Step 1: Query N:N skill relationship
             var skillIds = await QueryNodeRelatedIdsAsync(
                 nodeId, "sprk_playbooknode_skill", "sprk_analysisskillid", cancellationToken);
 
-            // Step 3: Query N:N knowledge relationship
+            // Step 2: Query N:N knowledge relationship
             var knowledgeIds = await QueryNodeRelatedIdsAsync(
                 nodeId, "sprk_playbooknode_knowledge", "sprk_analysisknowledgeid", cancellationToken);
 
-            _logger.LogDebug(
-                "Node {NodeId} relationships: {SkillCount} skills, {KnowledgeCount} knowledge, tool={HasTool}",
-                nodeId, skillIds.Length, knowledgeIds.Length, toolId.HasValue);
+            // Step 3: Query N:N tool relationship
+            var toolIds = await QueryNodeRelatedIdsAsync(
+                nodeId, "sprk_playbooknode_tool", "sprk_analysistoolid", cancellationToken);
 
-            // Step 4: Resolve tools
+            _logger.LogDebug(
+                "Node {NodeId} relationships: {SkillCount} skills, {KnowledgeCount} knowledge, {ToolCount} tools",
+                nodeId, skillIds.Length, knowledgeIds.Length, toolIds.Length);
+
+            // Step 4: Resolve tools in parallel
             var tools = Array.Empty<AnalysisTool>();
-            if (toolId.HasValue)
+            if (toolIds.Length > 0)
             {
-                var tool = await GetToolAsync(toolId.Value, cancellationToken);
-                tools = tool != null ? [tool] : [];
+                var toolTasks = toolIds.Select(id => GetToolAsync(id, cancellationToken));
+                var toolResults = await Task.WhenAll(toolTasks);
+                tools = toolResults.Where(t => t != null).Cast<AnalysisTool>().ToArray();
             }
 
             // Step 5: Resolve skills in parallel

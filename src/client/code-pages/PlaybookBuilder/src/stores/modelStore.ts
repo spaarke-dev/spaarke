@@ -28,7 +28,7 @@ function mapModelDeployment(record: DataverseRecord): AiModelDeployment {
         modelId: (record["sprk_modelid"] as string) ?? "",
         contextWindow: (record["sprk_contextwindow"] as number) ?? 0,
         isActive: (record["sprk_isactive"] as boolean) ?? false,
-        description: (record["sprk_description"] as string) ?? undefined,
+        description: undefined,
     };
 }
 
@@ -77,7 +77,7 @@ export const useModelStore = create<ModelStoreState>()((set, get) => ({
         try {
             const result = await retrieveMultipleRecords(
                 "sprk_aimodeldeployments",
-                "$select=sprk_aimodeldeploymentid,sprk_name,sprk_provider,sprk_capability,sprk_modelid,sprk_contextwindow,sprk_isactive,sprk_description&$filter=statecode eq 0&$orderby=sprk_name",
+                "$select=sprk_aimodeldeploymentid,sprk_name,sprk_provider,sprk_capability,sprk_modelid,sprk_contextwindow,sprk_isactive&$filter=statecode eq 0&$orderby=sprk_name",
             );
             const models = result.entities.map(mapModelDeployment);
             set({ models, isLoading: false });

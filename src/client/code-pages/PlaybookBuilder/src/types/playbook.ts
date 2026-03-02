@@ -24,27 +24,80 @@ export enum PlaybookNodeType {
     Wait = "wait",
 }
 
-/**
- * Map PlaybookNodeType to Dataverse sprk_nodetype optionset integer values.
- * These are the optionset values stored in the sprk_playbooknode table.
- */
-export const NodeTypeOptionSet: Record<PlaybookNodeType, number> = {
-    [PlaybookNodeType.Start]: 100000000,
-    [PlaybookNodeType.AiAnalysis]: 100000001,
-    [PlaybookNodeType.AiCompletion]: 100000002,
-    [PlaybookNodeType.Condition]: 100000003,
-    [PlaybookNodeType.DeliverOutput]: 100000004,
-    [PlaybookNodeType.CreateTask]: 100000005,
-    [PlaybookNodeType.SendEmail]: 100000006,
-    [PlaybookNodeType.Wait]: 100000007,
-};
+// ---------------------------------------------------------------------------
+// Dataverse sprk_nodetype — Coarse Node Category (4 values)
+// ---------------------------------------------------------------------------
 
 /**
- * Reverse mapping: optionset integer value back to PlaybookNodeType string.
+ * Coarse node category stored as sprk_nodetype choice on sprk_playbooknode.
+ * Determines which scopes the orchestrator resolves before execution.
+ *
+ *   AI Analysis — requires Action record + resolves Skills, Knowledge, Tools scopes
+ *   Output      — structural; no Action or scopes needed
+ *   Control     — structural; no Action or scopes needed
+ *   Workflow    — rule-based actions; scope TBD
  */
-export const OptionSetToNodeType: Record<number, PlaybookNodeType> = Object.fromEntries(
-    Object.entries(NodeTypeOptionSet).map(([type, value]) => [value, type as PlaybookNodeType]),
-);
+export enum DataverseNodeType {
+    AIAnalysis = 100_000_000,
+    Output = 100_000_001,
+    Control = 100_000_002,
+    Workflow = 100_000_003,
+}
+
+/**
+ * Map canvas PlaybookNodeType → Dataverse sprk_nodetype (coarse category).
+ */
+export const NodeTypeToDataverse: Record<PlaybookNodeType, DataverseNodeType> = {
+    [PlaybookNodeType.Start]: DataverseNodeType.Control,
+    [PlaybookNodeType.AiAnalysis]: DataverseNodeType.AIAnalysis,
+    [PlaybookNodeType.AiCompletion]: DataverseNodeType.AIAnalysis,
+    [PlaybookNodeType.Condition]: DataverseNodeType.Control,
+    [PlaybookNodeType.DeliverOutput]: DataverseNodeType.Output,
+    [PlaybookNodeType.CreateTask]: DataverseNodeType.Workflow,
+    [PlaybookNodeType.SendEmail]: DataverseNodeType.Workflow,
+    [PlaybookNodeType.Wait]: DataverseNodeType.Control,
+};
+
+// ---------------------------------------------------------------------------
+// ActionType — Fine-grained executor dispatch (matches server enum)
+// ---------------------------------------------------------------------------
+
+/**
+ * Specific action type for executor dispatch.
+ * Values match the server-side ActionType enum in INodeExecutor.cs.
+ * Stored as __actionType in ConfigJson.
+ */
+export enum ActionType {
+    AiAnalysis = 0,
+    AiCompletion = 1,
+    AiEmbedding = 2,
+    RuleEngine = 10,
+    Calculation = 11,
+    DataTransform = 12,
+    CreateTask = 20,
+    SendEmail = 21,
+    UpdateRecord = 22,
+    CallWebhook = 23,
+    SendTeamsMessage = 24,
+    Condition = 30,
+    Parallel = 31,
+    Wait = 32,
+    DeliverOutput = 40,
+}
+
+/**
+ * Map canvas PlaybookNodeType → ActionType (specific executor dispatch).
+ */
+export const NodeTypeToActionType: Record<PlaybookNodeType, ActionType> = {
+    [PlaybookNodeType.Start]: ActionType.Condition,
+    [PlaybookNodeType.AiAnalysis]: ActionType.AiAnalysis,
+    [PlaybookNodeType.AiCompletion]: ActionType.AiCompletion,
+    [PlaybookNodeType.Condition]: ActionType.Condition,
+    [PlaybookNodeType.DeliverOutput]: ActionType.DeliverOutput,
+    [PlaybookNodeType.CreateTask]: ActionType.CreateTask,
+    [PlaybookNodeType.SendEmail]: ActionType.SendEmail,
+    [PlaybookNodeType.Wait]: ActionType.Wait,
+};
 
 // ---------------------------------------------------------------------------
 // Dataverse Record Interfaces
@@ -70,7 +123,6 @@ export interface PlaybookNodeRecord {
     sprk_dependsonjson?: string;
     _sprk_playbookid_value: string;
     _sprk_actionid_value?: string;
-    _sprk_toolid_value?: string;
     _sprk_modeldeploymentid_value?: string;
 }
 
@@ -87,7 +139,7 @@ export interface PlaybookNodeData {
     isActive?: boolean;
     skillIds?: string[];
     knowledgeIds?: string[];
-    toolId?: string;
+    toolIds?: string[];
     modelDeploymentId?: string;
     timeoutSeconds?: number;
     retryCount?: number;

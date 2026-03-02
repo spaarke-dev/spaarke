@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Sprk.Bff.Api.Services.Ai.Nodes;
 
 namespace Sprk.Bff.Api.Models.Ai;
 
@@ -18,14 +19,20 @@ public record PlaybookNodeDto
     public Guid PlaybookId { get; init; }
 
     /// <summary>
-    /// Action ID to execute.
+    /// Coarse node category. Determines which scopes the orchestrator resolves.
+    /// Maps to sprk_playbooknode.sprk_nodetype choice column.
+    /// </summary>
+    public NodeType NodeType { get; init; }
+
+    /// <summary>
+    /// Action ID to execute (only required when NodeType == AI).
     /// </summary>
     public Guid ActionId { get; init; }
 
     /// <summary>
-    /// Optional tool handler ID (single tool per node).
+    /// Associated tool IDs (N:N relationship).
     /// </summary>
-    public Guid? ToolId { get; init; }
+    public Guid[] ToolIds { get; init; } = [];
 
     /// <summary>
     /// Node display name.
@@ -127,11 +134,6 @@ public record CreateNodeRequest
     public Guid ActionId { get; init; }
 
     /// <summary>
-    /// Optional tool handler ID.
-    /// </summary>
-    public Guid? ToolId { get; init; }
-
-    /// <summary>
     /// Execution order. If not specified, will be placed at the end.
     /// </summary>
     public int? ExecutionOrder { get; init; }
@@ -197,6 +199,11 @@ public record CreateNodeRequest
     /// Knowledge source IDs to associate with this node.
     /// </summary>
     public Guid[]? KnowledgeIds { get; init; }
+
+    /// <summary>
+    /// Tool IDs to associate with this node.
+    /// </summary>
+    public Guid[]? ToolIds { get; init; }
 }
 
 /// <summary>
@@ -214,11 +221,6 @@ public record UpdateNodeRequest
     /// Action ID to execute.
     /// </summary>
     public Guid? ActionId { get; init; }
-
-    /// <summary>
-    /// Optional tool handler ID.
-    /// </summary>
-    public Guid? ToolId { get; init; }
 
     /// <summary>
     /// Array of node IDs this node depends on.
@@ -280,6 +282,11 @@ public record UpdateNodeRequest
     /// Knowledge source IDs to associate with this node (replaces existing).
     /// </summary>
     public Guid[]? KnowledgeIds { get; init; }
+
+    /// <summary>
+    /// Tool IDs to associate with this node (replaces existing).
+    /// </summary>
+    public Guid[]? ToolIds { get; init; }
 }
 
 /// <summary>
@@ -296,6 +303,11 @@ public record NodeScopesRequest
     /// Knowledge source IDs to associate with this node (replaces existing).
     /// </summary>
     public Guid[]? KnowledgeIds { get; init; }
+
+    /// <summary>
+    /// Tool IDs to associate with this node (replaces existing).
+    /// </summary>
+    public Guid[]? ToolIds { get; init; }
 }
 
 /// <summary>

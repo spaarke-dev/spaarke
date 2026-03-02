@@ -259,17 +259,55 @@ export function clearTokenCache(): void {
     cachedToken = null;
 }
 
+/**
+ * Detect if we're running inside Dataverse (same-origin).
+ * When true, session cookies authenticate API calls automatically —
+ * no Bearer token needed (and sending a wrong-scope token causes 401).
+ *
+ * Two detection strategies:
+ *   1. Xrm getClientUrl() — compare origins (most reliable when Xrm is available)
+ *   2. Hostname pattern — *.dynamics.com (fallback when Xrm hasn't loaded yet)
+ */
+export function isSameOriginDataverse(): boolean {
+    // Strategy 1: Xrm-based origin comparison
+    const clientUrl = getClientUrl();
+    if (clientUrl) {
+        try {
+            const dvOrigin = new URL(clientUrl).origin.toLowerCase();
+            return dvOrigin === window.location.origin.toLowerCase();
+        } catch {
+            // fall through to hostname check
+        }
+    }
+
+    // Strategy 2: Hostname pattern — web resources on *.dynamics.com are always
+    // same-origin Dataverse. This handles the case where Xrm hasn't initialized
+    // yet (e.g., embedded iframe loads before parent form is ready).
+    const hostname = window.location.hostname.toLowerCase();
+    return hostname.endsWith(".dynamics.com");
+}
+
 export async function initializeAuth(): Promise<string> {
     console.info(`${LOG_PREFIX} Initializing authentication...`);
     const clientUrl = getClientUrl();
+
+    // When running inside Dataverse (same-origin web resource or embedded HTML),
+    // session cookies handle authentication automatically. Skip token acquisition
+    // entirely — acquiring a BFF-scoped token and sending it as a Bearer header
+    // would override the session cookies and cause 401 errors.
+    if (isSameOriginDataverse()) {
+        console.info(`${LOG_PREFIX} Same-origin Dataverse detected (${clientUrl}). Using session cookies — no Bearer token needed.`);
+        return "SESSION_COOKIE_AUTH";
+    }
+
     if (clientUrl) {
-        console.info(`${LOG_PREFIX} Dataverse org: ${clientUrl}`);
+        console.info(`${LOG_PREFIX} Dataverse org: ${clientUrl} (cross-origin — acquiring Bearer token)`);
     } else {
         console.info(`${LOG_PREFIX} Xrm SDK not available, will use MSAL ssoSilent`);
     }
     const token = await getAccessToken();
 
-    // Start proactive token refresh every 4 minutes
+    // Start proactive token refresh every 4 minutes (only needed for Bearer token auth)
     if (!refreshIntervalId) {
         refreshIntervalId = setInterval(async () => {
             try {

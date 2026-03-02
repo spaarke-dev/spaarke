@@ -241,7 +241,9 @@ export function BuilderLayout({ playbookId }: BuilderLayoutProps): JSX.Element {
     const [leftPanelOpen, setLeftPanelOpen] = useState(true);
     const [rightPanelOpen, setRightPanelOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [saveStatus, setSaveStatus] = useState<"saved" | "error" | null>(null);
     const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Auto-open properties panel when a node is selected
     useEffect(() => {
@@ -269,11 +271,16 @@ export function BuilderLayout({ playbookId }: BuilderLayoutProps): JSX.Element {
             // Sync nodes to Dataverse records
             await syncNodesToDataverse(playbookId, nodes, edges);
             markSaved();
+            setSaveStatus("saved");
             console.info("[BuilderLayout] Playbook saved successfully");
         } catch (err) {
+            setSaveStatus("error");
             console.error("[BuilderLayout] Save failed:", err);
         } finally {
             setIsSaving(false);
+            // Clear status after 3 seconds
+            if (saveStatusTimeoutRef.current) clearTimeout(saveStatusTimeoutRef.current);
+            saveStatusTimeoutRef.current = setTimeout(() => setSaveStatus(null), 3000);
         }
     }, [playbookId, isSaving, exportToCanvasJson, nodes, edges, markSaved]);
 
@@ -348,6 +355,9 @@ export function BuilderLayout({ playbookId }: BuilderLayoutProps): JSX.Element {
                             disabled={!isDirty || isSaving}
                         />
                     </Tooltip>
+                    {isSaving && <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>Saving...</Text>}
+                    {saveStatus === "saved" && <Text size={200} style={{ color: tokens.colorPaletteGreenForeground1 }}>Saved</Text>}
+                    {saveStatus === "error" && <Text size={200} style={{ color: tokens.colorPaletteRedForeground1 }}>Save failed</Text>}
                 </div>
 
                 <div className={styles.toolbarCenter}>

@@ -43,8 +43,11 @@ export function usePlaybookLoader(playbookId: string): UsePlaybookLoaderResult {
 
     const load = useCallback(async () => {
         if (!playbookId) {
+            // New playbook — start with empty canvas (no record to fetch yet)
+            reset();
             setIsLoading(false);
-            setError("No playbook ID provided");
+            setError(null);
+            console.info(`${LOG_PREFIX} No playbook ID — starting with empty canvas`);
             return;
         }
 

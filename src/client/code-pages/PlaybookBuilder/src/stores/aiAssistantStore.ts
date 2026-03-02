@@ -256,7 +256,7 @@ const patchNodeToPlaybookNode = (
         outputVariable: patchNode.outputVariable,
         skillIds: patchNode.skillIds,
         knowledgeIds: patchNode.knowledgeIds,
-        toolId: patchNode.toolId,
+        toolIds: patchNode.toolIds,
         modelDeploymentId: patchNode.modelDeploymentId,
         ...patchNode.config,
     } as PlaybookNodeData,

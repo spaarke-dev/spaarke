@@ -273,11 +273,11 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                                 nodeType={nodeType}
                                 skillIds={node.data.skillIds ?? []}
                                 knowledgeIds={node.data.knowledgeIds ?? []}
-                                toolId={node.data.toolId}
+                                toolIds={node.data.toolIds ?? []}
                                 showSkills
                                 onSkillsChange={(ids) => handleUpdate("skillIds", ids)}
                                 onKnowledgeChange={() => {}}
-                                onToolChange={() => {}}
+                                onToolsChange={() => {}}
                             />
                         </AccordionPanel>
                     </AccordionItem>
@@ -292,11 +292,11 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                                 nodeType={nodeType}
                                 skillIds={node.data.skillIds ?? []}
                                 knowledgeIds={node.data.knowledgeIds ?? []}
-                                toolId={node.data.toolId}
+                                toolIds={node.data.toolIds ?? []}
                                 showKnowledge
                                 onSkillsChange={() => {}}
                                 onKnowledgeChange={(ids) => handleUpdate("knowledgeIds", ids)}
-                                onToolChange={() => {}}
+                                onToolsChange={() => {}}
                             />
                         </AccordionPanel>
                     </AccordionItem>
@@ -311,11 +311,11 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                                 nodeType={nodeType}
                                 skillIds={node.data.skillIds ?? []}
                                 knowledgeIds={node.data.knowledgeIds ?? []}
-                                toolId={node.data.toolId}
+                                toolIds={node.data.toolIds ?? []}
                                 showTools
                                 onSkillsChange={() => {}}
                                 onKnowledgeChange={() => {}}
-                                onToolChange={(id) => handleUpdate("toolId", id)}
+                                onToolsChange={(ids) => handleUpdate("toolIds", ids)}
                             />
                         </AccordionPanel>
                     </AccordionItem>

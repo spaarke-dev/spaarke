@@ -29,7 +29,8 @@ export type PlaybookNodeType =
  *
  * Fields map to Dataverse sprk_playbooknode columns:
  *   label        -> sprk_name
- *   type         -> sprk_nodetype (option set)
+ *   type         -> sprk_nodetype (coarse category via NodeTypeToDataverse mapping)
+ *                    + __actionType in sprk_configjson (specific executor dispatch)
  *   configJson   -> sprk_configjson
  *   actionId     -> sprk_actionid (lookup)
  */
@@ -60,8 +61,8 @@ export interface PlaybookNodeData {
     skillIds?: string[];
     /** Selected knowledge source IDs (N:N relationship) */
     knowledgeIds?: string[];
-    /** Selected tool ID (lookup) */
-    toolId?: string;
+    /** Selected tool IDs (N:N relationship) */
+    toolIds?: string[];
     /** AI model deployment ID (for aiAnalysis, aiCompletion nodes) */
     modelDeploymentId?: string;
     /** Index signature for React Flow v12 compatibility */

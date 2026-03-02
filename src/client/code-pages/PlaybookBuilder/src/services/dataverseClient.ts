@@ -1,8 +1,14 @@
 /**
  * DataverseClient -- fetch()-based Dataverse Web API CRUD service
  *
- * Replaces PCF context.webAPI for the Code Page. All calls use
- * Bearer token from AuthService + standard OData Web API.
+ * Replaces PCF context.webAPI for the Code Page.
+ *
+ * Auth strategy:
+ *   - When running inside Dataverse (same-origin web resource or navigateTo
+ *     dialog), uses session cookies automatically — no Bearer token needed.
+ *     Sending a wrong-scope Bearer token overrides cookies and causes 401.
+ *   - When running standalone (dev server, different origin), falls back to
+ *     Bearer token from AuthService (Xrm platform strategies or MSAL).
  *
  * Supports:
  *   - CRUD: createRecord, retrieveRecord, updateRecord, deleteRecord
@@ -12,7 +18,7 @@
  * @see spec.md - PCF Coupling Points to Replace (11 Total)
  */
 
-import { getAccessToken, getClientUrl } from "./authService";
+import { getAccessToken, getClientUrl, isSameOriginDataverse } from "./authService";
 
 const LOG_PREFIX = "[PlaybookBuilder:DataverseClient]";
 
@@ -33,15 +39,29 @@ function getBaseUrl(): string {
 }
 
 async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
-    const token = await getAccessToken();
+    const headers: Record<string, string> = {
+        "Accept": "application/json",
+        "OData-MaxVersion": "4.0",
+        "OData-Version": "4.0",
+        "Content-Type": "application/json; charset=utf-8",
+    };
+
+    // When running inside Dataverse (same origin), rely on session cookies.
+    // Only add Bearer token when running cross-origin (dev server, etc.).
+    if (!isSameOriginDataverse()) {
+        try {
+            const token = await getAccessToken();
+            headers["Authorization"] = `Bearer ${token}`;
+        } catch (err) {
+            console.warn(`${LOG_PREFIX} Token acquisition failed, proceeding without auth header`, err);
+        }
+    }
+
     const response = await fetch(url, {
         ...options,
+        credentials: "include",
         headers: {
-            "Authorization": `Bearer ${token}`,
-            "Accept": "application/json",
-            "OData-MaxVersion": "4.0",
-            "OData-Version": "4.0",
-            "Content-Type": "application/json; charset=utf-8",
+            ...headers,
             ...options.headers,
         },
     });

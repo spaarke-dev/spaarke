@@ -1,8 +1,8 @@
-# How to Create AI Playbook Scopes
+# How to Create AI Playbooks and Scopes
 
-> **Version**: 1.0
-> **Date**: January 29, 2026
-> **Audience**: Dataverse Administrators, Power Users
+> **Version**: 2.0
+> **Date**: March 1, 2026
+> **Audience**: Dataverse Administrators, Power Users, Engineers
 > **Prerequisites**: Access to Dataverse environment with Spaarke AI solution installed
 
 ---
@@ -15,8 +15,10 @@
 4. [Creating Skills](#creating-skills)
 5. [Creating Knowledge Sources](#creating-knowledge-sources)
 6. [Creating Actions](#creating-actions)
-7. [Using Scopes in Playbooks](#using-scopes-in-playbooks)
-8. [Troubleshooting](#troubleshooting)
+7. [Building Playbooks in the Visual Canvas](#building-playbooks-in-the-visual-canvas)
+8. [Multi-Node Playbook Design](#multi-node-playbook-design)
+9. [Performance Optimization](#performance-optimization)
+10. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -199,10 +201,10 @@ Skills are prompt fragments that add specialized instructions to analysis workfl
 
 ### Step-by-Step: Create a Skill
 
-#### Step 1: Open Prompt Fragment Entity
+#### Step 1: Open Analysis Skill Entity
 
-1. Navigate to **Advanced Find** in Dataverse
-2. Look for: **Prompt Fragments** (table: `sprk_promptfragment`)
+1. Navigate to **Advanced Find** in Dataverse (or open the **Analysis Skills** view)
+2. Look for: **Analysis Skills** (table: `sprk_analysisskill`)
 3. Click **New**
 
 #### Step 2: Fill Basic Information
@@ -309,10 +311,10 @@ Knowledge sources provide domain-specific context via Retrieval-Augmented Genera
 
 ### Method 1: Inline Knowledge (For Short References)
 
-#### Step 1: Open Content Entity
+#### Step 1: Open Analysis Knowledge Entity
 
-1. Navigate to **Advanced Find** in Dataverse
-2. Look for: **Contents** (table: `sprk_content`)
+1. Navigate to **Advanced Find** in Dataverse (or open the **Analysis Knowledge** view)
+2. Look for: **Analysis Knowledge** (table: `sprk_analysisknowledge`)
 3. Click **New**
 
 #### Step 2: Fill Basic Information
@@ -400,10 +402,10 @@ Actions are system prompt templates that define how the LLM behaves.
 
 ### Step-by-Step: Create an Action
 
-#### Step 1: Open System Prompt Entity
+#### Step 1: Open Analysis Action Entity
 
-1. Navigate to **Advanced Find** in Dataverse
-2. Look for: **System Prompts** (table: `sprk_systemprompt`)
+1. Navigate to **Advanced Find** in Dataverse (or open the **Analysis Actions** view)
+2. Look for: **Analysis Actions** (table: `sprk_analysisaction`)
 3. Click **New**
 
 #### Step 2: Fill Basic Information
@@ -513,43 +515,195 @@ Begin your analysis.
 
 ---
 
-## Using Scopes in Playbooks
+## Building Playbooks in the Visual Canvas
 
-### Step 1: Create or Open a Playbook
+The **Playbook Builder** is a visual node-based editor for creating AI analysis workflows. Each playbook is a directed graph of nodes connected by edges.
+
+### Opening the Playbook Builder
 
 1. Navigate to **Analysis Playbooks** in Dataverse
-2. Click **New** or open existing playbook
+2. Open an existing playbook record (or create a new one)
+3. The Playbook Builder canvas loads automatically on the form
 
-### Step 2: Add Scopes via Relationships
+### Node Types (Palette)
 
-**N:N Relationships**:
-- **Actions**: Add via `sprk_playbook_action` relationship
-- **Skills**: Add via `sprk_playbook_skill` relationship
-- **Knowledge**: Add via `sprk_playbook_knowledge` relationship
-- **Tools**: Add via `sprk_playbook_tool` relationship
+Drag node types from the left sidebar palette onto the canvas:
 
-### Step 3: Configure Playbook in Node Builder (Advanced)
+| Node Type | Category | Purpose | Requires Scopes? |
+|-----------|----------|---------|-------------------|
+| **AI Analysis** | AI | LLM-powered analysis using action + skills + knowledge + tool | Yes (full scopes) |
+| **AI Completion** | AI | Raw LLM completion with system prompt and user template | Yes (full scopes) |
+| **Condition** | Logic | Branch execution based on expression (true/false paths) | No |
+| **Wait** | Logic | Pause for duration, until datetime, or condition met | No |
+| **Deliver Output** | Output | Format and assemble results from upstream nodes | No |
+| **Create Task** | Action | Create a Dataverse task record | No |
+| **Send Email** | Action | Send email via Microsoft Graph | No |
 
-For node-based playbooks:
-1. Open **Playbook Builder PCF control**
-2. Drag **AI Analysis Node** onto canvas
-3. Configure node:
-   - Select Action (provides system prompt)
-   - Select Skills (add specialized instructions)
-   - Select Knowledge (add domain context)
-   - Select Tool (executes analysis)
-4. Connect nodes with edges (defines execution order)
-5. Save → Canvas JSON stored in `sprk_canvaslayoutjson`
+### Configuring a Node
 
-### Example Playbook Configuration
+1. **Click a node** on the canvas to open the Properties Panel (right sidebar)
+2. Configure:
+   - **Name**: Display label
+   - **Output Variable**: Variable name other nodes can reference (e.g., `summary_result`)
+   - **AI Model**: Select model deployment (AI nodes only)
+   - **Skills**: Select prompt fragments that add domain expertise
+   - **Knowledge**: Select context sources (inline or RAG)
+   - **Tools**: Select executable handler
+   - **Configuration**: Type-specific settings (template, email recipients, etc.)
+   - **Runtime**: Timeout (seconds), retry count
 
-**Playbook**: "Full Contract Review"
-- **Action**: "Summarize Content"
-- **Skills**: ["Contract Analysis", "Risk Assessment"]
-- **Knowledge**: ["Standard Contract Clauses Reference"]
-- **Tools**: ["Entity Extractor", "Document Summarizer"]
+### Connecting Nodes (Edges)
 
-**Result**: Documents analyzed with contract-specific expertise, referencing standard clauses, extracting entities and generating summaries.
+- **Drag** from a node's output handle to another node's input handle to create an edge
+- Edges define **execution dependencies**: target node waits for source to complete
+- **Condition nodes** have two output handles: `true` branch and `false` branch
+- Nodes without incoming edges run first (batch 1)
+
+### Saving
+
+- **Ctrl+S** or click Save button — saves canvas JSON + syncs nodes to Dataverse
+- **Auto-save**: 30-second debounce after changes
+- On save, the builder:
+  1. Stores canvas layout in `sprk_canvaslayoutjson`
+  2. Creates/updates/deletes `sprk_playbooknode` records in Dataverse
+  3. Computes execution order and writes `sprk_dependsonjson`
+  4. Writes `sprk_nodetype` and `__actionType` for executor dispatch
+  5. Syncs N:N relationships (skills, knowledge, tools)
+
+### Referencing Upstream Outputs
+
+Nodes can reference outputs from previously completed nodes using **template variables**:
+
+```
+{{summary_result.TextContent}}      — raw text from an upstream node
+{{entities.StructuredData}}          — JSON data from an upstream node
+{{classify_result.Confidence}}       — confidence score
+```
+
+Use these in:
+- AI Completion `userPromptTemplate` field
+- Deliver Output `template` field
+- Send Email `emailBody` field
+
+---
+
+## Multi-Node Playbook Design
+
+### One Action Per Node
+
+Each node performs exactly one task. A playbook that needs to summarize, classify, extract entities, and match to a matter requires **4 separate AI Analysis nodes** — not one node doing everything.
+
+### Example: Full Contract Review (4 AI nodes + 1 output)
+
+```
+┌─────────────┐   ┌─────────────┐
+│  Summarize  │   │  Classify   │
+│  (AI Node)  │   │  (AI Node)  │
+│  var: summ  │   │  var: class │
+└──────┬──────┘   └──────┬──────┘
+       │                 │
+       │   ┌─────────────┐   ┌─────────────┐
+       │   │   Extract   │   │ Match Matter│
+       │   │  (AI Node)  │   │  (AI Node)  │
+       │   │  var: ents  │   │  var: match │
+       │   └──────┬──────┘   └──────┬──────┘
+       │          │                 │
+       └──────────┼─────────────────┘
+                  │
+           ┌──────▼──────┐
+           │   Deliver   │
+           │   Output    │
+           │ (assembles  │
+           │  all results)│
+           └─────────────┘
+```
+
+### Configuration for Each Node
+
+| Node | Action | Skills | Knowledge | Tool | Output Variable |
+|------|--------|--------|-----------|------|-----------------|
+| Summarize | ACT-004 Summarize Content | SKL-008 Executive Summary | KNW-003 Best Practices | TL-004 SummaryHandler | `summary` |
+| Classify | ACT-003 Classify Document | SKL-001 Contract Analysis | KNW-005 Document Types | TL-003 DocumentClassifier | `classification` |
+| Extract | ACT-001 Extract Entities | SKL-001 Contract Analysis | KNW-001 Standard Terms | TL-001 EntityExtractor | `entities` |
+| Match | Custom action | SKL-009 Risk Assessment | KNW-004 Risk Categories | GenericAnalysisHandler | `match_result` |
+| Deliver | (no action) | (no scopes) | (no scopes) | (no tool) | `final_output` |
+
+### Deliver Output Template
+
+The Deliver Output node uses a **Handlebars template** to assemble all upstream results:
+
+```handlebars
+# Contract Review Report
+
+## Summary
+{{summary.TextContent}}
+
+## Document Classification
+**Type**: {{classification.StructuredData.documentType}}
+**Confidence**: {{classification.Confidence}}
+
+## Key Entities
+{{entities.TextContent}}
+
+## Matter Match
+{{match_result.TextContent}}
+```
+
+---
+
+## Performance Optimization
+
+### How Parallel Execution Works
+
+The execution engine groups nodes into **batches** based on dependencies:
+- Nodes in the **same batch** have no dependencies on each other and run **in parallel**
+- Batches run **sequentially** (batch 2 waits for batch 1 to finish)
+- Total execution time = sum of the slowest node in each batch
+
+### Three Structure Patterns
+
+**Pattern A: Fully Sequential** (slowest)
+```
+Summarize → Classify → Extract → Match → Output
+  Batch 1    Batch 2   Batch 3   Batch 4  Batch 5
+Total time = sum of all node durations
+```
+
+**Pattern B: Fully Parallel** (fastest)
+```
+Summarize ─┐
+Classify  ─┤
+Extract   ─┼─→ Output
+Match     ─┘
+  Batch 1      Batch 2
+Total time = max(Summarize, Classify, Extract, Match) + Output
+```
+
+**Pattern C: Partial Dependencies** (when some nodes need prior output)
+```
+Summarize ──→ Match ─┐
+Classify  ───────────┤
+Extract   ───────────┼─→ Output
+  Batch 1    Batch 2  │   Batch 3
+                      └
+Total time = max(Summarize, Classify, Extract) + Match + Output
+```
+
+### The Optimization Rule
+
+> **Only add edges where data actually flows.** If a node does not reference `{{upstream.output}}` in its prompt, it should NOT have a dependency edge.
+
+In the contract review example: Summarize, Classify, Extract, and Match all analyze the **source document** — they don't need each other's output. Connect them all directly to the Deliver Output node for maximum parallelism (Pattern B).
+
+### Estimating Execution Time
+
+Each AI Analysis node's duration is roughly:
+- Network overhead: ~200-500ms
+- Token processing: (input_tokens + output_tokens) / tokens_per_second
+- For GPT-4o class models: ~50-80 tokens/sec output
+- A node producing 500 output tokens ≈ 7-10 seconds
+
+Four AI nodes in parallel ≈ 7-10 seconds total. Four sequential ≈ 28-40 seconds.
 
 ---
 
@@ -682,17 +836,32 @@ For node-based playbooks:
 ## Additional Resources
 
 **Architecture Documents**:
-- [AI-PLAYBOOK-ARCHITECTURE.md](../architecture/AI-PLAYBOOK-ARCHITECTURE.md) - Complete architecture
-- [AI-ANALYSIS-PLAYBOOK-SCOPE-DESIGN.md](../architecture/AI-ANALYSIS-PLAYBOOK-SCOPE-DESIGN.md) - Scope design patterns
+- [AI-ARCHITECTURE.md](../architecture/AI-ARCHITECTURE.md) - Complete AI architecture (four-tier model, execution flow, node types)
 
 **Related Guides**:
 - [HOW-TO-CREATE-UPDATE-SCHEMA.md](DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md) - Dataverse schema updates
 - [AI-TROUBLESHOOTING.md](ai-troubleshooting.md) - AI-specific troubleshooting
 
+**Dataverse Entities Reference**:
+
+| Entity | Logical Name | Purpose |
+|--------|-------------|---------|
+| Analysis Playbook | `sprk_analysisplaybook` | Playbook definition + canvas JSON |
+| Playbook Node | `sprk_playbooknode` | Individual node records (synced from canvas) |
+| Analysis Action | `sprk_analysisaction` | System prompt templates |
+| Analysis Skill | `sprk_analysisskill` | Prompt fragments (domain expertise) |
+| Analysis Knowledge | `sprk_analysisknowledge` | RAG context or inline text |
+| Analysis Tool | `sprk_analysistool` | Executable handlers |
+
 **API Reference**:
+- `GET /api/ai/scopes/actions` - List available actions
+- `GET /api/ai/scopes/skills` - List available skills
+- `GET /api/ai/scopes/knowledge` - List available knowledge sources
+- `GET /api/ai/scopes/tools` - List available tools
 - `GET /api/ai/handlers` - List available tool handlers with metadata
-- Requires authentication (Entra ID + Dataverse permissions)
+- `POST /api/ai/playbooks/{id}/execute` - Execute a playbook (SSE streaming)
+- All require authentication (Entra ID + Dataverse permissions)
 
 ---
 
-**Last Updated**: January 29, 2026
+**Last Updated**: March 1, 2026

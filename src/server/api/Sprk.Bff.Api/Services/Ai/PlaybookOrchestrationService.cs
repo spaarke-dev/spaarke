@@ -683,6 +683,32 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     }
 
     /// <summary>
+    /// Extracts the __actionType value from a node's ConfigJson.
+    /// Returns null if ConfigJson is missing or doesn't contain the field.
+    /// </summary>
+    private static ActionType? ExtractActionTypeFromConfig(string? configJson)
+    {
+        if (string.IsNullOrEmpty(configJson))
+            return null;
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(configJson);
+            if (doc.RootElement.TryGetProperty("__actionType", out var actionTypeProp) &&
+                actionTypeProp.TryGetInt32(out var actionTypeInt))
+            {
+                return (ActionType)actionTypeInt;
+            }
+        }
+        catch
+        {
+            // Invalid JSON — fall through to null
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Executes a single node and writes events to the channel.
     /// Returns the node output (success or failure).
     /// </summary>
@@ -730,28 +756,74 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             // The Condition ActionType is handled by ConditionNodeExecutor (Phase 4) which
             // returns ConditionResult with branch selection for orchestrator-level branching.
 
-            // Resolve scopes for this node
-            var scopes = await _scopeResolver.ResolveNodeScopesAsync(
-                node.Id, runContext.CancellationToken);
+            // NodeType-driven scope resolution and action lookup.
+            // AI nodes require an Action record and resolve all scopes (skills, knowledge, tools).
+            // Structural nodes (Output, Control) need neither.
+            AnalysisAction action;
+            ActionType actionType;
+            ResolvedScopes scopes;
 
-            // Get action definition
-            var action = await _scopeResolver.GetActionAsync(
-                node.ActionId, runContext.CancellationToken);
-
-            if (action == null)
+            if (node.NodeType == NodeType.AIAnalysis)
             {
-                var errorMsg = $"Action {node.ActionId} not found for node '{node.Name}'";
-                var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
-                runContext.StoreNodeOutput(errorOutput);
+                // AI nodes: resolve scopes and load action from Dataverse
+                scopes = await _scopeResolver.ResolveNodeScopesAsync(
+                    node.Id, runContext.CancellationToken);
 
-                await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
-                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
+                if (node.ActionId == Guid.Empty)
+                {
+                    var errorMsg = $"AI node '{node.Name}' requires an Action but has no ActionId";
+                    var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
+                    runContext.StoreNodeOutput(errorOutput);
 
-                return errorOutput;
+                    await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
+                        runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
+
+                    return errorOutput;
+                }
+
+                var resolved = await _scopeResolver.GetActionAsync(
+                    node.ActionId, runContext.CancellationToken);
+
+                if (resolved == null)
+                {
+                    var errorMsg = $"Action {node.ActionId} not found for node '{node.Name}'";
+                    var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
+                    runContext.StoreNodeOutput(errorOutput);
+
+                    await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
+                        runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
+
+                    return errorOutput;
+                }
+
+                action = resolved;
+                actionType = action.ActionType;
             }
+            else
+            {
+                // Structural nodes (Output, Control, Workflow): no Action record, no scopes
+                scopes = new ResolvedScopes([], [], []);
 
-            // Get action type from the action entity (Phase 4+)
-            var actionType = action.ActionType;
+                // Read specific ActionType from ConfigJson (written during canvas sync)
+                // Falls back to NodeType-based default if not present
+                actionType = ExtractActionTypeFromConfig(node.ConfigJson) ?? node.NodeType switch
+                {
+                    NodeType.Output => ActionType.DeliverOutput,
+                    NodeType.Control => ActionType.Condition,
+                    NodeType.Workflow => ActionType.CreateTask,
+                    _ => ActionType.DeliverOutput
+                };
+                action = new AnalysisAction
+                {
+                    Id = Guid.Empty,
+                    Name = node.Name,
+                    ActionType = actionType
+                };
+
+                _logger.LogDebug(
+                    "Structural node '{NodeName}' (NodeType={NodeType}) — using ActionType {ActionType}, no scopes",
+                    node.Name, node.NodeType, actionType);
+            }
 
             // Get executor for action type
             var executor = _executorRegistry.GetExecutor(actionType);

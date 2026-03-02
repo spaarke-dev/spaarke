@@ -1,7 +1,7 @@
 # Spaarke AI Architecture
 
-> **Version**: 3.0
-> **Last Updated**: February 21, 2026
+> **Version**: 3.1
+> **Last Updated**: March 1, 2026
 > **Audience**: Claude Code, AI agents, engineers
 > **Purpose**: Technical reference for the Spaarke AI platform component framework
 > **Supersedes**: `AI-PLAYBOOK-ARCHITECTURE.md` (v2.0), `AI-ANALYSIS-PLAYBOOK-SCOPE-DESIGN.md` (v2.0)
@@ -81,26 +81,48 @@ src/server/api/Sprk.Bff.Api/
 │   └── SemanticSearch/              # Search-specific models
 └── BackgroundWorkers/               # Background processing
 
+src/client/code-pages/
+├── PlaybookBuilder/                 # Visual playbook canvas (React 18 Code Page — current)
+│   ├── src/
+│   │   ├── App.tsx                   # Root component
+│   │   ├── index.tsx                 # React 18 createRoot entry
+│   │   ├── config/msalConfig.ts      # MSAL auth config
+│   │   ├── hooks/
+│   │   │   ├── useAuth.ts
+│   │   │   ├── useKeyboardShortcuts.ts
+│   │   │   ├── usePlaybookLoader.ts
+│   │   │   └── useThemeDetection.ts
+│   │   ├── services/
+│   │   │   ├── aiPlaybookService.ts   # BFF API client
+│   │   │   ├── authService.ts         # Token management
+│   │   │   ├── dataverseClient.ts     # Dataverse fetch + Bearer token
+│   │   │   └── playbookNodeSync.ts    # Canvas → sprk_playbooknode sync
+│   │   ├── stores/
+│   │   │   ├── canvasStore.ts         # Zustand state (nodes/edges)
+│   │   │   ├── executionStore.ts      # Execution state
+│   │   │   ├── aiAssistantStore.ts    # AI assistant modal state
+│   │   │   ├── scopeStore.ts          # Skills/Knowledge/Tools cache
+│   │   │   ├── modelStore.ts          # AI model deployments
+│   │   │   └── templateStore.ts       # Playbook templates
+│   │   ├── types/
+│   │   │   ├── canvas.ts              # PlaybookNode, PlaybookEdge, CanvasJson
+│   │   │   ├── playbook.ts            # Enums, NodeType/ActionType mappings
+│   │   │   ├── forms.ts               # Form field types
+│   │   │   └── scopeTypes.ts          # Scope DTOs
+│   │   └── components/
+│   │       ├── BuilderLayout.tsx       # Main layout (toolbar, palette, canvas, properties)
+│   │       ├── canvas/PlaybookCanvas.tsx  # @xyflow/react v12 canvas
+│   │       ├── nodes/                 # 9 node components (Start, AiAnalysis, etc.)
+│   │       ├── edges/                 # ConditionEdge (true/false branches)
+│   │       ├── properties/            # PropertiesPanel, ScopeSelector, ModelSelector, etc.
+│   │       ├── execution/             # ExecutionOverlay, ConfidenceBadge
+│   │       └── ai-assistant/          # AiAssistantModal, ChatHistory, CommandPalette
+│   ├── build-webresource.ps1          # Step 2: inline bundle → HTML
+│   └── out/sprk_playbookbuilder.html  # Deployable artifact
+
 src/client/pcf/
-├── PlaybookBuilderHost/             # Visual playbook canvas (PCF control)
-│   └── control/
-│       ├── PlaybookBuilderHost.tsx   # Main React component
-│       ├── index.ts                  # PCF lifecycle + auto-save
-│       ├── stores/
-│       │   ├── canvasStore.ts        # Zustand state (nodes/edges)
-│       │   └── executionStore.ts     # Execution state
-│       ├── components/
-│       │   ├── Canvas/Canvas.tsx     # React Flow wrapper
-│       │   ├── Palette/NodePalette.tsx  # Draggable node types
-│       │   ├── Properties/PropertiesPanel.tsx  # Node config
-│       │   ├── Nodes/
-│       │   │   ├── BaseNode.tsx
-│       │   │   ├── AiAnalysisNode.tsx
-│       │   │   ├── AiCompletionNode.tsx
-│       │   │   └── ConditionNode.tsx
-│       │   └── AiAssistant/AiAssistantModal.tsx
-│       └── services/
-│           └── AiPlaybookService.ts  # BFF API client
+├── PlaybookBuilderHost/             # Visual playbook canvas (PCF — legacy R4, still maintained)
+│   └── control/                     # Mirrors Code Page structure (React 16, react-flow v10)
 └── UniversalQuickCreate/            # Document quick-create with AI
     └── control/components/
         ├── AiSummaryPanel.tsx
@@ -339,35 +361,97 @@ Playbooks are the primary composition pattern -- visual node-based workflows sto
 **Canvas field**: `sprk_canvaslayoutjson` (serialized JSON of nodes and edges)
 **Builder PCF**: `src/client/pcf/PlaybookBuilderHost/`
 
-#### Node Types
+#### Three-Level Node Type System
+
+Nodes use three type concepts at different layers:
+
+| Level | Name | Where Stored | Purpose | Example |
+|-------|------|-------------|---------|---------|
+| **Canvas Type** | `PlaybookNodeType` | React Flow `node.data.type` | React component selection | `"aiAnalysis"` |
+| **Dataverse NodeType** | `sprk_nodetype` | `sprk_playbooknode` OptionSet | Coarse scope resolution | `AIAnalysis (100000000)` |
+| **ActionType** | `__actionType` in ConfigJson | `sprk_playbooknode.sprk_configjson` | Fine-grained executor dispatch | `AiAnalysis (0)` |
+
+**Canvas Types** (8 React components — drag-and-drop palette items):
 
 ```typescript
 type PlaybookNodeType =
+  | 'start'           // Entry point — always Spaarke code
   | 'aiAnalysis'      // AI analysis (LLM call) — backend-flexible
   | 'aiCompletion'    // AI completion (LLM call) — backend-flexible
   | 'condition'       // Conditional branching — always Spaarke code
   | 'deliverOutput'   // Output delivery — always Spaarke code
   | 'createTask'      // Task creation — always Spaarke code
   | 'sendEmail'       // Email action — always Spaarke code
-  | 'updateRecord'    // Dataverse update — always Spaarke code
   | 'wait';           // Wait/delay — always Spaarke code
 ```
+
+**Dataverse NodeType** (4 coarse categories for scope resolution):
+
+```csharp
+public enum NodeType
+{
+    AIAnalysis = 100_000_000,  // Full scope resolution (skills, knowledge, tools)
+    Output     = 100_000_001,  // No scopes — assembles previous outputs
+    Control    = 100_000_002,  // No scopes — flow control
+    Workflow   = 100_000_003   // No scopes — Dataverse/email actions
+}
+```
+
+**ActionType** (15 fine-grained executor dispatch values):
+
+```csharp
+public enum ActionType
+{
+    // AI nodes (backend-flexible)
+    AiAnalysis = 0, AiCompletion = 1, AiEmbedding = 2,
+    // Processing nodes
+    RuleEngine = 10, Calculation = 11, DataTransform = 12,
+    // Workflow nodes (always Spaarke code)
+    CreateTask = 20, SendEmail = 21, UpdateRecord = 22,
+    CallWebhook = 23, SendTeamsMessage = 24,
+    // Control nodes (always Spaarke code)
+    Condition = 30, Parallel = 31, Wait = 32,
+    // Output nodes
+    DeliverOutput = 40
+}
+```
+
+**Mapping flow** (computed during canvas-to-Dataverse sync):
+
+```
+Canvas Type "sendEmail"
+  → NodeType.Workflow (100000003)     ← written to sprk_nodetype
+  → ActionType.SendEmail (21)         ← written to __actionType in sprk_configjson
+```
+
+At execution time: NodeType determines scope resolution strategy, ActionType determines which `INodeExecutor` runs.
 
 #### Node Data Structure
 
 ```typescript
-// src/client/pcf/PlaybookBuilderHost/control/stores/canvasStore.ts
+// src/client/code-pages/PlaybookBuilder/src/types/playbook.ts
 interface PlaybookNodeData {
   label: string;
   type: PlaybookNodeType;
+  actionId?: string;             // Linked action (system prompt)
   outputVariable?: string;       // Variable name for output reference
+  isActive?: boolean;            // Active/disabled toggle
+  skillIds?: string[];           // Linked skills (N:N)
+  knowledgeIds?: string[];       // Linked knowledge (N:N)
+  toolIds?: string[];            // Linked tools (N:N)
+  modelDeploymentId?: string;    // AI model selection
   timeoutSeconds?: number;       // 30-3600s
   retryCount?: number;           // 0-5
-  conditionJson?: string;        // Condition expression
-  skillIds?: string[];           // Linked skills
-  knowledgeIds?: string[];       // Linked knowledge
-  toolId?: string;               // Linked tool
-  modelDeploymentId?: string;    // AI model selection
+  conditionJson?: string;        // Condition expression (condition nodes)
+  // Type-specific config (stored in sprk_configjson):
+  deliveryType?: string;         // Deliver Output: "markdown" | "html" | "text" | "json"
+  template?: string;             // Deliver Output: Handlebars template
+  emailTo?: string[];            // Send Email: recipients
+  emailSubject?: string;         // Send Email: subject
+  taskSubject?: string;          // Create Task: task subject
+  systemPrompt?: string;         // AI Completion: custom system prompt
+  userPromptTemplate?: string;   // AI Completion: user prompt with {{variables}}
+  waitType?: string;             // Wait: "duration" | "until" | "condition"
 }
 ```
 
@@ -504,48 +588,59 @@ Scopes can be invoked directly via API without a playbook:
 
 ## Tier 3: Execution Runtime
 
-### PlaybookBuilderHost PCF Control
+### Playbook Builder (Code Page — Current)
+
+**Path**: `src/client/code-pages/PlaybookBuilder/`
+**Stack**: React 18, @xyflow/react v12, Fluent UI v9, Zustand
+**Deployment**: Inline HTML web resource (`sprk_playbookbuilder.html`)
+
+```
+PlaybookBuilder (Code Page)
+└── FluentProvider (Fluent UI v9 theme, dark mode via useThemeDetection)
+    └── App
+        └── BuilderLayout
+            ├── Toolbar (save, run, AI assistant toggle)
+            ├── NodePalette (left sidebar, 7 draggable node types)
+            ├── PlaybookCanvas (center, @xyflow/react v12)
+            │   ├── StartNode
+            │   ├── AiAnalysisNode
+            │   ├── AiCompletionNode
+            │   ├── ConditionNode
+            │   ├── DeliverOutputNode
+            │   ├── CreateTaskNode
+            │   ├── SendEmailNode
+            │   ├── WaitNode
+            │   └── ConditionEdge (true/false branches)
+            ├── PropertiesPanel (right sidebar, auto-opens on node select)
+            │   └── NodePropertiesForm
+            │       ├── ScopeSelector (skills, knowledge, tools)
+            │       ├── ModelSelector (AI model dropdown)
+            │       ├── ActionSelector (linked action)
+            │       ├── ConditionEditor (condition nodes)
+            │       ├── DeliverOutputForm / SendEmailForm / CreateTaskForm / etc.
+            │       └── VariableReferencePanel (upstream output variables)
+            ├── ExecutionOverlay (during playbook execution)
+            └── AiAssistantModal (conversational builder, floating)
+```
+
+**Canvas-to-Dataverse Sync** (`playbookNodeSync.ts`):
+- Auto-save: 30-second debounce after canvas changes
+- Manual save: Ctrl+S
+- On save: Canvas JSON → `sprk_canvaslayoutjson`, then `syncNodesToDataverse()`:
+  1. Queries existing `sprk_playbooknode` records
+  2. Computes execution order via Kahn's topological sort of canvas edges
+  3. Creates/updates/deletes node records with `sprk_nodetype` + `__actionType` in ConfigJson
+  4. Writes `sprk_dependsonjson` with upstream node GUIDs
+  5. Manages N:N relationships (skills, knowledge, tools) via associate/disassociate
+- Uses `DataverseClient` (fetch + Bearer token via MSAL)
+
+### PlaybookBuilderHost PCF Control (Legacy R4)
 
 **Path**: `src/client/pcf/PlaybookBuilderHost/`
-**Version**: v2.13.x (Direct Rendering)
+**Stack**: React 16/17, react-flow-renderer v10, Fluent UI v9
+**Status**: Still maintained; mirrors Code Page structure. Used as field-bound control on `sprk_analysisplaybook` form.
 
-```
-PlaybookBuilderHost (PCF index.ts)
-└── FluentProvider (Fluent UI v9 theme)
-    └── PlaybookBuilderHostApp (React component)
-        ├── Header (title, dirty indicator)
-        ├── BuilderLayout
-        │   ├── NodePalette (left sidebar, draggable node types)
-        │   ├── Canvas (center, React Flow v10)
-        │   │   ├── BaseNode
-        │   │   ├── AiAnalysisNode
-        │   │   ├── AiCompletionNode
-        │   │   ├── ConditionNode
-        │   │   └── Custom edge types
-        │   └── PropertiesPanel (right sidebar)
-        │       └── NodePropertiesForm
-        │           ├── ScopeSelector (skills, knowledge, tools)
-        │           ├── ModelSelector (AI model dropdown)
-        │           └── ConditionEditor
-        └── Footer (version badge)
-```
-
-**PCF Bound Properties** (`ControlManifest.Input.xml`):
-
-| Property | Type | Bound Field | Purpose |
-|----------|------|-------------|---------|
-| `playbookId` | SingleLine.Text | (auto-detected) | Record ID fallback |
-| `playbookName` | SingleLine.Text | `sprk_name` | Playbook name |
-| `playbookDescription` | Multiple | `sprk_description` | Description |
-| `canvasJson` | Multiple | `sprk_canvaslayoutjson` | Canvas state |
-| `apiBaseUrl` | SingleLine.Text | -- | BFF API URL |
-| `isDirty` | TwoOptions | -- | Unsaved changes flag |
-
-**Auto-Save**: Dual-path saving (500ms debounce):
-1. `notifyOutputChanged()` -- standard PCF bound property update (requires form Save)
-2. `webAPI.updateRecord()` -- direct Dataverse PATCH (immediate persistence)
-
-**ADR-022 Compliance**: React 16 APIs, react-flow-renderer v10, Fluent UI v9.
+**ADR-022 Compliance**: React 16 APIs (platform-provided), Fluent UI v9.
 
 ### PlaybookExecutionEngine (Dual Mode)
 
@@ -604,12 +699,20 @@ Mode Detection: Legacy (no nodes) or NodeBased (has nodes)
   ├── Legacy → delegates to IAnalysisOrchestrationService
   │
   └── NodeBased:
-      1. Build ExecutionGraph (DAG from canvas JSON)
-      2. Topological sort → execution batches
-      3. Execute batches (max 3 parallel nodes, throttled)
-      4. Stream PlaybookStreamEvents per node
-      5. Store node outputs in PlaybookRunContext
-      6. Rate limit handling per ADR-016
+      1. Build ExecutionGraph (DAG from DependsOn arrays, Kahn's algorithm)
+      2. Topological sort → execution batches (independent nodes grouped)
+      3. FOR EACH batch:
+         a. Resolve scopes per node based on NodeType:
+            - AIAnalysis → full scopes (skills, knowledge, tools from N:N)
+            - Output/Control/Workflow → empty scopes (no LLM calls)
+         b. Determine ActionType from __actionType in ConfigJson
+            (falls back to NodeType-based default)
+         c. Route to INodeExecutor via NodeExecutorRegistry[ActionType]
+         d. Execute nodes in parallel (SemaphoreSlim throttle, configurable)
+      4. Stream PlaybookStreamEvents per node (SSE)
+      5. Store node outputs in PlaybookRunContext (ConcurrentDictionary)
+      6. Template substitution: downstream nodes reference {{variable}} outputs
+      7. Rate limit handling with exponential backoff per ADR-016
 ```
 
 **Streaming events**:
@@ -660,17 +763,17 @@ public class PlaybookRunContext {
 
 **Directory**: `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/`
 
-| File | Node Type | Backend |
-|------|-----------|---------|
-| `INodeExecutor.cs` | Interface | -- |
+| File | ActionType(s) | Backend |
+|------|--------------|---------|
+| `INodeExecutor.cs` | Interface + NodeType/ActionType enums | -- |
 | `INodeExecutorRegistry.cs` | Registry interface | -- |
-| `NodeExecutorRegistry.cs` | Registry implementation | -- |
-| `AiAnalysisNodeExecutor.cs` | AI Analysis | Backend-flexible (currently in-process) |
-| `ConditionNodeExecutor.cs` | Condition | Always Spaarke code |
-| `CreateTaskNodeExecutor.cs` | CreateTask | Always Spaarke code |
-| `UpdateRecordNodeExecutor.cs` | UpdateRecord | Always Spaarke code |
-| `SendEmailNodeExecutor.cs` | SendEmail | Always Spaarke code |
-| `DeliverOutputNodeExecutor.cs` | DeliverOutput | Always Spaarke code |
+| `NodeExecutorRegistry.cs` | ActionType → INodeExecutor lookup | -- |
+| `AiAnalysisNodeExecutor.cs` | AiAnalysis (0), AiCompletion (1), AiEmbedding (2) | Backend-flexible (currently in-process) |
+| `ConditionNodeExecutor.cs` | Condition (30) | Always Spaarke code |
+| `CreateTaskNodeExecutor.cs` | CreateTask (20) | Always Spaarke code |
+| `UpdateRecordNodeExecutor.cs` | UpdateRecord (22) | Always Spaarke code |
+| `SendEmailNodeExecutor.cs` | SendEmail (21) | Always Spaarke code |
+| `DeliverOutputNodeExecutor.cs` | DeliverOutput (40) | Always Spaarke code |
 
 ### Tool Handler Framework
 
@@ -738,48 +841,93 @@ Tier 3: Custom Handlers (complex scenarios)
 | `FinancialCalculatorHandler` | `Tools/FinancialCalculatorHandler.cs` | Financial calculations |
 | `SemanticSearchToolHandler` | `Tools/SemanticSearchToolHandler.cs` | RAG search |
 | `DataverseUpdateToolHandler` | `Tools/DataverseUpdateToolHandler.cs` | Dataverse updates |
+| `SendCommunicationToolHandler` | `Tools/SendCommunicationToolHandler.cs` | Email/Teams communication |
 | `GenericAnalysisHandler` | `Handlers/GenericAnalysisHandler.cs` | Configuration-driven (default) |
 
 ### Execution Flow (Batch Mode)
 
 ```
-POST /api/ai/playbook-runs (PlaybookRunEndpoints.cs)
+POST /api/ai/playbooks/{id}/execute (PlaybookRunEndpoints.cs)
   │
   ▼
 PlaybookOrchestrationService.ExecutePlaybookAsync()
   │
-  ├── Step 1: Load Playbook (PlaybookService.GetPlaybookAsync)
-  ├── Step 2: Detect mode (Legacy vs NodeBased)
+  ├── Step 1: Load Playbook + Nodes (PlaybookService / NodeService)
+  ├── Step 2: Detect mode (Legacy vs NodeBased — has sprk_playbooknode records?)
   ├── Step 3: Create PlaybookRunContext (RunId, DocumentIds, TenantId)
   ├── Step 4: Extract document text (TextExtractorService)
   │
-  ├── FOR EACH execution batch (topological order, max 3 parallel):
-  │   │
-  │   ├── Step 5: Resolve node scopes (IScopeResolverService)
-  │   ├── Step 6: Create NodeExecutionContext
-  │   ├── Step 7: Route to NodeExecutor (NodeExecutorRegistry)
-  │   │   │
-  │   │   ├── AiAnalysisNodeExecutor:
-  │   │   │   ├── Build prompt: Action.SystemPrompt + Skills + Knowledge + Document
-  │   │   │   ├── Resolve tool handler (ToolHandlerRegistry)
-  │   │   │   ├── Execute: handler.ExecuteAsync()
-  │   │   │   │   └── IOpenAiClient.GetCompletionAsync() → Azure OpenAI
-  │   │   │   └── Return NodeOutput (Data JSON + Summary text)
-  │   │   │
-  │   │   ├── ConditionNodeExecutor:
-  │   │   │   └── Evaluate conditionJson against previous NodeOutputs
-  │   │   │
-  │   │   └── CreateTask/SendEmail/UpdateRecord/DeliverOutput:
-  │   │       └── Execute Spaarke workflow action
-  │   │
-  │   ├── Step 8: Store output (PlaybookRunContext.StoreNodeOutput)
-  │   └── Step 9: Stream event (PlaybookStreamEvent)
+  ├── Step 5: Build ExecutionGraph (Kahn's algorithm on DependsOn arrays)
+  ├── Step 6: GetExecutionBatches() — group independent nodes into parallel batches
   │
-  ├── Step 10: Map outputs to document fields (DocumentProfileFieldMapper)
-  ├── Step 11: Update Dataverse (DataverseService.UpdateDocumentFieldsAsync)
-  ├── Step 12: Store analysis output (sprk_analysisoutput.sprk_output_rtf)
-  └── Step 13: Complete run (metrics, status)
+  ├── FOR EACH batch (sequential between batches, parallel within):
+  │   │
+  │   ├── Step 7: FOR EACH node in batch (parallel, SemaphoreSlim throttle):
+  │   │   │
+  │   │   ├── Step 7a: Scope resolution (based on sprk_nodetype):
+  │   │   │   ├── AIAnalysis → ResolveNodeScopesAsync (skills, knowledge, tools from N:N)
+  │   │   │   └── Output/Control/Workflow → empty scopes (no LLM overhead)
+  │   │   │
+  │   │   ├── Step 7b: ActionType resolution (from __actionType in ConfigJson):
+  │   │   │   └── Falls back to NodeType default if not present
+  │   │   │
+  │   │   ├── Step 7c: Create NodeExecutionContext (Node, Action, Scopes, PreviousOutputs)
+  │   │   │
+  │   │   ├── Step 7d: Route to INodeExecutor via NodeExecutorRegistry[ActionType]:
+  │   │   │   │
+  │   │   │   ├── AiAnalysisNodeExecutor (ActionType 0-2):
+  │   │   │   │   ├── Build prompt: Action.SystemPrompt + Skills + Knowledge + Document
+  │   │   │   │   ├── Template substitution: {{variable}} from PreviousOutputs
+  │   │   │   │   ├── Resolve tool handler (ToolHandlerRegistry)
+  │   │   │   │   ├── Execute: handler.ExecuteAsync()
+  │   │   │   │   │   └── IOpenAiClient.GetCompletionAsync() → Azure OpenAI
+  │   │   │   │   └── Return NodeOutput (Data JSON + Summary text + Confidence)
+  │   │   │   │
+  │   │   │   ├── ConditionNodeExecutor (ActionType 30):
+  │   │   │   │   └── Evaluate conditionJson against previous NodeOutputs
+  │   │   │   │
+  │   │   │   ├── DeliverOutputNodeExecutor (ActionType 40):
+  │   │   │   │   └── Render Handlebars template with all NodeOutputs
+  │   │   │   │
+  │   │   │   └── CreateTask/SendEmail/UpdateRecord (ActionType 20-24):
+  │   │   │       └── Execute Spaarke workflow action on Dataverse/Graph
+  │   │   │
+  │   │   ├── Step 7e: Store output (PlaybookRunContext.StoreNodeOutput)
+  │   │   └── Step 7f: Stream event (PlaybookStreamEvent via SSE)
+  │   │
+  │   └── Check for failures — stop execution if node failed (unless continueOnError)
+  │
+  ├── Step 8: Map outputs to document fields (DocumentProfileFieldMapper)
+  ├── Step 9: Update Dataverse (DataverseService.UpdateDocumentFieldsAsync)
+  ├── Step 10: Store analysis output (sprk_analysisoutput.sprk_output_rtf)
+  └── Step 11: Complete run (metrics, status, duration)
 ```
+
+### Parallel Execution and Performance
+
+**ExecutionGraph** (`ExecutionGraph.cs`) uses Kahn's algorithm to build a DAG from node `DependsOn` arrays:
+
+```
+GetExecutionBatches() produces:
+  Batch 1: [nodes with in-degree 0]  ← no dependencies, run in parallel
+  Batch 2: [nodes whose deps completed in batch 1]  ← run in parallel
+  ...
+  Batch N: [final nodes]
+```
+
+**Performance formula**: `Total time ≈ SUM(slowest node in each batch)`
+
+**Parallel throttling**: `SemaphoreSlim(DefaultMaxParallelNodes)` limits concurrent execution within a batch. Default is 3, but should be tuned based on Azure OpenAI TPM/RPM quota. This prevents rate limit storms (ADR-016).
+
+**Optimization strategies**:
+
+| Pattern | Structure | Batches | Performance |
+|---------|-----------|---------|-------------|
+| Fully sequential | A → B → C → D → Output | 5 | Slowest (sum of all) |
+| Fully parallel | A,B,C,D → Output | 2 | Fastest (max of A-D + Output) |
+| Partial deps | A → B; C,D → Output | 3 | Middle ground |
+
+**Key rule**: Only add dependency edges where a node actually references `{{upstream.output}}` in its prompt. Unnecessary edges force sequential execution.
 
 ### Dual Output Paths
 
@@ -925,7 +1073,7 @@ The PlaybookOrchestrationService evolves from a full execution engine to a thin 
 | ADR-014 | Dual storage pattern | Analysis Output (RTF) + Document fields (JSON) |
 | ADR-015 | AI observability | Application Insights logging at each execution step |
 | ADR-016 | Soft failure handling | Per-node error isolation, rate limit backoff |
-| ADR-022 | React 16 + Fluent v9 | PlaybookBuilderHost uses react-flow-renderer v10, Fluent UI v9 |
+| ADR-022 | React 16 + Fluent v9 (PCF); React 18 (Code Pages) | PlaybookBuilderHost PCF: React 16 + react-flow v10; PlaybookBuilder Code Page: React 18 + @xyflow/react v12; both use Fluent UI v9 |
 
 ---
 
@@ -951,6 +1099,7 @@ The PlaybookOrchestrationService evolves from a full execution engine to a thin 
 |----------|----------|----------|
 | AI Strategy & Roadmap | `docs/guides/SPAARKE-AI-STRATEGY-AND-ROADMAP.md` | Executive/business |
 | AI Implementation Guide | `docs/guides/SPAARKE-AI-ARCHITECTURE.md` | Engineers (detailed how-to) |
+| How to Create Playbooks | `docs/guides/HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md` | Admins, Power Users |
 | SK Chat Design | `projects/ai-document-analysis-enhancements/sk-analysis-chat-design.md` | Engineers (SprkChat design) |
 | AI Deployment Guide | `docs/guides/AI-DEPLOYMENT-GUIDE.md` | DevOps |
 | Azure AI Resources | `docs/architecture/auth-AI-azure-resources.md` | Infrastructure |
@@ -962,6 +1111,7 @@ The PlaybookOrchestrationService evolves from a full execution engine to a thin 
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-03-01 | 3.1 | Updated for Playbook Builder R5: three-level node type system (Canvas Type → NodeType → ActionType), Code Page builder as primary (PCF legacy), canvas-to-Dataverse sync with sprk_nodetype + __actionType, parallel execution batches and performance optimization, updated file structure, all 6 node executors, all 12 tool handlers. |
 | 2026-02-21 | 3.0 | Created from consolidation of AI-PLAYBOOK-ARCHITECTURE.md (v2.0) and AI-ANALYSIS-PLAYBOOK-SCOPE-DESIGN.md (v2.0). Added four-tier architecture, playbooks-as-frontend model, backend flexibility, nodes-as-agents evolution, complete file mapping from codebase. |
 | 2026-01-16 | (predecessor) | AI-ANALYSIS-PLAYBOOK-SCOPE-DESIGN.md v2.0 |
 | 2026-01-15 | (predecessor) | AI-PLAYBOOK-ARCHITECTURE.md v2.0 |

@@ -6,7 +6,7 @@
  *
  * Tables queried:
  *   - sprk_analysisskills   → Skills multi-select
- *   - sprk_aiknowledges     → Knowledge multi-select
+ *   - sprk_analysisknowledges     → Knowledge multi-select
  *   - sprk_analysistools    → Tool single-select
  *   - sprk_analysisactions  → Action single-select (NEW)
  *
@@ -64,10 +64,10 @@ function mapSkill(record: DataverseRecord): AnalysisSkill {
 
 function mapKnowledge(record: DataverseRecord): AiKnowledge {
     return {
-        id: (record["sprk_aiknowledgeid"] as string) ?? "",
+        id: (record["sprk_analysisknowledgeid"] as string) ?? "",
         name: (record["sprk_name"] as string) ?? "",
         description: (record["sprk_description"] as string) ?? "",
-        sourceType: (record["sprk_type"] as string) ?? "",
+        sourceType: "",
     };
 }
 
@@ -76,7 +76,6 @@ function mapTool(record: DataverseRecord): AnalysisTool {
         id: (record["sprk_analysistoolid"] as string) ?? "",
         name: (record["sprk_name"] as string) ?? "",
         description: (record["sprk_description"] as string) ?? "",
-        handlerType: (record["sprk_handlertype"] as string) ?? "",
     };
 }
 
@@ -123,6 +122,7 @@ interface ScopeStoreState {
     getCapabilities: (nodeType: string) => ActionTypeCapabilities;
     getSkillsByIds: (ids: string[]) => AnalysisSkill[];
     getKnowledgeByIds: (ids: string[]) => AiKnowledge[];
+    getToolsByIds: (ids: string[]) => AnalysisTool[];
     getToolById: (id: string) => AnalysisTool | undefined;
     getActionById: (id: string) => AnalysisAction | undefined;
 }
@@ -169,13 +169,13 @@ export const useScopeStore = create<ScopeStoreState>()((set, get) => ({
         }
     },
 
-    // ----- Load Knowledge from sprk_aiknowledges -----
+    // ----- Load Knowledge from sprk_analysisknowledges -----
     loadKnowledge: async () => {
         set({ isLoadingKnowledge: true, knowledgeError: null });
         try {
             const result = await retrieveMultipleRecords(
-                "sprk_aiknowledges",
-                "$select=sprk_aiknowledgeid,sprk_name,sprk_description,sprk_type&$filter=statecode eq 0&$orderby=sprk_name",
+                "sprk_analysisknowledges",
+                "$select=sprk_analysisknowledgeid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name",
             );
             const knowledge = result.entities.map(mapKnowledge);
             set({ knowledge, isLoadingKnowledge: false });
@@ -193,7 +193,7 @@ export const useScopeStore = create<ScopeStoreState>()((set, get) => ({
         try {
             const result = await retrieveMultipleRecords(
                 "sprk_analysistools",
-                "$select=sprk_analysistoolid,sprk_name,sprk_description,sprk_handlertype&$filter=statecode eq 0&$orderby=sprk_name",
+                "$select=sprk_analysistoolid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name",
             );
             const tools = result.entities.map(mapTool);
             set({ tools, isLoadingTools: false });
@@ -260,6 +260,11 @@ export const useScopeStore = create<ScopeStoreState>()((set, get) => ({
     getKnowledgeByIds: (ids: string[]): AiKnowledge[] => {
         const { knowledge } = get();
         return knowledge.filter((k) => ids.includes(k.id));
+    },
+
+    getToolsByIds: (ids: string[]): AnalysisTool[] => {
+        const { tools } = get();
+        return tools.filter((t) => ids.includes(t.id));
     },
 
     getToolById: (id: string): AnalysisTool | undefined => {
