@@ -60,6 +60,10 @@ export const NODE_TYPE_INFO: Record<
         label: "Deliver Output",
         description: "Send results to destination",
     },
+    updateRecord: {
+        label: "Update Record",
+        description: "Write fields to a Dataverse record",
+    },
     createTask: {
         label: "Create Task",
         description: "Create a task or work item",

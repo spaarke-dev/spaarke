@@ -12,9 +12,12 @@ import {
     tokens,
     shorthands,
     Checkbox,
+    Radio,
+    RadioGroup,
     Spinner,
     Text,
 } from "@fluentui/react-components";
+import type { RadioGroupOnChangeData } from "@fluentui/react-components";
 import { useScopeStore } from "../../stores/scopeStore";
 import type { PlaybookNodeType } from "../../types/canvas";
 
@@ -135,6 +138,18 @@ export const ScopeSelector = memo(function ScopeSelector({
         [toolIds, onToolsChange],
     );
 
+    // Single-select handler for tools (one tool per node)
+    const handleToolSelect = useCallback(
+        (_e: React.FormEvent<HTMLDivElement>, data: RadioGroupOnChangeData) => {
+            if (data.value === "__none__") {
+                onToolsChange([]);
+            } else {
+                onToolsChange([data.value]);
+            }
+        },
+        [onToolsChange],
+    );
+
     // Skills section
     if (showSkills) {
         if (!capabilities.allowsSkills) {
@@ -187,7 +202,7 @@ export const ScopeSelector = memo(function ScopeSelector({
         );
     }
 
-    // Tools section
+    // Tools section — single-select (one tool per node)
     if (showTools) {
         if (!capabilities.allowsTools) {
             return <Text className={styles.disabledMessage}>This node type does not support tools.</Text>;
@@ -199,17 +214,20 @@ export const ScopeSelector = memo(function ScopeSelector({
             return <Text className={styles.empty}>No tools available.</Text>;
         }
         return (
-            <div className={styles.checkboxList}>
+            <RadioGroup
+                className={styles.checkboxList}
+                value={toolIds.length > 0 ? toolIds[0] : "__none__"}
+                onChange={handleToolSelect}
+            >
+                <Radio key="__none__" value="__none__" label="(None)" />
                 {tools.map((tool) => (
-                    <Checkbox
+                    <Radio
                         key={tool.id}
-                        size="medium"
+                        value={tool.id}
                         label={tool.name}
-                        checked={toolIds.includes(tool.id)}
-                        onChange={(_, data) => handleToolToggle(tool.id, data.checked === true)}
                     />
                 ))}
-            </div>
+            </RadioGroup>
         );
     }
 

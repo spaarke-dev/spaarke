@@ -72,6 +72,7 @@ const NODE_PALETTE: NodePaletteItem[] = [
     { type: "aiCompletion", label: "AI Completion", description: "Generate AI text completion", color: tokens.colorBrandBackground },
     { type: "condition", label: "Condition", description: "Branch based on expression", color: tokens.colorPaletteYellowBackground3 },
     { type: "deliverOutput", label: "Deliver Output", description: "Format and save results", color: tokens.colorPaletteGreenBackground3 },
+    { type: "updateRecord", label: "Update Record", description: "Write fields to Dataverse record", color: tokens.colorPaletteGreenBackground3 },
     { type: "createTask", label: "Create Task", description: "Create a Dataverse task", color: tokens.colorPaletteBerryBackground2 },
     { type: "sendEmail", label: "Send Email", description: "Send notification email", color: tokens.colorPaletteBerryBackground2 },
     { type: "wait", label: "Wait", description: "Pause for duration or condition", color: tokens.colorPaletteMagentaBackground2 },
@@ -303,8 +304,10 @@ export function BuilderLayout({ playbookId }: BuilderLayoutProps): JSX.Element {
     // Drag start handler for palette items
     const handleDragStart = useCallback(
         (event: React.DragEvent, nodeType: PlaybookNodeType, label: string) => {
-            event.dataTransfer.setData("application/reactflow", nodeType);
-            event.dataTransfer.setData("application/reactflow-label", label);
+            event.dataTransfer.setData(
+                "application/reactflow",
+                JSON.stringify({ type: nodeType, label }),
+            );
             event.dataTransfer.effectAllowed = "move";
         },
         [],

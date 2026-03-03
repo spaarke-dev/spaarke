@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using HandlebarsDotNet;
 
@@ -119,6 +120,32 @@ public sealed class TemplateEngine : ITemplateEngine
 
             return template;
         }
+    }
+
+    /// <summary>
+    /// Converts a JsonElement to a Handlebars-traversable object hierarchy.
+    /// Handlebars.NET uses reflection to traverse properties, but JsonElement is a struct
+    /// whose members are ValueKind/GetString/etc. — NOT the JSON property names.
+    /// This converts to Dictionary/List/primitive types that Handlebars can navigate.
+    /// </summary>
+    public static object? ConvertJsonElement(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.Object => element.EnumerateObject()
+                .ToDictionary(
+                    p => p.Name,
+                    p => ConvertJsonElement(p.Value),
+                    StringComparer.OrdinalIgnoreCase),
+            JsonValueKind.Array => element.EnumerateArray()
+                .Select(ConvertJsonElement)
+                .ToList() as object,
+            JsonValueKind.String => element.GetString(),
+            JsonValueKind.Number => element.TryGetInt64(out var l) ? l : element.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => null
+        };
     }
 
     /// <inheritdoc />

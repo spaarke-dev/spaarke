@@ -71,6 +71,9 @@ interface CanvasState {
     markSaved: () => void;
     markDirty: () => void;
 
+    // Initialization
+    initializeNewCanvas: () => void;
+
     // Reset
     reset: () => void;
 }
@@ -260,6 +263,31 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     },
 
     markDirty: () => set({ isDirty: true }),
+
+    // -----------------------------------------------------------------------
+    // Initialization
+    // -----------------------------------------------------------------------
+
+    initializeNewCanvas: () => {
+        const startNode: PlaybookNode = {
+            id: generateNodeId(),
+            type: "start",
+            position: { x: 100, y: 200 },
+            data: {
+                label: "Start",
+                type: "start",
+                isConfigured: true,
+                validationErrors: [],
+            },
+        };
+        set({
+            nodes: [startNode],
+            edges: [],
+            selectedNodeId: null,
+            isDirty: false,
+            lastSavedJson: null,
+        });
+    },
 
     // -----------------------------------------------------------------------
     // Reset

@@ -25,6 +25,7 @@ export type PlaybookNodeType =
   | 'aiCompletion'
   | 'condition'
   | 'deliverOutput'
+  | 'updateRecord'
   | 'createTask'
   | 'sendEmail'
   | 'wait';

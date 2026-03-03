@@ -315,23 +315,43 @@ public sealed class DeliverOutputNodeExecutor : INodeExecutor
     }
 
     /// <summary>
-    /// Builds template context dictionary from previous node outputs.
+    /// Builds template context dictionary from previous node outputs and execution metadata.
     /// </summary>
     private static Dictionary<string, object?> BuildTemplateContext(NodeExecutionContext context)
     {
         var templateContext = new Dictionary<string, object?>();
 
+        // Add previous node outputs (e.g., {{analyze.text}}, {{analyze.output.summary}})
         foreach (var (varName, output) in context.PreviousOutputs)
         {
             templateContext[varName] = new
             {
                 output = output.StructuredData.HasValue
-                    ? JsonSerializer.Deserialize<object>(output.StructuredData.Value.GetRawText())
+                    ? TemplateEngine.ConvertJsonElement(output.StructuredData.Value)
                     : null,
                 text = output.TextContent,
                 success = output.Success
             };
         }
+
+        // Add document context (e.g., {{document.id}}, {{document.name}})
+        if (context.Document is not null)
+        {
+            templateContext["document"] = new
+            {
+                id = context.Document.DocumentId.ToString(),
+                name = context.Document.Name,
+                fileName = context.Document.FileName
+            };
+        }
+
+        // Add run context (e.g., {{run.id}}, {{run.playbookId}})
+        templateContext["run"] = new
+        {
+            id = context.RunId.ToString(),
+            playbookId = context.PlaybookId.ToString(),
+            tenantId = context.TenantId
+        };
 
         return templateContext;
     }

@@ -107,6 +107,97 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         ScheduleCleanup(runId);
     }
 
+    /// <inheritdoc />
+    public async IAsyncEnumerable<PlaybookStreamEvent> ExecuteAppOnlyAsync(
+        PlaybookRunRequest request,
+        string tenantId,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var runId = Guid.NewGuid();
+
+        _logger.LogInformation(
+            "Starting app-only playbook execution - RunId: {RunId}, PlaybookId: {PlaybookId}, Documents: {DocumentCount}",
+            runId, request.PlaybookId, request.DocumentIds.Length);
+
+        // Create run context without HttpContext (app-only mode)
+        var context = new PlaybookRunContext(
+            runId,
+            request.PlaybookId,
+            request.DocumentIds,
+            tenantId,
+            cancellationToken,
+            request.UserContext,
+            request.Parameters);
+
+        if (request.Document != null)
+        {
+            context.Document = request.Document;
+        }
+
+        _activeRuns[runId] = context;
+
+        var channel = Channel.CreateUnbounded<PlaybookStreamEvent>();
+
+        var executionTask = ExecuteAppOnlyInternalAsync(request, context, channel.Writer, cancellationToken);
+
+        await foreach (var evt in channel.Reader.ReadAllAsync(cancellationToken))
+        {
+            yield return evt;
+        }
+
+        await executionTask;
+        ScheduleCleanup(runId);
+    }
+
+    private async Task ExecuteAppOnlyInternalAsync(
+        PlaybookRunRequest request,
+        PlaybookRunContext context,
+        ChannelWriter<PlaybookStreamEvent> writer,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var nodes = await _nodeService.GetNodesAsync(request.PlaybookId, cancellationToken);
+
+            if (nodes.Length == 0)
+            {
+                _logger.LogError(
+                    "App-only execution requires node-based playbook. Playbook {PlaybookId} has no nodes.",
+                    request.PlaybookId);
+
+                context.MarkFailed("App-only execution requires a node-based playbook (no nodes found).");
+                await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
+                    context.RunId, context.PlaybookId,
+                    "App-only execution requires a node-based playbook. Configure nodes in the Playbook Builder."),
+                    CancellationToken.None);
+                return;
+            }
+
+            _logger.LogInformation(
+                "App-only mode: Playbook {PlaybookId} has {NodeCount} nodes — using node-based execution",
+                request.PlaybookId, nodes.Length);
+
+            await ExecuteNodeBasedModeAsync(context, nodes, writer, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            context.MarkCancelled();
+            await writer.WriteAsync(PlaybookStreamEvent.RunCancelled(
+                context.RunId, context.PlaybookId), CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "App-only playbook execution failed - RunId: {RunId}", context.RunId);
+            context.MarkFailed(ex.Message);
+            await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
+                context.RunId, context.PlaybookId, ex.Message), CancellationToken.None);
+        }
+        finally
+        {
+            writer.Complete();
+        }
+    }
+
     private async Task ExecuteInternalAsync(
         PlaybookRunRequest request,
         PlaybookRunContext context,
@@ -456,6 +547,16 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
         var tokenUsage = new TokenUsage(0, 0);
 
+        if (context.HttpContext is null)
+        {
+            context.MarkFailed("Legacy mode requires HttpContext — use node-based playbook for app-only execution");
+            await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
+                context.RunId, context.PlaybookId,
+                "Legacy mode requires HttpContext. Configure nodes in the Playbook Builder for app-only execution."),
+                cancellationToken);
+            return;
+        }
+
         await foreach (var chunk in _legacyOrchestrator.ExecutePlaybookAsync(
             legacyRequest, context.HttpContext, cancellationToken))
         {
@@ -591,12 +692,13 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     "Node {NodeName} in batch {BatchNumber} failed - stopping playbook execution",
                     failedNode.node.Name, batchNumber);
 
-                context.MarkFailed($"Node '{failedNode.node.Name}' failed: {failedNode.result.ErrorMessage}");
+                var failureDetail = $"Node '{failedNode.node.Name}' failed: {failedNode.result.ErrorMessage}";
+                context.MarkFailed(failureDetail);
 
                 await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
                     context.RunId,
                     context.PlaybookId,
-                    $"Node '{failedNode.node.Name}' failed",
+                    failureDetail,
                     context.GetMetrics(totalNodes)), cancellationToken);
 
                 return;
@@ -750,6 +852,19 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                         return NodeOutput.Ok(node.Id, node.OutputVariable, null, skipReason);
                     }
                 }
+            }
+
+            // Skip Start nodes — they are canvas anchors with no execution logic.
+            var configActionType = ExtractActionTypeFromConfig(node.ConfigJson);
+            if (configActionType == ActionType.Start)
+            {
+                var skipOutput = NodeOutput.Ok(node.Id, node.OutputVariable, null, "Start node (passthrough)");
+                runContext.StoreNodeOutput(skipOutput);
+
+                await writer.WriteAsync(PlaybookStreamEvent.NodeCompleted(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipOutput), cancellationToken);
+
+                return skipOutput;
             }
 
             // Note: ConditionJson on nodes is for conditional execution guards (Phase 5).

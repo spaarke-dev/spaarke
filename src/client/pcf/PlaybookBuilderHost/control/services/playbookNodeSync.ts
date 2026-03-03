@@ -347,17 +347,34 @@ function extractCanvasNodeId(configJson: string | null): string | null {
     }
 }
 
-/** Strip known Dataverse-bound fields from data to produce clean config. */
+/** Strip known Dataverse-bound fields and UI-only metadata from data to produce clean config. */
 function stripKnownFields(data: Record<string, unknown>): Record<string, unknown> {
     const known = new Set([
+        // Dataverse-bound fields (stored in their own columns)
         'label', 'name', 'actionId', 'toolId', 'modelDeploymentId',
         'outputVariable', 'timeoutSeconds', 'retryCount', 'conditionJson',
-        'isActive', 'skillIds', 'knowledgeIds',
+        'isActive', 'skillIds', 'knowledgeIds', 'toolIds',
+        // UI-only metadata (not part of executor config)
+        'type', 'isConfigured', 'validationErrors',
     ]);
     const result: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(data)) {
         if (!known.has(k)) result[k] = v;
     }
+
+    // For nodes that store their config in a nested configJson string
+    // (updateRecord, sendEmail, createTask), extract the inner fields
+    // to the top level so the server-side executor can read them directly.
+    if (typeof result['configJson'] === 'string') {
+        try {
+            const inner = JSON.parse(result['configJson'] as string);
+            if (inner && typeof inner === 'object') {
+                delete result['configJson'];
+                Object.assign(result, inner);
+            }
+        } catch { /* keep configJson as-is if not valid JSON */ }
+    }
+
     return result;
 }
 

@@ -47,6 +47,20 @@ public record ToolExecutionContext
     public string? UserContext { get; init; }
 
     /// <summary>
+    /// System prompt from the Action record (sprk_analysisaction.sprk_systemprompt).
+    /// When set, tool handlers should use this as the primary AI instruction instead of
+    /// their internal default prompt templates. This implements "Action = what to do,
+    /// Tool = how to do it" separation (Option A).
+    /// </summary>
+    public string? ActionSystemPrompt { get; init; }
+
+    /// <summary>
+    /// Skill context assembled from resolved skill scopes (prompt fragments).
+    /// Each skill contributes additional instructions or focus areas.
+    /// </summary>
+    public string? SkillContext { get; init; }
+
+    /// <summary>
     /// Knowledge context from resolved scopes (RAG results, inline content).
     /// Pre-resolved by AnalysisOrchestrationService.
     /// </summary>

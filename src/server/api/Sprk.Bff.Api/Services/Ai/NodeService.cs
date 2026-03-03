@@ -995,6 +995,7 @@ public class NodeService : INodeService
     /// </summary>
     private static ActionType MapCanvasTypeToActionType(string canvasType) => canvasType switch
     {
+        "start" => ActionType.Start,
         "aiAnalysis" => ActionType.AiAnalysis,
         "aiCompletion" => ActionType.AiCompletion,
         "aiEmbedding" => ActionType.AiEmbedding,

@@ -10,6 +10,7 @@ export { SendEmailForm } from "./SendEmailForm";
 export { CreateTaskForm } from "./CreateTaskForm";
 export { AiCompletionForm } from "./AiCompletionForm";
 export { WaitForm } from "./WaitForm";
+export { UpdateRecordForm } from "./UpdateRecordForm";
 export { VariableReferencePanel } from "./VariableReferencePanel";
 export { NodeValidationBadge } from "./NodeValidationBadge";
 export { ConditionEditor } from "./ConditionEditor";

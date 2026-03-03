@@ -34,6 +34,20 @@ public interface IPlaybookOrchestrationService
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Execute a playbook in app-only mode (no HttpContext, no OBO auth).
+    /// Suitable for background processing jobs (email-to-document, Office add-in uploads).
+    /// Only supports NodeBased mode — emits RunFailed if playbook has no nodes.
+    /// </summary>
+    /// <param name="request">Playbook execution request with playbook ID, documents, and options.</param>
+    /// <param name="tenantId">Tenant ID for multi-tenant isolation.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Async enumerable of stream events.</returns>
+    IAsyncEnumerable<PlaybookStreamEvent> ExecuteAppOnlyAsync(
+        PlaybookRunRequest request,
+        string tenantId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Validate a playbook's node graph before execution.
     /// Checks for cycles, missing dependencies, and invalid configurations.
     /// </summary>

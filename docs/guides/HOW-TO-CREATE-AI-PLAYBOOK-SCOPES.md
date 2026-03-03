@@ -1,7 +1,7 @@
 # How to Create AI Playbooks and Scopes
 
-> **Version**: 2.0
-> **Date**: March 1, 2026
+> **Version**: 3.1
+> **Date**: March 3, 2026
 > **Audience**: Dataverse Administrators, Power Users, Engineers
 > **Prerequisites**: Access to Dataverse environment with Spaarke AI solution installed
 
@@ -51,15 +51,109 @@
 | **Knowledge** | Provide domain context via RAG or inline text | "Standard Contract Clauses", "Company Policies" |
 | **Actions** | Define LLM behavior with system prompts | "Extract Entities", "Summarize Content" |
 
-### How They Work Together
+### How Scopes Are Assigned to Nodes
+
+Each AI Analysis node in a playbook has its own scope assignments:
+
+| Scope | Cardinality | Relationship | Purpose |
+|-------|-------------|-------------|---------|
+| **Action** | **1 per node** | Lookup (`sprk_actionid`) | Primary AI instruction — "what to do" |
+| **Tool** | **1 per node** | N:N (`sprk_playbooknode_tool`) | Execution handler — "how to do it" |
+| **Skills** | **Many per node** | N:N (`sprk_playbooknode_skill`) | Prompt modifiers — "pay attention to…" |
+| **Knowledge** | **Many per node** | N:N (`sprk_playbooknode_knowledge`) | Reference context — "here's background…" |
+
+> **Important**: Each AI node executes exactly **one tool**. If your playbook needs to classify, summarize, and extract entities, create **three separate AI Analysis nodes** — each with its own Action + Tool pair.
+
+### How Scopes Combine Into a Prompt
+
+When a node executes, the server assembles all scopes into a single prompt sent to Azure OpenAI. Here is the exact assembly sequence:
 
 ```
-Playbook Execution Flow:
-1. Action provides base system prompt
-2. Skills add specialized instructions
-3. Knowledge provides domain context
-4. Tool executes with combined prompt and returns results
+┌─────────────────────────────────────────────────────────────┐
+│                    FINAL PROMPT TO AI MODEL                 │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─ 1. PRIMARY INSTRUCTION (first non-empty wins) ──────┐  │
+│  │   Priority A: Action.SystemPrompt                     │  │
+│  │   Priority B: Tool.Configuration.PromptTemplate       │  │
+│  │   Priority C: Tool operation default (built-in)       │  │
+│  └───────────────────────────────────────────────────────┘  │
+│       The Action's SystemPrompt is the primary instruction. │
+│       If no Action is set, the Tool's prompt template is    │
+│       used. If neither exists, a built-in default runs.     │
+│                          ↓                                  │
+│  ┌─ 2. PLACEHOLDER SUBSTITUTION ────────────────────────┐  │
+│  │   {document}    → full extracted document text         │  │
+│  │   {parameters}  → Tool Configuration.Parameters JSON   │  │
+│  │   {tool_name}   → Tool record name                     │  │
+│  │   {tool_description} → Tool record description          │  │
+│  └───────────────────────────────────────────────────────┘  │
+│       If the prompt contains {document}, the document text  │
+│       is inserted there. These are literal string replaces. │
+│                          ↓                                  │
+│  ┌─ 3. SKILLS (appended to prompt) ─────────────────────┐  │
+│  │   ## Additional Analysis Instructions                 │  │
+│  │                                                       │  │
+│  │   [Contract Analysis]                                 │  │
+│  │   Focus on liability clauses, indemnification...      │  │
+│  │                                                       │  │
+│  │   [Financial Terminology]                             │  │
+│  │   Use standard financial definitions per GAAP...      │  │
+│  └───────────────────────────────────────────────────────┘  │
+│       Each selected Skill's PromptFragment is concatenated  │
+│       and appended. Skills are additive modifiers — they    │
+│       refine the analysis without replacing the Action.     │
+│                          ↓                                  │
+│  ┌─ 4. KNOWLEDGE (appended to prompt) ──────────────────┐  │
+│  │   ## Reference Knowledge                              │  │
+│  │                                                       │  │
+│  │   [Standard Contract Clauses]                         │  │
+│  │   Force Majeure: Unforeseeable circumstances...       │  │
+│  │                                                       │  │
+│  │   [Company Policies]                                  │  │
+│  │   Section 4.2: All contracts must include...          │  │
+│  └───────────────────────────────────────────────────────┘  │
+│       Each selected Knowledge source's content is appended. │
+│       Currently supports Inline text. Document and RAG      │
+│       types are defined but not yet implemented.            │
+│                          ↓                                  │
+│  ┌─ 5. DOCUMENT (auto-appended if needed) ──────────────┐  │
+│  │   ## Document                                         │  │
+│  │                                                       │  │
+│  │   [full extracted document text]                       │  │
+│  └───────────────────────────────────────────────────────┘  │
+│       If the prompt already used {document} placeholder,    │
+│       the text was inserted there (step 2). If NOT, the     │
+│       full document is auto-appended here so the LLM        │
+│       always sees the document content.                     │
+│                          ↓                                  │
+│  ┌─ 6. OUTPUT SCHEMA (from Tool Configuration) ─────────┐  │
+│  │   Return your response as valid JSON matching:        │  │
+│  │   { "type": "object", "properties": { ... } }        │  │
+│  └───────────────────────────────────────────────────────┘  │
+│       The Tool's output_schema (JSON Schema) tells the LLM  │
+│       what structure to return. If no schema is defined,     │
+│       defaults to: { "result": ..., "confidence": 0.0-1.0 } │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
+
+### Scope Roles Explained
+
+| Scope | Role | Analogy | Example |
+|-------|------|---------|---------|
+| **Action** | "What to do" — the primary instruction | The job description | "Summarize this document with key points and takeaways" |
+| **Tool** | "How to do it" — handler mechanism + output format | The toolbox and blueprint | GenericAnalysisHandler with `output_schema` |
+| **Skills** | "Pay attention to…" — modifiers that focus the analysis | Specialized lenses | "Focus on liability clauses and indemnification" |
+| **Knowledge** | "Here's context…" — reference material injected into prompt | Reference library | "Standard contract clause definitions" |
+
+### Key Principle: Action = What, Tool = How
+
+The **Action** record's SystemPrompt is the primary AI instruction. When an Action is assigned to a node, its prompt takes precedence over the Tool's built-in prompt template. The Tool provides the execution mechanism (which handler class to use) and the output format (JSON Schema), but the Action controls what the LLM actually does.
+
+**Without Action**: Tool's prompt template or built-in default runs → output matches tool's default behavior.
+
+**With Action**: Action's SystemPrompt runs → Tool provides handler and output format → output matches Action's instructions.
 
 ---
 
@@ -185,6 +279,115 @@ Each handler has its own configuration schema. Example for EntityExtractorHandle
 ```
 
 **Note**: Invalid handler names fall back to GenericAnalysisHandler with a warning in logs.
+
+---
+
+### Tool Configuration JSON Reference
+
+The `sprk_configuration` field on every tool record is a JSON string. Its structure depends on the handler class.
+
+#### GenericAnalysisHandler Configuration (Most Common)
+
+```json
+{
+  "operation": "extract",
+  "prompt_template": "Extract {parameters} from the document:\n{document}",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "requirements": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "description": { "type": "string" },
+            "priority": { "type": "string" }
+          }
+        }
+      },
+      "confidence": { "type": "number" }
+    }
+  },
+  "parameters": {
+    "types": ["Person", "Organization", "Date"]
+  },
+  "temperature": 0.2,
+  "max_tokens": 2000
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `operation` | **Yes** | Operation type: `extract`, `classify`, `validate`, `generate`, `transform`, `analyze`. Determines the built-in default prompt if no Action or prompt_template is set. |
+| `prompt_template` | No | Custom prompt with `{document}` and `{parameters}` placeholders. Only used when no Action SystemPrompt is assigned to the node (Priority B). |
+| `output_schema` | No | JSON Schema (Draft 07) defining the expected output structure. Appended to prompt as: "Return your response as valid JSON matching this schema: [schema]". If omitted, defaults to: `{ "result": ..., "confidence": 0.0-1.0 }`. |
+| `parameters` | No | Arbitrary JSON injected into `{parameters}` placeholder. Use for runtime-configurable values like entity types, categories, thresholds. |
+| `temperature` | No | AI creativity setting (0.0=deterministic, 1.0=creative). Default: 0.3. Use 0.1-0.3 for extraction/classification, 0.5-0.8 for generation. |
+| `max_tokens` | No | Maximum response tokens. Default: 2000. Range: 100-8000. |
+
+#### Understanding output_schema
+
+The `output_schema` is a standard **JSON Schema** that controls what the LLM returns. It is fully customizable per tool:
+
+- **Add any fields** you need (strings, numbers, booleans, nested objects, arrays)
+- **Use enums** to constrain values: `"enum": ["High", "Medium", "Low"]`
+- **Require fields**: `"required": ["summary", "confidence"]`
+- **Nest deeply**: objects within objects, arrays of objects, etc.
+
+The schema is appended verbatim to the end of the prompt with the instruction "Return your response as valid JSON matching this schema". The LLM follows it to structure its response.
+
+**Example schemas for common operations:**
+
+Classification:
+```json
+{
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "classification": { "type": "string" },
+      "subtype": { "type": "string" },
+      "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+    },
+    "required": ["classification", "confidence"]
+  }
+}
+```
+
+Multi-entity extraction:
+```json
+{
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "entities": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "type": { "type": "string", "enum": ["Person", "Organization", "Date", "Amount"] },
+            "context": { "type": "string" }
+          }
+        }
+      },
+      "confidence": { "type": "number" }
+    }
+  }
+}
+```
+
+#### Understanding Prompt Priority
+
+When a node executes, the prompt is selected using this priority:
+
+1. **Action SystemPrompt** (if an Action is assigned to the node) — **always wins**
+2. **Tool prompt_template** (from Configuration JSON) — used only if no Action is assigned
+3. **Operation default** (built-in to GenericAnalysisHandler) — used if neither exists
+
+This means:
+- Assigning an Action to a node **replaces** the tool's prompt template with the Action's SystemPrompt
+- The Tool still provides: handler class, output_schema, parameters, temperature, max_tokens
+- Skills and Knowledge are appended regardless of which prompt source is used
 
 ---
 
@@ -542,15 +745,34 @@ Drag node types from the left sidebar palette onto the canvas:
 ### Configuring a Node
 
 1. **Click a node** on the canvas to open the Properties Panel (right sidebar)
-2. Configure:
-   - **Name**: Display label
-   - **Output Variable**: Variable name other nodes can reference (e.g., `summary_result`)
-   - **AI Model**: Select model deployment (AI nodes only)
-   - **Skills**: Select prompt fragments that add domain expertise
-   - **Knowledge**: Select context sources (inline or RAG)
-   - **Tools**: Select executable handler
-   - **Configuration**: Type-specific settings (template, email recipients, etc.)
-   - **Runtime**: Timeout (seconds), retry count
+2. The panel shows sections based on node type:
+
+**For AI Analysis / AI Completion nodes:**
+
+| Section | Control | Purpose |
+|---------|---------|---------|
+| **Basic** | Name, Output Variable | Display label and variable name for downstream references |
+| **Action** | Dropdown (single-select) | Select the analysis action — defines the primary AI instruction (SystemPrompt) |
+| **AI Model** | Dropdown | Select Azure OpenAI model deployment |
+| **Skills** | Checkboxes (multi-select) | Add prompt fragment modifiers for domain expertise |
+| **Knowledge** | Checkboxes (multi-select) | Add reference context (inline text, RAG) |
+| **Tool** | Radio buttons (single-select) | Select one execution handler — defines how the AI processes and formats output |
+| **Runtime** | Timeout, Retry Count | Execution constraints |
+
+**For Deliver Output nodes:**
+
+| Section | Control | Purpose |
+|---------|---------|---------|
+| **Basic** | Name, Output Variable | Display label and variable name |
+| **Configuration** | Delivery Format, Template, Metadata toggles, Max Length | How to format and assemble upstream node outputs |
+
+**For other node types** (Condition, Wait, Create Task, Send Email):
+
+| Section | Control | Purpose |
+|---------|---------|---------|
+| **Basic** | Name, Output Variable | Display label and variable name |
+| **Configuration** | Type-specific fields | Condition expression, wait duration, email recipients, etc. |
+| **Runtime** | Timeout, Retry Count | Execution constraints |
 
 ### Connecting Nodes (Edges)
 
@@ -572,18 +794,46 @@ Drag node types from the left sidebar palette onto the canvas:
 
 ### Referencing Upstream Outputs
 
-Nodes can reference outputs from previously completed nodes using **template variables**:
+Nodes can reference outputs from previously completed nodes using **Handlebars template variables**. The variable name is the **Output Variable** you set on the upstream node.
 
-```
-{{summary_result.TextContent}}      — raw text from an upstream node
-{{entities.StructuredData}}          — JSON data from an upstream node
-{{classify_result.Confidence}}       — confidence score
+**Available template paths per node output:**
+
+| Path | Type | Description |
+|------|------|-------------|
+| `{{varName.text}}` | string | The raw text output from the node |
+| `{{varName.output.fieldName}}` | any | A specific field from the structured JSON output |
+| `{{varName.success}}` | boolean | Whether the node executed successfully |
+
+**Built-in context variables** (available in all nodes, no upstream node required):
+
+| Path | Type | Description |
+|------|------|-------------|
+| `{{document.id}}` | GUID string | The Dataverse document ID being analyzed |
+| `{{document.name}}` | string | Document display name |
+| `{{document.fileName}}` | string | Original file name with extension |
+| `{{run.id}}` | GUID string | The current playbook run ID |
+| `{{run.playbookId}}` | GUID string | The playbook being executed |
+| `{{run.tenantId}}` | string | Tenant ID for multi-tenant isolation |
+
+**Examples:**
+
+```handlebars
+{{summary.text}}                        — full text from the "summary" node
+{{extract_entities.output.parties}}     — "parties" field from structured JSON
+{{classify.output.documentType}}        — "documentType" from classifier output
+{{summary.success}}                     — true/false execution status
+{{document.id}}                         — Dataverse document GUID (for Update Record recordId)
+{{document.name}}                       — document display name
 ```
 
 Use these in:
 - AI Completion `userPromptTemplate` field
 - Deliver Output `template` field
+- Update Record `fields` values and `recordId`
 - Send Email `emailBody` field
+- Create Task `description` and `regarding` fields
+
+> **Tip**: The `.text` path returns the full text content. The `.output.fieldName` path navigates into structured JSON when the AI tool returns parsed data (e.g., from an output schema). The `document.*` and `run.*` variables are always available — they come from the execution context, not from upstream nodes.
 
 ---
 
@@ -636,18 +886,522 @@ The Deliver Output node uses a **Handlebars template** to assemble all upstream 
 # Contract Review Report
 
 ## Summary
-{{summary.TextContent}}
+{{summary.text}}
 
 ## Document Classification
-**Type**: {{classification.StructuredData.documentType}}
-**Confidence**: {{classification.Confidence}}
+**Type**: {{classification.output.documentType}}
 
 ## Key Entities
-{{entities.TextContent}}
+{{entities.text}}
 
 ## Matter Match
-{{match_result.TextContent}}
+{{match_result.text}}
 ```
+
+> See [Configuring Deliver Output Nodes](#configuring-deliver-output-nodes) below for complete configuration details.
+
+---
+
+## Configuring Deliver Output Nodes
+
+The **Deliver Output** node is typically the final node in a playbook. It assembles results from all upstream AI nodes into a single formatted deliverable shown to the user in the Analysis Workspace.
+
+### Two Modes of Operation
+
+| Mode | When Used | Behavior |
+|------|-----------|----------|
+| **Auto-Assembly** | Template field is **empty** | Concatenates all upstream node outputs as-is (raw text and/or JSON). Fast to set up but produces unformatted output. |
+| **Template** | Template field has content | Renders a Handlebars template with variable references to upstream node outputs. Produces clean, structured output. |
+
+**Recommendation**: Always use a template for production playbooks. Auto-assembly is useful only for debugging.
+
+### Delivery Format
+
+The **Delivery Format** dropdown controls the output content type:
+
+| Format | Use Case | Rendering |
+|--------|----------|-----------|
+| **Markdown** (default) | Human-readable reports, summaries | Rendered as styled Markdown in the Analysis Workspace |
+| **HTML** | Rich formatting, tables, embedded links | Rendered as HTML |
+| **Plain Text** | Simple text output, logs | Rendered as monospace text |
+| **JSON** | Machine-readable structured data, API consumption | Rendered as formatted JSON with all node outputs assembled |
+
+> **Markdown is recommended** for most playbooks. It renders well in the Analysis Workspace and supports headings, lists, tables, bold, italic, and code blocks.
+
+### Writing Templates
+
+Templates use **Handlebars syntax** to reference outputs from upstream nodes. The variable name must match the **Output Variable** set on the upstream node.
+
+#### Available Template Variables
+
+For each upstream node with output variable `varName`:
+
+| Expression | Returns |
+|-----------|---------|
+| `{{varName.text}}` | The full text content from that node |
+| `{{varName.output.fieldName}}` | A specific field from structured JSON output |
+| `{{varName.success}}` | `true` or `false` — whether the node succeeded |
+
+#### Template Example: Document Summary Playbook
+
+Given a playbook with these nodes:
+
+| Node | Output Variable | Purpose |
+|------|----------------|---------|
+| Profile Document | `profile` | Extracts document metadata |
+| Summarize | `summary` | Generates executive summary |
+
+Template:
+
+```handlebars
+# Document Summary
+
+## Profile
+{{profile.text}}
+
+## Executive Summary
+{{summary.text}}
+```
+
+#### Template Example: Contract Review Playbook
+
+Given a playbook with four AI nodes:
+
+| Node | Output Variable | Purpose |
+|------|----------------|---------|
+| Summarize Content | `summary` | Executive summary |
+| Classify Document | `classify` | Document type classification |
+| Extract Entities | `entities` | Parties, dates, terms |
+| Risk Assessment | `risk` | Key risks identified |
+
+Template:
+
+```handlebars
+# Contract Review Report
+
+## Executive Summary
+{{summary.text}}
+
+## Document Classification
+{{classify.text}}
+
+## Parties & Key Entities
+{{entities.text}}
+
+## Risk Assessment
+{{risk.text}}
+
+---
+*Generated by Spaarke AI Playbook*
+```
+
+#### Template Example: Accessing Structured Output Fields
+
+When a tool uses an **Output Schema** (configured in the tool's `sprk_configuration` JSON), the AI returns structured JSON. You can access individual fields:
+
+```handlebars
+## Document Profile
+
+| Field | Value |
+|-------|-------|
+| **Type** | {{profile.output.documentType}} |
+| **Date** | {{profile.output.documentDate}} |
+| **Parties** | {{profile.output.parties}} |
+
+## Summary
+{{summary.text}}
+```
+
+> **Note**: The `.output.fieldName` syntax only works when the upstream tool produces structured JSON (via an Output Schema). If the tool returns plain text, use `.text` instead.
+
+### Output Format Options
+
+These settings control post-processing of the rendered output:
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| **Include Metadata** | Off | Appends execution metadata (run ID, timestamps, node count, confidence scores) to the output |
+| **Include Source Citations** | Off | Appends source citation references to the output |
+| **Max Output Length** | 0 (unlimited) | Maximum characters in output. Content beyond this limit is truncated with "...(truncated)" |
+
+- **Include Metadata** is useful for audit trails and debugging
+- **Include Source Citations** is useful when Knowledge sources (RAG) contribute to the output
+- **Max Output Length** prevents runaway outputs from consuming excessive storage
+
+### JSON Delivery Format (Special Behavior)
+
+When **Delivery Format = JSON**, the node assembles all upstream outputs into a structured JSON object:
+
+```json
+{
+  "_metadata": {
+    "playbookId": "...",
+    "runId": "...",
+    "generatedAt": "2026-03-02T...",
+    "nodeCount": 3,
+    "overallConfidence": 0.92
+  },
+  "summary": { ... },
+  "entities": { ... },
+  "classification": { ... }
+}
+```
+
+- The `_metadata` block is only included when **Include Metadata** is enabled
+- Each upstream node's structured output is included under its output variable name
+- If a template is also provided, the engine attempts to parse the rendered template as JSON
+
+### Configuring in the Playbook Builder
+
+1. **Drag** a "Deliver Output" node from the palette onto the canvas
+2. **Connect** all upstream AI nodes to it (draw edges from each AI node → Deliver Output)
+3. **Click** the Deliver Output node to open the Properties Panel
+4. **Set** the Output Variable name (e.g., `final_output`)
+5. **Choose** a Delivery Format (Markdown recommended)
+6. **Write** a template using `{{outputVariable.text}}` or `{{outputVariable.output.field}}` syntax
+7. **Toggle** metadata and citation options as needed
+8. **Set** max output length if needed (0 = unlimited)
+9. **Save** the playbook (Ctrl+S)
+
+### Common Mistakes
+
+| Mistake | Symptom | Fix |
+|---------|---------|-----|
+| Empty template | Output shows raw JSON dump of all node data | Write a template with `{{varName.text}}` references |
+| Wrong variable name | `{{summary.text}}` shows blank | Check the upstream node's **Output Variable** field matches exactly |
+| Using `.TextContent` instead of `.text` | Template renders literally | Use `.text` (lowercase, no "Content" suffix) |
+| Using `.StructuredData` instead of `.output` | Template renders literally | Use `.output.fieldName` to access structured data |
+| No edges to Deliver Output | Output is empty | Connect upstream nodes to the Deliver Output node |
+| Delivery Format mismatch | Markdown renders as code block | Match the format to your template content type |
+
+---
+
+## Configuring Update Record Nodes
+
+The **Update Record** node writes AI analysis results back to Dataverse entity records. It is fully configuration-driven — no custom code is needed for any entity or field combination.
+
+### When to Use
+
+Use Update Record nodes to:
+- Write AI-extracted fields back to the source document record (`sprk_document`)
+- Update status/choice fields after analysis completes (e.g., document type, summary status)
+- Set boolean flags based on AI classification (e.g., is confidential, requires review)
+- Set lookup fields linking documents to matched entities (e.g., link document to a matter)
+- Write computed values to any Dataverse entity
+
+### Typed Field Mappings (Recommended)
+
+The recommended way to configure an Update Record node is with **typed field mappings**. Each field mapping declares the Dataverse field type so the executor can correctly coerce AI string output into the right Dataverse value.
+
+```json
+{
+  "entityLogicalName": "sprk_document",
+  "recordId": "{{document.id}}",
+  "fieldMappings": [
+    {
+      "field": "sprk_filesummary",
+      "type": "string",
+      "value": "{{aiAnalysis.text}}"
+    },
+    {
+      "field": "sprk_filesummarystatus",
+      "type": "choice",
+      "value": "{{aiAnalysis.output.status}}",
+      "options": {
+        "pending": 100000000,
+        "in progress": 100000001,
+        "complete": 100000002
+      }
+    },
+    {
+      "field": "sprk_documenttype",
+      "type": "choice",
+      "value": "{{aiAnalysis.output.documentType}}",
+      "options": {
+        "contract": 100000000,
+        "invoice": 100000001,
+        "proposal": 100000002,
+        "report": 100000003,
+        "letter": 100000004,
+        "memo": 100000005,
+        "email": 100000006,
+        "agreement": 100000007,
+        "other": 100000012
+      }
+    },
+    {
+      "field": "sprk_isconfidential",
+      "type": "boolean",
+      "value": "{{aiAnalysis.output.isConfidential}}"
+    },
+    {
+      "field": "sprk_pagecount",
+      "type": "number",
+      "value": "{{aiAnalysis.output.pageCount}}"
+    }
+  ]
+}
+```
+
+### Field Mapping Types
+
+Each field mapping has a `type` that determines how the AI's string output is coerced into the correct Dataverse value:
+
+| Type | Dataverse Column Type | Coercion Behavior | Example |
+|------|----------------------|-------------------|---------|
+| **string** | Single/Multi-line Text | Pass through as-is | AI outputs `"A detailed summary..."` → stored as string |
+| **choice** | Choice (OptionSet) | Case-insensitive label lookup in `options` map → integer value | AI outputs `"Complete"` → matched to `"complete": 100000002` → stored as `100000002` |
+| **boolean** | Yes/No (Two Option) | Parses common truthy/falsy strings | AI outputs `"yes"` → stored as `true` |
+| **number** | Whole Number / Decimal | Parses as integer, then decimal | AI outputs `"42"` → stored as `42` |
+
+### Choice Field Coercion (Detail)
+
+Choice (OptionSet) fields require mapping AI text labels to Dataverse integer option values. The `options` property defines this mapping:
+
+```json
+{
+  "field": "sprk_documenttype",
+  "type": "choice",
+  "value": "{{aiAnalysis.output.documentType}}",
+  "options": {
+    "contract": 100000000,
+    "invoice": 100000001,
+    "proposal": 100000002
+  }
+}
+```
+
+**How coercion works:**
+
+1. AI outputs a string value (e.g., `"Contract"`)
+2. Executor trims and lowercases: `"contract"`
+3. Looks up in `options` map (case-insensitive): `"contract" → 100000000`
+4. Sends `100000000` to Dataverse via OData PATCH
+
+**Fallback behavior:**
+- If the AI output doesn't match any label, the executor tries parsing it as a raw integer (in case the AI returns the numeric value directly)
+- If neither matches, the field is skipped with a warning in the API logs
+
+**Matching is case-insensitive**: `"Contract"`, `"contract"`, `"CONTRACT"` all match the same option.
+
+### Boolean Field Coercion (Detail)
+
+Boolean fields map common AI text responses to `true`/`false`:
+
+| AI Output → `true` | AI Output → `false` |
+|---------------------|----------------------|
+| `"true"`, `"yes"`, `"1"`, `"on"` | `"false"`, `"no"`, `"0"`, `"off"` |
+
+```json
+{
+  "field": "sprk_isconfidential",
+  "type": "boolean",
+  "value": "{{aiAnalysis.output.isConfidential}}"
+}
+```
+
+Matching is case-insensitive: `"Yes"`, `"YES"`, `"yes"` all coerce to `true`.
+
+### Choice Options and AI Prompt Alignment
+
+The `options` map in a Choice field mapping serves **dual purpose**:
+
+1. **Downstream coercion**: Converts AI string output → Dataverse integer option value
+2. **Upstream prompt guidance**: The same labels should appear in your AI Action prompt so the AI knows the valid values to choose from
+
+**Example — keeping prompts and field mappings in sync:**
+
+In the **AI Action prompt** (SystemPrompt), include the valid values:
+
+```
+Classify the document type. Choose exactly one:
+- contract
+- invoice
+- proposal
+- report
+- letter
+- memo
+- email
+- agreement
+- other
+```
+
+In the **Update Record node**, use the same labels in the `options` map:
+
+```json
+{
+  "field": "sprk_documenttype",
+  "type": "choice",
+  "value": "{{aiAnalysis.output.documentType}}",
+  "options": {
+    "contract": 100000000,
+    "invoice": 100000001,
+    "proposal": 100000002,
+    "report": 100000003,
+    "letter": 100000004,
+    "memo": 100000005,
+    "email": 100000006,
+    "agreement": 100000007,
+    "other": 100000012
+  }
+}
+```
+
+This ensures the AI picks from labels that the downstream executor can reliably map to Dataverse values.
+
+> **Tip**: Define the valid values **once** in the UpdateRecord field mapping, then copy the same labels into your Action prompt. This prevents mismatches where the AI outputs a label that doesn't appear in the options map.
+
+### Configuring in the Playbook Builder UI
+
+The Playbook Builder provides a visual form for configuring typed field mappings:
+
+1. **Click** an Update Record node on the canvas to open the Properties Panel
+2. **Set** the Entity Logical Name (e.g., `sprk_document`)
+3. **Set** the Record ID (e.g., `{{document.id}}`)
+4. **Click "Add Field"** to add a field mapping
+5. For each mapping:
+   - Enter the **field logical name** (e.g., `sprk_documenttype`)
+   - Select the **type** from the dropdown: String, Choice, Boolean, or Number
+   - Enter the **value template** (e.g., `{{aiAnalysis.output.documentType}}`)
+   - For **Choice** fields: an options editor appears where you add label → value pairs
+6. **Save** the playbook (Ctrl+S)
+
+**Choice Options Editor:**
+- Click **"Add Option"** to add a new label → value pair
+- Enter the **label** (text the AI outputs, e.g., "Complete")
+- Set the **value** (Dataverse OptionSet integer, e.g., `100000002`)
+- Click the delete button to remove an option
+
+### Template Variables in Field Values
+
+All field values support Handlebars template variables referencing upstream node outputs:
+
+```json
+{
+  "fieldMappings": [
+    {
+      "field": "sprk_filesummary",
+      "type": "string",
+      "value": "{{summary.text}}"
+    },
+    {
+      "field": "sprk_analysisscore",
+      "type": "number",
+      "value": "{{risk.output.overallScore}}"
+    }
+  ]
+}
+```
+
+**Built-in context variables** are also available:
+
+| Variable | Description |
+|----------|-------------|
+| `{{document.id}}` | GUID of the document being analyzed (use for `recordId`) |
+| `{{document.name}}` | Document display name |
+| `{{document.fileName}}` | Original file name with extension |
+| `{{run.id}}` | Current playbook run ID |
+
+### Lookup Fields
+
+Lookup fields use the `@odata.bind` syntax internally. Configure them in the `lookups` section (alongside `fieldMappings`):
+
+```json
+{
+  "entityLogicalName": "sprk_document",
+  "recordId": "{{document.id}}",
+  "fieldMappings": [ ... ],
+  "lookups": {
+    "sprk_relatedmatter": {
+      "targetEntity": "sprk_matter",
+      "targetId": "{{match.output.matterId}}"
+    }
+  }
+}
+```
+
+This generates: `"sprk_relatedmatter@odata.bind": "/sprk_matters(guid)"` in the Dataverse PATCH request.
+
+### Example: Document Summary Write-Back
+
+After AI nodes produce a summary, document type classification, and status:
+
+```json
+{
+  "entityLogicalName": "sprk_document",
+  "recordId": "{{document.id}}",
+  "fieldMappings": [
+    {
+      "field": "sprk_filesummary",
+      "type": "string",
+      "value": "{{summary.text}}"
+    },
+    {
+      "field": "sprk_filetldr",
+      "type": "string",
+      "value": "{{summary.output.tldr}}"
+    },
+    {
+      "field": "sprk_documenttype",
+      "type": "choice",
+      "value": "{{summary.output.documentType}}",
+      "options": {
+        "contract": 100000000,
+        "invoice": 100000001,
+        "proposal": 100000002,
+        "report": 100000003,
+        "letter": 100000004,
+        "other": 100000012
+      }
+    },
+    {
+      "field": "sprk_filesummarystatus",
+      "type": "choice",
+      "value": "{{summary.output.status}}",
+      "options": {
+        "pending": 100000000,
+        "in progress": 100000001,
+        "complete": 100000002
+      }
+    },
+    {
+      "field": "sprk_isconfidential",
+      "type": "boolean",
+      "value": "{{summary.output.isConfidential}}"
+    }
+  ]
+}
+```
+
+### Legacy Format (Backward Compatible)
+
+The original `fields` dictionary format still works for existing playbooks:
+
+```json
+{
+  "entityLogicalName": "sprk_document",
+  "recordId": "{{document.id}}",
+  "fields": {
+    "sprk_filesummary": "{{summary.text}}",
+    "sprk_filekeywords": "{{entities.output.keywords}}"
+  }
+}
+```
+
+With the legacy format, type coercion is heuristic (automatic best-guess):
+- String values that parse as integers → stored as `int`
+- String values that parse as decimals → stored as `decimal`
+- String values that parse as booleans → stored as `bool`
+- All other values → stored as strings
+
+> **Recommendation**: Migrate existing playbooks to `fieldMappings` for explicit type control. The Playbook Builder UI automatically migrates legacy `fields` to `fieldMappings` (all typed as `string`) when you open and save a node.
+
+### How the Executor Chooses Format
+
+The server detects which format to use:
+- If `fieldMappings` array is present and non-empty → **typed coercion** (new path)
+- If only `fields` dictionary is present → **heuristic coercion** (legacy path)
+- Both can coexist in the same playbook (different nodes can use different formats)
 
 ---
 
@@ -864,4 +1618,4 @@ Four AI nodes in parallel ≈ 7-10 seconds total. Four sequential ≈ 28-40 seco
 
 ---
 
-**Last Updated**: March 1, 2026
+**Last Updated**: March 3, 2026

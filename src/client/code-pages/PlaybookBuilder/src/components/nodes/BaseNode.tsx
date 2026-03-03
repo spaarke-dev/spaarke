@@ -119,6 +119,10 @@ export const nodeColorSchemes: Record<
         background: tokens.colorPaletteGreenBackground3,
         iconColor: tokens.colorNeutralForegroundOnBrand,
     },
+    updateRecord: {
+        background: tokens.colorPaletteGreenBackground3,
+        iconColor: tokens.colorNeutralForegroundOnBrand,
+    },
     createTask: {
         background: tokens.colorPaletteBerryBackground2,
         iconColor: tokens.colorNeutralForegroundOnBrand,

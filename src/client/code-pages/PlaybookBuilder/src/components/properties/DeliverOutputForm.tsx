@@ -2,34 +2,52 @@
  * DeliverOutputForm - Configuration form for Deliver Output nodes.
  *
  * Allows users to configure how a playbook delivers its output:
- * - Output format (Markdown, HTML, Plain Text, JSON)
- * - Template content with variable support ({{nodeName.output.fieldName}})
- * - Target Dataverse field to write output to
- * - Include/exclude metadata toggle
+ * - Delivery type (markdown, html, text, json)
+ * - Handlebars template with variable support ({{nodeName.output.fieldName}})
+ * - Include/exclude metadata and source citations
+ * - Max output length
+ *
+ * Updates typed PlaybookNodeData fields directly so buildConfigJson()
+ * in playbookNodeSync produces the correct sprk_configjson for the
+ * server-side DeliverOutputNodeExecutor.
+ *
+ * Server config shape (DeliveryNodeConfig):
+ *   { deliveryType, template, outputFormat: { includeMetadata, includeSourceCitations, maxLength } }
  *
  * @see ADR-021 - Fluent UI v9 design system (dark mode required)
  */
 
-import { useCallback, useMemo, memo } from "react";
+import { useCallback, memo } from "react";
 import {
     makeStyles,
     tokens,
     Text,
-    Input,
     Label,
     Textarea,
     Dropdown,
     Option,
     Switch,
+    SpinButton,
     shorthands,
 } from "@fluentui/react-components";
 import type {
-    DropdownProps,
     OptionOnSelectData,
     SelectionEvents,
     SwitchOnChangeData,
+    SpinButtonOnChangeData,
+    SpinButtonChangeEvent,
 } from "@fluentui/react-components";
-import type { NodeFormProps } from "../../types/forms";
+import type { PlaybookNodeData } from "../../types/playbook";
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
+
+export interface DeliverOutputFormProps {
+    nodeId: string;
+    data: PlaybookNodeData;
+    onUpdate: (field: string, value: unknown) => void;
+}
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -62,55 +80,18 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
-// Config shape
+// Constants
 // ---------------------------------------------------------------------------
 
-const OUTPUT_FORMATS = ["Markdown", "HTML", "Plain Text", "JSON"] as const;
-type OutputFormat = (typeof OUTPUT_FORMATS)[number];
+/** Delivery types matching server-side DeliveryNodeConfig.DeliveryType */
+const DELIVERY_TYPES = [
+    { value: "markdown", label: "Markdown" },
+    { value: "html", label: "HTML" },
+    { value: "text", label: "Plain Text" },
+    { value: "json", label: "JSON" },
+] as const;
 
-interface DeliverOutputConfig {
-    outputFormat: OutputFormat;
-    templateContent: string;
-    targetField: string;
-    includeMetadata: boolean;
-}
-
-const DEFAULT_CONFIG: DeliverOutputConfig = {
-    outputFormat: "Markdown",
-    templateContent: "",
-    targetField: "",
-    includeMetadata: false,
-};
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function parseConfig(json: string): DeliverOutputConfig {
-    try {
-        const parsed = JSON.parse(json) as Partial<DeliverOutputConfig>;
-        return {
-            outputFormat: OUTPUT_FORMATS.includes(parsed.outputFormat as OutputFormat)
-                ? (parsed.outputFormat as OutputFormat)
-                : DEFAULT_CONFIG.outputFormat,
-            templateContent: typeof parsed.templateContent === "string"
-                ? parsed.templateContent
-                : DEFAULT_CONFIG.templateContent,
-            targetField: typeof parsed.targetField === "string"
-                ? parsed.targetField
-                : DEFAULT_CONFIG.targetField,
-            includeMetadata: typeof parsed.includeMetadata === "boolean"
-                ? parsed.includeMetadata
-                : DEFAULT_CONFIG.includeMetadata,
-        };
-    } catch {
-        return { ...DEFAULT_CONFIG };
-    }
-}
-
-function serializeConfig(config: DeliverOutputConfig): string {
-    return JSON.stringify(config);
-}
+type DeliveryType = (typeof DELIVERY_TYPES)[number]["value"];
 
 // ---------------------------------------------------------------------------
 // Component
@@ -118,70 +99,80 @@ function serializeConfig(config: DeliverOutputConfig): string {
 
 export const DeliverOutputForm = memo(function DeliverOutputForm({
     nodeId,
-    configJson,
-    onConfigChange,
-}: NodeFormProps) {
+    data,
+    onUpdate,
+}: DeliverOutputFormProps) {
     const styles = useStyles();
-    const config = useMemo(() => parseConfig(configJson), [configJson]);
 
-    const update = useCallback(
-        (patch: Partial<DeliverOutputConfig>) => {
-            onConfigChange(serializeConfig({ ...config, ...patch }));
-        },
-        [config, onConfigChange],
-    );
+    // Read from typed PlaybookNodeData fields
+    const deliveryType = (data.deliveryType as DeliveryType) || "markdown";
+    const template = data.template ?? "";
+    const includeMetadata = data.includeMetadata ?? false;
+    const includeSourceCitations = data.includeSourceCitations ?? false;
+    const maxOutputLength = data.maxOutputLength ?? 0;
+
+    // Find display label for current value
+    const deliveryTypeLabel =
+        DELIVERY_TYPES.find((dt) => dt.value === deliveryType)?.label ?? "Markdown";
 
     // -- Handlers --
 
-    const handleFormatChange: DropdownProps["onOptionSelect"] = useCallback(
-        (_event: SelectionEvents, data: OptionOnSelectData) => {
-            if (data.optionValue) {
-                update({ outputFormat: data.optionValue as OutputFormat });
+    const handleDeliveryTypeChange = useCallback(
+        (_event: SelectionEvents, item: OptionOnSelectData) => {
+            if (item.optionValue) {
+                onUpdate("deliveryType", item.optionValue);
             }
         },
-        [update],
+        [onUpdate],
     );
 
     const handleTemplateChange = useCallback(
         (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-            update({ templateContent: e.target.value });
+            onUpdate("template", e.target.value);
         },
-        [update],
-    );
-
-    const handleTargetFieldChange = useCallback(
-        (e: React.ChangeEvent<HTMLInputElement>) => {
-            update({ targetField: e.target.value });
-        },
-        [update],
+        [onUpdate],
     );
 
     const handleMetadataToggle = useCallback(
-        (_e: React.ChangeEvent<HTMLInputElement>, data: SwitchOnChangeData) => {
-            update({ includeMetadata: data.checked });
+        (_e: React.ChangeEvent<HTMLInputElement>, item: SwitchOnChangeData) => {
+            onUpdate("includeMetadata", item.checked);
         },
-        [update],
+        [onUpdate],
+    );
+
+    const handleCitationsToggle = useCallback(
+        (_e: React.ChangeEvent<HTMLInputElement>, item: SwitchOnChangeData) => {
+            onUpdate("includeSourceCitations", item.checked);
+        },
+        [onUpdate],
+    );
+
+    const handleMaxLengthChange = useCallback(
+        (_e: SpinButtonChangeEvent, item: SpinButtonOnChangeData) => {
+            onUpdate("maxOutputLength", item.value ?? 0);
+        },
+        [onUpdate],
     );
 
     // -- Render --
 
     return (
         <div className={styles.form}>
-            {/* Output Format */}
+            {/* Delivery Type */}
             <div className={styles.field}>
-                <Label htmlFor={`${nodeId}-outputFormat`} size="small" required>
-                    Output Format
+                <Label htmlFor={`${nodeId}-deliveryType`} size="small" required>
+                    Delivery Format
                 </Label>
                 <Dropdown
-                    id={`${nodeId}-outputFormat`}
+                    id={`${nodeId}-deliveryType`}
                     size="small"
-                    value={config.outputFormat}
-                    selectedOptions={[config.outputFormat]}
-                    onOptionSelect={handleFormatChange}
+                    value={deliveryTypeLabel}
+                    selectedOptions={[deliveryType]}
+                    onOptionSelect={handleDeliveryTypeChange}
                 >
-                    {OUTPUT_FORMATS.map((fmt) => (
-                        <Option key={fmt} value={fmt}>
-                            {fmt}
+                    {DELIVERY_TYPES.map((dt) => (
+                        <Option key={dt.value} value={dt.value}>
+                            {dt.label}
                         </Option>
                     ))}
                 </Dropdown>
@@ -190,39 +181,30 @@ export const DeliverOutputForm = memo(function DeliverOutputForm({
                 </Text>
             </div>
 
-            {/* Template Content */}
+            {/* Handlebars Template */}
             <div className={styles.field}>
-                <Label htmlFor={`${nodeId}-templateContent`} size="small">
-                    Template Content
+                <Label htmlFor={`${nodeId}-template`} size="small">
+                    Output Template
                 </Label>
                 <Textarea
-                    id={`${nodeId}-templateContent`}
+                    id={`${nodeId}-template`}
                     size="small"
                     className={styles.templateArea}
-                    value={config.templateContent}
+                    value={template}
                     onChange={handleTemplateChange}
-                    placeholder={"Use template variables: {{nodeName.output.fieldName}}\n\nExample:\n# Summary\n{{analysis.output.summary}}\n\n## Details\n{{completion.output.result}}"}
+                    placeholder={
+                        "Handlebars template with node output variables:\n\n" +
+                        "## Summary\n" +
+                        "{{summarize.text}}\n\n" +
+                        "## Details\n" +
+                        "{{extract_entities.text}}\n\n" +
+                        "Leave empty for auto-assembly of all previous outputs."
+                    }
                     resize="vertical"
                 />
                 <Text className={styles.fieldHint}>
-                    Supports template variables: {"{{nodeName.output.fieldName}}"}
-                </Text>
-            </div>
-
-            {/* Target Field */}
-            <div className={styles.field}>
-                <Label htmlFor={`${nodeId}-targetField`} size="small">
-                    Target Field
-                </Label>
-                <Input
-                    id={`${nodeId}-targetField`}
-                    size="small"
-                    value={config.targetField}
-                    onChange={handleTargetFieldChange}
-                    placeholder="e.g., sprk_workingdocument"
-                />
-                <Text className={styles.fieldHint}>
-                    Dataverse field logical name to write the output to
+                    {"Use {{outputVariable.text}} or {{outputVariable.output.field}} syntax. " +
+                        "Leave empty to auto-assemble all previous node outputs."}
                 </Text>
             </div>
 
@@ -233,13 +215,47 @@ export const DeliverOutputForm = memo(function DeliverOutputForm({
                 </Label>
                 <Switch
                     id={`${nodeId}-includeMetadata`}
-                    checked={config.includeMetadata}
+                    checked={includeMetadata}
                     onChange={handleMetadataToggle}
                 />
             </div>
             <Text className={styles.fieldHint}>
-                Append execution metadata (timestamps, node IDs) to the output
+                Append execution metadata (timestamps, run ID, confidence) to the output
             </Text>
+
+            {/* Include Source Citations */}
+            <div className={styles.switchRow}>
+                <Label htmlFor={`${nodeId}-includeCitations`} size="small">
+                    Include Source Citations
+                </Label>
+                <Switch
+                    id={`${nodeId}-includeCitations`}
+                    checked={includeSourceCitations}
+                    onChange={handleCitationsToggle}
+                />
+            </div>
+            <Text className={styles.fieldHint}>
+                Append source citation references to the output
+            </Text>
+
+            {/* Max Output Length */}
+            <div className={styles.field}>
+                <Label htmlFor={`${nodeId}-maxLength`} size="small">
+                    Max Output Length
+                </Label>
+                <SpinButton
+                    id={`${nodeId}-maxLength`}
+                    size="small"
+                    min={0}
+                    max={100000}
+                    step={1000}
+                    value={maxOutputLength}
+                    onChange={handleMaxLengthChange}
+                />
+                <Text className={styles.fieldHint}>
+                    Maximum characters in output (0 = unlimited). Content beyond this limit is truncated.
+                </Text>
+            </div>
         </div>
     );
 });

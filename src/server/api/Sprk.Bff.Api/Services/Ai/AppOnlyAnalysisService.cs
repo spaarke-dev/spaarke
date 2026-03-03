@@ -28,6 +28,8 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     private readonly IPlaybookService _playbookService;
     private readonly IScopeResolverService _scopeResolver;
     private readonly IToolHandlerRegistry _toolHandlerRegistry;
+    private readonly INodeService _nodeService;
+    private readonly IPlaybookOrchestrationService _playbookOrchestrator;
     private readonly ILogger<AppOnlyAnalysisService> _logger;
 
     // Summary status values (Dataverse OptionSet)
@@ -49,6 +51,8 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         IPlaybookService playbookService,
         IScopeResolverService scopeResolver,
         IToolHandlerRegistry toolHandlerRegistry,
+        INodeService nodeService,
+        IPlaybookOrchestrationService playbookOrchestrator,
         ILogger<AppOnlyAnalysisService> logger)
     {
         _dataverseService = dataverseService;
@@ -57,6 +61,8 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         _playbookService = playbookService;
         _scopeResolver = scopeResolver;
         _toolHandlerRegistry = toolHandlerRegistry;
+        _nodeService = nodeService;
+        _playbookOrchestrator = playbookOrchestrator;
         _logger = logger;
     }
 
@@ -359,7 +365,24 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             return AppOnlyDocumentAnalysisResult.Failed(documentId, $"Playbook '{playbookName}' not found");
         }
 
-        // 2. Resolve playbook scopes (Skills, Knowledge, Tools)
+        // 2. Check for node-based playbook — delegate to PlaybookOrchestrationService
+        var nodes = await _nodeService.GetNodesAsync(playbook.Id, cancellationToken);
+        if (nodes.Length > 0)
+        {
+            _logger.LogInformation(
+                "Playbook '{PlaybookName}' (Id={PlaybookId}) has {NodeCount} nodes — using node-based execution via PlaybookOrchestrationService",
+                playbookName, playbook.Id, nodes.Length);
+
+            return await ExecuteNodeBasedAnalysisAsync(
+                documentId, documentName, fileName, documentText,
+                playbook.Id, dataverseAnalysisId, cancellationToken);
+        }
+
+        // Legacy path: no nodes — execute tools sequentially using playbook-level scopes
+        _logger.LogInformation(
+            "Playbook '{PlaybookName}' (Id={PlaybookId}) has no nodes — using legacy sequential tool execution",
+            playbookName, playbook.Id);
+
         var scopes = await _scopeResolver.ResolvePlaybookScopesAsync(playbook.Id, cancellationToken);
         _logger.LogDebug(
             "Resolved scopes: {SkillCount} skills, {KnowledgeCount} knowledge, {ToolCount} tools",
@@ -528,6 +551,288 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             documentId, toolResults.Count, structuredOutputs.Count);
 
         return AppOnlyDocumentAnalysisResult.Success(documentId, profileUpdate, dataverseAnalysisId);
+    }
+
+    /// <summary>
+    /// Execute a node-based playbook via PlaybookOrchestrationService (app-only mode).
+    /// Collects NodeCompleted outputs and extracts Document Profile fields from tool results
+    /// to build an UpdateDocumentRequest for the sprk_document Dataverse record.
+    /// </summary>
+    private async Task<AppOnlyDocumentAnalysisResult> ExecuteNodeBasedAnalysisAsync(
+        Guid documentId,
+        string documentName,
+        string fileName,
+        string documentText,
+        Guid playbookId,
+        Guid? dataverseAnalysisId,
+        CancellationToken cancellationToken)
+    {
+        var documentContext = new DocumentContext
+        {
+            DocumentId = documentId,
+            Name = documentName,
+            FileName = fileName,
+            ExtractedText = documentText,
+            Metadata = new Dictionary<string, object?>
+            {
+                ["PlaybookId"] = playbookId,
+                ["DataverseAnalysisId"] = dataverseAnalysisId
+            }
+        };
+
+        var runRequest = new PlaybookRunRequest
+        {
+            PlaybookId = playbookId,
+            DocumentIds = [documentId],
+            UserContext = null,
+            Document = documentContext
+        };
+
+        // Consume the stream events — collect NodeCompleted outputs for field mapping.
+        var succeeded = false;
+        string? errorMessage = null;
+        var completedOutputs = new List<NodeOutput>();
+
+        await foreach (var evt in _playbookOrchestrator.ExecuteAppOnlyAsync(
+            runRequest, "app-only", cancellationToken))
+        {
+            switch (evt.Type)
+            {
+                case PlaybookEventType.NodeCompleted:
+                    if (evt.NodeOutput is { Success: true })
+                    {
+                        completedOutputs.Add(evt.NodeOutput);
+                        _logger.LogDebug(
+                            "Node '{NodeName}' completed with output variable '{OutputVar}', " +
+                            "ToolResults={ToolCount}, HasText={HasText}, HasStructured={HasStructured}",
+                            evt.NodeName,
+                            evt.NodeOutput.OutputVariable,
+                            evt.NodeOutput.ToolResults.Count,
+                            !string.IsNullOrWhiteSpace(evt.NodeOutput.TextContent),
+                            evt.NodeOutput.StructuredData.HasValue);
+                    }
+                    break;
+
+                case PlaybookEventType.RunCompleted:
+                    succeeded = true;
+                    _logger.LogInformation(
+                        "Node-based playbook completed for document {DocumentId}: {Metrics}",
+                        documentId,
+                        evt.Metrics != null
+                            ? $"{evt.Metrics.CompletedNodes}/{evt.Metrics.TotalNodes} nodes, " +
+                              $"{evt.Metrics.TotalTokensIn}+{evt.Metrics.TotalTokensOut} tokens"
+                            : "no metrics");
+                    break;
+
+                case PlaybookEventType.RunFailed:
+                    errorMessage = evt.Error ?? "Playbook execution failed";
+                    _logger.LogError(
+                        "Node-based playbook failed for document {DocumentId}: {Error}",
+                        documentId, errorMessage);
+                    break;
+
+                case PlaybookEventType.NodeFailed:
+                    _logger.LogWarning(
+                        "Node '{NodeName}' failed during app-only execution for document {DocumentId}: {Error}",
+                        evt.NodeName, documentId, evt.Error);
+                    break;
+            }
+        }
+
+        if (!succeeded)
+        {
+            return AppOnlyDocumentAnalysisResult.Failed(
+                documentId,
+                errorMessage ?? "Node-based playbook execution failed");
+        }
+
+        // Extract Document Profile fields from node outputs.
+        // Try tool results first (AI analysis nodes), then structured data, then text content.
+        var profileUpdate = ExtractProfileFromNodeOutputs(completedOutputs, documentId);
+
+        return AppOnlyDocumentAnalysisResult.Success(documentId, profileUpdate, dataverseAnalysisId);
+    }
+
+    /// <summary>
+    /// Extract Document Profile fields from node-based playbook outputs.
+    /// Scans NodeOutput.ToolResults for structured data (same tool handlers as legacy path),
+    /// then falls back to StructuredData and TextContent on each output.
+    /// </summary>
+    private UpdateDocumentRequest? ExtractProfileFromNodeOutputs(
+        List<NodeOutput> completedOutputs,
+        Guid documentId)
+    {
+        if (completedOutputs.Count == 0)
+        {
+            _logger.LogWarning(
+                "No completed node outputs to extract profile from for document {DocumentId}",
+                documentId);
+            return null;
+        }
+
+        var structuredOutputs = new Dictionary<string, string?>();
+
+        // Pass 1: Extract from ToolResults (AI analysis nodes produce these)
+        foreach (var output in completedOutputs)
+        {
+            foreach (var toolResult in output.ToolResults)
+            {
+                ExtractStructuredOutputs(toolResult, structuredOutputs);
+            }
+        }
+
+        // Pass 2: If no tool results extracted fields, try StructuredData on outputs
+        if (structuredOutputs.Count == 0)
+        {
+            foreach (var output in completedOutputs)
+            {
+                if (output.StructuredData.HasValue)
+                {
+                    TryExtractFromStructuredData(output, structuredOutputs);
+                }
+            }
+        }
+
+        // Pass 3: If still nothing, try text content with output variable name matching
+        if (structuredOutputs.Count == 0)
+        {
+            foreach (var output in completedOutputs)
+            {
+                if (!string.IsNullOrWhiteSpace(output.TextContent))
+                {
+                    TryExtractFromTextContent(output, structuredOutputs);
+                }
+            }
+        }
+
+        if (structuredOutputs.Count == 0)
+        {
+            _logger.LogWarning(
+                "Could not extract any Document Profile fields from {OutputCount} node outputs for document {DocumentId}",
+                completedOutputs.Count, documentId);
+            return null;
+        }
+
+        _logger.LogInformation(
+            "Extracted {FieldCount} Document Profile fields from node outputs for document {DocumentId}: [{Fields}]",
+            structuredOutputs.Count, documentId,
+            string.Join(", ", structuredOutputs.Keys));
+
+        return BuildProfileUpdateFromOutputs(structuredOutputs);
+    }
+
+    /// <summary>
+    /// Try to extract Document Profile fields from a node's StructuredData JSON.
+    /// Looks for known property names (summary, keywords, entities, documentType, tldr).
+    /// </summary>
+    private static void TryExtractFromStructuredData(
+        NodeOutput output,
+        Dictionary<string, string?> structuredOutputs)
+    {
+        try
+        {
+            var root = output.StructuredData!.Value;
+
+            // Try known property names in the structured data
+            TryExtractJsonProperty(root, "summary", "Summary", structuredOutputs);
+            TryExtractJsonProperty(root, "tldr", "TL;DR", structuredOutputs);
+            TryExtractJsonProperty(root, "tl_dr", "TL;DR", structuredOutputs);
+            TryExtractJsonProperty(root, "keywords", "Keywords", structuredOutputs);
+            TryExtractJsonProperty(root, "documentType", "Document Type", structuredOutputs);
+            TryExtractJsonProperty(root, "document_type", "Document Type", structuredOutputs);
+
+            // For entities, look for entities array or object
+            if (root.TryGetProperty("entities", out var entities) ||
+                root.TryGetProperty("Entities", out entities))
+            {
+                if (!structuredOutputs.ContainsKey("Entities"))
+                {
+                    structuredOutputs["Entities"] = entities.GetRawText();
+                }
+            }
+
+            // Check for nested "content" property (DeliverOutput wraps in { content, format })
+            if (root.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.String)
+            {
+                // DeliverOutput auto-assembly — content is the assembled markdown
+                // Try to parse it for known sections
+                var contentText = content.GetString();
+                if (!string.IsNullOrWhiteSpace(contentText) && structuredOutputs.Count == 0)
+                {
+                    // Use the text content as Summary if nothing else matched
+                    structuredOutputs["Summary"] = contentText;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Ignore parsing errors — structured data may not match expected format
+        }
+    }
+
+    /// <summary>
+    /// Try to extract a JSON property value and add it to the outputs dictionary.
+    /// </summary>
+    private static void TryExtractJsonProperty(
+        JsonElement root,
+        string propertyName,
+        string outputType,
+        Dictionary<string, string?> outputs)
+    {
+        if (outputs.ContainsKey(outputType))
+            return;
+
+        // Try exact name, then PascalCase
+        var pascalName = char.ToUpperInvariant(propertyName[0]) + propertyName[1..];
+
+        if (root.TryGetProperty(propertyName, out var value) ||
+            root.TryGetProperty(pascalName, out value))
+        {
+            var text = value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : value.GetRawText();
+
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                outputs[outputType] = text;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Try to match a node's output variable name to a Document Profile field
+    /// and use its text content as the value.
+    /// </summary>
+    private static void TryExtractFromTextContent(
+        NodeOutput output,
+        Dictionary<string, string?> structuredOutputs)
+    {
+        var varName = output.OutputVariable?.ToLowerInvariant() ?? "";
+
+        // Match common output variable naming patterns to Document Profile types
+        if (varName.Contains("summary") && !structuredOutputs.ContainsKey("Summary"))
+        {
+            structuredOutputs["Summary"] = output.TextContent;
+        }
+        else if ((varName.Contains("tldr") || varName.Contains("tl_dr") || varName.Contains("tl;dr"))
+                 && !structuredOutputs.ContainsKey("TL;DR"))
+        {
+            structuredOutputs["TL;DR"] = output.TextContent;
+        }
+        else if (varName.Contains("keyword") && !structuredOutputs.ContainsKey("Keywords"))
+        {
+            structuredOutputs["Keywords"] = output.TextContent;
+        }
+        else if ((varName.Contains("doctype") || varName.Contains("document_type") || varName.Contains("classification"))
+                 && !structuredOutputs.ContainsKey("Document Type"))
+        {
+            structuredOutputs["Document Type"] = output.TextContent;
+        }
+        else if ((varName.Contains("entit") || varName.Contains("extract"))
+                 && !structuredOutputs.ContainsKey("Entities"))
+        {
+            structuredOutputs["Entities"] = output.TextContent;
+        }
     }
 
     /// <summary>
@@ -1186,7 +1491,7 @@ public class AppOnlyDocumentAnalysisResult
     /// </summary>
     public Guid? AnalysisId { get; init; }
 
-    public static AppOnlyDocumentAnalysisResult Success(Guid documentId, UpdateDocumentRequest profileUpdate, Guid? analysisId = null)
+    public static AppOnlyDocumentAnalysisResult Success(Guid documentId, UpdateDocumentRequest? profileUpdate, Guid? analysisId = null)
         => new()
         {
             DocumentId = documentId,

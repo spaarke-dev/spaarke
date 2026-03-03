@@ -242,7 +242,7 @@ public sealed class SendEmailNodeExecutor : INodeExecutor
     }
 
     /// <summary>
-    /// Builds template context dictionary from previous node outputs.
+    /// Builds template context dictionary from previous node outputs and execution metadata.
     /// </summary>
     private static Dictionary<string, object?> BuildTemplateContext(NodeExecutionContext context)
     {
@@ -259,6 +259,23 @@ public sealed class SendEmailNodeExecutor : INodeExecutor
                 success = output.Success
             };
         }
+
+        if (context.Document is not null)
+        {
+            templateContext["document"] = new
+            {
+                id = context.Document.DocumentId.ToString(),
+                name = context.Document.Name,
+                fileName = context.Document.FileName
+            };
+        }
+
+        templateContext["run"] = new
+        {
+            id = context.RunId.ToString(),
+            playbookId = context.PlaybookId.ToString(),
+            tenantId = context.TenantId
+        };
 
         return templateContext;
     }

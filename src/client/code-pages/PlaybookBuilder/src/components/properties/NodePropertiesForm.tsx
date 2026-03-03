@@ -35,6 +35,7 @@ import type { PlaybookNode } from "../../types/canvas";
 import { useCanvasStore } from "../../stores/canvasStore";
 
 // Sub-components
+import { ActionSelector } from "./ActionSelector";
 import { ModelSelector } from "./ModelSelector";
 import { ScopeSelector } from "./ScopeSelector";
 import { ConditionEditor } from "./ConditionEditor";
@@ -43,6 +44,7 @@ import { SendEmailForm } from "./SendEmailForm";
 import { CreateTaskForm } from "./CreateTaskForm";
 import { AiCompletionForm } from "./AiCompletionForm";
 import { WaitForm } from "./WaitForm";
+import { UpdateRecordForm } from "./UpdateRecordForm";
 import { NodeValidationBadge } from "./NodeValidationBadge";
 
 // ---------------------------------------------------------------------------
@@ -104,6 +106,7 @@ const NODE_TYPE_LABELS: Record<string, string> = {
     aiCompletion: "AI Completion",
     condition: "Condition",
     deliverOutput: "Deliver Output",
+    updateRecord: "Update Record",
     createTask: "Create Task",
     sendEmail: "Send Email",
     wait: "Wait",
@@ -126,7 +129,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
     const isStartNode = nodeType === "start";
 
     // Determine which type-specific form to show
-    const hasTypeForm = ["deliverOutput", "sendEmail", "createTask", "aiCompletion", "wait"].includes(nodeType);
+    const hasTypeForm = ["deliverOutput", "updateRecord", "sendEmail", "createTask", "aiCompletion", "wait"].includes(nodeType);
 
     // Generic field updater
     const handleUpdate = useCallback(
@@ -151,8 +154,8 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
     // Default open accordion items
     const defaultOpenItems = useMemo(() => {
         const items = ["basic"];
+        if (isAiNode) items.push("action", "aiModel");
         if (hasTypeForm) items.push("typeConfig");
-        if (isAiNode) items.push("aiModel");
         if (isConditionNode) items.push("condition");
         return items;
     }, [hasTypeForm, isAiNode, isConditionNode]);
@@ -207,6 +210,19 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                     </AccordionPanel>
                 </AccordionItem>
 
+                {/* Action Section — Only for AI nodes */}
+                {isAiNode && (
+                    <AccordionItem value="action">
+                        <AccordionHeader size="small">Action</AccordionHeader>
+                        <AccordionPanel className={styles.accordionPanel}>
+                            <ActionSelector
+                                selectedActionId={node.data.actionId}
+                                onActionChange={(id) => handleUpdate("actionId", id)}
+                            />
+                        </AccordionPanel>
+                    </AccordionItem>
+                )}
+
                 {/* AI Model Section — Only for AI nodes */}
                 {isAiNode && (
                     <AccordionItem value="aiModel">
@@ -227,6 +243,13 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                         <AccordionPanel className={styles.accordionPanel}>
                             {nodeType === "deliverOutput" && (
                                 <DeliverOutputForm
+                                    nodeId={node.id}
+                                    data={node.data}
+                                    onUpdate={handleUpdate}
+                                />
+                            )}
+                            {nodeType === "updateRecord" && (
+                                <UpdateRecordForm
                                     nodeId={node.id}
                                     configJson={node.data.configJson ?? "{}"}
                                     onConfigChange={handleConfigChange}

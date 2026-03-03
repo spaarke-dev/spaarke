@@ -1,7 +1,7 @@
 # Spaarke AI Architecture
 
-> **Version**: 3.1
-> **Last Updated**: March 1, 2026
+> **Version**: 3.2
+> **Last Updated**: March 3, 2026
 > **Audience**: Claude Code, AI agents, engineers
 > **Purpose**: Technical reference for the Spaarke AI platform component framework
 > **Supersedes**: `AI-PLAYBOOK-ARCHITECTURE.md` (v2.0), `AI-ANALYSIS-PLAYBOOK-SCOPE-DESIGN.md` (v2.0)
@@ -889,18 +889,21 @@ PlaybookOrchestrationService.ExecutePlaybookAsync()
   │   │   │   ├── DeliverOutputNodeExecutor (ActionType 40):
   │   │   │   │   └── Render Handlebars template with all NodeOutputs
   │   │   │   │
-  │   │   │   └── CreateTask/SendEmail/UpdateRecord (ActionType 20-24):
-  │   │   │       └── Execute Spaarke workflow action on Dataverse/Graph
+  │   │   │   ├── CreateTask/SendEmail (ActionType 20-21):
+  │   │   │   │   └── Execute Spaarke workflow action on Dataverse/Graph
+  │   │   │   │
+  │   │   │   └── UpdateRecordNodeExecutor (ActionType 24):
+  │   │   │       ├── Render Handlebars templates: {{output_nodeLabel.output.field}}
+  │   │   │       ├── Coerce values by type (Choice → option int, Boolean → true/false)
+  │   │   │       └── OData Web API PATCH to Dataverse entity
   │   │   │
   │   │   ├── Step 7e: Store output (PlaybookRunContext.StoreNodeOutput)
   │   │   └── Step 7f: Stream event (PlaybookStreamEvent via SSE)
   │   │
   │   └── Check for failures — stop execution if node failed (unless continueOnError)
   │
-  ├── Step 8: Map outputs to document fields (DocumentProfileFieldMapper)
-  ├── Step 9: Update Dataverse (DataverseService.UpdateDocumentFieldsAsync)
-  ├── Step 10: Store analysis output (sprk_analysisoutput.sprk_output_rtf)
-  └── Step 11: Complete run (metrics, status, duration)
+  ├── Step 8: Store analysis output (sprk_analysisoutput.sprk_output_rtf)
+  └── Step 9: Complete run (metrics, status, duration)
 ```
 
 ### Parallel Execution and Performance
@@ -934,7 +937,109 @@ GetExecutionBatches() produces:
 | Path | Data | Storage | Display |
 |------|------|---------|---------|
 | **Analysis Output** | `ToolResult.Summary` (text) | `sprk_analysisoutput.sprk_output_rtf` | AiSummaryPanel |
-| **Document Fields** | `ToolResult.Data` (JSON) | `sprk_document.*` fields via FieldMapper | Document form fields |
+| **Document Fields** | AI structured output (JSON) | `sprk_document.*` fields via UpdateRecord node (OData PATCH) | Document form fields |
+
+Document field writes happen **during** playbook execution (UpdateRecord node in step 7d), not after. There is no post-execution field mapping step.
+
+### TemplateEngine
+
+**File**: `src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs`
+
+The TemplateEngine renders Handlebars.NET templates against a context built from previous node outputs. It is used by `UpdateRecordNodeExecutor` and `DeliverOutputNodeExecutor` to resolve `{{output_nodeLabel.output.fieldName}}` references.
+
+**Key methods**:
+
+| Method | Purpose |
+|--------|---------|
+| `RenderTemplate(template, context)` | Render a Handlebars template string against a dictionary context |
+| `ConvertJsonElement(JsonElement)` | Convert `System.Text.Json.JsonElement` → `Dictionary<string,object>` / `List<object>` / primitives for Handlebars traversal |
+| `FlattenArrays(object)` | Convert `List<object?>` → `"- item1\n- item2"` bullet-point string for Dataverse text fields |
+
+**Template syntax**:
+
+```
+{{output_aiAnalysis.text}}                   → AI summary text
+{{output_aiAnalysis.output.documentType}}    → Structured JSON field
+{{output_aiAnalysis.output.keyFindings}}     → Array → flattened to bullet list
+{{document.id}}                              → Document record ID (from run context)
+```
+
+**Context building** (`BuildTemplateContext` in each executor):
+1. Start with `PreviousOutputs` dictionary (keyed by `output_{nodeLabel}`)
+2. Each output contains `.text` (summary), `.output` (structured JSON), `.confidence`
+3. `ConvertJsonElement` recursively converts JSON so Handlebars can dot-navigate into nested objects
+4. `FlattenArrays` post-processes to convert arrays into text-friendly bullet strings
+5. Additional context keys (`document`, `run`) come from `PlaybookRunContext`
+
+### Typed Field Mappings (UpdateRecord Node)
+
+**File**: `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs`
+
+The UpdateRecord node writes AI-extracted values to Dataverse entity fields. Each field mapping specifies a Dataverse type so the executor can coerce AI string output to the correct typed value.
+
+**Config format** (`fieldMappings` array in node ConfigJson):
+
+```json
+{
+  "entityLogicalName": "sprk_document",
+  "recordId": "{{document.id}}",
+  "fieldMappings": [
+    {
+      "field": "sprk_filesummary",
+      "type": "string",
+      "value": "{{output_aiAnalysis.text}}"
+    },
+    {
+      "field": "sprk_filesummarystatus",
+      "type": "choice",
+      "value": "{{output_aiAnalysis.output.status}}",
+      "options": {
+        "pending": 100000000,
+        "in progress": 100000001,
+        "complete": 100000002
+      }
+    },
+    {
+      "field": "sprk_isconfidential",
+      "type": "boolean",
+      "value": "{{output_aiAnalysis.output.isConfidential}}"
+    }
+  ]
+}
+```
+
+**Supported types and coercion** (`CoerceFieldValue`):
+
+| Type | AI Output | Coerced Value | Notes |
+|------|-----------|---------------|-------|
+| `string` | `"Contract for services..."` | `"Contract for services..."` | Passthrough |
+| `choice` | `"Complete"` | `100000002` | Case-insensitive lookup in `options` map; falls back to raw int parse |
+| `boolean` | `"yes"` / `"true"` / `"1"` | `true` | Truthy/falsy string parsing |
+| `number` | `"42"` | `42` | `int.TryParse` then `decimal.TryParse` |
+
+**OData Web API PATCH** (not SDK): `PATCH /api/data/v9.2/{entitySetName}({recordId})` with JSON body of coerced field values. This bypasses the Dataverse SDK to avoid `JsonElement` serialization issues with typed attributes.
+
+**Backward compatibility**: The old `fields` dictionary format (`"fields": { "fieldName": "value" }`) still works. If `fieldMappings` is present it takes precedence; otherwise the legacy `fields` path executes unchanged.
+
+### Consumer Integration Pattern
+
+Components (PCF controls, Code Pages) that invoke AI analysis follow this pattern:
+
+```
+┌─────────────────┐     SSE stream      ┌──────────────────┐     OData PATCH     ┌──────────┐
+│  PCF / CodePage │ ──────────────────→  │  BFF API         │ ──────────────────→ │ Dataverse│
+│  (useAiSummary) │ ← progress events   │  (Playbook exec) │   (UpdateRecord)    │ (fields) │
+└─────────────────┘                      └──────────────────┘                     └──────────┘
+```
+
+**Rules**:
+
+1. **Component triggers playbook** via SSE endpoint (`/api/ai/analysis/execute`) and displays streaming progress
+2. **All Dataverse field writes are server-side** — the playbook's UpdateRecord node writes structured fields via OData PATCH during execution
+3. **Component does NOT write AI output fields** — no `onSummaryComplete` callbacks, no `updateSummary()` calls to Dataverse after playbook finishes
+4. **Component owns its own UX** — file upload, metadata entry, progress display, error handling
+
+**Anti-pattern** (removed in v3.15.0 of UniversalQuickCreate): Client-side `onSummaryComplete` callback accumulated ALL SSE chunks (including diagnostic messages like `"[Node-based execution: 3 nodes detected]"`) into a string, then overwrote the correct UpdateRecord values by calling `documentRecordService.updateSummary()`.
 
 ### Builder Agent (Conversational Mode)
 
@@ -1111,6 +1216,7 @@ The PlaybookOrchestrationService evolves from a full execution engine to a thin 
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-03-03 | 3.2 | Updated for typed field mappings: TemplateEngine (ConvertJsonElement, FlattenArrays), UpdateRecord OData PATCH with typed coercion (Choice/Boolean/Number), consumer integration pattern (PCF triggers playbook, no client-side field writes), removed obsolete DocumentProfileFieldMapper references from execution flow. |
 | 2026-03-01 | 3.1 | Updated for Playbook Builder R5: three-level node type system (Canvas Type → NodeType → ActionType), Code Page builder as primary (PCF legacy), canvas-to-Dataverse sync with sprk_nodetype + __actionType, parallel execution batches and performance optimization, updated file structure, all 6 node executors, all 12 tool handlers. |
 | 2026-02-21 | 3.0 | Created from consolidation of AI-PLAYBOOK-ARCHITECTURE.md (v2.0) and AI-ANALYSIS-PLAYBOOK-SCOPE-DESIGN.md (v2.0). Added four-tier architecture, playbooks-as-frontend model, backend flexibility, nodes-as-agents evolution, complete file mapping from codebase. |
 | 2026-01-16 | (predecessor) | AI-ANALYSIS-PLAYBOOK-SCOPE-DESIGN.md v2.0 |

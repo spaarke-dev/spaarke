@@ -1478,15 +1478,35 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             return;
         }
 
-        var entity = new Entity(entityLogicalName, recordId);
+        // Use OData Web API PATCH via ServiceClient.ExecuteWebRequest.
+        // The Web API handles all Dataverse field types natively — OptionSet/Choice
+        // fields accept plain int, currency accepts decimal, @odata.bind works for
+        // lookups — unlike the SDK's Entity model which requires typed wrappers
+        // (OptionSetValue, Money, EntityReference).
+        var entitySetName = await GetEntitySetNameAsync(entityLogicalName, ct);
+        var apiPath = $"{entitySetName}({recordId})";
+        var body = System.Text.Json.JsonSerializer.Serialize(fields);
 
-        foreach (var field in fields)
+        _logger.LogDebug("PATCH {ApiPath} with {FieldCount} fields", apiPath, fields.Count);
+
+        var response = await Task.Run(() =>
+            _serviceClient.ExecuteWebRequest(
+                HttpMethod.Patch,
+                apiPath,
+                body,
+                null,
+                "application/json"), ct);
+
+        if (!response.IsSuccessStatusCode)
         {
-            entity[field.Key] = field.Value;
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError(
+                "Failed to PATCH {Entity}({Id}): {StatusCode} {ErrorBody}",
+                entityLogicalName, recordId, response.StatusCode, errorBody);
+            response.EnsureSuccessStatusCode();
         }
 
-        await _serviceClient.UpdateAsync(entity, ct);
-        _logger.LogInformation("Updated {Entity}({Id}) with {FieldCount} fields", entityLogicalName, recordId, fields.Count);
+        _logger.LogInformation("Updated {Entity}({Id}) with {FieldCount} fields via Web API", entityLogicalName, recordId, fields.Count);
     }
 
     // ========================================

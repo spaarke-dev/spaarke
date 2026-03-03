@@ -394,14 +394,26 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
     }
 
     /// <summary>
-    /// Builds the execution prompt from the tool configuration and context.
+    /// Builds the execution prompt from the Action's system prompt, tool configuration, and context.
     /// </summary>
+    /// <remarks>
+    /// Prompt priority (Option A: Action = what to do, Tool = how to do it):
+    ///   1. ActionSystemPrompt (from sprk_analysisaction) — primary instruction when present
+    ///   2. Tool's PromptTemplate (from tool Configuration JSON) — custom tool prompt
+    ///   3. Operation-specific default (extract, classify, validate, etc.) — fallback
+    ///
+    /// When ActionSystemPrompt is present, it replaces the tool's prompt template entirely.
+    /// Skills and knowledge context are appended as additional context sections.
+    /// </remarks>
     private static string BuildExecutionPrompt(ToolExecutionContext context, AnalysisTool tool, GenericToolConfig config)
     {
-        // Use custom prompt template if provided, otherwise use operation-specific default
-        var promptTemplate = !string.IsNullOrWhiteSpace(config.PromptTemplate)
-            ? config.PromptTemplate
-            : GetDefaultPromptTemplate(config.Operation!);
+        // Priority: Action SystemPrompt > Tool PromptTemplate > operation default.
+        // Action defines "what to analyze"; Tool defines "how" (model, schema, etc.).
+        var promptTemplate = !string.IsNullOrWhiteSpace(context.ActionSystemPrompt)
+            ? context.ActionSystemPrompt
+            : !string.IsNullOrWhiteSpace(config.PromptTemplate)
+                ? config.PromptTemplate
+                : GetDefaultPromptTemplate(config.Operation!);
 
         // Build parameters JSON for template substitution
         var parametersJson = config.Parameters != null
@@ -413,12 +425,32 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
             ? $"\n\nReturn your response as valid JSON matching this schema:\n```json\n{JsonSerializer.Serialize(config.OutputSchema, new JsonSerializerOptions { WriteIndented = true })}\n```"
             : "\n\nReturn your response as valid JSON with a 'result' field containing your analysis and a 'confidence' field (0.0-1.0).";
 
-        // Substitute placeholders
+        // Substitute placeholders (works for both Action prompts and tool templates)
         var prompt = promptTemplate
             .Replace("{document}", context.Document!.ExtractedText ?? string.Empty)
             .Replace("{parameters}", parametersJson)
             .Replace("{tool_name}", tool.Name)
             .Replace("{tool_description}", tool.Description ?? "No description provided");
+
+        // Append skill context (prompt fragments) if available
+        if (!string.IsNullOrWhiteSpace(context.SkillContext))
+        {
+            prompt += $"\n\n## Additional Analysis Instructions\n\n{context.SkillContext}";
+        }
+
+        // Append knowledge context if available
+        if (!string.IsNullOrWhiteSpace(context.KnowledgeContext))
+        {
+            prompt += $"\n\n## Reference Knowledge\n\n{context.KnowledgeContext}";
+        }
+
+        // Append document text if not already substituted via {document} placeholder.
+        // This handles Action prompts that don't use {document} placeholder explicitly.
+        if (!promptTemplate.Contains("{document}") &&
+            !string.IsNullOrWhiteSpace(context.Document?.ExtractedText))
+        {
+            prompt += $"\n\n## Document\n\n{context.Document.ExtractedText}";
+        }
 
         return prompt + schemaInstructions;
     }
@@ -599,6 +631,14 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 if (resultObj.TryGetPropertyValue("confidence", out var confNode))
                 {
                     confidence = Math.Clamp(confNode?.GetValue<double>() ?? 0.8, 0.0, 1.0);
+                }
+
+                // Unwrap "result" wrapper if present — AI often returns { "result": {...}, "confidence": N }
+                // Normalizing here so downstream template paths access fields directly
+                // (e.g., {{output.sprk_filesummary}} instead of {{output.result.sprk_filesummary}})
+                if (resultObj.TryGetPropertyValue("result", out var resultNode) && resultNode is JsonObject)
+                {
+                    return (resultNode, confidence);
                 }
 
                 return (result, confidence);

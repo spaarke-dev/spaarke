@@ -30,7 +30,7 @@ public class PlaybookRunContext
     private readonly CancellationTokenSource _cancellationSource;
 
     /// <summary>
-    /// Creates a new run context.
+    /// Creates a new run context for interactive (HTTP) execution.
     /// </summary>
     public PlaybookRunContext(
         Guid runId,
@@ -52,6 +52,30 @@ public class PlaybookRunContext
     }
 
     /// <summary>
+    /// Creates a new run context for app-only (background) execution.
+    /// No HttpContext required; uses app-only authentication.
+    /// </summary>
+    public PlaybookRunContext(
+        Guid runId,
+        Guid playbookId,
+        Guid[] documentIds,
+        string tenantId,
+        CancellationToken externalCancellation,
+        string? userContext = null,
+        IReadOnlyDictionary<string, string>? parameters = null)
+    {
+        RunId = runId;
+        PlaybookId = playbookId;
+        DocumentIds = documentIds;
+        HttpContext = null;
+        UserContext = userContext;
+        Parameters = parameters ?? new Dictionary<string, string>();
+        TenantId = tenantId;
+        _cancellationSource = CancellationTokenSource.CreateLinkedTokenSource(
+            externalCancellation);
+    }
+
+    /// <summary>
     /// Unique identifier for this execution run.
     /// Used for correlation across all nodes and events.
     /// </summary>
@@ -69,8 +93,9 @@ public class PlaybookRunContext
 
     /// <summary>
     /// HTTP context for OBO authentication when accessing SPE.
+    /// Null when running in app-only (background) mode.
     /// </summary>
-    public HttpContext HttpContext { get; }
+    public HttpContext? HttpContext { get; }
 
     /// <summary>
     /// User-provided context or instructions.

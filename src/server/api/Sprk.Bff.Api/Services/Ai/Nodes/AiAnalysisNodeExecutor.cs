@@ -257,6 +257,8 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
 
     /// <summary>
     /// Creates a ToolExecutionContext from the NodeExecutionContext.
+    /// Passes Action.SystemPrompt and Skill context so tool handlers
+    /// use the Action's prompt as primary instruction (Option A).
     /// </summary>
     private ToolExecutionContext CreateToolExecutionContext(NodeExecutionContext context)
     {
@@ -275,6 +277,15 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
         // Build knowledge context from resolved scopes
         var knowledgeContext = BuildKnowledgeContext(context.Scopes);
 
+        // Build skill context from resolved scopes (prompt fragments)
+        var skillContext = BuildSkillContext(context.Scopes);
+
+        // Pass Action's SystemPrompt — this is the primary AI instruction.
+        // Tool handlers should use this instead of their internal defaults.
+        var actionSystemPrompt = !string.IsNullOrWhiteSpace(context.Action.SystemPrompt)
+            ? context.Action.SystemPrompt
+            : null;
+
         return new ToolExecutionContext
         {
             AnalysisId = context.RunId,
@@ -282,6 +293,8 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             Document = context.Document!,
             PreviousResults = previousResults,
             UserContext = context.UserContext,
+            ActionSystemPrompt = actionSystemPrompt,
+            SkillContext = skillContext,
             KnowledgeContext = knowledgeContext,
             MaxTokens = context.MaxTokens,
             Temperature = context.Temperature,
@@ -309,6 +322,30 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             }
             // TODO: Document and RagIndex types will be resolved in PlaybookOrchestrationService
             // and pre-populated into knowledge.Content before reaching the executor
+        }
+
+        return contextParts.Count > 0
+            ? string.Join("\n\n", contextParts)
+            : null;
+    }
+
+    /// <summary>
+    /// Builds skill context string from resolved scopes.
+    /// Skills are prompt fragments that provide additional instructions or focus areas.
+    /// </summary>
+    private static string? BuildSkillContext(ResolvedScopes scopes)
+    {
+        if (scopes.Skills.Length == 0)
+            return null;
+
+        var contextParts = new List<string>();
+
+        foreach (var skill in scopes.Skills)
+        {
+            if (!string.IsNullOrWhiteSpace(skill.PromptFragment))
+            {
+                contextParts.Add($"[{skill.Name}]\n{skill.PromptFragment}");
+            }
         }
 
         return contextParts.Count > 0

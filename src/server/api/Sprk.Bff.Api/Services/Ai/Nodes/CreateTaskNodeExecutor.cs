@@ -195,7 +195,7 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
     }
 
     /// <summary>
-    /// Builds template context dictionary from previous node outputs.
+    /// Builds template context dictionary from previous node outputs and execution metadata.
     /// </summary>
     private static Dictionary<string, object?> BuildTemplateContext(NodeExecutionContext context)
     {
@@ -203,7 +203,6 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
 
         foreach (var (varName, output) in context.PreviousOutputs)
         {
-            // Add the entire output as a nested object for template access
             templateContext[varName] = new
             {
                 output = output.StructuredData.HasValue
@@ -213,6 +212,23 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
                 success = output.Success
             };
         }
+
+        if (context.Document is not null)
+        {
+            templateContext["document"] = new
+            {
+                id = context.Document.DocumentId.ToString(),
+                name = context.Document.Name,
+                fileName = context.Document.FileName
+            };
+        }
+
+        templateContext["run"] = new
+        {
+            id = context.RunId.ToString(),
+            playbookId = context.PlaybookId.ToString(),
+            tenantId = context.TenantId
+        };
 
         return templateContext;
     }

@@ -39,15 +39,16 @@ export function usePlaybookLoader(playbookId: string): UsePlaybookLoaderResult {
     const [playbookName, setPlaybookName] = useState<string | null>(null);
 
     const loadFromCanvasJson = useCanvasStore((s) => s.loadFromCanvasJson);
+    const initializeNewCanvas = useCanvasStore((s) => s.initializeNewCanvas);
     const reset = useCanvasStore((s) => s.reset);
 
     const load = useCallback(async () => {
         if (!playbookId) {
-            // New playbook — start with empty canvas (no record to fetch yet)
-            reset();
+            // New playbook — initialize with a default Start node
+            initializeNewCanvas();
             setIsLoading(false);
             setError(null);
-            console.info(`${LOG_PREFIX} No playbook ID — starting with empty canvas`);
+            console.info(`${LOG_PREFIX} No playbook ID — initialized with Start node`);
             return;
         }
 
@@ -70,9 +71,9 @@ export function usePlaybookLoader(playbookId: string): UsePlaybookLoaderResult {
                 loadFromCanvasJson(canvasJson);
                 console.info(`${LOG_PREFIX} Loaded playbook "${name}" canvas data`);
             } else {
-                // No saved canvas yet — reset to empty state
-                reset();
-                console.info(`${LOG_PREFIX} Playbook "${name}" has no saved canvas; starting fresh`);
+                // No saved canvas yet — initialize with a default Start node
+                initializeNewCanvas();
+                console.info(`${LOG_PREFIX} Playbook "${name}" has no saved canvas; initialized with Start node`);
             }
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);

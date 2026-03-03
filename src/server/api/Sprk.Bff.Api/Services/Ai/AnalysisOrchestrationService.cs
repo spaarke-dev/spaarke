@@ -1546,9 +1546,12 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             yield break;
         }
 
-        // Legacy path: No nodes — execute tools sequentially using playbook-level scopes
-        _logger.LogInformation(
-            "[PLAYBOOK-EXEC] Legacy mode: No nodes found for playbook {PlaybookId}, using sequential tool execution",
+        // Legacy path: No nodes — execute tools sequentially using playbook-level scopes.
+        // DEPRECATED: This path is for backward compatibility with playbooks that have not been
+        // migrated to the Playbook Builder (node-based). New playbooks should always use nodes.
+        _logger.LogWarning(
+            "[PLAYBOOK-EXEC] DEPRECATED Legacy mode: No nodes found for playbook {PlaybookId}. " +
+            "Falling back to sequential tool execution. Migrate this playbook to the Playbook Builder for node-based execution.",
             request.PlaybookId);
 
         // 4. Resolve playbook scopes (Skills, Knowledge, Tools)

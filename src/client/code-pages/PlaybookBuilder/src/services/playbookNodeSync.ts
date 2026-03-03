@@ -261,6 +261,21 @@ export function buildConfigJson(canvasNodeId: string, data: PlaybookNodeData): s
             if (data.emailIsHtml != null) config.isHtml = data.emailIsHtml;
             break;
 
+        case "updateRecord":
+            // Update Record: entityLogicalName, recordId, fieldMappings (new) or fields (legacy), lookups
+            // The UpdateRecordForm stores full config in data.configJson
+            if (data.configJson) {
+                try {
+                    const parsed = JSON.parse(data.configJson as string);
+                    if (parsed.entityLogicalName) config.entityLogicalName = parsed.entityLogicalName;
+                    if (parsed.recordId) config.recordId = parsed.recordId;
+                    if (parsed.fieldMappings) config.fieldMappings = parsed.fieldMappings;
+                    else if (parsed.fields) config.fields = parsed.fields;
+                    if (parsed.lookups) config.lookups = parsed.lookups;
+                } catch { /* invalid JSON, skip */ }
+            }
+            break;
+
         case "createTask":
             // Create Task: subject, description, regarding, owner, dueDate
             if (data.taskSubject) config.subject = data.taskSubject;

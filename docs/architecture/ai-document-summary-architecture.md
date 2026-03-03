@@ -3,6 +3,10 @@
 > **Last Updated**: January 28, 2026
 > **Purpose**: Comprehensive architecture documentation for all Document creation processes with AI analysis pipelines
 
+> **PARTIALLY SUPERSEDED**: The AI analysis sections of this document are outdated.
+> For current AI architecture, see [`AI-ARCHITECTURE.md`](AI-ARCHITECTURE.md) (v3.2+).
+> The **document creation process flows** (upload, email, Outlook, Word) below remain accurate.
+
 ---
 
 ## Table of Contents

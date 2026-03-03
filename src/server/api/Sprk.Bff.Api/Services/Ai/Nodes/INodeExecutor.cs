@@ -119,6 +119,9 @@ public enum ActionType
     /// <summary>Wait for human approval.</summary>
     Wait = 32,
 
+    /// <summary>Start node — canvas anchor, pass-through with no execution logic.</summary>
+    Start = 33,
+
     /// <summary>Render and deliver final output.</summary>
     DeliverOutput = 40
 }

@@ -198,21 +198,16 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
     // Tab state
     const [selectedTab, setSelectedTab] = React.useState<string>('upload');
 
-    /**
-     * Handle summary completion - save to Dataverse
-     */
-    const handleSummaryComplete = React.useCallback(async (documentId: string, summary: string) => {
-        logInfo('DocumentUploadForm', 'Summary completed, saving to Dataverse', { documentId });
-        await documentRecordService.updateSummary(documentId, summary);
-    }, [documentRecordService]);
-
     // AI Summary hook - uses getToken for dynamic token acquisition
+    // NOTE: onSummaryComplete (client-side write to sprk_filesummary) is intentionally removed.
+    // The playbook's UpdateRecord node writes structured field values server-side via OData PATCH.
+    // The old client-side callback accumulated ALL SSE chunks (including diagnostic messages like
+    // "[Node-based execution: 3 nodes detected]") and overwrote the correct UpdateRecord values.
     const aiSummary = useAiSummary({
         apiBaseUrl,
         getToken: getAuthToken,
         maxConcurrent: 3,
-        autoStart: true,
-        onSummaryComplete: handleSummaryComplete
+        autoStart: true
     });
 
     // Determine if AI processing is complete
@@ -597,7 +592,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
             {/* Footer */}
             <div className={styles.footer}>
                 <span className={styles.versionText}>
-                    v3.14.0 • Built 2026-02-22
+                    v3.15.0 • Built 2026-03-03
                 </span>
                 <div className={styles.footerButtons}>
                     <Button
