@@ -1,0 +1,64 @@
+<task id="022" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Integrate Structured Output with Azure OpenAI</title>
+    <phase>3</phase>
+    <tags>bff-api, api, implement</tags>
+    <estimate>2h</estimate>
+    <dependencies>021</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Wire the generated JSON Schema into Azure OpenAI's GetStructuredCompletionAsync for constrained JSON decoding.</goal>
+    <context>
+      When RenderedPrompt.JsonSchema is not null, GenericAnalysisHandler should use GetStructuredCompletionAsync
+      instead of GetCompletionAsync. This ensures the AI returns JSON that is guaranteed to match the schema.
+      The RenderedPrompt.SchemaName provides a name for the schema (required by Azure OpenAI API).
+      Both ExecuteAsync and StreamExecuteAsync paths must support this.
+    </context>
+    <constraints>
+      - Use GetStructuredCompletionAsync when JsonSchema is present
+      - Fall back to GetCompletionAsync when JsonSchema is null (unstructured output)
+      - Pass schema name via RenderedPrompt.SchemaName
+      - Both sync and streaming paths must support structured output
+      - MUST apply rate limiting per ADR-016
+      - MUST NOT log prompt or response content per ADR-015
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read GenericAnalysisHandler ExecuteAsync and StreamExecuteAsync for current OpenAI calls</step>
+    <step order="2">Find GetStructuredCompletionAsync method signature in OpenAiClient</step>
+    <step order="3">Modify ExecuteAsync: if RenderedPrompt.JsonSchema != null → use structured completion</step>
+    <step order="4">Modify StreamExecuteAsync: if RenderedPrompt.JsonSchema != null → use structured streaming</step>
+    <step order="5">Add SchemaName to structured output API call</step>
+    <step order="6">Verify build: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Grep</tool>
+    <tool>Bash(dotnet build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Structured output mode uses GetStructuredCompletionAsync</criterion>
+    <criterion>Unstructured output falls back to GetCompletionAsync</criterion>
+    <criterion>Both sync and streaming paths support structured output</criterion>
+    <criterion>Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

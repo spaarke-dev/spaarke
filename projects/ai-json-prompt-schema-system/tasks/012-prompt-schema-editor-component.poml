@@ -1,0 +1,74 @@
+<task id="012" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Create PromptSchemaEditor Component (Level 2)</title>
+    <phase>2</phase>
+    <tags>frontend, fluent-ui, implement</tags>
+    <estimate>3h</estimate>
+    <dependencies>010</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Build the Level 2 JSON editor for advanced users to edit JPS schemas directly with validation and prompt preview.</goal>
+    <context>
+      The JSON editor shows the raw JPS JSON with syntax highlighting, validation feedback, and a preview tab
+      that renders the assembled prompt as the AI would receive it. Toggling between form (Level 1) and editor
+      (Level 2) is lossless — no data lost. Located alongside PromptSchemaForm in components/properties/.
+    </context>
+    <constraints>
+      - Use a textarea-based JSON editor (keep it simple — no Monaco dependency to avoid bundle bloat)
+      - Show validation errors inline (red underlines or error list below)
+      - Include "Preview" tab that renders the prompt as flat text
+      - Include "Switch to Form" toggle to go back to Level 1
+      - Lossless: parse JSON on every change, validate, emit onChange only for valid schemas
+      - Fluent UI v9 styling with dark mode support per ADR-021
+      - Single-file build constraint per ADR-026 — no heavy editor libraries
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-026.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read design.md "Level 2: Advanced User (JSON Editor)" section</step>
+    <step order="2">Create PromptSchemaEditor.tsx with:
+      - Props: schema: PromptSchema | null, onChange: (schema: PromptSchema) => void, onSwitchToForm: () => void
+      - Textarea with monospace font for JSON editing
+      - Real-time JSON parsing and JPS validation
+      - Error display (list of validation issues)
+      - Tab control: "Edit" | "Preview"
+      - Preview tab renders assembled prompt text (client-side rendering)</step>
+    <step order="3">Implement client-side prompt preview renderer (simplified version of server renderer):
+      - Assemble sections: role → task → constraints → output instructions
+      - Show preview as read-only formatted text</step>
+    <step order="4">Style with makeStyles() using Fluent design tokens (monospace for editor, proper spacing)</step>
+    <step order="5">Verify build: npm run build in code-pages/PlaybookBuilder/</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Bash(npm run build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/PlaybookBuilder/src/components/properties/PromptSchemaEditor.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>JSON editor shows raw JPS JSON with monospace font</criterion>
+    <criterion>Real-time validation shows errors for invalid schemas</criterion>
+    <criterion>Preview tab renders assembled prompt text</criterion>
+    <criterion>Toggle to form view is lossless (no data lost)</criterion>
+    <criterion>Dark mode compatible</criterion>
+    <criterion>No heavy editor dependencies (Monaco, CodeMirror)</criterion>
+  </acceptance-criteria>
+</task>

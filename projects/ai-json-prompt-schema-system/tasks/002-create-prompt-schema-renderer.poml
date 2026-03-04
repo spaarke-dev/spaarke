@@ -1,0 +1,75 @@
+<task id="002" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Create PromptSchemaRenderer Service with Format Detection</title>
+    <phase>1</phase>
+    <tags>bff-api, api, implement</tags>
+    <estimate>3h</estimate>
+    <dependencies>001</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Create the PromptSchemaRenderer service that detects format (flat text vs JPS JSON) and renders JPS schemas into assembled prompt strings.</goal>
+    <context>
+      The renderer replaces the static BuildExecutionPrompt method in GenericAnalysisHandler.cs (L408-456).
+      It's a pure function: given a raw prompt string, resolved scopes, template context, and downstream node info,
+      it produces a deterministic RenderedPrompt (PromptText + optional JsonSchema).
+      Format detection: null/empty → delegate to defaults, flat text → legacy path, JPS JSON (starts with { and contains $schema) → schema path.
+      The rendering pipeline assembles sections in order: role → task → constraints → context → document → parameters → prior outputs → skills → knowledge → examples → output instructions.
+    </context>
+    <constraints>
+      - Register as concrete type (no interface) per ADR-010
+      - Pure function design: given inputs → deterministic output
+      - Flat text path MUST produce output identical to current BuildExecutionPrompt
+      - Use System.Text.Json for deserialization
+      - MUST NOT log prompt content per ADR-015
+      - Handle malformed JSON gracefully (fall back to flat text with warning)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read GenericAnalysisHandler.BuildExecutionPrompt (L408-456) to understand current rendering logic</step>
+    <step order="2">Read design.md "Composition Rendering Pipeline" and "Assembled Prompt Example" sections</step>
+    <step order="3">Create `Services/Ai/PromptSchemaRenderer.cs` with:
+      - Render() method signature matching design.md
+      - Format detection logic (null/empty, flat text, JPS JSON)
+      - Schema parsing via System.Text.Json
+      - Section-by-section assembly (11 sections in order)
+      - RenderedPrompt return type</step>
+    <step order="4">Implement flat text legacy path that replicates BuildExecutionPrompt behavior exactly</step>
+    <step order="5">Implement JPS rendering path with all section types</step>
+    <step order="6">Verify build: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+    <tool>Bash(dotnet build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaRenderer.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Format detection correctly routes null/empty, flat text, and JPS JSON</criterion>
+    <criterion>Flat text path produces identical output to current BuildExecutionPrompt</criterion>
+    <criterion>JPS rendering assembles all 11 sections in correct order</criterion>
+    <criterion>Malformed JSON falls back to flat text gracefully</criterion>
+    <criterion>Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

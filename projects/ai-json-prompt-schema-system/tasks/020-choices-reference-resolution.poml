@@ -1,0 +1,75 @@
+<task id="020" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Implement $choices Reference Resolution (Server)</title>
+    <phase>3</phase>
+    <tags>bff-api, api, implement</tags>
+    <estimate>3h</estimate>
+    <dependencies>002</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Implement $choices resolution in PromptSchemaRenderer that pulls valid values from downstream UpdateRecord nodes.</goal>
+    <context>
+      $choices: "downstream:nodeVar.fieldName" references a downstream UpdateRecord node's fieldMappings options.
+      At render time, the renderer traverses the execution graph to find the referenced node, reads its
+      fieldMappings for the matching Dataverse field, and injects the option keys as enum values.
+      This eliminates duplication: choice values defined once in UpdateRecord, auto-propagated to AI prompt.
+      The renderer needs downstream node info passed through from PlaybookOrchestrationService.
+    </context>
+    <constraints>
+      - Parse "downstream:nodeVar.fieldName" syntax
+      - Traverse downstream nodes to find matching UpdateRecord node
+      - Extract fieldMappings[].options keys from ConfigJson
+      - Inject as enum values on the output field definition
+      - Log warning (not error) for unresolvable references
+      - MUST NOT break rendering if $choices can't resolve (graceful degradation)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read design.md "$choices Auto-Injection" section for resolution algorithm</step>
+    <step order="2">Read PlaybookOrchestrationService.cs to understand how downstream node info is available</step>
+    <step order="3">Define DownstreamNodeInfo record with OutputVariable, FieldMappings, ConfigJson</step>
+    <step order="4">Add $choices resolution to PromptSchemaRenderer:
+      - Parse "downstream:{outputVariable}.{fieldName}" syntax
+      - Find matching downstream node by outputVariable
+      - Extract fieldMappings options keys
+      - Set as enum on the output field</step>
+    <step order="5">Update AiAnalysisNodeExecutor to pass downstream node info to handler context</step>
+    <step order="6">Update PlaybookOrchestrationService to collect downstream ConfigJson</step>
+    <step order="7">Verify build: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Grep</tool>
+    <tool>Bash(dotnet build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaRenderer.cs (modified)</output>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs (modified)</output>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>$choices references resolve to correct enum values from downstream UpdateRecord</criterion>
+    <criterion>Unresolvable references produce warnings, not errors</criterion>
+    <criterion>Rendering continues even if $choices can't resolve</criterion>
+    <criterion>Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

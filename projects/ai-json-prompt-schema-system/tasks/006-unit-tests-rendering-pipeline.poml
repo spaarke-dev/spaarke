@@ -1,0 +1,67 @@
+<task id="006" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Unit Tests: Rendering Pipeline and Section Assembly</title>
+    <phase>1</phase>
+    <tags>testing, bff-api</tags>
+    <estimate>2h</estimate>
+    <dependencies>005</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Write comprehensive unit tests for the JPS rendering pipeline covering all section types and edge cases.</goal>
+    <context>
+      The rendering pipeline assembles 11 sections in order. Each section needs individual tests plus
+      integration tests that verify the complete assembled output matches the design document's example.
+      Tests should cover: role rendering, task rendering, constraints as numbered list, context with templates,
+      document placeholder, parameters, prior outputs, skill context, knowledge context with labels,
+      examples as few-shot, and output instructions (both text-based and structured output mode).
+    </context>
+    <constraints>
+      - Test each section type independently
+      - Test full assembly matches design.md "Assembled Prompt Example"
+      - Test edge cases: missing optional sections, empty arrays, null fields
+      - Test examples section formatting (few-shot pattern)
+      - Test output instructions for both structuredOutput true and false
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read design.md "Assembled Prompt Example" for expected output format</step>
+    <step order="2">Add section-level tests to PromptSchemaRendererTests.cs:
+      - RoleRendering, TaskRendering, ConstraintsRendering, ContextRendering
+      - DocumentPlaceholder, ParametersRendering, PriorOutputsRendering
+      - SkillContextRendering, KnowledgeContextRendering (with as labels)
+      - ExamplesRendering (few-shot format)
+      - OutputInstructions_TextBased, OutputInstructions_StructuredOutput</step>
+    <step order="3">Add full assembly integration test matching design.md example</step>
+    <step order="4">Add edge case tests: MinimalSchema (task only), AllOptionalFieldsNull, EmptyArrays</step>
+    <step order="5">Run tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PromptSchemaRendererTests.cs (extended)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 11 section types have individual tests</criterion>
+    <criterion>Full assembly test matches design.md example</criterion>
+    <criterion>Edge case tests pass (minimal schema, null optionals, empty arrays)</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

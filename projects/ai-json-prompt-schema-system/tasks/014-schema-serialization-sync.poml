@@ -1,0 +1,64 @@
+<task id="014" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Schema Serialization in playbookNodeSync</title>
+    <phase>2</phase>
+    <tags>frontend, implement</tags>
+    <estimate>2h</estimate>
+    <dependencies>013</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Serialize PromptSchema from canvas node data to Dataverse fields when syncing the playbook.</goal>
+    <context>
+      playbookNodeSync.ts maps canvas node data to Dataverse record fields for persistence.
+      For AI nodes with a promptSchema, serialize the schema to JSON and store in the Action scope's
+      sprk_systemprompt field. If the node has a promptSchemaOverride (node-level customization),
+      serialize that into sprk_configjson.promptSchemaOverride.
+      Must handle both new schemas and existing flat text (detect and preserve).
+    </context>
+    <constraints>
+      - Serialize promptSchema as JSON string to sprk_systemprompt (Action scope)
+      - If no promptSchema exists, preserve existing flat text (backward compatible)
+      - Node-level overrides go into configJson.promptSchemaOverride
+      - Include $schema and $version in serialized output
+      - Handle deserialization when loading from Dataverse (JSON → PromptSchema, flat text → null)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/types/canvas.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read playbookNodeSync.ts to understand current serialization flow</step>
+    <step order="2">Add serialization: PromptSchema → JSON string for sprk_systemprompt</step>
+    <step order="3">Add deserialization: JSON string → PromptSchema (with format detection)</step>
+    <step order="4">Handle promptSchemaOverride in configJson</step>
+    <step order="5">Preserve flat text for nodes without promptSchema</step>
+    <step order="6">Verify build: npm run build</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Bash(npm run build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PromptSchema serialized to sprk_systemprompt as JSON with $schema and $version</criterion>
+    <criterion>Flat text preserved for nodes without promptSchema</criterion>
+    <criterion>Deserialization correctly detects JPS JSON vs flat text</criterion>
+    <criterion>promptSchemaOverride serialized into configJson</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,60 @@
+<task id="004" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>DI Registration and Service Wiring</title>
+    <phase>1</phase>
+    <tags>bff-api, api</tags>
+    <estimate>1h</estimate>
+    <dependencies>002</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Register PromptSchemaRenderer in the DI container following ADR-010 minimalism patterns.</goal>
+    <context>
+      AI services are registered in ToolFrameworkExtensions.cs via AddToolFramework() extension method.
+      PromptSchemaRenderer should be registered as a concrete type (no interface per ADR-010).
+      It's a pure-function service with no state — Singleton lifetime is appropriate.
+      Current DI count must stay ≤15 non-framework registrations.
+    </context>
+    <constraints>
+      - Register as concrete (no IPromptSchemaRenderer interface) per ADR-010
+      - Use Singleton lifetime (stateless, pure function)
+      - Register in ToolFrameworkExtensions.AddToolFramework() method
+      - Verify total non-framework DI registrations stay ≤15
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ToolFrameworkExtensions.cs</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read ToolFrameworkExtensions.cs to understand current registration pattern</step>
+    <step order="2">Add `services.AddSingleton&lt;PromptSchemaRenderer&gt;();` to AddToolFramework()</step>
+    <step order="3">Count total non-framework DI registrations to verify ≤15 limit</step>
+    <step order="4">Verify build: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Grep</tool>
+    <tool>Bash(dotnet build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/ToolFrameworkExtensions.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PromptSchemaRenderer registered as Singleton</criterion>
+    <criterion>No interface created (concrete registration only)</criterion>
+    <criterion>Total non-framework DI registrations ≤15</criterion>
+    <criterion>Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

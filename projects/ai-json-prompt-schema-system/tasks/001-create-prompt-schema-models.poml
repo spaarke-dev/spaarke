@@ -1,0 +1,76 @@
+<task id="001" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Create C# PromptSchema Record Models</title>
+    <phase>1</phase>
+    <tags>bff-api, models, api</tags>
+    <estimate>2h</estimate>
+    <dependencies>none</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Create the C# record model types for the JSON Prompt Schema (JPS) format using System.Text.Json serialization.</goal>
+    <context>
+      JPS is a structured JSON format stored in the existing `sprk_systemprompt` field on `sprk_analysisaction`.
+      The models define the schema structure: instruction (role, task, constraints, context), input (document, priorOutputs, parameters),
+      output (fields with types, $choices references, structuredOutput flag), scopes ($skills, $knowledge references),
+      examples (few-shot), and metadata (author, authorLevel, tags).
+      See design.md "Complete Schema Format" section for the full JSON structure.
+    </context>
+    <constraints>
+      - Use C# records (not classes) for immutability
+      - Use System.Text.Json attributes for JSON property naming (camelCase)
+      - Use IReadOnlyList for collection properties
+      - Follow existing model patterns in the Sprk.Bff.Api project
+      - Keep all models in a single file (PromptSchema.cs) since they form a cohesive unit
+      - Include XML doc comments for each record and property
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read design.md "Complete Schema Format" and "C# Model" sections for exact schema structure</step>
+    <step order="2">Read existing model patterns in Services/Ai/ (e.g., IScopeResolverService.cs records)</step>
+    <step order="3">Create `Services/Ai/Models/PromptSchema.cs` with all record types:
+      - PromptSchema (root record)
+      - InstructionSection (role, task, constraints, context)
+      - InputSection (document, priorOutputs, parameters)
+      - OutputSection (fields, structuredOutput)
+      - OutputFieldDefinition (name, type, description, enum, $choices, items, constraints)
+      - ScopesSection ($skills, $knowledge)
+      - KnowledgeReference ($ref, as, inline)
+      - ExampleEntry (input, output)
+      - MetadataSection (author, authorLevel, createdAt, description, tags)
+      - RenderedPrompt (PromptText, JsonSchema?, SchemaName, Format enum)</step>
+    <step order="4">Add System.Text.Json attributes: JsonPropertyName for camelCase, JsonConverter for polymorphic types if needed</step>
+    <step order="5">Verify the project builds: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+    <tool>Bash(dotnet build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Models/PromptSchema.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All JPS schema sections represented as C# records</criterion>
+    <criterion>System.Text.Json serialization round-trips correctly (serialize → deserialize → equal)</criterion>
+    <criterion>Project builds without errors</criterion>
+    <criterion>Records use init-only properties and IReadOnlyList for collections</criterion>
+  </acceptance-criteria>
+</task>

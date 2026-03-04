@@ -1,0 +1,58 @@
+<task id="033" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Unit Tests: Builder Agent Tool Execution</title>
+    <phase>4</phase>
+    <tags>testing, bff-api</tags>
+    <estimate>2h</estimate>
+    <dependencies>031</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Write unit tests for configure_prompt_schema tool execution and JPS generation from Builder Agent.</goal>
+    <context>
+      Tests verify: (1) tool executor generates valid JPS from simplified parameters,
+      (2) autoWireChoices correctly connects to downstream nodes,
+      (3) metadata fields set correctly,
+      (4) error handling for invalid parameters.
+    </context>
+    <constraints>
+      - Mock canvas state for edge traversal tests
+      - Verify generated JPS round-trips through PromptSchemaRenderer
+      - Test autoWireChoices with and without downstream UpdateRecord nodes
+      - Test error cases: missing nodeId, missing task, invalid outputField type
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create test file: tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Builder/ConfigurePromptSchemaTests.cs</step>
+    <step order="2">Write tests: GeneratesValidJps, SetsMetadataCorrectly, AutoWiresChoices, HandlesNoDownstreamNodes</step>
+    <step order="3">Write error tests: MissingNodeId, MissingTask, InvalidFieldType</step>
+    <step order="4">Verify generated JPS renders correctly via PromptSchemaRenderer</step>
+    <step order="5">Run tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Builder/ConfigurePromptSchemaTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Valid JPS generation tested</criterion>
+    <criterion>autoWireChoices tested with mock canvas</criterion>
+    <criterion>Error handling tested for invalid parameters</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

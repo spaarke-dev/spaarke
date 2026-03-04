@@ -1,0 +1,60 @@
+<task id="032" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Update Builder Agent System Prompt for JPS Awareness</title>
+    <phase>4</phase>
+    <tags>bff-api, api</tags>
+    <estimate>1h</estimate>
+    <dependencies>030</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Update PlaybookBuilderSystemPrompt.cs to instruct the Builder Agent to always use configure_prompt_schema for AI nodes.</goal>
+    <context>
+      The system prompt in PlaybookBuilderSystemPrompt.cs guides the Builder Agent's behavior.
+      Update the ToolExecution and BuildPlanGeneration prompts to instruct the agent:
+      1. Always use configure_prompt_schema when creating AI Analysis nodes
+      2. Define typed output fields matching downstream expectations
+      3. Set autoWireChoices=true to auto-connect choice fields
+      4. Enable structured output for reliable JSON responses
+    </context>
+    <constraints>
+      - Add JPS instructions to existing system prompts (don't replace, extend)
+      - Keep prompt additions concise (agents perform worse with overly long instructions)
+      - Focus on WHEN to use the tool and HOW to define output fields
+      - Mention autoWireChoices as the default behavior
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Prompts/PlaybookBuilderSystemPrompt.cs</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read PlaybookBuilderSystemPrompt.cs ToolExecution and BuildPlanGeneration sections</step>
+    <step order="2">Add JPS instructions to ToolExecution prompt (after creating AI nodes, always use configure_prompt_schema)</step>
+    <step order="3">Add output field guidance to BuildPlanGeneration prompt</step>
+    <step order="4">Verify build: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Prompts/PlaybookBuilderSystemPrompt.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ToolExecution prompt instructs agent to use configure_prompt_schema</criterion>
+    <criterion>BuildPlanGeneration prompt includes output field guidance</criterion>
+    <criterion>Instructions are concise and actionable</criterion>
+    <criterion>Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>
