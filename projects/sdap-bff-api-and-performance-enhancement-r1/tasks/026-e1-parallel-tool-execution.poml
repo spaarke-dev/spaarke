@@ -1,0 +1,51 @@
+<task id="026" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Parallel read-only tool execution in chat pipeline</title>
+    <tags>bff-api, ai, performance</tags>
+    <phase>3.1</phase>
+    <estimate>4h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-3.1</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Execute read-only AI tools in parallel via Task.WhenAll. Write tools remain sequential. Target: 2-tool messages drop from ~700-1000ms to ~350-500ms.</goal>
+    <context>The current AI chat pipeline executes all tool calls sequentially, even when tools are independent read-only operations. When a chat message triggers 2+ read-only tools (e.g., DocumentSearch + KnowledgeRetrieval), each waits for the previous to complete. Parallel execution of read-only tools can nearly halve the latency for multi-tool messages. Write tools must remain sequential to prevent race conditions.</context>
+    <constraints>
+      - Follow ADR-013: AI stays in BFF, no separate service
+      - Read-only tools (DocumentSearch, KnowledgeRetrieval, etc.) execute in parallel via Task.WhenAll
+      - Write tools (CreateTask, UpdateRecord, etc.) execute sequentially — order matters
+      - Feature flag to enable/disable parallel execution (default: enabled)
+      - Must not change tool result ordering — results returned in original request order
+      - Target: SC-04 — 2-tool messages in ~350-500ms (down from ~700-1000ms)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-013-ai-architecture.md" reason="AI architecture — tools in BFF, not separate service" />
+      <file path=".claude/constraints/ai.md" reason="AI-specific constraints and rules" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Read current tool execution flow in Ai/Chat/ — understand how tool calls are dispatched and results collected</step>
+    <step id="2">Classify tools as read-only vs write: DocumentSearchTools, KnowledgeRetrievalTools = read-only; CreateTask, UpdateRecord = write</step>
+    <step id="3">Implement parallel execution for read-only tools: var readOnlyTasks = toolCalls.Where(IsReadOnly).Select(ExecuteToolAsync); await Task.WhenAll(readOnlyTasks)</step>
+    <step id="4">Keep sequential execution for write tools — execute after all read-only tools complete</step>
+    <step id="5">Ensure result ordering matches original request order regardless of execution order</step>
+    <step id="6">Add feature flag AI:ParallelToolExecution (default: true) to enable/disable</step>
+    <step id="7">Unit tests for parallel read-only + sequential write scenarios</step>
+    <step id="8">Run dotnet test — verify all tests pass</step>
+  </steps>
+  <outputs>
+    <artifact>Updated Ai/Chat/ tool execution pipeline with parallel support</artifact>
+    <artifact>Tool classification (read-only vs write) configuration</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Read-only tools execute in parallel via Task.WhenAll</criterion>
+    <criterion>Write tools execute sequentially after read-only tools complete</criterion>
+    <criterion>Result ordering matches original request order</criterion>
+    <criterion>Feature flag AI:ParallelToolExecution controls behavior (default: true)</criterion>
+    <criterion>Unit tests pass for parallel and sequential scenarios</criterion>
+    <criterion>SC-04 target achievable: 2-tool messages in ~350-500ms</criterion>
+  </acceptance-criteria>
+</task>

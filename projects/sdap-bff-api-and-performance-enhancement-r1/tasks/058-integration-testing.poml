@@ -1,0 +1,51 @@
+<task id="058" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>End-to-end integration testing</title>
+    <tags>testing, verification</tags>
+    <phase>6.1</phase>
+    <estimate>4h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>031, 051, 057</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Full integration testing of all project changes against dev environment.</goal>
+    <context>With all code changes (Phases 1-3), infrastructure (Phase 4), and CI/CD (Phase 5) complete, this task performs comprehensive integration testing to verify all 16 success criteria are met. This is the final validation before documentation updates and project wrap-up.</context>
+    <constraints>
+      - All changes must be deployed to dev environment before testing
+      - All 16 success criteria must be verified or have a documented plan
+      - Performance criteria (SC-02, SC-04) must be measured with actual timings
+      - Module disable/enable (SC-16) must be tested with live configuration changes
+      - Analysis restart recovery (SC-09) must be tested with simulated failure
+      - Follow integration test patterns from .claude/patterns/testing/
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/testing.md" reason="Testing requirements and verification standards" />
+      <file path=".claude/patterns/testing/integration-tests.md" reason="Integration test patterns and conventions" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Deploy all changes to dev</step>
+    <step id="2">Run integration test suite</step>
+    <step id="3">Verify all 16 success criteria</step>
+    <step id="4">Test file listing performance (SC-02)</step>
+    <step id="5">Test chat message performance (SC-04)</step>
+    <step id="6">Test module disable/enable (SC-16)</step>
+    <step id="7">Test analysis restart recovery (SC-09)</step>
+    <step id="8">Document test results</step>
+  </steps>
+  <outputs>
+    <artifact>projects/sdap-bff-api-and-performance-enhancement-r1/notes/integration-test-results.md</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All changes deployed to dev environment</criterion>
+    <criterion>All 16 success criteria verified or documented with plan</criterion>
+    <criterion>File listing performance meets SC-02 target</criterion>
+    <criterion>Chat message performance meets SC-04 target</criterion>
+    <criterion>Module disable/enable works (SC-16)</criterion>
+    <criterion>Analysis restart recovery works (SC-09)</criterion>
+    <criterion>Test results documented</criterion>
+  </acceptance-criteria>
+</task>

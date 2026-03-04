@@ -1,0 +1,61 @@
+<task id="002" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Extract startup modules from Program.cs</title>
+    <tags>bff-api, architecture, refactoring</tags>
+    <phase>1.2</phase>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>001</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Extract auth, cache, resilience, observability, and middleware setup from Program.cs into dedicated Infrastructure/Startup/ files.</goal>
+    <context>Using the extraction plan from task 001, decompose Program.cs into focused startup modules. Each module should be a static class with an IServiceCollection or WebApplication extension method. The DI registration order and middleware pipeline order documented in the extraction plan MUST be preserved exactly.</context>
+    <constraints>
+      - Follow ADR-001: Minimal API pattern — extension methods on IServiceCollection and WebApplication
+      - Follow ADR-008: Endpoint filters for auth — auth policies belong in AuthStartup.cs, not global middleware
+      - Follow ADR-010: DI minimalism — preserve ≤15 non-framework DI registrations across all modules
+      - Preserve exact DI registration order from extraction plan
+      - Preserve exact middleware pipeline order from extraction plan
+      - Each startup module must be independently testable
+      - No behavioral changes — pure refactoring
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-001-minimal-api.md" reason="Minimal API composition patterns" />
+      <file path=".claude/adr/ADR-008-endpoint-filters.md" reason="Endpoint filter auth pattern" />
+      <file path=".claude/adr/ADR-010-di-minimalism.md" reason="DI registration limits" />
+      <file path=".claude/patterns/api/service-registration.md" reason="Standard service registration patterns" />
+      <file path=".claude/constraints/api.md" reason="API-level constraints and rules" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Create Infrastructure/Startup/AuthStartup.cs — extract authentication config, authorization policies (26 policies), and auth-related DI registrations</step>
+    <step id="2">Create Infrastructure/Startup/CacheStartup.cs — extract Redis and in-memory cache configuration</step>
+    <step id="3">Create Infrastructure/Startup/ResilienceStartup.cs — extract Polly resilience policies and rate limiting configuration</step>
+    <step id="4">Create Infrastructure/Startup/ObservabilityStartup.cs — extract Application Insights, OpenTelemetry, and health check registrations</step>
+    <step id="5">Create Infrastructure/Startup/MiddlewareStartup.cs — extract middleware pipeline configuration (CORS, error handling, request logging, etc.)</step>
+    <step id="6">Create Infrastructure/Startup/EndpointStartup.cs — extract inline health, debug, and status endpoint mappings</step>
+    <step id="7">Update Program.cs to call new startup modules via extension methods, preserving registration and middleware order</step>
+    <step id="8">Run dotnet build to verify compilation</step>
+    <step id="9">Run dotnet test to verify no behavioral regressions</step>
+  </steps>
+  <outputs>
+    <artifact>src/server/api/Sprk.Bff.Api/Infrastructure/Startup/AuthStartup.cs</artifact>
+    <artifact>src/server/api/Sprk.Bff.Api/Infrastructure/Startup/CacheStartup.cs</artifact>
+    <artifact>src/server/api/Sprk.Bff.Api/Infrastructure/Startup/ResilienceStartup.cs</artifact>
+    <artifact>src/server/api/Sprk.Bff.Api/Infrastructure/Startup/ObservabilityStartup.cs</artifact>
+    <artifact>src/server/api/Sprk.Bff.Api/Infrastructure/Startup/MiddlewareStartup.cs</artifact>
+    <artifact>src/server/api/Sprk.Bff.Api/Infrastructure/Startup/EndpointStartup.cs</artifact>
+    <artifact>src/server/api/Sprk.Bff.Api/Program.cs (reduced)</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All 6 new startup files exist under Infrastructure/Startup/</criterion>
+    <criterion>Program.cs calls startup modules via extension methods</criterion>
+    <criterion>DI registration order matches extraction plan exactly</criterion>
+    <criterion>Middleware pipeline order matches extraction plan exactly</criterion>
+    <criterion>dotnet build succeeds with zero errors</criterion>
+    <criterion>dotnet test passes with zero regressions</criterion>
+  </acceptance-criteria>
+</task>

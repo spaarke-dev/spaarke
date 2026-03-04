@@ -1,0 +1,50 @@
+<task id="017" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Phase 2 integration verification</title>
+    <tags>testing, verification</tags>
+    <phase>2.3</phase>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>011, 013, 014, 015, 016</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify all Phase 2 caching and feature flag changes work together.</goal>
+    <context>Phase 2 introduced multiple independent subsystems: feature flags (tasks 010-011), Graph metadata caching (tasks 012-013), auth data caching (task 014), GraphServiceClient pooling (task 015), and request-scoped document caching (task 016). This verification task ensures all subsystems integrate correctly, no regressions exist, and the architecture tests still pass. This is a quality gate before deployment.</context>
+    <constraints>
+      - All dotnet build targets must compile successfully
+      - All existing and new tests must pass
+      - Architecture tests must pass (DI count, naming conventions, etc.)
+      - Feature flag behavior must be verified end-to-end
+      - Cache services must be properly registered in DI
+      - Graceful degradation must work when Redis is unavailable
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/testing.md" reason="Testing constraints and requirements" />
+      <file path=".claude/patterns/testing/integration-tests.md" reason="Integration test patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Run dotnet build for all projects — verify clean compilation</step>
+    <step id="2">Run dotnet test for all projects — verify all tests pass</step>
+    <step id="3">Run architecture tests — verify DI count, naming conventions, endpoint filter usage</step>
+    <step id="4">Verify SC-16: disable a module via config, confirm 503 response, confirm other modules unaffected</step>
+    <step id="5">Verify cache services (GraphMetadataCacheService, AuthDataCacheService) are properly registered in DI</step>
+    <step id="6">Verify graceful degradation: simulate Redis unavailability, confirm operations fall back to source</step>
+    <step id="7">Document verification results in notes/phase2-verification.md</step>
+  </steps>
+  <outputs>
+    <artifact>projects/sdap-bff-api-and-performance-enhancement-r1/notes/phase2-verification.md</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All projects build successfully with no warnings</criterion>
+    <criterion>All tests pass (existing and new)</criterion>
+    <criterion>Architecture tests pass</criterion>
+    <criterion>SC-16 verified: disabled module returns 503, others unaffected</criterion>
+    <criterion>Cache services properly registered and functional</criterion>
+    <criterion>Graceful degradation works when Redis is unavailable</criterion>
+    <criterion>Verification results documented</criterion>
+  </acceptance-criteria>
+</task>

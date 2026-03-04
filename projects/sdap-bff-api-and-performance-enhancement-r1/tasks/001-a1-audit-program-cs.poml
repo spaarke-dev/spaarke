@@ -1,0 +1,48 @@
+<task id="001" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Audit Program.cs composition root, document extraction plan</title>
+    <tags>bff-api, architecture, refactoring</tags>
+    <phase>1.1</phase>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-1.1</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Read and document the full structure of Program.cs (~1,881 lines). Create extraction plan mapping each section to its target file. Document DI registration order, middleware order, conditional logic blocks.</goal>
+    <context>Program.cs has grown to ~1,881 lines and needs decomposition into focused startup modules. This audit task produces the extraction plan that guides tasks 002 and 003. Understanding the exact DI registration order and middleware pipeline order is critical — reordering can break auth, caching, and request handling.</context>
+    <constraints>
+      - Follow ADR-001: Minimal API + BackgroundService — no Azure Functions
+      - Follow ADR-010: DI minimalism — track registration count, target ≤15 non-framework registrations
+      - Preserve exact DI registration order in extraction plan
+      - Preserve exact middleware pipeline order in extraction plan
+      - Document all conditional logic blocks (IsDevelopment, feature flags, etc.)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-001-minimal-api.md" reason="Architectural constraints for API composition" />
+      <file path=".claude/adr/ADR-010-di-minimalism.md" reason="DI registration limits and patterns" />
+      <file path=".claude/patterns/api/service-registration.md" reason="Standard service registration patterns" />
+      <file path=".claude/constraints/api.md" reason="API-level constraints and rules" />
+      <file path="src/server/api/Sprk.Bff.Api/CLAUDE.md" reason="BFF API module-specific instructions" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Read Program.cs fully — capture total line count and high-level structure</step>
+    <step id="2">Document all sections: DI registrations, middleware pipeline, endpoint mappings, conditional blocks</step>
+    <step id="3">Map each section to its target extraction file (AuthStartup.cs, CacheStartup.cs, ResilienceStartup.cs, ObservabilityStartup.cs, MiddlewareStartup.cs, EndpointStartup.cs, EmailModule.cs, AiModule.cs, WorkersModule.cs)</step>
+    <step id="4">Document DI registration order dependencies — identify registrations that must come before others</step>
+    <step id="5">Create extraction-plan.md in projects/sdap-bff-api-and-performance-enhancement-r1/notes/ with complete section-to-file mapping and DI order documentation</step>
+  </steps>
+  <outputs>
+    <artifact>projects/sdap-bff-api-and-performance-enhancement-r1/notes/extraction-plan.md</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>extraction-plan.md exists in notes/ with complete section-to-file mapping</criterion>
+    <criterion>DI registration order is fully documented with dependency notes</criterion>
+    <criterion>Middleware pipeline order is fully documented</criterion>
+    <criterion>All conditional logic blocks are identified and annotated</criterion>
+    <criterion>Every line range in Program.cs is accounted for in the extraction plan</criterion>
+  </acceptance-criteria>
+</task>

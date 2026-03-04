@@ -1,0 +1,45 @@
+<task id="031" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Deploy Phase 3 to dev environment</title>
+    <tags>deploy, bff-api</tags>
+    <phase>3.4</phase>
+    <estimate>1h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>030</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Deploy Phase 1-3 changes to dev environment.</goal>
+    <context>Phase 3 verification (task 030) has confirmed all features work correctly. This task deploys the cumulative Phase 1-3 changes to the dev environment. This includes creating 2 new Service Bus queues (if not already provisioned via Bicep), deploying the updated BFF API, and verifying the deployment is healthy. Resource budgets should be in warn-only mode for initial observation.</context>
+    <constraints>
+      - Use scripts/Deploy-BffApi.ps1 for BFF API deployment
+      - Verify /healthz endpoint after deployment
+      - Resource budgets must be in warn-only mode (not enforce)
+      - Monitor Application Insights for errors after deployment
+      - Service Bus queues must be created before BFF API deployment if not already present
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/azure-deployment.md" reason="Azure deployment constraints and procedures" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Create 2 new Service Bus queues (sdap-jobs-critical, sdap-jobs-bulk) via Bicep deployment if not already provisioned</step>
+    <step id="2">Deploy BFF API using scripts/Deploy-BffApi.ps1</step>
+    <step id="3">Verify /healthz endpoint returns healthy status</step>
+    <step id="4">Test resource budget warn-only logging — trigger AI endpoint, verify budget metrics in logs</step>
+    <step id="5">Monitor Application Insights for errors, exceptions, and performance anomalies</step>
+  </steps>
+  <outputs>
+    <artifact>Deployed BFF API to dev environment</artifact>
+    <artifact>2 new Service Bus queues operational</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Dev deployment successful — BFF API running</criterion>
+    <criterion>/healthz returns healthy</criterion>
+    <criterion>Priority queues (sdap-jobs-critical, sdap-jobs-standard, sdap-jobs-bulk) are operational</criterion>
+    <criterion>Resource budgets in warn-only mode — metrics visible in logs</criterion>
+    <criterion>No errors in Application Insights post-deployment</criterion>
+  </acceptance-criteria>
+</task>

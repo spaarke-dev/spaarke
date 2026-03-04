@@ -1,0 +1,47 @@
+<task id="051" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Phase 4 infrastructure verification</title>
+    <tags>testing, verification, infrastructure</tags>
+    <phase>4.5</phase>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>043, 044, 048, 049, 050</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify all infrastructure changes work together.</goal>
+    <context>Phase 4 includes VNet/private endpoints (040-042, 050), autoscaling (043), deployment slots (044), service hardening (045-047), and AI resource cleanup (048-049). This verification task ensures all infrastructure changes work together as a cohesive system — no connectivity gaps, no misconfigured rules, and all success criteria (SC-12, SC-13, SC-14) are met before proceeding to CI/CD in Phase 5.</context>
+    <constraints>
+      - All Phase 4 tasks must be complete before verification
+      - SC-12: All resources behind VNet/private endpoints
+      - SC-13: Autoscaling rules active
+      - SC-14: Deployment slot swap works
+      - Document all verification results for audit trail
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/azure-deployment.md" reason="Azure deployment constraints and Bicep patterns" />
+      <file path=".claude/constraints/testing.md" reason="Testing requirements and verification standards" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Verify VNet + private endpoints (SC-12)</step>
+    <step id="2">Verify autoscaling profile (SC-13)</step>
+    <step id="3">Verify deployment slot swap (SC-14)</step>
+    <step id="4">Verify Redis hardening</step>
+    <step id="5">Verify Key Vault/Storage restrictions</step>
+    <step id="6">Run BFF API health check</step>
+    <step id="7">Document results in notes/phase4-verification.md</step>
+  </steps>
+  <outputs>
+    <artifact>projects/sdap-bff-api-and-performance-enhancement-r1/notes/phase4-verification.md</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All infrastructure criteria met and documented</criterion>
+    <criterion>SC-12 verified — all resources behind VNet/private endpoints</criterion>
+    <criterion>SC-13 verified — autoscaling rules active</criterion>
+    <criterion>SC-14 verified — deployment slot swap works</criterion>
+    <criterion>BFF API health check passes with all infrastructure changes</criterion>
+  </acceptance-criteria>
+</task>

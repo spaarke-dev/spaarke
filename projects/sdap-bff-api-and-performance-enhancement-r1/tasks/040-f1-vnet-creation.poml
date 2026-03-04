@@ -1,0 +1,48 @@
+<task id="040" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>VNet and subnet creation</title>
+    <tags>infrastructure, azure, security, bicep</tags>
+    <phase>4.1</phase>
+    <estimate>5h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-4.1</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create VNet with 3 subnets (snet-app, snet-redis, snet-pe) via Bicep.</goal>
+    <context>The SDAP BFF API infrastructure currently runs without network isolation. All Azure services are exposed via public endpoints, creating unnecessary attack surface. A VNet with purpose-specific subnets provides the network foundation for private endpoints, NSG rules, and App Service VNet integration that subsequent tasks will build upon.</context>
+    <constraints>
+      - Follow Azure naming conventions from docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md
+      - Use Bicep modules under infrastructure/bicep/modules/
+      - Subnets: snet-app (App Service integration), snet-redis (Redis VNet injection), snet-pe (private endpoints)
+      - Each subnet must have an NSG attached
+      - Address space must not overlap with any existing VNets
+      - Use dev.bicepparam for environment-specific configuration
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/azure-deployment.md" reason="Azure deployment constraints and Bicep patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Design address space and subnet CIDR ranges</step>
+    <step id="2">Create infrastructure/bicep/modules/vnet.bicep</step>
+    <step id="3">Add subnet definitions with service endpoints</step>
+    <step id="4">Add NSG skeleton for each subnet</step>
+    <step id="5">Create dev.bicepparam with VNet configuration</step>
+    <step id="6">Run what-if deployment</step>
+    <step id="7">Deploy to dev environment</step>
+  </steps>
+  <outputs>
+    <artifact>infrastructure/bicep/modules/vnet.bicep</artifact>
+    <artifact>infrastructure/bicep/modules/nsg.bicep</artifact>
+    <artifact>infrastructure/bicep/params/dev.bicepparam</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>VNet created with 3 subnets (snet-app, snet-redis, snet-pe)</criterion>
+    <criterion>NSGs attached to each subnet</criterion>
+    <criterion>Bicep template validated with what-if deployment</criterion>
+    <criterion>Dev environment deployment successful</criterion>
+  </acceptance-criteria>
+</task>

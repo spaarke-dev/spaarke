@@ -1,0 +1,52 @@
+<task id="003" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Extract remaining DI modules and finalize Program.cs</title>
+    <tags>bff-api, architecture, refactoring</tags>
+    <phase>1.3</phase>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>002</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Extract EmailModule.cs, expand AiModule.cs and WorkersModule.cs, reduce Program.cs to ~150 lines.</goal>
+    <context>After task 002 extracted startup modules, Program.cs still contains domain-specific DI registrations for email services, AI services (~200 lines), and background job handlers (~65 lines). These need to be extracted into focused DI modules to reach the target of Program.cs under 200 lines. The final Program.cs should be a clean composition root that reads like a table of contents.</context>
+    <constraints>
+      - Follow ADR-010: DI minimalism — verify ≤15 non-framework DI registrations after extraction
+      - Preserve DI registration order within each module
+      - Program.cs must remain the single composition root — modules are called from Program.cs
+      - No behavioral changes — pure refactoring
+      - Final Program.cs should be under 200 lines (target ~150)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-010-di-minimalism.md" reason="DI registration limits and module patterns" />
+      <file path=".claude/patterns/api/service-registration.md" reason="Standard service registration patterns" />
+      <file path=".claude/constraints/api.md" reason="API-level constraints and rules" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Create Infrastructure/DI/EmailModule.cs — extract email-related service registrations</step>
+    <step id="2">Move ~200 lines of AI service registrations into Infrastructure/DI/AiModule.cs (expand existing or create new)</step>
+    <step id="3">Move ~65 lines of background job handler registrations into Infrastructure/DI/WorkersModule.cs (expand existing or create new)</step>
+    <step id="4">Refactor Program.cs to ~150 lines matching target composition root structure</step>
+    <step id="5">Verify DI registration order is preserved across all modules</step>
+    <step id="6">Run dotnet build to verify compilation</step>
+    <step id="7">Run dotnet test to verify no behavioral regressions</step>
+    <step id="8">Verify Program.cs line count is under 200 lines</step>
+  </steps>
+  <outputs>
+    <artifact>src/server/api/Sprk.Bff.Api/Infrastructure/DI/EmailModule.cs</artifact>
+    <artifact>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs</artifact>
+    <artifact>src/server/api/Sprk.Bff.Api/Infrastructure/DI/WorkersModule.cs</artifact>
+    <artifact>src/server/api/Sprk.Bff.Api/Program.cs (finalized, ~150 lines)</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Program.cs is under 200 lines (target ~150)</criterion>
+    <criterion>All domain-specific DI modules extracted (Email, AI, Workers)</criterion>
+    <criterion>dotnet build succeeds with zero errors</criterion>
+    <criterion>dotnet test passes with zero regressions</criterion>
+    <criterion>SC-01 success criterion met: Program.cs reduced from ~1,881 to under 200 lines</criterion>
+  </acceptance-criteria>
+</task>

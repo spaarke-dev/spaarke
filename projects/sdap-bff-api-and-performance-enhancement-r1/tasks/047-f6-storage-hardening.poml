@@ -1,0 +1,46 @@
+<task id="047" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Storage account hardening</title>
+    <tags>infrastructure, azure, security, bicep</tags>
+    <phase>4.3</phase>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-4.3</parallel-group>
+    <dependencies>041</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Disable shared key access, restrict to VNet, add lifecycle management for ai-chunks container.</goal>
+    <context>The Storage account currently allows shared key access and public blob access. Disabling shared key access forces all access through Azure AD (managed identity), which is more secure and auditable. The ai-chunks container accumulates temporary processing artifacts that should be automatically cleaned up after 90 days to control costs.</context>
+    <constraints>
+      - Disable shared key access — all access via managed identity (Azure AD)
+      - VNet network rules must restrict to snet-app subnet
+      - Lifecycle management: auto-delete blobs in ai-chunks container after 90 days
+      - Disable public blob access
+      - App Service must retain access via managed identity
+      - Verify no code paths rely on shared key authentication
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/azure-deployment.md" reason="Azure deployment constraints and Bicep patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Update storage-account.bicep: disable shared key access</step>
+    <step id="2">Add VNet network rules</step>
+    <step id="3">Add lifecycle management policy for ai-chunks container (auto-delete after 90 days)</step>
+    <step id="4">Disable public blob access</step>
+    <step id="5">Verify App Service can still access storage via managed identity</step>
+    <step id="6">Deploy</step>
+  </steps>
+  <outputs>
+    <artifact>infrastructure/bicep/modules/storage-account.bicep</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Shared key access disabled on storage account</criterion>
+    <criterion>VNet-only access enforced via network rules</criterion>
+    <criterion>Lifecycle policy active: ai-chunks auto-delete after 90 days</criterion>
+    <criterion>Public blob access disabled</criterion>
+    <criterion>App Service access via managed identity verified</criterion>
+  </acceptance-criteria>
+</task>

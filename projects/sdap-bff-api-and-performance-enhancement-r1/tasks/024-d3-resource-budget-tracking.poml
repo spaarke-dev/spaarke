@@ -1,0 +1,52 @@
+<task id="024" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Resource budget tracking infrastructure</title>
+    <tags>bff-api, resilience, performance</tags>
+    <phase>3.1</phase>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-3.2</parallel-group>
+    <dependencies>003</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create per-request resource budget tracking for Graph API calls, OpenAI tokens, and AI Search queries.</goal>
+    <context>Currently there are no guardrails on how many external API calls a single request can trigger. A single chat message could theoretically trigger unlimited Graph calls, OpenAI token consumption, and AI Search queries. Resource budget tracking creates per-request budgets with defined limits, enabling the enforcement filter (task 025) to prevent runaway requests. Budget profiles are defined per endpoint type (Chat, Analysis, Batch).</context>
+    <constraints>
+      - Follow ADR-015: Log only identifiers, sizes, and timings — not content
+      - Follow ADR-019: ProblemDetails for all HTTP error responses
+      - Budget tracking must be request-scoped (not global)
+      - Budget profiles: Chat (Graph=5, OpenAI=4000 tokens, AISearch=3), Analysis (Graph=15, OpenAI=16000, AISearch=10), Batch (Graph=50, OpenAI=32000, AISearch=20)
+      - Track consumed vs budget — no enforcement yet (task 025 adds enforcement)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-015-ai-data-governance.md" reason="Data governance — log identifiers only, not content" />
+      <file path=".claude/adr/ADR-019-problem-details.md" reason="ProblemDetails format for error responses" />
+      <file path=".claude/constraints/api.md" reason="API-level constraints and rules" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Create Infrastructure/ResourceBudget.cs — tracks consumed vs budget per resource type (Graph, OpenAI, AISearch) per request</step>
+    <step id="2">Define budget profiles: Chat (Graph=5, OpenAI=4000, AISearch=3), Analysis (Graph=15, OpenAI=16000, AISearch=10), Batch (Graph=50, OpenAI=32000, AISearch=20)</step>
+    <step id="3">Create ResourceBudgetContext as request-scoped service — initialized with appropriate profile at request start</step>
+    <step id="4">Add budget check points in Graph client wrapper — increment Graph call count</step>
+    <step id="5">Add budget check points in OpenAI client wrapper — increment token count</step>
+    <step id="6">Add budget check points in AI Search client wrapper — increment query count</step>
+    <step id="7">Unit tests for budget tracking, increment, and exhaustion detection</step>
+    <step id="8">Run dotnet build — verify compilation</step>
+  </steps>
+  <outputs>
+    <artifact>src/server/api/Sprk.Bff.Api/Infrastructure/ResourceBudget.cs</artifact>
+    <artifact>src/server/api/Sprk.Bff.Api/Infrastructure/ResourceBudgetContext.cs</artifact>
+    <artifact>src/server/api/Sprk.Bff.Api/Infrastructure/ResourceBudgetProfile.cs</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>ResourceBudget class tracks consumed vs budget per resource type per request</criterion>
+    <criterion>3 budget profiles defined (Chat, Analysis, Batch) with correct limits</criterion>
+    <criterion>ResourceBudgetContext is request-scoped and integrates with DI</criterion>
+    <criterion>Budget check points added to Graph, OpenAI, and AI Search client wrappers</criterion>
+    <criterion>Unit tests pass for tracking, increment, and exhaustion detection</criterion>
+    <criterion>dotnet build succeeds</criterion>
+  </acceptance-criteria>
+</task>

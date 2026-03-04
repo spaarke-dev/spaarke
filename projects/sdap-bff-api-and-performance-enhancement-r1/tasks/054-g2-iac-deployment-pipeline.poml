@@ -1,0 +1,46 @@
+<task id="054" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>IaC CI/CD pipeline configuration</title>
+    <tags>ci-cd, infrastructure</tags>
+    <phase>5.2</phase>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>053</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Configure GitHub Actions workflow for IaC deployment with environment selection.</goal>
+    <context>With Bicep parameter files created for all environments (task 053), a GitHub Actions workflow is needed to automate infrastructure deployment. The workflow must support environment selection (dev/staging/prod), include a what-if preview step, and require approval gates for production deployments.</context>
+    <constraints>
+      - Use GitHub Actions (not Azure DevOps)
+      - Environment matrix: dev, staging, prod
+      - What-if preview must run before deployment
+      - Production deployment requires manual approval
+      - Workflow must use OIDC for Azure authentication (no stored credentials)
+      - Output summary must show what resources were created/modified
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/azure-deployment.md" reason="Azure deployment constraints and Bicep patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Create .github/workflows/deploy-infrastructure.yml</step>
+    <step id="2">Add environment matrix (dev, staging, prod)</step>
+    <step id="3">Add what-if preview step</step>
+    <step id="4">Add deployment step with approval gate for prod</step>
+    <step id="5">Add output summary</step>
+    <step id="6">Test workflow with dev environment</step>
+  </steps>
+  <outputs>
+    <artifact>.github/workflows/deploy-infrastructure.yml</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>GitHub Actions workflow deploys infrastructure for all environments</criterion>
+    <criterion>What-if preview step included before deployment</criterion>
+    <criterion>Approval gate configured for production environment</criterion>
+    <criterion>OIDC authentication used (no stored credentials)</criterion>
+    <criterion>Workflow tested with dev environment</criterion>
+  </acceptance-criteria>
+</task>

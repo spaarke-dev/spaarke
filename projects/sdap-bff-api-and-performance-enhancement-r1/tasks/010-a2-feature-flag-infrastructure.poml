@@ -1,0 +1,52 @@
+<task id="010" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Domain feature flag infrastructure</title>
+    <tags>bff-api, architecture, feature-flags</tags>
+    <phase>2.1</phase>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-2.1</parallel-group>
+    <dependencies>003</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create ModuleState tracking and ModuleGateFilter for runtime domain isolation. When a module is disabled: endpoints return 503, DI modules skip registration, background job handlers skip-and-complete messages.</goal>
+    <context>Phase 2 introduces feature flags so individual domain modules (AI, Communication, Documents, Finance, Office, Workers, Workspace, Email) can be enabled/disabled at runtime. This is foundational infrastructure that other Phase 2 tasks depend on. SPE is foundational and cannot be disabled. Dataverse cannot be disabled.</context>
+    <constraints>
+      - Follow ADR-008: Use endpoint filters for authorization and gating, not global middleware
+      - Follow ADR-019: Return ProblemDetails for all error responses including 503
+      - Follow ADR-010: DI minimalism — ModuleState should be a single registration
+      - ModuleGateFilter must return 503 Service Unavailable with ProblemDetails body
+      - SPE module is foundational and must not be disableable
+      - Dataverse module cannot be disabled
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-008-endpoint-filters.md" reason="Endpoint filter pattern for ModuleGateFilter" />
+      <file path=".claude/adr/ADR-019-problem-details.md" reason="ProblemDetails format for 503 responses" />
+      <file path=".claude/patterns/api/endpoint-filters.md" reason="Endpoint filter implementation patterns" />
+      <file path=".claude/constraints/api.md" reason="API constraints and conventions" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Create Infrastructure/ModuleState.cs — tracks enabled/disabled state per module, loaded from configuration</step>
+    <step id="2">Create Api/Filters/ModuleGateFilter.cs — endpoint filter that returns 503 ProblemDetails when the associated module is disabled</step>
+    <step id="3">Add Modules config section to appsettings.json with all domains defaulting to true</step>
+    <step id="4">Document domain dependency graph (SPE foundational, Dataverse cannot be disabled) in code comments and config</step>
+    <step id="5">Run dotnet build — verify compilation</step>
+    <step id="6">Run dotnet test — verify no regressions</step>
+  </steps>
+  <outputs>
+    <artifact>src/server/api/Sprk.Bff.Api/Infrastructure/ModuleState.cs</artifact>
+    <artifact>src/server/api/Sprk.Bff.Api/Api/Filters/ModuleGateFilter.cs</artifact>
+    <artifact>Updated appsettings.json with Modules section</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>ModuleState class exists and tracks enabled/disabled state per module</criterion>
+    <criterion>ModuleGateFilter returns 503 ProblemDetails when module is disabled</criterion>
+    <criterion>Modules config section added to appsettings.json with all domains defaulting to true</criterion>
+    <criterion>SPE and Dataverse are marked as non-disableable</criterion>
+    <criterion>dotnet build succeeds</criterion>
+    <criterion>dotnet test passes with no regressions</criterion>
+  </acceptance-criteria>
+</task>

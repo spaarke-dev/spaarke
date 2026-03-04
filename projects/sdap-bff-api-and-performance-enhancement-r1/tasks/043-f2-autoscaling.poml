@@ -1,0 +1,47 @@
+<task id="043" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>App Service autoscaling rules</title>
+    <tags>infrastructure, azure, bicep</tags>
+    <phase>4.1</phase>
+    <estimate>4h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-4.1</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Configure autoscaling: CPU>70%/5min scale out, CPU&lt;30%/10min scale in, memory/queue triggers. Min 2, max 10.</goal>
+    <context>The BFF API currently runs on a fixed instance count. Under load spikes (e.g., bulk document processing, concurrent AI operations), this leads to degraded performance. Autoscaling rules ensure the App Service scales dynamically based on CPU, memory, and HTTP queue depth while maintaining a minimum of 2 instances for high availability. This directly addresses success criterion SC-13.</context>
+    <constraints>
+      - Scale-out trigger: CPU > 70% sustained for 5 minutes
+      - Scale-in trigger: CPU &lt; 30% sustained for 10 minutes
+      - Include memory and HTTP queue depth triggers
+      - Cooldown: 5 minutes for scale-out, 10 minutes for scale-in
+      - Instance range: min=2, max=10
+      - Must work on P1v3 App Service Plan
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/azure-deployment.md" reason="Azure deployment constraints and Bicep patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Update infrastructure/bicep/modules/app-service-plan.bicep with autoscale profile</step>
+    <step id="2">Add CPU, memory, HTTP queue scale rules</step>
+    <step id="3">Set cooldown periods (5min scale-out, 10min scale-in)</step>
+    <step id="4">Set min=2, max=10 instances</step>
+    <step id="5">Deploy and verify autoscale profile active</step>
+    <step id="6">Test scale trigger (optional — manual verification)</step>
+  </steps>
+  <outputs>
+    <artifact>infrastructure/bicep/modules/app-service-plan.bicep</artifact>
+    <artifact>infrastructure/bicep/modules/autoscale-settings.bicep</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Autoscale profile deployed and active on App Service Plan</criterion>
+    <criterion>CPU, memory, and HTTP queue depth rules configured</criterion>
+    <criterion>Cooldown periods set correctly (5min out, 10min in)</criterion>
+    <criterion>Instance range min=2, max=10 configured</criterion>
+    <criterion>SC-13 verified — autoscaling rules active</criterion>
+  </acceptance-criteria>
+</task>

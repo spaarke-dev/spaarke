@@ -1,0 +1,47 @@
+<task id="029" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Pagination support for unbounded queries</title>
+    <tags>bff-api, dataverse, correctness</tags>
+    <phase>3.1</phase>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-3.1</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Add paging cookie support to unbounded queries that silently truncate at 5,000 records.</goal>
+    <context>Dataverse silently truncates query results at 5,000 records. Several queries in the codebase (e.g., GetDocumentsByContainerAsync) do not handle pagination and will silently return incomplete results for containers with more than 5,000 documents. Dataverse provides a paging cookie mechanism for continuation — this task adds automatic page continuation so unbounded queries return complete result sets.</context>
+    <constraints>
+      - Use Dataverse paging cookie mechanism for continuation
+      - Automatic page continuation — callers should not need to handle paging manually
+      - Must identify all unbounded queries, not just GetDocumentsByContainerAsync
+      - Performance consideration: very large result sets should stream/yield rather than buffer all in memory
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/data.md" reason="Dataverse data access constraints and pagination rules" />
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Entity operation patterns including paging" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Identify all unbounded queries in the codebase — search for Dataverse queries without $top or pagination handling</step>
+    <step id="2">Implement paging cookie support in DataverseService — parse @Microsoft.Dynamics.CRM.fetchXmlPagingCookie or @odata.nextLink</step>
+    <step id="3">Add automatic page continuation for queries exceeding 5,000 records — follow nextLink/paging cookie until complete</step>
+    <step id="4">Apply pagination to identified unbounded queries (GetDocumentsByContainerAsync and others)</step>
+    <step id="5">Unit tests for pagination scenarios — single page, multi-page, empty results</step>
+    <step id="6">Run dotnet test — verify all tests pass</step>
+  </steps>
+  <outputs>
+    <artifact>Updated DataverseService with paging cookie support</artifact>
+    <artifact>Updated unbounded query methods with automatic pagination</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Paging cookie support implemented in DataverseService</criterion>
+    <criterion>Automatic page continuation follows nextLink/paging cookie until all results retrieved</criterion>
+    <criterion>All identified unbounded queries updated with pagination</criterion>
+    <criterion>Queries return complete results beyond 5,000 records</criterion>
+    <criterion>Unit tests pass for single-page, multi-page, and empty result scenarios</criterion>
+    <criterion>dotnet test passes with no regressions</criterion>
+  </acceptance-criteria>
+</task>

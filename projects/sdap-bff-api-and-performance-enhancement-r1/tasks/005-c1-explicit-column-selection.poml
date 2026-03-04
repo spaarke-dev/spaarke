@@ -1,0 +1,55 @@
+<task id="005" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Replace ColumnSet(true) with explicit columns</title>
+    <tags>bff-api, dataverse, performance</tags>
+    <phase>1.1</phase>
+    <estimate>4h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-1.1</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Replace all 6 ColumnSet(true) usages and add $select to WebAPI queries for 50-80% payload reduction.</goal>
+    <context>ColumnSet(true) retrieves ALL columns from Dataverse entities, returning far more data than needed. This causes unnecessary network traffic, slower responses, and higher Dataverse API unit consumption. Each usage must be replaced with explicit column lists derived by tracing how the retrieved data is actually used by callers. Similarly, WebAPI queries without $select return all columns and must be updated.</context>
+    <constraints>
+      - Trace each ColumnSet(true) caller to determine actually-used columns — do not guess
+      - Include all columns that callers access, including conditional or optional accesses
+      - Add a safety margin: include columns used in logging, error messages, and audit trails
+      - Use string constants for column names where possible (avoid magic strings)
+      - Add $select to all WebAPI GET requests that retrieve entity data
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/data.md" reason="Data access constraints including column selection rules" />
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Entity operation patterns and column selection guidance" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Search entire codebase for ColumnSet(true) — document all 6 occurrences with file, line, and method</step>
+    <step id="2">For each occurrence, trace all callers to identify actually-used columns</step>
+    <step id="3">Replace GetDocumentAsync SDK call — ColumnSet(true) to explicit 8 columns</step>
+    <step id="4">Replace GetProcessingJobAsync — ColumnSet(true) to explicit 10 columns</step>
+    <step id="5">Replace GetProcessingJobByIdempotencyKeyAsync — ColumnSet(true) to explicit 6 columns</step>
+    <step id="6">Replace GetEmailArtifactAsync — ColumnSet(true) to explicit 12 columns</step>
+    <step id="7">Replace GetAttachmentArtifactAsync — ColumnSet(true) to explicit 8 columns</step>
+    <step id="8">Replace remaining ColumnSet(true) occurrence (6th instance identified in step 1)</step>
+    <step id="9">Add $select parameter to GetDocumentAsync WebAPI query</step>
+    <step id="10">Search for any other WebAPI GET requests missing $select and add explicit column selection</step>
+    <step id="11">Run dotnet build to verify compilation</step>
+    <step id="12">Run dotnet test to verify no regressions</step>
+    <step id="13">Verify zero ColumnSet(true) remaining in codebase via search</step>
+  </steps>
+  <outputs>
+    <artifact>Modified Dataverse service files with explicit column selection</artifact>
+    <artifact>Modified WebAPI query methods with $select parameters</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Zero ColumnSet(true) occurrences remain in the entire codebase</criterion>
+    <criterion>All WebAPI GET queries include $select with explicit columns</criterion>
+    <criterion>Column lists are derived from actual caller usage (traced, not guessed)</criterion>
+    <criterion>dotnet build succeeds with zero errors</criterion>
+    <criterion>dotnet test passes with zero regressions</criterion>
+    <criterion>SC-07 success criterion met: all Dataverse queries use explicit column selection</criterion>
+  </acceptance-criteria>
+</task>

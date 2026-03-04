@@ -1,0 +1,44 @@
+<task id="057" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Phase 5 CI/CD verification</title>
+    <tags>testing, verification, ci-cd</tags>
+    <phase>5.5</phase>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>052, 054, 055, 056</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify complete CI/CD pipeline works end-to-end.</goal>
+    <context>Phase 5 established test re-enablement (052), IaC deployment pipeline (053-054), environment promotion (055), and deployment slot integration (056). This verification task ensures the entire CI/CD pipeline works end-to-end — from code push through test gate, IaC what-if, environment promotion, and slot-based deployment. This is the final gate before integration testing in Phase 6.</context>
+    <constraints>
+      - All Phase 5 tasks must be complete before verification
+      - SC-15: CI/CD pipeline with test gate, IaC deployment, environment promotion
+      - Pipeline must be demonstrated working, not just configured
+      - Document the complete pipeline flow for operations team
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/testing.md" reason="Testing requirements and verification standards" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Verify test gate blocks deployment on failure</step>
+    <step id="2">Verify IaC what-if preview works</step>
+    <step id="3">Verify environment promotion flow</step>
+    <step id="4">Verify slot deployment + swap</step>
+    <step id="5">Document pipeline in notes/cicd-pipeline.md</step>
+  </steps>
+  <outputs>
+    <artifact>projects/sdap-bff-api-and-performance-enhancement-r1/notes/cicd-pipeline.md</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Full CI/CD pipeline operational end-to-end</criterion>
+    <criterion>Test gate blocks deployment on test failure</criterion>
+    <criterion>IaC what-if preview works for all environments</criterion>
+    <criterion>Environment promotion flow verified</criterion>
+    <criterion>Slot deployment and swap verified</criterion>
+    <criterion>SC-15 verified — complete CI/CD pipeline operational</criterion>
+  </acceptance-criteria>
+</task>

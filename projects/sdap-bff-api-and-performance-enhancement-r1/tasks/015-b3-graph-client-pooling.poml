@@ -1,0 +1,47 @@
+<task id="015" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>GraphServiceClient singleton pooling</title>
+    <tags>bff-api, performance</tags>
+    <phase>2.1</phase>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-2.1</parallel-group>
+    <dependencies>003</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Cache singleton GraphServiceClient for app-only operations instead of recreating credential and auth provider on every call.</goal>
+    <context>Currently, GraphClientFactory recreates the ClientSecretCredential, TokenCredentialAuthProvider, and GraphServiceClient on every app-only call. This is unnecessary overhead since app-only credentials are long-lived. By caching a singleton GraphServiceClient for app-only operations, we eliminate repeated object creation. OBO (on-behalf-of / delegated) clients must remain per-request since they carry user-specific tokens.</context>
+    <constraints>
+      - Follow ADR-007: SpeFileStore facade — changes must not leak Graph SDK types
+      - App-only GraphServiceClient should be singleton (thread-safe, reusable)
+      - OBO (delegated) clients MUST remain per-request (user-specific tokens)
+      - Do not change the public API of GraphClientFactory or SpeFileStore
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-007-spe-file-store.md" reason="SpeFileStore facade and Graph client usage" />
+      <file path=".claude/patterns/api/service-registration.md" reason="Service registration and lifetime patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Read GraphClientFactory.cs — identify the app-only client recreation pattern</step>
+    <step id="2">Implement singleton caching for app-only GraphServiceClient (lazy initialization, thread-safe)</step>
+    <step id="3">Ensure OBO (delegated) clients remain per-request with user-specific tokens</step>
+    <step id="4">Add unit test verifying singleton reuse for app-only client (same instance returned)</step>
+    <step id="5">Run dotnet build — verify compilation</step>
+    <step id="6">Run dotnet test — verify all tests pass</step>
+  </steps>
+  <outputs>
+    <artifact>Updated GraphClientFactory with singleton app-only client</artifact>
+    <artifact>Unit test verifying singleton reuse</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>App-only GraphServiceClient is created once and reused (singleton)</criterion>
+    <criterion>OBO (delegated) clients remain per-request</criterion>
+    <criterion>Thread-safe initialization (Lazy or similar pattern)</criterion>
+    <criterion>Unit test verifies same instance returned for app-only calls</criterion>
+    <criterion>dotnet build succeeds</criterion>
+    <criterion>dotnet test passes</criterion>
+  </acceptance-criteria>
+</task>

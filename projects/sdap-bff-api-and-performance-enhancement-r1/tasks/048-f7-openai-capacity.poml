@@ -1,0 +1,44 @@
+<task id="048" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>OpenAI capacity planning</title>
+    <tags>infrastructure, azure, ai</tags>
+    <phase>4.1</phase>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-4.1</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Evaluate PTU for gpt-4o/gpt-4o-mini, restrict to private endpoint, remove deprecated text-embedding-3-small deployment.</goal>
+    <context>The Azure OpenAI service currently has a deprecated text-embedding-3-small deployment that is no longer used (replaced by text-embedding-3-large in the RAG pipeline). PTU (Provisioned Throughput Units) may offer cost savings for gpt-4o and gpt-4o-mini if usage patterns justify the commitment. Private endpoint restriction aligns with the VNet security posture being established in Phase 4.</context>
+    <constraints>
+      - PTU evaluation must be data-driven — document usage metrics and cost comparison
+      - text-embedding-3-small deployment must be verified unused before removal
+      - Private endpoint reference requires task 041 (F1) to be complete
+      - Do not change model deployments without documenting the change
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/ai.md" reason="AI constraints and Azure OpenAI configuration" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Review current OpenAI deployment usage metrics</step>
+    <step id="2">Evaluate PTU cost-benefit for gpt-4o and gpt-4o-mini</step>
+    <step id="3">Document PTU recommendation in notes/openai-capacity-analysis.md</step>
+    <step id="4">Remove deprecated text-embedding-3-small deployment from Bicep</step>
+    <step id="5">Update openai.bicep with private endpoint reference (after F1)</step>
+    <step id="6">Deploy</step>
+  </steps>
+  <outputs>
+    <artifact>projects/sdap-bff-api-and-performance-enhancement-r1/notes/openai-capacity-analysis.md</artifact>
+    <artifact>infrastructure/bicep/modules/openai.bicep</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>PTU evaluation documented with usage data and cost comparison</criterion>
+    <criterion>Deprecated text-embedding-3-small deployment removed from Bicep</criterion>
+    <criterion>Private endpoint configured for Azure OpenAI</criterion>
+    <criterion>All changes documented</criterion>
+  </acceptance-criteria>
+</task>

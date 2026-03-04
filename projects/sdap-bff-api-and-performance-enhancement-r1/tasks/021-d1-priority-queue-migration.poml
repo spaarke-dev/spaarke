@@ -1,0 +1,48 @@
+<task id="021" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Priority queue routing and migration</title>
+    <tags>bff-api, jobs, resilience, service-bus</tags>
+    <phase>3.2</phase>
+    <estimate>4h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>020</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Switch JobSubmissionService to route to priority queues while keeping old queue active for drain.</goal>
+    <context>Task 020 created the 3-tier priority queue infrastructure. This task wires the submission side — JobSubmissionService must route new jobs to the correct priority queue based on job type. The old single queue must remain active to drain any in-flight messages, ensuring zero message loss during migration. A configuration flag controls whether new jobs route to priority queues or the old queue.</context>
+    <constraints>
+      - Follow ADR-004: Idempotent jobs, deterministic keys — idempotency must work across old and new queues
+      - Old queue listener must remain active alongside new queue listeners for drain period
+      - Migration config flag must allow rollback to old single-queue routing
+      - No message loss during migration — jobs submitted to old queue before switchover must still process
+      - SC-10 (zero dropped messages) and SC-11 (priority queue responsive under load) must be achievable
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-004-job-contract.md" reason="Job contract, idempotency, deterministic keys" />
+      <file path=".claude/constraints/jobs.md" reason="Job processing constraints and rules" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Update JobSubmissionService to route by job type → priority tier using JobPriorityMapper from task 020</step>
+    <step id="2">Keep old queue listener active alongside new priority queue listeners for drain period</step>
+    <step id="3">Add migration config flag (Jobs:UsePriorityQueues, default: false) to switch routing</step>
+    <step id="4">Integration test: submit jobs of each type, verify routing to correct priority queues</step>
+    <step id="5">Test idempotency across queues — same job submitted to old and new queue must deduplicate</step>
+    <step id="6">Run dotnet test — verify all tests pass</step>
+  </steps>
+  <outputs>
+    <artifact>Updated src/server/api/Sprk.Bff.Api/Services/Jobs/JobSubmissionService.cs</artifact>
+    <artifact>Updated appsettings.json with Jobs:UsePriorityQueues flag</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Jobs route to correct priority queue based on job type when flag is enabled</criterion>
+    <criterion>Old queue remains active and drainable when priority routing is enabled</criterion>
+    <criterion>Migration config flag allows rollback to single-queue routing</criterion>
+    <criterion>Idempotency preserved across old and new queues</criterion>
+    <criterion>SC-10 (zero dropped messages) and SC-11 (priority queue responsive) are achievable</criterion>
+    <criterion>dotnet test passes with no regressions</criterion>
+  </acceptance-criteria>
+</task>

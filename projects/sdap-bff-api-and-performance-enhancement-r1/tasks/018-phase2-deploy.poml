@@ -1,0 +1,43 @@
+<task id="018" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Deploy Phase 2 to dev environment</title>
+    <tags>deploy, bff-api</tags>
+    <phase>2.4</phase>
+    <estimate>1h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>017</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Deploy Phase 1+2 changes to dev environment for validation.</goal>
+    <context>With Phase 2 verification complete (task 017), this task deploys all Phase 1 and Phase 2 changes to the dev Azure environment. The deployment uses the existing Deploy-BffApi.ps1 script. Post-deployment validation includes health check, feature flag configuration verification, and Application Insights monitoring for errors.</context>
+    <constraints>
+      - Use existing deployment script: scripts/Deploy-BffApi.ps1
+      - Verify /healthz returns healthy after deployment
+      - Verify feature flags section is present in deployed configuration
+      - Monitor Application Insights for new errors post-deployment
+      - Do not deploy to any environment other than dev
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/azure-deployment.md" reason="Azure deployment constraints and procedures" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Run dotnet publish to create deployment package</step>
+    <step id="2">Deploy using scripts/Deploy-BffApi.ps1 to dev environment</step>
+    <step id="3">Verify /healthz endpoint returns healthy response</step>
+    <step id="4">Verify feature flags section is present in deployed configuration</step>
+    <step id="5">Monitor Application Insights for errors in the first few minutes post-deployment</step>
+  </steps>
+  <outputs>
+    <artifact>Deployed BFF API with Phase 1+2 changes to dev environment</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Dev deployment completes successfully</criterion>
+    <criterion>/healthz returns healthy</criterion>
+    <criterion>Feature flags config section is present and all modules default to enabled</criterion>
+    <criterion>No new errors in Application Insights post-deployment</criterion>
+  </acceptance-criteria>
+</task>

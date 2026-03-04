@@ -1,0 +1,44 @@
+<task id="049" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>AI Search cleanup</title>
+    <tags>infrastructure, azure, ai</tags>
+    <phase>4.1</phase>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-4.1</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Delete deprecated spaarke-knowledge-index (1536-dim), evaluate 3 replicas for 99.9% write SLA, restrict public access.</goal>
+    <context>The AI Search service has a deprecated spaarke-knowledge-index that uses 1536-dimensional vectors (from the old text-embedding-3-small model). This index is no longer used and consumes resources. The replica count should be evaluated against SLA requirements — 3 replicas enable 99.9% read/write SLA. Public access restriction aligns with VNet security posture.</context>
+    <constraints>
+      - Verify spaarke-knowledge-index is not referenced in any code before deletion
+      - Replica evaluation must consider current SLA requirements and cost
+      - Network restrictions must allow access from snet-app subnet
+      - Do not delete any active indexes
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/ai.md" reason="AI constraints and Azure AI Search configuration" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Verify spaarke-knowledge-index is not referenced anywhere in code</step>
+    <step id="2">Delete deprecated index</step>
+    <step id="3">Evaluate replica count vs SLA requirements</step>
+    <step id="4">Document recommendation</step>
+    <step id="5">Update ai-search.bicep with network restrictions</step>
+    <step id="6">Deploy</step>
+  </steps>
+  <outputs>
+    <artifact>projects/sdap-bff-api-and-performance-enhancement-r1/notes/ai-search-replica-evaluation.md</artifact>
+    <artifact>infrastructure/bicep/modules/ai-search.bicep</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Deprecated spaarke-knowledge-index deleted</criterion>
+    <criterion>Replica evaluation documented with recommendation</criterion>
+    <criterion>Network restrictions applied to AI Search</criterion>
+    <criterion>No active indexes affected</criterion>
+  </acceptance-criteria>
+</task>

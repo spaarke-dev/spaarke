@@ -1,0 +1,53 @@
+<task id="012" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Graph metadata cache infrastructure</title>
+    <tags>bff-api, caching, redis, performance</tags>
+    <phase>2.1</phase>
+    <estimate>4h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-2.1</parallel-group>
+    <dependencies>003</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create the cache service layer for Graph metadata with ETag-versioned keys, configurable TTLs, and graceful degradation on Redis failure.</goal>
+    <context>Graph API calls for file metadata, folder listings, container-to-drive mappings, and permissions are the primary latency contributors. This task creates the cache infrastructure layer that will be integrated into SpeFileStore in task 013. The cache must use ETag-versioned keys to ensure consistency, have configurable TTLs per operation type, and gracefully degrade when Redis is unavailable.</context>
+    <constraints>
+      - Follow ADR-009: Redis-first caching — no hybrid L1 cache unless profiling proves need
+      - Cache keys must include ETag version for consistency (sdap:graph:metadata:{driveId}:{itemId}:v{etag})
+      - Graceful degradation: Redis failure must not break the application — fall back to source
+      - TTLs must be configurable via appsettings.json
+      - Log warnings on Redis failures, do not throw exceptions to callers
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-009-redis-caching.md" reason="Redis-first caching strategy and constraints" />
+      <file path=".claude/patterns/caching/distributed-cache.md" reason="Distributed cache implementation patterns" />
+      <file path=".claude/constraints/api.md" reason="API constraints and conventions" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Create Services/Caching/GraphMetadataCacheService.cs with cache-aside pattern</step>
+    <step id="2">Define cache key patterns: sdap:graph:metadata:{driveId}:{itemId}:v{etag}, sdap:graph:folder:{driveId}:{folderId}, sdap:graph:container-drive:{containerId}, sdap:graph:permissions:{driveId}:{itemId}</step>
+    <step id="3">Define TTL constants: file metadata 5min, folder listing 2min, container-to-drive 24hr, permissions 5min</step>
+    <step id="4">Implement graceful degradation — try/catch around all Redis operations, fall back to source on failure, log warning</step>
+    <step id="5">Add cache options section to appsettings.json with configurable TTLs</step>
+    <step id="6">Add unit tests for cache hit, cache miss, and cache failure (Redis down) scenarios</step>
+    <step id="7">Run dotnet build — verify compilation</step>
+    <step id="8">Run dotnet test — verify all tests pass</step>
+  </steps>
+  <outputs>
+    <artifact>src/server/api/Sprk.Bff.Api/Services/Caching/GraphMetadataCacheService.cs</artifact>
+    <artifact>Updated appsettings.json with cache TTL configuration</artifact>
+    <artifact>Unit tests for GraphMetadataCacheService</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>GraphMetadataCacheService exists with cache-aside pattern</criterion>
+    <criterion>Cache keys use ETag-versioned format for consistency</criterion>
+    <criterion>TTLs are configurable: file metadata 5min, folder listing 2min, container-to-drive 24hr, permissions 5min</criterion>
+    <criterion>Graceful degradation verified: Redis failure falls back to source without throwing</criterion>
+    <criterion>Unit tests cover cache hit, miss, and failure scenarios</criterion>
+    <criterion>dotnet build succeeds</criterion>
+    <criterion>dotnet test passes</criterion>
+  </acceptance-criteria>
+</task>
