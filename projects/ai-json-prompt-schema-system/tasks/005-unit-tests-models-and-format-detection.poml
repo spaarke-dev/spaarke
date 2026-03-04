@@ -1,0 +1,66 @@
+<task id="005" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Unit Tests: Models and Format Detection</title>
+    <phase>1</phase>
+    <tags>testing, bff-api</tags>
+    <estimate>2h</estimate>
+    <dependencies>002</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Write unit tests for PromptSchema model serialization and PromptSchemaRenderer format detection.</goal>
+    <context>
+      Tests verify: (1) C# models serialize/deserialize correctly with System.Text.Json,
+      (2) Format detection correctly routes null/empty/flat text/JPS JSON/malformed JSON,
+      (3) Flat text rendering produces identical output to the old BuildExecutionPrompt.
+      Use existing test patterns in the Sprk.Bff.Api.Tests project.
+    </context>
+    <constraints>
+      - Follow existing test project conventions (xUnit, FluentAssertions if available)
+      - Test all format detection branches: null, empty string, flat text, valid JPS, malformed JSON
+      - Include backward compatibility test: flat text → identical output
+      - Test round-trip serialization for all model types
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Find existing test project structure and conventions in tests/unit/Sprk.Bff.Api.Tests/</step>
+    <step order="2">Create test file: tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PromptSchemaTests.cs for model serialization</step>
+    <step order="3">Create test file: tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PromptSchemaRendererTests.cs for format detection and rendering</step>
+    <step order="4">Write tests:
+      - Model round-trip serialization (all record types)
+      - Format detection: null → default, empty → default, flat text → legacy, JPS JSON → schema, malformed → fallback
+      - Flat text backward compatibility (compare output to BuildExecutionPrompt reference)
+      - JPS rendering: instruction section, constraints list, output instructions</step>
+    <step order="5">Run tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PromptSchemaTests.cs</output>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PromptSchemaRendererTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All tests pass</criterion>
+    <criterion>Format detection tests cover all 5 branches</criterion>
+    <criterion>Backward compatibility test verifies flat text identity</criterion>
+    <criterion>Model serialization round-trips for all record types</criterion>
+  </acceptance-criteria>
+</task>

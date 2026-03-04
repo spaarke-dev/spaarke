@@ -1,0 +1,61 @@
+<task id="026" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Unit Tests: $choices Resolution and JSON Schema Generation</title>
+    <phase>3</phase>
+    <tags>testing, bff-api</tags>
+    <estimate>2h</estimate>
+    <dependencies>020, 021</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Write unit tests for $choices resolution, JSON Schema generation, and pre-execution validation.</goal>
+    <context>
+      Tests cover: (1) $choices reference parsing and resolution from mock downstream nodes,
+      (2) JSON Schema Draft-07 generation from output.fields with all type mappings,
+      (3) Pre-execution validation for JPS schemas.
+    </context>
+    <constraints>
+      - Mock downstream node data for $choices tests
+      - Validate generated JSON Schema against Draft-07 spec
+      - Test all field type mappings (string, number, boolean, array, object)
+      - Test enum injection from $choices
+      - Test graceful degradation for unresolvable references
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add test class for $choices resolution in PromptSchemaRendererTests.cs</step>
+    <step order="2">Write tests: ResolvesChoicesFromDownstreamNode, HandlesUnresolvableReference, InjectsEnumValues</step>
+    <step order="3">Add test class for JSON Schema generation</step>
+    <step order="4">Write tests: GeneratesStringSchema, GeneratesNumberSchema, GeneratesBooleanSchema, GeneratesArraySchema, GeneratesObjectSchema, IncludesEnumFromChoices, IncludesConstraints</step>
+    <step order="5">Add pre-execution validation tests</step>
+    <step order="6">Run tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PromptSchemaRendererTests.cs (extended)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>$choices resolution tests pass with mock downstream nodes</criterion>
+    <criterion>JSON Schema generation tests cover all 5 field types</criterion>
+    <criterion>Graceful degradation tested for unresolvable references</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,71 @@
+<task id="021" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Implement JSON Schema Draft-07 Generation</title>
+    <phase>3</phase>
+    <tags>bff-api, api, implement</tags>
+    <estimate>3h</estimate>
+    <dependencies>001, 020</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Convert output.fields definitions to JSON Schema Draft-07 for Azure OpenAI structured output (constrained decoding).</goal>
+    <context>
+      When structuredOutput is true, the renderer converts output.fields into a JSON Schema that Azure OpenAI
+      uses for constrained decoding — the AI is physically unable to return invalid JSON.
+      The JSON Schema includes: type mappings (string→string, number→number), enum values (from $choices or inline),
+      array items schema, nested object properties, required fields, and constraints (maxLength, minimum, maximum).
+      The generated schema is returned as RenderedPrompt.JsonSchema for use with GetStructuredCompletionAsync.
+    </context>
+    <constraints>
+      - Generate JSON Schema Draft-07 (compatible with Azure OpenAI response_format)
+      - Map all OutputFieldDefinition types: string, number, boolean, array, object
+      - Include enum values from $choices resolution and inline enum
+      - Include constraints: maxLength, minimum, maximum
+      - All output fields are required by default
+      - Nested objects and array items must have proper schema
+      - Schema must be valid for Azure OpenAI structured output API
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read design.md "GENERATE OUTPUT SCHEMA" (Pipeline Step 7) for generation rules</step>
+    <step order="2">Research Azure OpenAI JSON Schema requirements for response_format</step>
+    <step order="3">Add JsonSchemaGenerator helper to PromptSchemaRenderer or as separate utility:
+      - GenerateJsonSchema(fields: OutputFieldDefinition[], resolvedEnums) → JsonObject
+      - Type mapping for each field type
+      - Enum injection from $choices resolution
+      - Array items schema
+      - Required properties list</step>
+    <step order="4">Integrate into renderer: when structuredOutput=true, set RenderedPrompt.JsonSchema</step>
+    <step order="5">Add brief text instruction to prompt: "Return valid JSON matching the provided schema"</step>
+    <step order="6">Verify build: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaRenderer.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Generated JSON Schema is valid Draft-07</criterion>
+    <criterion>All field types map correctly (string, number, boolean, array, object)</criterion>
+    <criterion>Enum values from $choices appear in JSON Schema</criterion>
+    <criterion>Array items and nested objects have proper sub-schemas</criterion>
+    <criterion>Schema is compatible with Azure OpenAI response_format</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,63 @@
+<task id="023" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Implement $choices UI in PromptSchemaForm (Client)</title>
+    <phase>3</phase>
+    <tags>frontend, fluent-ui, implement</tags>
+    <estimate>2h</estimate>
+    <dependencies>011</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Add $choices UI to the output field rows in PromptSchemaForm, showing "Values from: [node]" with resolved choice labels.</goal>
+    <context>
+      When an output field has type "string" and a downstream UpdateRecord node maps to a choice field,
+      the form should auto-suggest adding $choices. Show resolved choice labels as read-only chips.
+      The form needs access to canvas node data to find downstream UpdateRecord nodes and their fieldMappings.
+    </context>
+    <constraints>
+      - Auto-detect when output field matches a downstream UpdateRecord choice field
+      - Show "Values from: [node name]" with resolved option labels
+      - Allow manual $choices reference entry for advanced users
+      - Use Fluent UI v9 TagGroup or Badge for choice label chips
+      - Read downstream node data from canvasStore
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/stores/canvasStore.ts</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/UpdateRecordForm.tsx</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read UpdateRecordForm.tsx to understand how fieldMappings and options are structured</step>
+    <step order="2">Read canvasStore.ts to understand how to access downstream node data via edges</step>
+    <step order="3">Add helper: findDownstreamChoiceFields(nodeId, edges, nodes) → matching choice fields</step>
+    <step order="4">Modify output field rows to show $choices suggestions when a downstream match exists</step>
+    <step order="5">Display resolved option labels as read-only Tag/Badge chips</step>
+    <step order="6">Add $choices reference input for manual entry</step>
+    <step order="7">Verify build: npm run build</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Bash(npm run build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/PlaybookBuilder/src/components/properties/PromptSchemaForm.tsx (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Auto-suggests $choices when downstream UpdateRecord has matching choice field</criterion>
+    <criterion>Shows resolved option labels as read-only chips</criterion>
+    <criterion>Manual $choices reference entry works</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

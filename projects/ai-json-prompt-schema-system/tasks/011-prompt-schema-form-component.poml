@@ -1,0 +1,81 @@
+<task id="011" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Create PromptSchemaForm Component (Level 1)</title>
+    <phase>2</phase>
+    <tags>frontend, fluent-ui, implement</tags>
+    <estimate>4h</estimate>
+    <dependencies>010</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Build the Level 1 structured form for editing JPS schemas without JSON knowledge.</goal>
+    <context>
+      The form is shown in the properties panel when an AI node (AiAnalysis or AiCompletion) is selected.
+      It provides fields for: role (textarea), task (textarea, required), constraints (tag list with add/remove),
+      output fields (repeating row: name, type dropdown, description, remove button),
+      structured output checkbox, and a toggle to switch to JSON editor (Level 2).
+      Uses Fluent UI v9 components. Located in components/properties/ alongside other node forms.
+      See design.md "Level 1: Power User (Form-Based)" for the wireframe.
+    </context>
+    <constraints>
+      - Use Fluent UI v9 components exclusively (Textarea, Input, Dropdown, Button, Checkbox, TagGroup) per ADR-021
+      - Support dark mode via Fluent design tokens (no hard-coded colors) per ADR-021
+      - Form state managed locally, emit onChange with updated PromptSchema
+      - Task field is required (show validation error if empty)
+      - Output fields use repeating row pattern with Add/Remove
+      - Type dropdown options: string, number, boolean, array, object
+      - Include "Switch to JSON Editor" toggle button
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesForm.tsx</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-026.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read design.md "Level 1: Power User (Form-Based)" section for wireframe</step>
+    <step order="2">Read existing property form components (e.g., AiCompletionForm.tsx, UpdateRecordForm.tsx) for patterns</step>
+    <step order="3">Create PromptSchemaForm.tsx with:
+      - Props: schema: PromptSchema | null, onChange: (schema: PromptSchema) => void, onSwitchToEditor: () => void
+      - Role textarea (optional, Fluent Textarea)
+      - Task textarea (required, validation)
+      - Constraints tag list (TagGroup with TagPicker or similar)
+      - Output fields table (repeating rows with DataGrid or manual rows)
+      - Structured output checkbox
+      - Switch to JSON Editor button</step>
+    <step order="4">Implement constraint add/remove with tag UI</step>
+    <step order="5">Implement output field rows with name input, type Dropdown, description input, remove Button</step>
+    <step order="6">Style with makeStyles() using Fluent design tokens</step>
+    <step order="7">Verify it renders in the PlaybookBuilder (npm run build in code-pages/PlaybookBuilder/)</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+    <tool>Bash(npm run build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/PlaybookBuilder/src/components/properties/PromptSchemaForm.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Form renders with all fields: role, task, constraints, output fields, structured output</criterion>
+    <criterion>Task field shows validation error when empty</criterion>
+    <criterion>Constraints can be added and removed</criterion>
+    <criterion>Output field rows can be added and removed with name/type/description</criterion>
+    <criterion>onChange fires with valid PromptSchema on every edit</criterion>
+    <criterion>All Fluent UI v9 components used (no v8, no hard-coded colors)</criterion>
+    <criterion>Dark mode compatible via design tokens</criterion>
+  </acceptance-criteria>
+</task>

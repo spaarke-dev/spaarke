@@ -1,0 +1,73 @@
+<task id="040" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Implement $knowledge Named Reference Resolution</title>
+    <phase>5</phase>
+    <tags>bff-api, api, implement</tags>
+    <estimate>3h</estimate>
+    <dependencies>002</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Implement $knowledge named reference resolution that queries Dataverse at render time for knowledge content.</goal>
+    <context>
+      JPS scopes.$knowledge can contain named references: {"$ref": "knowledge:standard-contract-clauses", "as": "reference"}.
+      At render time, the renderer queries sprk_analysisknowledge by sprk_name to load content.
+      The "as" label controls section heading: "reference" → "Reference Knowledge", "definitions" → "Definitions", "examples" → "Examples".
+      Named references supplement N:N scope relationships — N:N scopes are always included; $knowledge adds additional contextual content.
+      Resolution is LIVE (every execution queries Dataverse for fresh content).
+    </context>
+    <constraints>
+      - Query Dataverse sprk_analysisknowledge by sprk_name
+      - Live resolution: query on every execution (no save-time caching)
+      - Use existing scope resolution patterns (IScopeResolverService)
+      - Support "as" labels: reference, definitions, examples (controls section heading)
+      - Merge with N:N resolved scopes (N:N takes precedence on conflicts)
+      - Handle missing references gracefully (log warning, continue rendering)
+      - MUST NOT log knowledge content per ADR-015
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read IScopeResolverService.cs for existing scope resolution patterns</step>
+    <step order="2">Read design.md "RESOLVE $knowledge AND $skill REFERENCES" section</step>
+    <step order="3">Add $knowledge resolution to PromptSchemaRenderer:
+      - Parse {"$ref": "knowledge:name"} syntax
+      - Query Dataverse via scope resolver for knowledge by name
+      - Support "as" label for section heading
+      - Handle inline content {"inline": "text"}</step>
+    <step order="4">Merge named references with N:N resolved scopes in knowledge context</step>
+    <step order="5">Render knowledge sections with contextual headings based on "as" label</step>
+    <step order="6">Verify build: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Grep</tool>
+    <tool>Bash(dotnet build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaRenderer.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>$knowledge references resolve by querying Dataverse by name</criterion>
+    <criterion>"as" labels produce correct section headings</criterion>
+    <criterion>Inline content rendered without Dataverse query</criterion>
+    <criterion>Missing references produce warnings, not errors</criterion>
+    <criterion>N:N scopes merged with named references (N:N precedence)</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,67 @@
+<task id="043" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Create Schema Template Library</title>
+    <phase>5</phase>
+    <tags>bff-api, implement</tags>
+    <estimate>2h</estimate>
+    <dependencies>001</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Create pre-built JPS schema templates for common playbook patterns (document classification, entity extraction, risk assessment, summarization).</goal>
+    <context>
+      Templates are JPS JSON files with placeholder descriptions that users can select when creating new AI nodes.
+      They provide a starting point: pre-filled role, task, constraints, and output fields for common document analysis patterns.
+      Templates are stored as embedded resources or static JSON files and made available through the PlaybookBuilder UI.
+    </context>
+    <constraints>
+      - Create 4-5 common templates: classification, entity extraction, risk assessment, summarization, contract review
+      - Templates are complete JPS schemas with placeholders in descriptions
+      - Store as static JSON files in a templates directory
+      - Make available via a simple API endpoint or embedded in the PlaybookBuilder bundle
+      - Each template includes appropriate output fields, constraints, and examples
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define 4-5 common template schemas based on existing playbook patterns</step>
+    <step order="2">Create template JSON files:
+      - classification.json (document type classification with choice fields)
+      - entity-extraction.json (extract entities, dates, parties)
+      - risk-assessment.json (risk level, flags, recommendations)
+      - summarization.json (summary, key points, action items)
+      - contract-review.json (clauses, obligations, risks)</step>
+    <step order="3">Add template metadata: name, description, tags, typical use case</step>
+    <step order="4">Create template registry (list of available templates with metadata)</step>
+    <step order="5">Add template selection to PlaybookBuilder UI (dropdown or dialog when creating AI node)</step>
+    <step order="6">Verify build for both server and client</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+    <tool>Bash(npm run build)</tool>
+  </tools>
+
+  <outputs>
+    <output>Template JSON files (4-5 files)</output>
+    <output>Template registry/selection UI</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>4-5 templates created for common patterns</criterion>
+    <criterion>Each template is valid JPS JSON</criterion>
+    <criterion>Templates available in PlaybookBuilder UI</criterion>
+    <criterion>Templates include appropriate output fields and constraints</criterion>
+  </acceptance-criteria>
+</task>

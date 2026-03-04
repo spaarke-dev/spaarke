@@ -1,0 +1,59 @@
+<task id="041" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Implement $skill Named Reference Resolution</title>
+    <phase>5</phase>
+    <tags>bff-api, api, implement</tags>
+    <estimate>1h</estimate>
+    <dependencies>040</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Implement $skill named reference resolution that queries Dataverse for skill prompt fragments.</goal>
+    <context>
+      Similar to $knowledge but for skills: {"$ref": "skill:liability-analysis"}.
+      Queries sprk_analysisskill by sprk_name to load sprk_promptfragment.
+      Merges with N:N resolved skills (N:N takes precedence).
+    </context>
+    <constraints>
+      - Query sprk_analysisskill by sprk_name
+      - Live resolution at render time
+      - Merge with N:N resolved skills
+      - Handle missing references gracefully
+      - Follow same patterns as $knowledge resolution (task 040)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing $knowledge resolution from task 040 for patterns</step>
+    <step order="2">Add $skill resolution to PromptSchemaRenderer following same pattern</step>
+    <step order="3">Query sprk_analysisskill by sprk_name via scope resolver</step>
+    <step order="4">Merge with N:N resolved skills</step>
+    <step order="5">Verify build: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaRenderer.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>$skill references resolve by querying Dataverse by name</criterion>
+    <criterion>Merged with N:N skills correctly</criterion>
+    <criterion>Missing references handled gracefully</criterion>
+    <criterion>Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

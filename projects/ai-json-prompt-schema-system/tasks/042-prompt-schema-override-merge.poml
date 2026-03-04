@@ -1,0 +1,70 @@
+<task id="042" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Implement promptSchemaOverride Merge with Directives</title>
+    <phase>5</phase>
+    <tags>bff-api, api, implement</tags>
+    <estimate>2h</estimate>
+    <dependencies>002</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Implement the override merge logic that allows node-level customization of base Action schemas with directive support.</goal>
+    <context>
+      A reusable Action scope (e.g., "General Document Analysis") can be customized per-node via
+      promptSchemaOverride in sprk_configjson. The merge rules:
+      - Default: constraint arrays concatenate (base + override)
+      - Default: output.fields arrays concatenate (override appends to base)
+      - Directive: __replace: true on a section replaces instead of merging
+      - Scalar fields (role, task) replace if present in override
+      The merged result is what the renderer processes.
+    </context>
+    <constraints>
+      - Create PromptSchemaOverrideMerger as a separate utility class
+      - Default merge: concatenate arrays (constraints, output.fields)
+      - __replace directive: fully replace the section
+      - Scalar replacement: role, task, context replace if present
+      - Merge happens before rendering (renderer receives merged schema)
+      - Unit testable as pure function
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read design.md "Node-Level Override" section for merge rules</step>
+    <step order="2">Create PromptSchemaOverrideMerger.cs with:
+      - Merge(baseSchema: PromptSchema, override: PromptSchema?) → PromptSchema
+      - Array concatenation for constraints and output.fields by default
+      - __replace detection and full replacement logic
+      - Scalar field replacement for role, task, context</step>
+    <step order="3">Integrate into AiAnalysisNodeExecutor: read promptSchemaOverride from configJson, merge before rendering</step>
+    <step order="4">Verify build: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaOverrideMerger.cs (new)</output>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Array fields concatenate by default</criterion>
+    <criterion>__replace directive fully replaces section</criterion>
+    <criterion>Scalar fields replace when present in override</criterion>
+    <criterion>Null override returns base schema unchanged</criterion>
+    <criterion>Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,67 @@
+<task id="010" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Create TypeScript PromptSchema Type Definitions</title>
+    <phase>2</phase>
+    <tags>frontend, typescript</tags>
+    <estimate>1h</estimate>
+    <dependencies>none</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Create TypeScript interfaces for the JPS format mirroring the C# models, plus validation utilities.</goal>
+    <context>
+      The PlaybookBuilder code page at src/client/code-pages/PlaybookBuilder/ uses React 19, TypeScript, and Zustand v5.
+      Types go in the types/ directory alongside existing canvas.ts and playbook.ts.
+      The PromptSchema TypeScript types must mirror the C# records exactly for consistent serialization.
+      Include a validation utility that checks required fields and type constraints.
+    </context>
+    <constraints>
+      - Mirror C# model structure exactly (same property names, same nesting)
+      - Use TypeScript interfaces (not classes)
+      - Include JSDoc comments for each interface and property
+      - Place in src/client/code-pages/PlaybookBuilder/src/types/promptSchema.ts
+      - Add validation function: validatePromptSchema(schema: unknown): ValidationResult
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/types/canvas.ts</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read design.md "TypeScript Types" section for interface definitions</step>
+    <step order="2">Read existing types in src/client/code-pages/PlaybookBuilder/src/types/ for conventions</step>
+    <step order="3">Create promptSchema.ts with interfaces:
+      - PromptSchema, InstructionSection, InputSection, OutputSection
+      - OutputFieldDefinition, ScopesSection, KnowledgeReference
+      - ExampleEntry, MetadataSection
+      - PromptSchemaValidationResult</step>
+    <step order="4">Add validatePromptSchema() function that checks required fields</step>
+    <step order="5">Add createDefaultPromptSchema() factory for new empty schemas</step>
+    <step order="6">Export all types and utilities from types/index.ts</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/PlaybookBuilder/src/types/promptSchema.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All JPS schema sections have TypeScript interfaces</criterion>
+    <criterion>Interfaces mirror C# models (same property names and nesting)</criterion>
+    <criterion>validatePromptSchema returns structured validation results</criterion>
+    <criterion>createDefaultPromptSchema creates valid empty schema</criterion>
+  </acceptance-criteria>
+</task>

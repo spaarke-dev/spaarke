@@ -1,0 +1,62 @@
+<task id="030" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Add configure_prompt_schema Tool Definition</title>
+    <phase>4</phase>
+    <tags>bff-api, api, implement</tags>
+    <estimate>2h</estimate>
+    <dependencies>001</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Add the configure_prompt_schema tool to BuilderToolDefinitions.cs so the Builder Agent can create JPS schemas.</goal>
+    <context>
+      BuilderToolDefinitions.cs contains OpenAI function tool definitions for the Playbook Builder Agent.
+      The new tool allows the agent to create structured prompts with role, task, constraints, typed output fields,
+      and optional auto-wired $choices. Tool parameters are simplified vs full JPS — the executor generates
+      the complete schema from these inputs.
+    </context>
+    <constraints>
+      - Follow existing tool definition patterns in BuilderToolDefinitions.cs
+      - Parameters: nodeId (required), role, task (required), constraints, outputFields (required), useStructuredOutput, autoWireChoices
+      - OutputFields items: name, type (enum: string/number/boolean/array/object), description, enum
+      - Include clear description that guides the AI agent on usage
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Builder/BuilderToolDefinitions.cs</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read BuilderToolDefinitions.cs for existing tool definition patterns</step>
+    <step order="2">Read design.md "New Tool: configure_prompt_schema" section for parameter spec</step>
+    <step order="3">Add configure_prompt_schema tool definition following existing patterns</step>
+    <step order="4">Add tool name constant to tool constants section</step>
+    <step order="5">Register in GetAllTools() and appropriate category</step>
+    <step order="6">Verify build: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Grep</tool>
+    <tool>Bash(dotnet build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Builder/BuilderToolDefinitions.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Tool definition follows existing patterns</criterion>
+    <criterion>All parameters defined with correct types and required flags</criterion>
+    <criterion>Tool registered in GetAllTools()</criterion>
+    <criterion>Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

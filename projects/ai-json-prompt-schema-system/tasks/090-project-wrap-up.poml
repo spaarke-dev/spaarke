@@ -1,0 +1,62 @@
+<task id="090" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <phase>wrap-up</phase>
+    <tags>documentation, cleanup</tags>
+    <estimate>1h</estimate>
+    <dependencies>006, 014, 026, 033, 044</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Complete project wrap-up: update README status, create lessons-learned, verify all tests pass, archive project artifacts.</goal>
+    <context>
+      Final task after all implementation phases are complete.
+      Verify: all tests pass, all success criteria met, documentation updated.
+    </context>
+    <constraints>
+      - Run full test suite (dotnet test + npm test)
+      - Update README.md status to "Complete"
+      - Create notes/lessons-learned.md
+      - Update TASK-INDEX.md with all completed statuses
+      - Verify all 8 success criteria from spec.md
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>projects/ai-json-prompt-schema-system/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run full test suite: `dotnet test` and verify all pass</step>
+    <step order="2">Run PlaybookBuilder build: npm run build in code-pages/PlaybookBuilder/</step>
+    <step order="3">Verify all 8 success criteria from spec.md are met</step>
+    <step order="4">Update README.md status from "In Progress" to "Complete"</step>
+    <step order="5">Create notes/lessons-learned.md with implementation insights</step>
+    <step order="6">Update TASK-INDEX.md with all tasks marked complete</step>
+    <step order="7">Run /repo-cleanup to validate structure</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet test)</tool>
+    <tool>Bash(npm run build)</tool>
+  </tools>
+
+  <outputs>
+    <output>README.md updated to Complete status</output>
+    <output>notes/lessons-learned.md created</output>
+    <output>TASK-INDEX.md fully updated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All tests pass</criterion>
+    <criterion>All 8 success criteria verified</criterion>
+    <criterion>README status updated</criterion>
+    <criterion>Lessons learned documented</criterion>
+  </acceptance-criteria>
+</task>

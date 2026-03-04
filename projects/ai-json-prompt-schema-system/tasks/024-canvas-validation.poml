@@ -1,0 +1,72 @@
+<task id="024" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Implement Canvas-Time Validation</title>
+    <phase>3</phase>
+    <tags>frontend, implement</tags>
+    <estimate>3h</estimate>
+    <dependencies>013, 023</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Implement canvas-time validation that checks output coverage, choice consistency, and type compatibility when the user saves or syncs.</goal>
+    <context>
+      Validation runs on all AI nodes when the canvas is saved/synced. Rules:
+      1. Output coverage: every {{output_X.output.field}} template in downstream nodes must have a matching field in output.fields
+      2. Choice consistency: if downstream UpdateRecord has options for a field, the AI node should have $choices or enum
+      3. Type compatibility: output.fields[].type should match downstream UpdateRecord fieldMappings[].type
+      4. Missing task: instruction.task is required when using JPS format
+      5. Unresolvable $choices: references a node that doesn't exist or has no matching field
+      Show warnings in the NodeValidationBadge component.
+    </context>
+    <constraints>
+      - Validation runs at canvas save/sync time (not on every keystroke)
+      - Warnings (not errors) for output coverage, choice consistency, type compatibility
+      - Errors for missing task and unresolvable $choices
+      - Show results via NodeValidationBadge component
+      - Create canvasValidation.ts service for validation logic
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/design.md</file>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/NodeValidationBadge.tsx</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read design.md "Canvas-Time Validation" section for all rules</step>
+    <step order="2">Read NodeValidationBadge.tsx for existing validation display patterns</step>
+    <step order="3">Create canvasValidation.ts with:
+      - validatePromptSchemaNode(node, edges, allNodes) → ValidationResult[]
+      - checkOutputCoverage, checkChoiceConsistency, checkTypeCompatibility
+      - checkRequiredFields, checkChoicesResolvable</step>
+    <step order="4">Integrate validation into playbookNodeSync save/sync flow</step>
+    <step order="5">Display validation results in NodeValidationBadge</step>
+    <step order="6">Verify build: npm run build</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Bash(npm run build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/PlaybookBuilder/src/services/canvasValidation.ts (new)</output>
+    <output>src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 5 validation rules implemented</criterion>
+    <criterion>Warnings shown for coverage/consistency/compatibility</criterion>
+    <criterion>Errors shown for missing task and unresolvable $choices</criterion>
+    <criterion>Validation runs at save/sync time</criterion>
+    <criterion>Results displayed in NodeValidationBadge</criterion>
+  </acceptance-criteria>
+</task>

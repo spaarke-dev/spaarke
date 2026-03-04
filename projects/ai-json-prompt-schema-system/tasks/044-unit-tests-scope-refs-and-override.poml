@@ -1,0 +1,65 @@
+<task id="044" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Unit Tests: Scope References and Override Merge</title>
+    <phase>5</phase>
+    <tags>testing, bff-api</tags>
+    <estimate>2h</estimate>
+    <dependencies>040, 041, 042</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Write unit tests for $knowledge resolution, $skill resolution, and promptSchemaOverride merge logic.</goal>
+    <context>
+      Tests cover: (1) $knowledge reference resolution from mock Dataverse data,
+      (2) $skill reference resolution, (3) contextual labels ("as" property),
+      (4) override merge with default concatenation and __replace directive,
+      (5) N:N scope merging with named references.
+    </context>
+    <constraints>
+      - Mock IScopeResolverService for Dataverse queries
+      - Test all "as" label types: reference, definitions, examples
+      - Test override merge: concatenation, __replace, scalar replacement
+      - Test missing reference handling (graceful degradation)
+      - Test N:N + named reference merge precedence
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add $knowledge resolution tests with mock scope resolver</step>
+    <step order="2">Add $skill resolution tests</step>
+    <step order="3">Add "as" label rendering tests</step>
+    <step order="4">Create PromptSchemaOverrideMergerTests.cs:
+      - ConcatenatesConstraints, ConcatenatesOutputFields
+      - ReplacesWithDirective, ReplacesScalarFields
+      - NullOverrideReturnsBase, EmptyOverrideReturnsBase</step>
+    <step order="5">Add N:N + named reference merge precedence test</step>
+    <step order="6">Run tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PromptSchemaRendererTests.cs (extended)</output>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PromptSchemaOverrideMergerTests.cs (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>$knowledge and $skill resolution tests pass with mocks</criterion>
+    <criterion>All override merge modes tested</criterion>
+    <criterion>Contextual label rendering verified</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,66 @@
+<task id="003" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Integrate PromptSchemaRenderer into GenericAnalysisHandler</title>
+    <phase>1</phase>
+    <tags>bff-api, api, refactor</tags>
+    <estimate>2h</estimate>
+    <dependencies>002</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Replace the static BuildExecutionPrompt method in GenericAnalysisHandler with a call to the new PromptSchemaRenderer service.</goal>
+    <context>
+      GenericAnalysisHandler currently has a static BuildExecutionPrompt method (L408-456) that assembles prompts from
+      ActionSystemPrompt, PromptTemplate, skill context, and knowledge context using string replacement.
+      This method is called from ExecuteAsync (L237) and StreamExecuteAsync (L338).
+      Replace with PromptSchemaRenderer.Render() which handles both flat text (backward compatible) and JPS JSON.
+      The renderer needs: rawPrompt (ActionSystemPrompt), resolvedScopes (skill/knowledge context), template context, and downstream nodes.
+    </context>
+    <constraints>
+      - Inject PromptSchemaRenderer via constructor (concrete, not interface per ADR-010)
+      - Preserve all existing behavior for flat text prompts (zero regressions)
+      - Both ExecuteAsync and StreamExecuteAsync must use the renderer
+      - Do not remove BuildExecutionPrompt immediately — keep as private fallback during transition, mark [Obsolete]
+      - Pass SkillContext and KnowledgeContext from ToolExecutionContext to renderer
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ToolExecutionContext.cs</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read GenericAnalysisHandler.cs fully — understand ExecuteAsync, StreamExecuteAsync, and BuildExecutionPrompt</step>
+    <step order="2">Read ToolExecutionContext.cs for available context data (ActionSystemPrompt, SkillContext, KnowledgeContext)</step>
+    <step order="3">Add PromptSchemaRenderer as constructor parameter to GenericAnalysisHandler</step>
+    <step order="4">Replace BuildExecutionPrompt calls in ExecuteAsync (L237) and StreamExecuteAsync (L338) with renderer.Render()</step>
+    <step order="5">Mark old BuildExecutionPrompt as [Obsolete] (keep for reference during development)</step>
+    <step order="6">Verify build: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+    <tool>Bash(dotnet build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PromptSchemaRenderer injected via constructor</criterion>
+    <criterion>Both ExecuteAsync and StreamExecuteAsync use renderer</criterion>
+    <criterion>Old BuildExecutionPrompt marked [Obsolete]</criterion>
+    <criterion>Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

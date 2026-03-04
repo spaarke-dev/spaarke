@@ -1,0 +1,65 @@
+<task id="025" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Implement Pre-Execution Server Validation</title>
+    <phase>3</phase>
+    <tags>bff-api, api, implement</tags>
+    <estimate>2h</estimate>
+    <dependencies>020, 021</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Add server-side pre-execution validation for JPS schemas before playbook execution.</goal>
+    <context>
+      Before executing a playbook, PlaybookOrchestrationService.ValidateAsync checks for issues.
+      Add JPS-specific validations: $choices resolvable, $knowledge resolvable, schema parseable,
+      structured output compatible (output.fields can generate valid JSON Schema).
+      Return clear error messages with actionable fixes.
+    </context>
+    <constraints>
+      - Add to existing PlaybookOrchestrationService.ValidateAsync
+      - Return structured validation results (not exceptions)
+      - Clear error messages with specific field/reference that failed
+      - $choices and $knowledge validation only for JPS schemas (skip for flat text)
+      - MUST NOT log prompt content per ADR-015
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read PlaybookOrchestrationService.cs ValidateAsync method</step>
+    <step order="2">Add JPS validation checks:
+      - Schema parseable (valid JSON, required fields present)
+      - $choices resolvable (downstream node exists, field exists)
+      - Structured output compatible (fields can generate JSON Schema)
+    </step>
+    <step order="3">Return structured validation results with field-level errors</step>
+    <step order="4">Skip JPS validation for flat text prompts</step>
+    <step order="5">Verify build: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Grep</tool>
+    <tool>Bash(dotnet build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>JPS schemas validated before execution</criterion>
+    <criterion>Clear error messages for unresolvable references</criterion>
+    <criterion>Flat text prompts skip JPS validation</criterion>
+    <criterion>Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

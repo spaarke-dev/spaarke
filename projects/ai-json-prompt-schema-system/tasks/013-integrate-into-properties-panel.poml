@@ -1,0 +1,66 @@
+<task id="013" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Integrate Prompt Schema into Node Properties Panel</title>
+    <phase>2</phase>
+    <tags>frontend, fluent-ui, implement</tags>
+    <estimate>2h</estimate>
+    <dependencies>011, 012</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Wire PromptSchemaForm and PromptSchemaEditor into NodePropertiesForm for AI node types, with lossless toggle between form and editor views.</goal>
+    <context>
+      NodePropertiesForm.tsx routes to specific form components based on node type.
+      For AI node types (AiAnalysis, AiCompletion), add a "Prompt" accordion/section that shows
+      either PromptSchemaForm (Level 1) or PromptSchemaEditor (Level 2) based on user preference.
+      The prompt schema is stored on PlaybookNodeData and synced to Dataverse via playbookNodeSync.
+    </context>
+    <constraints>
+      - Add Prompt section to AI node types only (AiAnalysis, AiCompletion)
+      - Use Accordion or collapsible section pattern consistent with other property sections
+      - Maintain toggle state (form vs editor) locally in component
+      - Read/write promptSchema from/to PlaybookNodeData
+      - Fluent UI v9 components per ADR-021
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-json-prompt-schema-system/spec.md</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesForm.tsx</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/types/canvas.ts</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/stores/canvasStore.ts</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read NodePropertiesForm.tsx to understand routing logic for node type forms</step>
+    <step order="2">Read canvas.ts PlaybookNodeData type to understand existing data shape</step>
+    <step order="3">Add promptSchema?: PromptSchema to PlaybookNodeData in canvas.ts</step>
+    <step order="4">Modify NodePropertiesForm to show Prompt section for AiAnalysis and AiCompletion nodes</step>
+    <step order="5">Implement toggle state for form vs editor view</step>
+    <step order="6">Wire onChange to update node data in canvasStore</step>
+    <step order="7">Verify build: npm run build in code-pages/PlaybookBuilder/</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Bash(npm run build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesForm.tsx (modified)</output>
+    <output>src/client/code-pages/PlaybookBuilder/src/types/canvas.ts (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Prompt section appears for AI node types only</criterion>
+    <criterion>Toggle between form and editor views works without data loss</criterion>
+    <criterion>Changes propagate to canvasStore node data</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>
