@@ -1,0 +1,174 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are a technology contracts specialist and IT service management expert with deep knowledge of Service Level Agreements across cloud services, managed services, software-as-a-service, outsourcing, and telecommunications. You understand both the operational realities of meeting SLAs and the legal/financial consequences of SLA breaches. You are skilled at identifying gaps between what an SLA promises and what it actually delivers in practice.",
+    "task": "Analyze the provided Service Level Agreement (SLA) or service level provisions within a broader agreement. Produce a comprehensive structured analysis that enables both technical teams and business stakeholders to understand performance commitments, measurement approaches, consequences of non-performance, and practical limitations of the SLA. Cover: (1) Scope of services covered and service boundaries, (2) Service Level Objectives with target values and measurement periods, (3) Measurement methodology and calculation formulas, (4) Scheduled maintenance and exclusions, (5) Incident classification and response commitments, (6) Service credits and penalty structure, (7) Reporting and transparency provisions, (8) Continuous improvement and review processes, (9) Practical assessment comparing to industry standards.",
+    "constraints": [
+      "Cite specific sections and tables where each SLO is defined",
+      "Flag provisions that undermine SLA value with [FLAG], notice deadlines with [CALENDAR ITEM], and terms requiring negotiation with [ACTION REQUIRED]",
+      "Begin with a Summary Table listing each SLO with target, measurement period, associated credit, and severity classification",
+      "Identify any exclusions that significantly reduce practical SLA value and mark as [REVIEW RECOMMENDED]",
+      "If a field cannot be determined from the document, return null rather than guessing"
+    ],
+    "context": "The user is a business or technical stakeholder reviewing an SLA to understand performance commitments, enforcement mechanisms, and practical risk exposure before signing or during vendor management."
+  },
+
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 50000,
+      "placeholder": "{{document.extractedText}}"
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "executiveSummary",
+        "type": "string",
+        "description": "High-level summary of the SLA covering services, key SLO targets, credit structure, and overall assessment",
+        "maxLength": 1000
+      },
+      {
+        "name": "serviceLevelObjectives",
+        "type": "array",
+        "description": "All Service Level Objectives defined in the SLA",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "description": "SLO name or identifier" },
+            "metric": { "type": "string", "description": "What is measured (availability, response time, resolution time, etc.)" },
+            "targetValue": { "type": "string", "description": "Target value (e.g., 99.9%, <200ms, <4 hours)" },
+            "measurementPeriod": { "type": "string", "description": "Monthly, quarterly, rolling 30 days, etc." },
+            "creditPercentage": { "type": "string", "description": "Service credit percentage for breach of this SLO" },
+            "section": { "type": "string", "description": "Document section reference where this SLO is defined" }
+          }
+        }
+      },
+      {
+        "name": "uptimeTarget",
+        "type": "string",
+        "description": "Primary availability/uptime SLO target percentage",
+        "$choices": "downstream:update_doc.sprk_slouptarget"
+      },
+      {
+        "name": "maxCreditCap",
+        "type": "string",
+        "description": "Maximum service credit cap (monthly or annual) as stated in the agreement"
+      },
+      {
+        "name": "exclusions",
+        "type": "array",
+        "description": "Events or conditions excluded from SLA calculations",
+        "items": {
+          "type": "object",
+          "properties": {
+            "exclusion": { "type": "string", "description": "Description of excluded event or condition" },
+            "impact": { "type": "string", "description": "How this exclusion affects practical SLA value" },
+            "flagged": { "type": "boolean", "description": "Whether this exclusion is flagged as significantly reducing SLA value" }
+          }
+        }
+      },
+      {
+        "name": "incidentResponseTimes",
+        "type": "array",
+        "description": "Response and resolution time commitments by severity level",
+        "items": {
+          "type": "object",
+          "properties": {
+            "severity": { "type": "string", "description": "Severity level (P1, P2, P3, Critical, High, Medium, Low)" },
+            "responseTime": { "type": "string", "description": "Initial response time commitment" },
+            "resolutionTime": { "type": "string", "description": "Target resolution or workaround time" }
+          }
+        }
+      },
+      {
+        "name": "overallAssessment",
+        "type": "string",
+        "description": "Whether this SLA is industry-standard, stronger, or weaker than typical for this service type",
+        "$choices": "downstream:update_doc.sprk_sloritassessment"
+      },
+      {
+        "name": "topRisks",
+        "type": "array",
+        "description": "The three most significant risks to the customer from this SLA as written",
+        "items": {
+          "type": "object",
+          "properties": {
+            "risk": { "type": "string", "description": "Description of the risk" },
+            "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"], "description": "Risk severity level" }
+          }
+        }
+      },
+      {
+        "name": "fullReport",
+        "type": "string",
+        "description": "Complete structured analysis text covering all nine analysis sections with flags, calendar items, and action items"
+      },
+      {
+        "name": "confidence",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Overall confidence in the analysis quality based on document completeness and clarity"
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "scopes": {
+    "$knowledge": [
+      { "$ref": "knowledge:sla-standards", "as": "reference" },
+      { "$ref": "knowledge:standard-contract-terms", "as": "definitions" }
+    ]
+  },
+
+  "examples": [
+    {
+      "input": "SERVICE LEVEL AGREEMENT between CloudHost Inc. and Acme Corp. Section 3.1 Availability: Provider shall maintain 99.9% monthly uptime for Production Environment. Section 3.2 Response Times: P1 Critical - 15 min response, 4 hour resolution. P2 High - 1 hour response, 8 hour resolution. Section 5 Credits: For each 0.1% below target, Customer receives 5% credit on monthly fee, capped at 30% monthly fee. Section 6 Exclusions: Scheduled maintenance (Sundays 2-6 AM UTC), force majeure, customer-caused outages...",
+      "output": {
+        "executiveSummary": "SLA between CloudHost Inc. and Acme Corp covering production environment availability with 99.9% monthly uptime target. Credit structure provides 5% per 0.1% shortfall, capped at 30% monthly fee. Response times are tiered by severity (P1: 15 min, P2: 1 hour). Standard exclusions apply including scheduled maintenance and force majeure.",
+        "serviceLevelObjectives": [
+          {
+            "name": "Production Availability",
+            "metric": "uptime percentage",
+            "targetValue": "99.9%",
+            "measurementPeriod": "monthly",
+            "creditPercentage": "5% per 0.1% below target",
+            "section": "Section 3.1"
+          }
+        ],
+        "uptimeTarget": "99.9%",
+        "maxCreditCap": "30% of monthly fee",
+        "exclusions": [
+          {
+            "exclusion": "Scheduled maintenance window (Sundays 2-6 AM UTC)",
+            "impact": "Up to 17.3 hours/month excluded from availability calculation",
+            "flagged": false
+          }
+        ],
+        "incidentResponseTimes": [
+          { "severity": "P1 Critical", "responseTime": "15 minutes", "resolutionTime": "4 hours" },
+          { "severity": "P2 High", "responseTime": "1 hour", "resolutionTime": "8 hours" }
+        ],
+        "overallAssessment": "industry_standard",
+        "topRisks": [
+          { "risk": "Credit cap at 30% limits financial remedy for prolonged outages", "severity": "medium" },
+          { "risk": "No termination right triggered by repeated SLA failures", "severity": "high" },
+          { "risk": "Broad force majeure exclusion may cover provider infrastructure failures", "severity": "medium" }
+        ],
+        "fullReport": "[Full structured analysis text...]",
+        "confidence": 0.88
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "migration",
+    "authorLevel": 0,
+    "description": "SLA Analysis — extracts service level objectives, measurement methodology, penalties/credits, exclusions, and practical risk assessment",
+    "tags": ["sla", "service-level", "technology", "vendor-management"]
+  }
+}

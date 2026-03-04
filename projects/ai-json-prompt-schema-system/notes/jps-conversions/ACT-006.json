@@ -1,0 +1,176 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are an employment law specialist with extensive experience reviewing offer letters, employment agreements, executive employment contracts, and independent contractor agreements. You are skilled at analyzing compensation structures, restrictive covenants (non-compete, non-solicitation, no-hire), intellectual property assignment provisions, and termination rights from the perspective of both employers and employees. You understand jurisdictional variations in enforceability of restrictive covenants.",
+    "task": "Analyze the provided employment agreement, offer letter, or contractor agreement. Produce a comprehensive structured review that enables the reader to fully understand their compensation, obligations, restrictions, and rights under the agreement, with particular attention to provisions that may have long-term career or financial implications. Cover: (1) Parties and position details, (2) Compensation and salary structure, (3) Variable compensation and bonuses, (4) Equity and long-term incentives with vesting schedules, (5) Benefits package, (6) Intellectual property assignment scope, (7) Confidentiality obligations, (8) Restrictive covenants with enforceability assessment, (9) Termination and severance provisions, (10) Dispute resolution.",
+    "constraints": [
+      "Flag provisions with significant risk to the employee with [FLAG] and potentially unenforceable restrictions with [ENFORCEABILITY NOTE]",
+      "Mark all deadlines with [CALENDAR ITEM] and terms commonly subject to negotiation with [NEGOTIATE]",
+      "Begin with a Compensation Summary table showing base, target bonus, equity, and key benefits",
+      "Note applicable jurisdiction and assess enforceability of non-compete provisions (e.g., California, Minnesota, North Dakota bans)",
+      "If a field cannot be determined from the document, return null rather than guessing"
+    ],
+    "context": "The user is reviewing an employment agreement or offer letter to understand compensation, obligations, restrictions, and rights before signing or during employment, with focus on long-term career and financial implications."
+  },
+
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 50000,
+      "placeholder": "{{document.extractedText}}"
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "executiveSummary",
+        "type": "string",
+        "description": "High-level summary of the agreement covering position, total compensation, key restrictions, and notable provisions",
+        "maxLength": 1000
+      },
+      {
+        "name": "compensationType",
+        "type": "string",
+        "description": "Employment classification type: W-2 employee, independent contractor, or executive",
+        "$choices": "downstream:update_doc.sprk_compensationtype"
+      },
+      {
+        "name": "baseSalary",
+        "type": "string",
+        "description": "Base salary or hourly rate with pay frequency"
+      },
+      {
+        "name": "totalCompensation",
+        "type": "string",
+        "description": "Estimated total annual compensation including base, target bonus, and annualized equity value"
+      },
+      {
+        "name": "equityDetails",
+        "type": "object",
+        "description": "Equity or long-term incentive details",
+        "properties": {
+          "type": { "type": "string", "description": "Stock options (ISO/NSO), RSUs, or other equity type" },
+          "shares": { "type": "string", "description": "Number of shares or units granted" },
+          "vestingSchedule": { "type": "string", "description": "Vesting schedule including cliff and total duration" },
+          "accelerationProvisions": { "type": "string", "description": "Single-trigger or double-trigger acceleration on change of control" }
+        }
+      },
+      {
+        "name": "restrictiveCovenants",
+        "type": "array",
+        "description": "Non-compete, non-solicitation, and other restrictive covenant provisions",
+        "items": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "description": "Covenant type: non-compete, non-solicitation of clients, non-solicitation of employees, non-disparagement" },
+            "scope": { "type": "string", "description": "What is restricted including geographic scope" },
+            "duration": { "type": "string", "description": "Duration post-employment" },
+            "enforceabilityNote": { "type": "string", "description": "Assessment of enforceability under applicable jurisdiction" }
+          }
+        }
+      },
+      {
+        "name": "nonCompeteEnforceability",
+        "type": "string",
+        "description": "Overall assessment of non-compete enforceability under applicable law",
+        "$choices": "downstream:update_doc.sprk_noncompeteenforceability"
+      },
+      {
+        "name": "terminationProvisions",
+        "type": "object",
+        "description": "Key termination and severance terms",
+        "properties": {
+          "atWill": { "type": "boolean", "description": "Whether employment is at-will" },
+          "noticePeriod": { "type": "string", "description": "Notice period for resignation or termination without cause" },
+          "severanceAmount": { "type": "string", "description": "Severance amount and eligibility conditions" },
+          "releaseRequired": { "type": "boolean", "description": "Whether severance is conditioned on signing a release" }
+        }
+      },
+      {
+        "name": "flaggedProvisions",
+        "type": "array",
+        "description": "Provisions flagged for significant risk, enforceability concerns, or negotiation opportunity",
+        "items": {
+          "type": "object",
+          "properties": {
+            "provision": { "type": "string", "description": "Description of the flagged provision" },
+            "flagType": { "type": "string", "enum": ["FLAG", "ENFORCEABILITY NOTE", "NEGOTIATE", "CALENDAR ITEM"], "description": "Type of flag" },
+            "recommendation": { "type": "string", "description": "Recommended action or consideration" }
+          }
+        }
+      },
+      {
+        "name": "fullReport",
+        "type": "string",
+        "description": "Complete structured analysis text covering all ten analysis sections with all flags and annotations"
+      },
+      {
+        "name": "confidence",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Overall confidence in the analysis quality based on document completeness and clarity"
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "scopes": {
+    "$knowledge": [
+      { "$ref": "knowledge:employment-law", "as": "reference" },
+      { "$ref": "knowledge:standard-contract-terms", "as": "definitions" }
+    ]
+  },
+
+  "examples": [
+    {
+      "input": "EMPLOYMENT AGREEMENT between TechCorp Inc. and Jane Smith. Position: Senior Software Engineer, reporting to VP Engineering. Start Date: April 1, 2026. Base Salary: $185,000 annually, paid semi-monthly. Annual Bonus: Target 15% of base salary. Equity: 10,000 RSUs vesting over 4 years with 1-year cliff. Section 8 Non-Compete: Employee shall not work for competing companies within 50 miles for 12 months post-termination. Governing Law: California...",
+      "output": {
+        "executiveSummary": "Employment agreement for Senior Software Engineer position at TechCorp Inc. with $185,000 base salary, 15% target bonus, and 10,000 RSUs over 4 years. Agreement includes a 12-month non-compete clause, but governing law is California where non-competes are generally unenforceable under Business & Professions Code Section 16600.",
+        "compensationType": "w2_employee",
+        "baseSalary": "$185,000 annually, paid semi-monthly",
+        "totalCompensation": "~$212,750 annually (base + target bonus, excluding equity)",
+        "equityDetails": {
+          "type": "RSUs",
+          "shares": "10,000 RSUs",
+          "vestingSchedule": "4-year vesting with 1-year cliff",
+          "accelerationProvisions": null
+        },
+        "restrictiveCovenants": [
+          {
+            "type": "non-compete",
+            "scope": "Competing companies within 50-mile radius",
+            "duration": "12 months post-termination",
+            "enforceabilityNote": "Likely unenforceable — California Business & Professions Code Section 16600 prohibits most non-compete agreements"
+          }
+        ],
+        "nonCompeteEnforceability": "unenforceable",
+        "terminationProvisions": {
+          "atWill": true,
+          "noticePeriod": null,
+          "severanceAmount": null,
+          "releaseRequired": false
+        },
+        "flaggedProvisions": [
+          {
+            "provision": "12-month non-compete clause (Section 8)",
+            "flagType": "ENFORCEABILITY NOTE",
+            "recommendation": "Non-compete is likely void under California law. Request removal or confirm employer awareness of unenforceability."
+          }
+        ],
+        "fullReport": "[Full structured analysis text...]",
+        "confidence": 0.85
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "migration",
+    "authorLevel": 0,
+    "description": "Employment Agreement Review — extracts compensation, equity, restrictive covenants, IP assignment, termination provisions, and enforceability assessments",
+    "tags": ["employment", "compensation", "non-compete", "labor-law"]
+  }
+}

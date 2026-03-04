@@ -1,0 +1,168 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are a senior accounts payable analyst and financial document specialist with deep expertise in invoice processing, vendor management, and financial controls. You have experience with invoices from diverse industries and formats, including purchase order-backed invoices, subscription billing, professional services invoices, and utility bills. You understand common invoice discrepancies, fraud indicators, and compliance requirements.",
+    "task": "Extract and validate all relevant financial and logistical data from the provided invoice document. Your analysis must produce structured, machine-readable output suitable for accounts payable processing, three-way matching against purchase orders and receipts, and general ledger coding.",
+    "constraints": [
+      "Use null for any field not found in the document",
+      "Flag sensitive payment/banking details as [SENSITIVE]",
+      "Mark mathematical discrepancies with exact amounts as [DISCREPANCY]",
+      "Mark missing required fields as [MISSING: field name]",
+      "Verify that line item totals sum correctly to subtotal and that tax calculations are mathematically correct"
+    ],
+    "context": "The user is an accounts payable professional processing vendor invoices for payment authorization. Output must support three-way matching (invoice vs. purchase order vs. receipt) and general ledger coding. Target document types include vendor invoices, utility bills, subscription invoices, professional services invoices, and purchase invoices."
+  },
+
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 50000,
+      "placeholder": "{{document.extractedText}}"
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "executiveSummary",
+        "type": "string",
+        "description": "Brief summary of the invoice: vendor, invoice number, total amount, due date, and any issues found. If no issues, state 'No issues found — invoice ready for processing.'",
+        "maxLength": 1000
+      },
+      {
+        "name": "invoiceNumber",
+        "type": "string",
+        "description": "Invoice number exactly as printed on the document"
+      },
+      {
+        "name": "invoiceDate",
+        "type": "string",
+        "description": "Invoice date in ISO 8601 format"
+      },
+      {
+        "name": "purchaseOrderNumber",
+        "type": "string",
+        "description": "Purchase order number if referenced on the invoice, null if not present"
+      },
+      {
+        "name": "vendor",
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Vendor/supplier legal name as printed" },
+          "address": { "type": "string", "description": "Full vendor address" },
+          "taxId": { "type": "string", "description": "Vendor tax identification number (EIN, VAT, GST, etc.)" }
+        },
+        "description": "Vendor identification and contact information"
+      },
+      {
+        "name": "lineItems",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "lineNumber": { "type": "number", "description": "Line item number" },
+            "description": { "type": "string", "description": "Item description verbatim" },
+            "quantity": { "type": "number", "description": "Quantity" },
+            "unitPrice": { "type": "number", "description": "Unit price" },
+            "lineTotal": { "type": "number", "description": "Line total amount" }
+          }
+        },
+        "description": "Individual line items with quantity, pricing, and totals"
+      },
+      {
+        "name": "financialSummary",
+        "type": "object",
+        "properties": {
+          "subtotal": { "type": "number", "description": "Subtotal before tax and discounts" },
+          "taxAmount": { "type": "number", "description": "Total tax amount" },
+          "taxRate": { "type": "string", "description": "Tax rate and type (e.g., '8.25% sales tax')" },
+          "totalAmountDue": { "type": "number", "description": "Total amount due" },
+          "currency": { "type": "string", "description": "Currency code (e.g., USD, EUR, GBP)" }
+        },
+        "description": "Financial totals including subtotal, tax, and amount due"
+      },
+      {
+        "name": "paymentTerms",
+        "type": "string",
+        "description": "Payment terms as stated (e.g., Net 30, 2/10 Net 30, Due on Receipt) with calculated due date"
+      },
+      {
+        "name": "invoiceStatus",
+        "type": "string",
+        "description": "Validation status based on mathematical verification and completeness checks",
+        "$choices": "downstream:update_doc.sprk_invoicestatus"
+      },
+      {
+        "name": "issues",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["DISCREPANCY", "MISSING", "SENSITIVE", "FLAG"], "description": "Issue category" },
+            "description": { "type": "string", "description": "Detailed description of the issue" },
+            "field": { "type": "string", "description": "Which field or line item is affected" }
+          }
+        },
+        "description": "All validation issues, discrepancies, missing fields, and risk flags found during processing"
+      },
+      {
+        "name": "confidence",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Overall confidence in the extraction accuracy based on document quality and completeness"
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "scopes": {
+    "$knowledge": [
+      { "$ref": "knowledge:invoice-validation-rules", "as": "reference" },
+      { "$ref": "knowledge:ap-fraud-indicators", "as": "definitions" }
+    ]
+  },
+
+  "examples": [
+    {
+      "input": "INVOICE\n\nFrom: DataStream Solutions LLC\n123 Tech Boulevard, Suite 200\nAustin, TX 78701\nEIN: 84-1234567\n\nBill To: Acme Corporation\n456 Commerce Street\nDallas, TX 75201\n\nInvoice #: DS-2026-0847\nInvoice Date: February 15, 2026\nPO #: PO-ACM-2026-112\nPayment Terms: Net 30\n\nLine Items:\n1. Cloud Infrastructure Services (Feb 2026) — 1 x $12,500.00 = $12,500.00\n2. Data Analytics Platform License — 5 users x $450.00 = $2,250.00\n3. Professional Services: Migration Support — 40 hrs x $175.00 = $7,000.00\n\nSubtotal: $21,750.00\nSales Tax (8.25%): $1,794.38\nTotal Due: $23,544.38\n\nPayment Due: March 17, 2026",
+      "output": {
+        "executiveSummary": "Invoice DS-2026-0847 from DataStream Solutions LLC for $23,544.38 due March 17, 2026. PO reference: PO-ACM-2026-112. Three line items covering cloud services, software licenses, and professional services. No issues found — invoice ready for processing.",
+        "invoiceNumber": "DS-2026-0847",
+        "invoiceDate": "2026-02-15",
+        "purchaseOrderNumber": "PO-ACM-2026-112",
+        "vendor": {
+          "name": "DataStream Solutions LLC",
+          "address": "123 Tech Boulevard, Suite 200, Austin, TX 78701",
+          "taxId": "84-1234567"
+        },
+        "lineItems": [
+          { "lineNumber": 1, "description": "Cloud Infrastructure Services (Feb 2026)", "quantity": 1, "unitPrice": 12500.00, "lineTotal": 12500.00 },
+          { "lineNumber": 2, "description": "Data Analytics Platform License", "quantity": 5, "unitPrice": 450.00, "lineTotal": 2250.00 },
+          { "lineNumber": 3, "description": "Professional Services: Migration Support", "quantity": 40, "unitPrice": 175.00, "lineTotal": 7000.00 }
+        ],
+        "financialSummary": {
+          "subtotal": 21750.00,
+          "taxAmount": 1794.38,
+          "taxRate": "8.25% sales tax",
+          "totalAmountDue": 23544.38,
+          "currency": "USD"
+        },
+        "paymentTerms": "Net 30. Due date: March 17, 2026.",
+        "invoiceStatus": "valid",
+        "issues": [],
+        "confidence": 0.95
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "migration",
+    "authorLevel": 0,
+    "createdAt": "2026-03-04T00:00:00Z",
+    "description": "Extraction and validation of invoice data including vendor details, invoice number, line items, amounts, taxes, payment terms, and due dates for accounts payable processing",
+    "tags": ["invoice", "financial", "accounts-payable", "extraction", "validation"]
+  }
+}

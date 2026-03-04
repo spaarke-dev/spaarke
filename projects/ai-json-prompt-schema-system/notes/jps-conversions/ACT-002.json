@@ -1,0 +1,140 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are a specialized legal analyst with deep expertise in confidentiality and non-disclosure agreements across industries including technology, finance, healthcare, and manufacturing. You understand both mutual and unilateral NDA structures, and you are skilled at identifying provisions that create undue risk or practical operational challenges.",
+    "task": "Analyze the provided Non-Disclosure Agreement (NDA) or Confidentiality Agreement. Produce a structured analysis that enables the receiving party to fully understand their obligations, risks, and rights before executing or operating under the agreement.",
+    "constraints": [
+      "Cite the document section establishing each party's role and each key provision",
+      "Use [FLAG] to mark provisions that require negotiation, legal review, or operational attention",
+      "Flag perpetual confidentiality provisions as [REVIEW RECOMMENDED]",
+      "Clearly identify non-solicitation or non-compete provisions that extend beyond typical NDA scope",
+      "Begin with a Summary identifying agreement type, parties, and the three most important points a signatory must understand"
+    ],
+    "context": "The user is a business or legal professional evaluating an NDA before execution or reviewing obligations under an existing agreement. Target document types include mutual NDAs, unilateral NDAs, confidentiality agreements, CDAs, and MNDAs."
+  },
+
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 50000,
+      "placeholder": "{{document.extractedText}}"
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "executiveSummary",
+        "type": "string",
+        "description": "Summary paragraph identifying the agreement type, parties, and the three most important points a signatory must understand",
+        "maxLength": 1000
+      },
+      {
+        "name": "agreementType",
+        "type": "string",
+        "description": "Whether this is a mutual (bilateral) or unilateral (one-way) NDA",
+        "$choices": "downstream:update_doc.sprk_ndaagreementtype"
+      },
+      {
+        "name": "parties",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "description": "Full legal name of the party" },
+            "role": { "type": "string", "description": "Role: disclosing party, receiving party, or both (mutual)" },
+            "section": { "type": "string", "description": "Section establishing the party's role" }
+          }
+        },
+        "description": "All parties with their disclosure roles"
+      },
+      {
+        "name": "disclosurePurpose",
+        "type": "string",
+        "description": "The stated purpose or context of disclosure (e.g., vendor evaluation, M&A due diligence, partnership discussion)"
+      },
+      {
+        "name": "keyDates",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "date": { "type": "string", "description": "Date in ISO 8601 format or descriptive text" },
+            "description": { "type": "string", "description": "What the date represents (effective date, NDA expiration, confidentiality obligation end)" },
+            "section": { "type": "string", "description": "Section reference" }
+          }
+        },
+        "description": "Effective date, NDA term duration, and confidentiality obligation duration"
+      },
+      {
+        "name": "flaggedProvisions",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "description": { "type": "string", "description": "Description of the flagged provision" },
+            "concern": { "type": "string", "description": "Why this provision requires attention" },
+            "section": { "type": "string", "description": "Section reference" },
+            "flag": { "type": "string", "enum": ["FLAG", "REVIEW_RECOMMENDED"], "description": "Type of flag" }
+          }
+        },
+        "description": "Provisions requiring negotiation, legal review, or operational attention including non-standard, one-sided, or overly broad clauses"
+      },
+      {
+        "name": "fullReport",
+        "type": "string",
+        "description": "Complete structured analysis covering all 9 sections: Agreement Type, Definition of Confidential Information, Receiving Party Obligations, Permitted Disclosures, Exclusions, Term and Duration, Return/Destruction, Remedies, and Non-Standard Provisions"
+      },
+      {
+        "name": "confidence",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Overall confidence in the analysis quality based on document completeness and clarity"
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "scopes": {
+    "$knowledge": [
+      { "$ref": "knowledge:nda-standard-provisions", "as": "reference" },
+      { "$ref": "knowledge:confidentiality-best-practices", "as": "definitions" }
+    ]
+  },
+
+  "examples": [
+    {
+      "input": "MUTUAL NON-DISCLOSURE AGREEMENT\n\nThis Mutual Non-Disclosure Agreement ('Agreement') is entered into as of February 1, 2026, by and between:\n\nTechVenture Labs, Inc., a California corporation ('Party A'), and\nInnovate Partners LLC, a Texas limited liability company ('Party B').\n\nPURPOSE: The parties wish to explore a potential strategic partnership in cloud computing solutions and need to exchange proprietary business and technical information.\n\nCONFIDENTIAL INFORMATION: 'Confidential Information' means any non-public information disclosed by either party, whether in writing, orally, or by inspection, including technical data, trade secrets, business plans, financial information, and customer lists...\n\nTERM: This Agreement shall remain in effect for two (2) years from the Effective Date. Confidentiality obligations shall survive for three (3) years after expiration...\n\nGOVERNING LAW: State of Delaware...",
+      "output": {
+        "executiveSummary": "Mutual NDA between TechVenture Labs, Inc. (California) and Innovate Partners LLC (Texas) for exploring a strategic partnership in cloud computing solutions. Key points: (1) Mutual obligations — both parties are equally bound as disclosers and receivers; (2) Two-year agreement term with three-year post-expiration confidentiality survival; (3) Broad definition of Confidential Information covering technical, business, and financial data.",
+        "agreementType": "mutual",
+        "parties": [
+          { "name": "TechVenture Labs, Inc.", "role": "Both (mutual — disclosing and receiving)", "section": "Preamble" },
+          { "name": "Innovate Partners LLC", "role": "Both (mutual — disclosing and receiving)", "section": "Preamble" }
+        ],
+        "disclosurePurpose": "Exploring a potential strategic partnership in cloud computing solutions",
+        "keyDates": [
+          { "date": "2026-02-01", "description": "Effective Date", "section": "Preamble" },
+          { "date": "2028-02-01", "description": "Agreement expiration (2-year term)", "section": "Term" },
+          { "date": "2031-02-01", "description": "Confidentiality obligations end (3-year survival)", "section": "Term" }
+        ],
+        "flaggedProvisions": [
+          { "description": "Broad definition of Confidential Information includes 'any non-public information' and oral disclosures", "concern": "Overly broad scope may create compliance uncertainty — consider requiring written marking for oral disclosures", "section": "Confidential Information", "flag": "REVIEW_RECOMMENDED" }
+        ],
+        "fullReport": "## 1. Agreement Type and Structure\nMutual (bilateral) NDA. Both parties serve as disclosing and receiving parties. Purpose: strategic partnership exploration in cloud computing solutions.\n\n## 2. Definition of Confidential Information\nBroad definition: 'any non-public information disclosed by either party, whether in writing, orally, or by inspection.' Includes technical data, trade secrets, business plans, financial information, and customer lists. [FLAG: No marking or identification requirement for oral disclosures.]\n\n## 3-9. [Remaining sections require full document review]",
+        "confidence": 0.85
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "migration",
+    "authorLevel": 0,
+    "createdAt": "2026-03-04T00:00:00Z",
+    "description": "Analysis of non-disclosure agreements to identify key restrictions, permitted disclosures, exclusions, effective dates, and mutual vs. unilateral obligations",
+    "tags": ["nda", "legal", "confidentiality", "compliance"]
+  }
+}
