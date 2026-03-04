@@ -8,6 +8,7 @@
  */
 
 import type { Node, Edge } from "@xyflow/react";
+import type { PromptSchema } from "./promptSchema";
 
 /**
  * All supported playbook node types.
@@ -66,6 +67,8 @@ export interface PlaybookNodeData {
     toolIds?: string[];
     /** AI model deployment ID (for aiAnalysis, aiCompletion nodes) */
     modelDeploymentId?: string;
+    /** JSON Prompt Schema for AI nodes (aiAnalysis, aiCompletion) */
+    promptSchema?: PromptSchema;
     /** Index signature for React Flow v12 compatibility */
     [key: string]: unknown;
 }

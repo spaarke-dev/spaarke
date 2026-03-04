@@ -22,7 +22,14 @@ public class AiAnalysisNodeExecutorTests
     {
         _toolHandlerRegistryMock = new Mock<IToolHandlerRegistry>();
         _loggerMock = new Mock<ILogger<AiAnalysisNodeExecutor>>();
-        _executor = new AiAnalysisNodeExecutor(_toolHandlerRegistryMock.Object, _loggerMock.Object);
+
+        // AiAnalysisNodeExecutor now takes IServiceProvider to resolve handlers at runtime.
+        // Wire up a mock IServiceProvider that returns the IToolHandlerRegistry when requested.
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        serviceProviderMock
+            .Setup(sp => sp.GetService(typeof(IToolHandlerRegistry)))
+            .Returns(_toolHandlerRegistryMock.Object);
+        _executor = new AiAnalysisNodeExecutor(serviceProviderMock.Object, _loggerMock.Object);
     }
 
     #region SupportedActionTypes Tests
@@ -381,7 +388,7 @@ public class AiAnalysisNodeExecutorTests
                 Id = nodeId,
                 PlaybookId = Guid.NewGuid(),
                 ActionId = actionId,
-                ToolId = toolId,
+                ToolIds = new[] { toolId },
                 Name = "Test Node",
                 ExecutionOrder = 1,
                 OutputVariable = "testOutput",

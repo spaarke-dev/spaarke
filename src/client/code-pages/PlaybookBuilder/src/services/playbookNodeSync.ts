@@ -35,6 +35,14 @@ import {
     NodeTypeToDataverse,
     NodeTypeToActionType,
 } from "../types/playbook";
+import type { PromptSchema } from "../types/promptSchema";
+import { validatePromptSchema } from "../types/promptSchema";
+import {
+    validatePromptSchemaNodes,
+    hasValidationErrors,
+    groupValidationsByNode,
+    type PromptSchemaValidation,
+} from "./canvasValidation";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -198,6 +206,75 @@ export async function syncNodesToDataverse(
 }
 
 // ---------------------------------------------------------------------------
+// Validation-Aware Sync — Runs canvas validation before persisting
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of a validated sync operation.
+ */
+export interface ValidatedSyncResult {
+    /** Whether the sync was executed (false if validation errors blocked it). */
+    synced: boolean;
+    /** All validation results (errors and warnings). */
+    validations: PromptSchemaValidation[];
+    /** Validation results grouped by node ID for UI consumption. */
+    validationsByNode: Map<string, { errors: string[]; warnings: string[] }>;
+}
+
+/**
+ * Validate canvas nodes and, if no errors, sync to Dataverse.
+ *
+ * This is the recommended entry point for save operations. It:
+ *   1. Runs all prompt schema validation rules
+ *   2. If errors exist, returns results WITHOUT syncing (errors block save)
+ *   3. If only warnings (or none), syncs to Dataverse and returns results
+ *
+ * @param playbookId - Playbook record GUID (no braces).
+ * @param nodes - Current canvas nodes (typed for @xyflow/react compatibility).
+ * @param edges - Current canvas edges.
+ * @returns Validation results and whether the sync was executed.
+ */
+export async function validateAndSyncNodes(
+    playbookId: string,
+    nodes: CanvasNode[],
+    edges: CanvasEdge[],
+): Promise<ValidatedSyncResult> {
+    // Cast CanvasNode[] to the @xyflow/react Node shape for validation.
+    // CanvasNode is structurally compatible (has id, type, data with PlaybookNodeData).
+    const validationNodes = nodes.map((n) => ({
+        ...n,
+        data: n.data,
+    }));
+
+    const validations = validatePromptSchemaNodes(
+        validationNodes as unknown as import("@xyflow/react").Node<import("../types/canvas").PlaybookNodeData>[],
+        edges,
+    );
+
+    const validationsByNode = groupValidationsByNode(validations);
+
+    if (hasValidationErrors(validations)) {
+        const errorCount = validations.filter((v) => v.severity === "error").length;
+        console.warn(
+            `${LOG_PREFIX} Sync blocked: ${errorCount} validation error(s) found. Fix errors before saving.`,
+        );
+        return { synced: false, validations, validationsByNode };
+    }
+
+    // No errors — proceed with sync (warnings are informational)
+    await syncNodesToDataverse(playbookId, nodes, edges);
+    return { synced: true, validations, validationsByNode };
+}
+
+// Re-export validation utilities for consumers that import from playbookNodeSync
+export {
+    validatePromptSchemaNodes,
+    hasValidationErrors,
+    groupValidationsByNode,
+    type PromptSchemaValidation,
+} from "./canvasValidation";
+
+// ---------------------------------------------------------------------------
 // buildConfigJson — Maps ALL 7 node types' fields into sprk_configjson
 // ---------------------------------------------------------------------------
 
@@ -223,12 +300,24 @@ export function buildConfigJson(canvasNodeId: string, data: PlaybookNodeData): s
             // SkillIds and KnowledgeIds are handled via N:N tables, not in configjson.
             // But we include model/tool/action references for executor convenience.
             if (data.modelDeploymentId) config.modelDeploymentId = data.modelDeploymentId;
-            if (data.systemPrompt) config.systemPrompt = data.systemPrompt;
+            // JPS serialization: if promptSchema exists, serialize it as the systemPrompt value.
+            // Otherwise preserve flat text systemPrompt for backward compatibility.
+            if (data.promptSchema) {
+                config.systemPrompt = JSON.stringify(data.promptSchema);
+            } else if (data.systemPrompt) {
+                config.systemPrompt = data.systemPrompt;
+            }
             break;
 
         case "aiCompletion":
             // AI Completion: system prompt, user prompt template, temperature, max tokens
-            if (data.systemPrompt) config.systemPrompt = data.systemPrompt;
+            // JPS serialization: if promptSchema exists, serialize it as the systemPrompt value.
+            // Otherwise preserve flat text systemPrompt for backward compatibility.
+            if (data.promptSchema) {
+                config.systemPrompt = JSON.stringify(data.promptSchema);
+            } else if (data.systemPrompt) {
+                config.systemPrompt = data.systemPrompt;
+            }
             if (data.userPromptTemplate) config.userPromptTemplate = data.userPromptTemplate;
             if (data.temperature != null) config.temperature = data.temperature;
             if (data.maxTokens != null) config.maxTokens = data.maxTokens;
@@ -295,6 +384,86 @@ export function buildConfigJson(canvasNodeId: string, data: PlaybookNodeData): s
     }
 
     return JSON.stringify(config);
+}
+
+// ---------------------------------------------------------------------------
+// JPS Format Detection & Deserialization (Dataverse → canvas)
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect whether a string contains JPS (JSON Prompt Schema) format.
+ *
+ * Mirrors the server-side detection logic: the string must start with '{'
+ * (after trimming whitespace) and contain the '"$schema"' marker.
+ *
+ * @param value - The raw string value (e.g. from sprk_systemprompt or configJson.systemPrompt).
+ * @returns True if the value appears to be JPS JSON, false if it's flat text or empty.
+ */
+export function isJpsFormat(value: string | null | undefined): boolean {
+    if (!value) return false;
+    const trimmed = value.trimStart();
+    return trimmed.startsWith("{") && trimmed.includes('"$schema"');
+}
+
+/**
+ * Attempt to deserialize a JPS JSON string into a PromptSchema object.
+ *
+ * Performs format detection, JSON parsing, and structural validation.
+ * Returns undefined for flat text, empty strings, or invalid JPS.
+ *
+ * @param value - The raw string value to attempt JPS deserialization on.
+ * @returns A validated PromptSchema if the value is valid JPS, or undefined otherwise.
+ */
+export function deserializePromptSchema(value: string | null | undefined): PromptSchema | undefined {
+    if (!isJpsFormat(value)) return undefined;
+
+    try {
+        const parsed = JSON.parse(value!);
+        const result = validatePromptSchema(parsed);
+        if (result.valid) {
+            return parsed as PromptSchema;
+        }
+        console.warn(`${LOG_PREFIX} JPS validation failed:`, result.errors);
+        return undefined;
+    } catch (err) {
+        console.warn(`${LOG_PREFIX} JPS parse failed:`, err);
+        return undefined;
+    }
+}
+
+/**
+ * Extract a PromptSchema from a node's configJson string.
+ *
+ * Parses the configJson blob, checks the `systemPrompt` property for JPS format,
+ * and returns the deserialized PromptSchema if valid.
+ *
+ * Also checks for a `promptSchemaOverride` property in the configJson
+ * (reserved for node-level overrides in Phase 5).
+ *
+ * @param configJson - The raw sprk_configjson string from a Dataverse node record.
+ * @returns An object with `promptSchema` (from systemPrompt) and `promptSchemaOverride`
+ *          (from configJson.promptSchemaOverride), either or both may be undefined.
+ */
+export function parseNodeConfigForPromptSchema(configJson: string | null | undefined): {
+    promptSchema: PromptSchema | undefined;
+    promptSchemaOverride: PromptSchema | undefined;
+} {
+    if (!configJson) return { promptSchema: undefined, promptSchemaOverride: undefined };
+
+    try {
+        const parsed = JSON.parse(configJson);
+        const systemPromptValue = typeof parsed.systemPrompt === "string" ? parsed.systemPrompt : undefined;
+        const overrideValue = typeof parsed.promptSchemaOverride === "string"
+            ? parsed.promptSchemaOverride
+            : undefined;
+
+        return {
+            promptSchema: deserializePromptSchema(systemPromptValue),
+            promptSchemaOverride: deserializePromptSchema(overrideValue),
+        };
+    } catch {
+        return { promptSchema: undefined, promptSchemaOverride: undefined };
+    }
 }
 
 // ---------------------------------------------------------------------------

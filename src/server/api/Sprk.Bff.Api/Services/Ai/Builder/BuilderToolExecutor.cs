@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai.Builder;
 
@@ -63,6 +64,8 @@ public class BuilderToolExecutor
                     await ExecuteAutoLayoutAsync(toolCall, canvasState, cancellationToken),
                 BuilderToolDefinitions.ToolNames.ValidateCanvas =>
                     await ExecuteValidateCanvasAsync(toolCall, canvasState, cancellationToken),
+                BuilderToolDefinitions.ToolNames.ConfigurePromptSchema =>
+                    await ExecuteConfigurePromptSchemaAsync(toolCall, canvasState, cancellationToken),
                 _ => CreateErrorResult(toolCall, $"Unknown tool: {toolCall.ToolName}")
             };
         }
@@ -499,6 +502,219 @@ public class BuilderToolExecutor
             CanvasOperations = new[] { CreateCanvasOperation(CanvasOperationType.ValidateResult,
                 new CanvasPatch { Config = new Dictionary<string, object?> { ["validation"] = result } }) }
         });
+    }
+
+    private Task<BuilderToolResult> ExecuteConfigurePromptSchemaAsync(
+        BuilderToolCall toolCall,
+        CanvasState canvasState,
+        CancellationToken cancellationToken)
+    {
+        var args = toolCall.Arguments.Deserialize<ConfigurePromptSchemaArguments>(JsonOptions)
+            ?? throw new JsonException("Failed to parse ConfigurePromptSchema arguments");
+
+        // Find the target node
+        var node = canvasState.Nodes.FirstOrDefault(n => n.Id == args.NodeId);
+        if (node == null)
+        {
+            return Task.FromResult(CreateErrorResult(toolCall, $"Node not found: {args.NodeId}"));
+        }
+
+        // Build output field definitions from arguments
+        var outputFields = args.OutputFields.Select(f => new OutputFieldDefinition
+        {
+            Name = f.Name,
+            Type = f.Type,
+            Description = f.Description,
+            Enum = f.Enum
+        }).ToList();
+
+        // Handle autoWireChoices: attempt to resolve $choices references from downstream nodes
+        var autoWireApplied = false;
+        if (args.AutoWireChoices)
+        {
+            autoWireApplied = TryAutoWireChoices(args.NodeId, outputFields, canvasState);
+            if (!autoWireApplied)
+            {
+                _logger.LogInformation(
+                    "ConfigurePromptSchema: autoWireChoices requested for node {NodeId} but no downstream choice fields found or wiring deferred",
+                    args.NodeId);
+            }
+        }
+
+        // Build the complete PromptSchema
+        var schema = new PromptSchema
+        {
+            Schema = "https://spaarke.com/schemas/prompt/v1",
+            Version = 1,
+            Instruction = new InstructionSection
+            {
+                Role = args.Role,
+                Task = args.Task,
+                Constraints = args.Constraints
+            },
+            Output = new OutputSection
+            {
+                Fields = outputFields,
+                StructuredOutput = args.UseStructuredOutput
+            },
+            Metadata = new MetadataSection
+            {
+                Author = "builder-agent",
+                AuthorLevel = 3,
+                CreatedAt = DateTime.UtcNow.ToString("o")
+            }
+        };
+
+        // Serialize the PromptSchema to JSON
+        var schemaJson = JsonSerializer.Serialize(schema, JsonOptions);
+
+        // Build the result
+        var result = new ConfigurePromptSchemaResult
+        {
+            NodeId = args.NodeId,
+            SchemaVersion = 1,
+            FieldCount = outputFields.Count,
+            StructuredOutput = args.UseStructuredOutput,
+            AutoWireChoicesApplied = autoWireApplied,
+            Message = $"Configured prompt schema for node '{node.Label ?? args.NodeId}' with {outputFields.Count} output fields" +
+                      (args.UseStructuredOutput ? " (structured output enabled)" : "") +
+                      (autoWireApplied ? " with auto-wired choice references" : ""),
+            Success = true
+        };
+
+        // Create canvas patch to store the schema JSON in the node's config (sprk_systemprompt field)
+        var patch = new CanvasPatch
+        {
+            Operation = CanvasPatchOperation.ConfigureNode,
+            NodeId = args.NodeId,
+            Config = new Dictionary<string, object?>
+            {
+                ["sprk_systemprompt"] = schemaJson,
+                ["promptSchemaVersion"] = 1,
+                ["structuredOutput"] = args.UseStructuredOutput
+            }
+        };
+
+        _logger.LogInformation(
+            "ConfigurePromptSchema: Configured node {NodeId} with {FieldCount} output fields, structuredOutput={StructuredOutput}, autoWireApplied={AutoWireApplied}",
+            args.NodeId, outputFields.Count, args.UseStructuredOutput, autoWireApplied);
+
+        return Task.FromResult(new BuilderToolResult
+        {
+            ToolCallId = toolCall.Id,
+            ToolName = toolCall.ToolName,
+            Success = true,
+            Result = JsonDocument.Parse(JsonSerializer.Serialize(result, JsonOptions)),
+            CanvasOperations = new[] { CreateCanvasOperation(CanvasOperationType.UpdateNode, patch) }
+        });
+    }
+
+    /// <summary>
+    /// Attempt to auto-wire $choices references for output fields that match
+    /// downstream UpdateRecord-type nodes with choice field mappings.
+    /// </summary>
+    /// <returns>True if any $choices references were wired.</returns>
+    private bool TryAutoWireChoices(
+        string sourceNodeId,
+        List<OutputFieldDefinition> outputFields,
+        CanvasState canvasState)
+    {
+        var wired = false;
+
+        // Find edges going from this node to downstream nodes
+        var downstreamEdges = canvasState.Edges
+            .Where(e => e.SourceId == sourceNodeId)
+            .ToList();
+
+        if (downstreamEdges.Count == 0)
+            return false;
+
+        foreach (var edge in downstreamEdges)
+        {
+            var downstreamNode = canvasState.Nodes.FirstOrDefault(n => n.Id == edge.TargetId);
+            if (downstreamNode == null)
+                continue;
+
+            // Check if the downstream node is an UpdateRecord-type node
+            // by examining its config for fieldMappings
+            if (downstreamNode.Config == null)
+                continue;
+
+            if (!downstreamNode.Config.TryGetValue("fieldMappings", out var fieldMappingsObj) ||
+                fieldMappingsObj == null)
+                continue;
+
+            // Parse fieldMappings from the config
+            Dictionary<string, JsonElement>? fieldMappings = null;
+            try
+            {
+                var fieldMappingsJson = JsonSerializer.Serialize(fieldMappingsObj, JsonOptions);
+                fieldMappings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(fieldMappingsJson, JsonOptions);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            if (fieldMappings == null)
+                continue;
+
+            // Get the downstream node's outputVariable for the $choices reference
+            var outputVariable = downstreamNode.OutputVariable ?? downstreamNode.Id;
+
+            // For each output field, check if there's a matching choice field in downstream fieldMappings
+            for (var i = 0; i < outputFields.Count; i++)
+            {
+                var field = outputFields[i];
+
+                // Skip fields that already have enum values or $choices set
+                if (field.Enum != null && field.Enum.Count > 0)
+                    continue;
+                if (!string.IsNullOrEmpty(field.Choices))
+                    continue;
+
+                // Check if a downstream fieldMapping references this output field's name
+                foreach (var (mappingFieldName, mappingValue) in fieldMappings)
+                {
+                    // Check if the mapping value references this field and is a choice-type field
+                    var isChoiceField = false;
+                    try
+                    {
+                        if (mappingValue.ValueKind == JsonValueKind.Object &&
+                            mappingValue.TryGetProperty("type", out var typeElement) &&
+                            typeElement.GetString()?.Equals("choice", StringComparison.OrdinalIgnoreCase) == true)
+                        {
+                            isChoiceField = true;
+                        }
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // Property access failed, skip
+                    }
+
+                    if (!isChoiceField)
+                        continue;
+
+                    // Check if this mapping field name matches or relates to the output field name
+                    if (mappingFieldName.Contains(field.Name, StringComparison.OrdinalIgnoreCase) ||
+                        field.Name.Contains(mappingFieldName.Replace("sprk_", ""), StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Wire the $choices reference
+                        outputFields[i] = field with
+                        {
+                            Choices = $"downstream:{outputVariable}.{mappingFieldName}"
+                        };
+                        wired = true;
+
+                        _logger.LogInformation(
+                            "ConfigurePromptSchema: Auto-wired $choices for field '{FieldName}' -> downstream:{OutputVariable}.{MappingField}",
+                            field.Name, outputVariable, mappingFieldName);
+                    }
+                }
+            }
+        }
+
+        return wired;
     }
 
     #endregion

@@ -4,6 +4,7 @@
  * Renders collapsible Accordion sections:
  *   - Basic (always): Name, Output Variable
  *   - AI Model (aiAnalysis, aiCompletion only): ModelSelector
+ *   - Prompt Configuration (aiAnalysis, aiCompletion only): PromptSchemaForm | PromptSchemaEditor
  *   - Type-Specific Config: DeliverOutputForm | SendEmailForm | CreateTaskForm | AiCompletionForm | WaitForm
  *   - Skills (capability-dependent): ScopeSelector
  *   - Knowledge (capability-dependent): ScopeSelector
@@ -14,7 +15,7 @@
  * All changes flow through canvasStore.updateNodeData().
  */
 
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import {
     makeStyles,
     tokens,
@@ -46,6 +47,9 @@ import { AiCompletionForm } from "./AiCompletionForm";
 import { WaitForm } from "./WaitForm";
 import { UpdateRecordForm } from "./UpdateRecordForm";
 import { NodeValidationBadge } from "./NodeValidationBadge";
+import { PromptSchemaForm } from "./PromptSchemaForm";
+import { PromptSchemaEditor } from "./PromptSchemaEditor";
+import type { PromptSchema } from "../../types/promptSchema";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -151,10 +155,20 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
         removeNode(node.id);
     }, [node.id, removeNode]);
 
+    // Prompt Configuration editor mode: "form" (Level 1) or "editor" (Level 2)
+    const [editorMode, setEditorMode] = useState<"form" | "editor">("form");
+
+    const handlePromptSchemaChange = useCallback(
+        (schema: PromptSchema) => {
+            updateNodeData(node.id, { promptSchema: schema });
+        },
+        [node.id, updateNodeData],
+    );
+
     // Default open accordion items
     const defaultOpenItems = useMemo(() => {
         const items = ["basic"];
-        if (isAiNode) items.push("action", "aiModel");
+        if (isAiNode) items.push("action", "aiModel", "promptConfig");
         if (hasTypeForm) items.push("typeConfig");
         if (isConditionNode) items.push("condition");
         return items;
@@ -232,6 +246,29 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                                 modelDeploymentId={node.data.modelDeploymentId}
                                 onModelChange={(id) => handleUpdate("modelDeploymentId", id)}
                             />
+                        </AccordionPanel>
+                    </AccordionItem>
+                )}
+
+                {/* Prompt Configuration — Only for AI nodes */}
+                {isAiNode && (
+                    <AccordionItem value="promptConfig">
+                        <AccordionHeader size="small">Prompt Configuration</AccordionHeader>
+                        <AccordionPanel className={styles.accordionPanel}>
+                            {editorMode === "form" ? (
+                                <PromptSchemaForm
+                                    schema={node.data.promptSchema ?? null}
+                                    onChange={handlePromptSchemaChange}
+                                    onSwitchToEditor={() => setEditorMode("editor")}
+                                    nodeId={node.id}
+                                />
+                            ) : (
+                                <PromptSchemaEditor
+                                    schema={node.data.promptSchema ?? null}
+                                    onChange={handlePromptSchemaChange}
+                                    onSwitchToForm={() => setEditorMode("form")}
+                                />
+                            )}
                         </AccordionPanel>
                     </AccordionItem>
                 )}

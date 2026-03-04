@@ -680,4 +680,87 @@ public class OpenAiClient : IOpenAiClient
             throw;
         }
     }
+
+    /// <summary>
+    /// Get a structured completion as raw JSON string that conforms to a JSON schema.
+    /// Uses constrained decoding (response_format: json_schema) to guarantee valid JSON output.
+    /// Unlike the generic overload, this returns the raw JSON string without deserialization,
+    /// suitable for dynamic schemas resolved at runtime (e.g., from JPS prompt definitions).
+    /// Protected by circuit breaker - throws OpenAiCircuitBrokenException when open.
+    /// </summary>
+    /// <param name="prompt">The prompt text to send to the model.</param>
+    /// <param name="jsonSchema">The JSON schema that the response must conform to.</param>
+    /// <param name="schemaName">A name identifying the schema (e.g., "prompt_response").</param>
+    /// <param name="model">Optional model override. Defaults to configured SummarizeModel.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The raw JSON string response conforming to the schema.</returns>
+    /// <exception cref="OpenAiCircuitBrokenException">Thrown when circuit breaker is open.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when response is empty.</exception>
+    public async Task<string> GetStructuredCompletionRawAsync(
+        string prompt,
+        BinaryData jsonSchema,
+        string schemaName,
+        string? model = null,
+        CancellationToken cancellationToken = default)
+    {
+        var deploymentName = model ?? _options.SummarizeModel;
+        var chatClient = _client.GetChatClient(deploymentName);
+
+        var chatOptions = new ChatCompletionOptions
+        {
+            ResponseFormat = ChatResponseFormat.CreateJsonSchemaFormat(
+                schemaName,
+                jsonSchema,
+                jsonSchemaIsStrict: true),
+            MaxOutputTokenCount = _options.MaxOutputTokens,
+            Temperature = _options.Temperature
+        };
+
+        var messages = new List<ChatMessage>
+        {
+            new UserChatMessage(prompt)
+        };
+
+        _logger.LogDebug(
+            "Starting structured raw completion. Model={Model}, Schema={Schema}",
+            deploymentName, schemaName);
+
+        try
+        {
+            var response = await _circuitBreaker.ExecuteAsync(async ct =>
+            {
+                return await chatClient.CompleteChatAsync(messages, chatOptions, ct);
+            }, cancellationToken);
+
+            var content = response.Value.Content.FirstOrDefault()?.Text;
+
+            if (string.IsNullOrEmpty(content))
+            {
+                throw new InvalidOperationException(
+                    $"Structured raw completion returned empty content for schema '{schemaName}'.");
+            }
+
+            _logger.LogDebug(
+                "Structured raw completion finished. Model={Model}, Schema={Schema}, ResponseLength={Length}",
+                deploymentName, schemaName, content.Length);
+
+            return content;
+        }
+        catch (BrokenCircuitException)
+        {
+            _logger.LogWarning("OpenAI circuit breaker is open. Rejecting structured raw completion request.");
+            throw new OpenAiCircuitBrokenException(BreakDuration);
+        }
+        catch (InvalidOperationException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to get structured raw completion. Model={Model}, Schema={Schema}",
+                deploymentName, schemaName);
+            throw;
+        }
+    }
 }

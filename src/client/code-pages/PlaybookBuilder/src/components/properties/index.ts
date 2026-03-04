@@ -19,3 +19,6 @@ export { ModelSelector } from "./ModelSelector";
 export { NodePropertiesForm } from "./NodePropertiesForm";
 export { PropertiesPanel } from "./PropertiesPanel";
 export { ActionSelector } from "./ActionSelector";
+export { PromptSchemaForm } from "./PromptSchemaForm";
+export { PromptSchemaEditor } from "./PromptSchemaEditor";
+export type { PromptSchemaEditorProps } from "./PromptSchemaEditor";

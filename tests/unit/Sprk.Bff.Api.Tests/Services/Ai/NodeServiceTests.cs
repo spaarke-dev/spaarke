@@ -54,7 +54,7 @@ public class NodeServiceTests
         {
             Name = "Test Node",
             ActionId = TestActionId,
-            ToolId = TestToolId,
+            ToolIds = [TestToolId],
             ExecutionOrder = 1,
             OutputVariable = "result_1",
             ConditionJson = "{\"type\":\"always\"}",
@@ -71,7 +71,7 @@ public class NodeServiceTests
 
         Assert.Equal("Test Node", request.Name);
         Assert.Equal(TestActionId, request.ActionId);
-        Assert.Equal(TestToolId, request.ToolId);
+        Assert.Single(request.ToolIds!);
         Assert.Equal(1, request.ExecutionOrder);
         Assert.Equal("result_1", request.OutputVariable);
         Assert.NotNull(request.ConditionJson);
@@ -151,7 +151,7 @@ public class NodeServiceTests
             PlaybookId = TestPlaybookId,
             Name = "Test Node",
             ActionId = TestActionId,
-            ToolId = TestToolId,
+            ToolIds = [TestToolId],
             ExecutionOrder = 1,
             DependsOn = dependsOn,
             OutputVariable = "result_1",
@@ -173,7 +173,7 @@ public class NodeServiceTests
         Assert.Equal(TestPlaybookId, response.PlaybookId);
         Assert.Equal("Test Node", response.Name);
         Assert.Equal(TestActionId, response.ActionId);
-        Assert.Equal(TestToolId, response.ToolId);
+        Assert.Single(response.ToolIds);
         Assert.Equal(1, response.ExecutionOrder);
         Assert.Single(response.DependsOn);
         Assert.Equal("result_1", response.OutputVariable);
@@ -198,7 +198,7 @@ public class NodeServiceTests
             PlaybookId = TestPlaybookId,
             Name = "Test Node",
             ActionId = TestActionId,
-            ToolId = null,
+            ToolIds = [],
             ExecutionOrder = 1,
             DependsOn = [],
             OutputVariable = "result",
@@ -213,7 +213,7 @@ public class NodeServiceTests
             KnowledgeIds = []
         };
 
-        Assert.Null(response.ToolId);
+        Assert.Empty(response.ToolIds);
         Assert.Null(response.ConditionJson);
         Assert.Null(response.ConfigJson);
         Assert.Null(response.ModelDeploymentId);
@@ -234,7 +234,7 @@ public class NodeServiceTests
         {
             Name = "Updated Node",
             ActionId = TestActionId,
-            ToolId = TestToolId,
+            ToolIds = [TestToolId],
             OutputVariable = "updated_output",
             ConfigJson = "{\"prompt\":\"updated\"}",
             TimeoutSeconds = 60,
@@ -258,7 +258,7 @@ public class NodeServiceTests
         {
             Name = "Updated Name",
             ActionId = null,
-            ToolId = null,
+            ToolIds = null,
             OutputVariable = null,
             ConfigJson = null,
             IsActive = null

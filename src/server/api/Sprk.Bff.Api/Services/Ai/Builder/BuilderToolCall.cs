@@ -295,6 +295,51 @@ public record NodeSpacing
 }
 
 /// <summary>
+/// Arguments for the configure_prompt_schema tool.
+/// </summary>
+public record ConfigurePromptSchemaArguments
+{
+    [JsonPropertyName("nodeId")]
+    public required string NodeId { get; init; }
+
+    [JsonPropertyName("role")]
+    public string? Role { get; init; }
+
+    [JsonPropertyName("task")]
+    public required string Task { get; init; }
+
+    [JsonPropertyName("constraints")]
+    public IReadOnlyList<string>? Constraints { get; init; }
+
+    [JsonPropertyName("outputFields")]
+    public required IReadOnlyList<OutputFieldArgument> OutputFields { get; init; }
+
+    [JsonPropertyName("useStructuredOutput")]
+    public bool UseStructuredOutput { get; init; }
+
+    [JsonPropertyName("autoWireChoices")]
+    public bool AutoWireChoices { get; init; }
+}
+
+/// <summary>
+/// Output field definition within configure_prompt_schema arguments.
+/// </summary>
+public record OutputFieldArgument
+{
+    [JsonPropertyName("name")]
+    public required string Name { get; init; }
+
+    [JsonPropertyName("type")]
+    public required string Type { get; init; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; init; }
+
+    [JsonPropertyName("enum")]
+    public IReadOnlyList<string>? Enum { get; init; }
+}
+
+/// <summary>
 /// Arguments for the validate_canvas tool.
 /// </summary>
 public record ValidateCanvasArguments
@@ -401,6 +446,33 @@ public record CreateScopeResult
 
     [JsonPropertyName("fullName")]
     public required string FullName { get; init; }
+
+    [JsonPropertyName("success")]
+    public required bool Success { get; init; }
+}
+
+/// <summary>
+/// Result of configure_prompt_schema operation.
+/// </summary>
+public record ConfigurePromptSchemaResult
+{
+    [JsonPropertyName("nodeId")]
+    public required string NodeId { get; init; }
+
+    [JsonPropertyName("schemaVersion")]
+    public required int SchemaVersion { get; init; }
+
+    [JsonPropertyName("fieldCount")]
+    public required int FieldCount { get; init; }
+
+    [JsonPropertyName("structuredOutput")]
+    public required bool StructuredOutput { get; init; }
+
+    [JsonPropertyName("autoWireChoicesApplied")]
+    public required bool AutoWireChoicesApplied { get; init; }
+
+    [JsonPropertyName("message")]
+    public required string Message { get; init; }
 
     [JsonPropertyName("success")]
     public required bool Success { get; init; }

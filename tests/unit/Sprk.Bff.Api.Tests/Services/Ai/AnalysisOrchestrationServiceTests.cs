@@ -32,6 +32,7 @@ public class AnalysisOrchestrationServiceTests
     private readonly Mock<IRagService> _ragServiceMock;
     private readonly Mock<IPlaybookService> _playbookServiceMock;
     private readonly Mock<IToolHandlerRegistry> _toolHandlerRegistryMock;
+    private readonly Mock<INodeService> _nodeServiceMock;
     private readonly Mock<IHttpContextAccessor> _httpContextAccessorMock;
     private readonly Mock<IStorageRetryPolicy> _storageRetryPolicyMock;
     private readonly Mock<ILogger<AnalysisOrchestrationService>> _loggerMock;
@@ -51,6 +52,7 @@ public class AnalysisOrchestrationServiceTests
         _ragServiceMock = new Mock<IRagService>();
         _playbookServiceMock = new Mock<IPlaybookService>();
         _toolHandlerRegistryMock = new Mock<IToolHandlerRegistry>();
+        _nodeServiceMock = new Mock<INodeService>();
         _httpContextAccessorMock = new Mock<IHttpContextAccessor>();
         _storageRetryPolicyMock = new Mock<IStorageRetryPolicy>();
         _loggerMock = new Mock<ILogger<AnalysisOrchestrationService>>();
@@ -78,6 +80,7 @@ public class AnalysisOrchestrationServiceTests
             new RagQueryBuilder(),
             _playbookServiceMock.Object,
             _toolHandlerRegistryMock.Object,
+            _nodeServiceMock.Object,
             _httpContextAccessorMock.Object,
             _storageRetryPolicyMock.Object,
             _options,

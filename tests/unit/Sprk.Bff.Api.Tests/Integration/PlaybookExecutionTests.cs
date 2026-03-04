@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
@@ -38,10 +39,16 @@ public class PlaybookExecutionTests
         var mockGraphClientFactory = new Mock<IGraphClientFactory>();
         var mockHttpContextAccessor = new Mock<IHttpContextAccessor>();
 
+        var mockServiceProvider = new Mock<IServiceProvider>();
+        mockServiceProvider
+            .Setup(sp => sp.GetService(typeof(IToolHandlerRegistry)))
+            .Returns(mockToolHandlerRegistry.Object);
+        var mockDataverseService = new Mock<IDataverseService>();
+
         var executors = new List<INodeExecutor>
         {
             new AiAnalysisNodeExecutor(
-                mockToolHandlerRegistry.Object,
+                mockServiceProvider.Object,
                 Mock.Of<ILogger<AiAnalysisNodeExecutor>>()),
             new CreateTaskNodeExecutor(
                 mockTemplateEngine.Object,
@@ -54,7 +61,7 @@ public class PlaybookExecutionTests
                 Mock.Of<ILogger<SendEmailNodeExecutor>>()),
             new UpdateRecordNodeExecutor(
                 mockTemplateEngine.Object,
-                mockHttpClientFactory.Object,
+                mockDataverseService.Object,
                 Mock.Of<ILogger<UpdateRecordNodeExecutor>>()),
             new DeliverOutputNodeExecutor(
                 mockTemplateEngine.Object,
@@ -106,10 +113,16 @@ public class PlaybookExecutionTests
         var mockGraphClientFactory = new Mock<IGraphClientFactory>();
         var mockHttpContextAccessor = new Mock<IHttpContextAccessor>();
 
+        var mockServiceProvider2 = new Mock<IServiceProvider>();
+        mockServiceProvider2
+            .Setup(sp => sp.GetService(typeof(IToolHandlerRegistry)))
+            .Returns(mockToolHandlerRegistry.Object);
+        var mockDataverseService2 = new Mock<IDataverseService>();
+
         var executors = new List<INodeExecutor>
         {
             new AiAnalysisNodeExecutor(
-                mockToolHandlerRegistry.Object,
+                mockServiceProvider2.Object,
                 Mock.Of<ILogger<AiAnalysisNodeExecutor>>()),
             new CreateTaskNodeExecutor(
                 mockTemplateEngine.Object,
@@ -122,7 +135,7 @@ public class PlaybookExecutionTests
                 Mock.Of<ILogger<SendEmailNodeExecutor>>()),
             new UpdateRecordNodeExecutor(
                 mockTemplateEngine.Object,
-                mockHttpClientFactory.Object,
+                mockDataverseService2.Object,
                 Mock.Of<ILogger<UpdateRecordNodeExecutor>>()),
             new DeliverOutputNodeExecutor(
                 mockTemplateEngine.Object,
@@ -514,7 +527,7 @@ public class PlaybookExecutionTests
 
         var executor = new UpdateRecordNodeExecutor(
             templateEngineMock.Object,
-            httpClientFactoryMock.Object,
+            Mock.Of<IDataverseService>(),
             loggerMock.Object);
 
         var recordId = Guid.NewGuid();
@@ -539,7 +552,7 @@ public class PlaybookExecutionTests
 
         var executor = new UpdateRecordNodeExecutor(
             templateEngineMock.Object,
-            httpClientFactoryMock.Object,
+            Mock.Of<IDataverseService>(),
             loggerMock.Object);
 
         var context = CreateNodeContext(ActionType.UpdateRecord, @"{""recordId"":""abc"",""fields"":{}}");
