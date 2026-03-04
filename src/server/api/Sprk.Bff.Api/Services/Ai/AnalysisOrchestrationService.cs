@@ -1827,9 +1827,35 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 using var dataDoc = JsonDocument.Parse(toolResult.Data.Value.GetRawText());
                 var root = dataDoc.RootElement;
 
+                // JPS structured output: If the result contains JPS field names (tldr, summary, etc.)
+                // at the root level, extract them directly using the outputKeyToTypeName mapping.
+                // This handles GenericAnalysisHandler output when JPS structuredOutput is enabled.
+                if (root.TryGetProperty("tldr", out _) || root.TryGetProperty("summary", out _))
+                {
+                    foreach (var (outputKey, outputTypeName) in outputKeyToTypeName)
+                    {
+                        if (root.TryGetProperty(outputKey, out var outputValue))
+                        {
+                            string? outputText = outputValue.ValueKind switch
+                            {
+                                JsonValueKind.String => outputValue.GetString(),
+                                JsonValueKind.Array or JsonValueKind.Object => JsonSerializer.Serialize(outputValue),
+                                _ => outputValue.ToString()
+                            };
+
+                            if (!string.IsNullOrWhiteSpace(outputText))
+                            {
+                                structuredOutputs[outputTypeName] = outputText;
+                                _logger.LogDebug(
+                                    "Extracted JPS output: {OutputType} = {Length} characters",
+                                    outputTypeName, outputText.Length);
+                            }
+                        }
+                    }
+                }
                 // Map tool result structures to output type names based on handler ID
                 // EntityExtractorHandler → Entities output
-                if (toolResult.HandlerId.Equals("EntityExtractorHandler", StringComparison.OrdinalIgnoreCase))
+                else if (toolResult.HandlerId.Equals("EntityExtractorHandler", StringComparison.OrdinalIgnoreCase))
                 {
                     // EntityExtractionResult has "entities" array property
                     if (root.TryGetProperty("entities", out var entitiesValue) ||

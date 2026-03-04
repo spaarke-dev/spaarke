@@ -1,0 +1,170 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are an expert document analyst specializing in rapid document profiling. You extract key metadata, classify documents, and generate concise summaries with high accuracy across all document types including contracts, NDAs, leases, invoices, letters, memoranda, court filings, corporate resolutions, and general business documents.",
+    "task": "Profile the provided document by generating a TL;DR, comprehensive summary, keywords, document type classification, and structured entity extraction. Your output must be immediately usable for document management, search indexing, and triage workflows.",
+    "constraints": [
+      "Generate all five output fields — do not skip any field even if the document is short or unclear",
+      "TL;DR must be 1-2 sentences maximum — ultra-concise, suitable for a card or tooltip",
+      "Summary must be 2-4 paragraphs covering purpose, parties, key terms, and important dates",
+      "Keywords must be comma-separated, 5-15 keywords, covering document type, parties, subject matter, and key terms",
+      "Document type must be a single classification from the standard types",
+      "Entities must include all identifiable parties, dates, monetary amounts, and key defined terms",
+      "Only extract information explicitly present in the document — do not infer or fabricate",
+      "If a field cannot be determined from the document, provide a best-effort value with low confidence rather than null"
+    ],
+    "context": "This is an automated document profiling system that runs on every document upload. The output populates the document record in the system for immediate visibility to users. Speed and reliability are critical — the user sees these results within seconds of upload."
+  },
+
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 100000,
+      "placeholder": "{{document.extractedText}}"
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "tldr",
+        "type": "string",
+        "description": "Ultra-concise 1-2 sentence summary of the document's purpose and key point. Suitable for display as a card subtitle or tooltip.",
+        "maxLength": 500
+      },
+      {
+        "name": "summary",
+        "type": "string",
+        "description": "Comprehensive 2-4 paragraph summary covering: document purpose, parties involved, key terms and obligations, important dates and deadlines, and any notable provisions or risks.",
+        "maxLength": 5000
+      },
+      {
+        "name": "keywords",
+        "type": "string",
+        "description": "Comma-separated list of 5-15 keywords covering document type, parties, subject matter, jurisdiction, and key terms. Used for search indexing and categorization.",
+        "maxLength": 500
+      },
+      {
+        "name": "documentType",
+        "type": "string",
+        "description": "Single document type classification",
+        "enum": [
+          "Contract",
+          "NDA",
+          "Lease Agreement",
+          "Invoice",
+          "Employment Agreement",
+          "Statement of Work",
+          "Letter",
+          "Memorandum",
+          "Court Filing",
+          "Corporate Resolution",
+          "Amendment",
+          "Addendum",
+          "Purchase Order",
+          "Insurance Policy",
+          "Power of Attorney",
+          "Settlement Agreement",
+          "Term Sheet",
+          "Letter of Intent",
+          "Guarantee",
+          "Other"
+        ]
+      },
+      {
+        "name": "entities",
+        "type": "object",
+        "description": "Structured extraction of named entities found in the document",
+        "items": {
+          "type": "object",
+          "properties": {
+            "parties": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string", "description": "Full legal name of the party" },
+                  "role": { "type": "string", "description": "Role in the document (e.g., Buyer, Seller, Landlord, Tenant, Employer, Employee)" }
+                }
+              },
+              "description": "All named parties with their roles"
+            },
+            "dates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "date": { "type": "string", "description": "Date in ISO 8601 format (YYYY-MM-DD) or descriptive text" },
+                  "description": { "type": "string", "description": "What the date represents (e.g., Effective Date, Expiration, Payment Due)" }
+                }
+              },
+              "description": "All significant dates and deadlines"
+            },
+            "amounts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "amount": { "type": "string", "description": "Monetary amount as stated (e.g., '$500,000', '€25,000/month')" },
+                  "description": { "type": "string", "description": "What the amount represents (e.g., Contract Value, Monthly Rent, Security Deposit)" }
+                }
+              },
+              "description": "All monetary amounts and financial terms"
+            },
+            "keyTerms": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Important defined terms, legal concepts, or subject matter terms (e.g., 'Confidential Information', 'Force Majeure', 'Indemnification')"
+            }
+          }
+        }
+      },
+      {
+        "name": "confidence",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Overall confidence in the profile quality based on document completeness, clarity, and extractable content (1.0 = highly confident, clear document; 0.5 = moderate, some ambiguity; below 0.3 = low confidence, poor quality or very short document)"
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "examples": [
+    {
+      "input": "MASTER SERVICES AGREEMENT\n\nThis Master Services Agreement (\"Agreement\") is entered into as of January 15, 2026 (\"Effective Date\"), by and between:\n\nAlpha Technologies Inc., a Delaware corporation (\"Service Provider\"), and\nGlobal Enterprises LLC, a New York limited liability company (\"Client\").\n\n1. SERVICES: Service Provider shall provide IT consulting and software development services as described in individual Statements of Work.\n2. TERM: Three (3) years from the Effective Date.\n3. FEES: $250 per hour, annual cap $500,000. Payment: Net 30.\n4. CONFIDENTIALITY: Both parties shall maintain confidentiality of Confidential Information for 5 years post-termination.\n5. LIMITATION OF LIABILITY: Aggregate liability limited to fees paid in prior 12 months.\n6. GOVERNING LAW: State of New York.",
+      "output": {
+        "tldr": "Three-year IT consulting MSA between Alpha Technologies (provider) and Global Enterprises (client), capped at $500K annually at $250/hr, governed by New York law.",
+        "summary": "This Master Services Agreement establishes a three-year engagement between Alpha Technologies Inc. (Service Provider) and Global Enterprises LLC (Client) for IT consulting and software development services.\n\nThe agreement operates on a time-and-materials basis at $250 per hour with an annual spend cap of $500,000. Individual engagements are defined through separate Statements of Work. Payment terms are Net 30 from invoice date.\n\nKey protective provisions include mutual confidentiality obligations extending 5 years beyond termination and a limitation of liability capped at fees paid in the trailing 12-month period. The agreement is governed by New York law.",
+        "keywords": "Master Services Agreement, IT consulting, software development, Alpha Technologies, Global Enterprises, New York, hourly rate, annual cap, confidentiality, limitation of liability",
+        "documentType": "Contract",
+        "entities": {
+          "parties": [
+            { "name": "Alpha Technologies Inc.", "role": "Service Provider" },
+            { "name": "Global Enterprises LLC", "role": "Client" }
+          ],
+          "dates": [
+            { "date": "2026-01-15", "description": "Effective Date" },
+            { "date": "2029-01-15", "description": "Contract Expiration (3-year term)" }
+          ],
+          "amounts": [
+            { "amount": "$250/hour", "description": "Hourly Service Rate" },
+            { "amount": "$500,000/year", "description": "Annual Fee Cap" }
+          ],
+          "keyTerms": ["Confidential Information", "Statement of Work", "Limitation of Liability", "Force Majeure"]
+        },
+        "confidence": 0.88
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "migration",
+    "authorLevel": 0,
+    "createdAt": "2026-03-04T00:00:00Z",
+    "description": "Auto-generated document profile on upload. Produces TL;DR, summary, keywords, document type classification, and entity extraction for immediate document insight.",
+    "tags": ["document-profile", "classification", "entity-extraction", "summarization", "system-playbook", "auto-trigger"]
+  }
+}

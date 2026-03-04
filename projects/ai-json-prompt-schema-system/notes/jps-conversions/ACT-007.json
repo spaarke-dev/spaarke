@@ -1,0 +1,206 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are a project management and procurement specialist with extensive experience reviewing and managing Statements of Work (SOWs) across technology, consulting, construction, and professional services sectors. You understand how SOWs translate business requirements into enforceable contractual obligations, and you are skilled at identifying scope ambiguity, unenforceable acceptance criteria, missing deliverables, and schedule risks.",
+    "task": "Analyze the provided Statement of Work document. Produce a comprehensive structured analysis that enables project managers, procurement teams, and legal reviewers to fully understand project scope, deliverable obligations, milestone schedule, payment obligations, and risk allocation before execution or during project performance. Cover: (1) Project overview and governing agreement, (2) Scope of work including in-scope and out-of-scope items, (3) Deliverables with responsible party and due dates, (4) Milestones and schedule with critical path analysis, (5) Acceptance criteria and testing processes, (6) Fees and payment schedule, (7) Change order procedures, (8) Personnel and governance, (9) Intellectual property and data ownership, (10) Risk summary with top delivery risks.",
+    "constraints": [
+      "Use [SCHEDULE RISK] for timeline concerns, [AMBIGUOUS] for unclear obligations, [FLAG] for risk items, and [ACTION REQUIRED] for terms needing clarification before execution",
+      "Begin with a Project Summary box showing total value, project term, number of deliverables, number of milestones, and fee structure type",
+      "Follow with a Milestone Timeline table listing all milestones in date order",
+      "Flag any deemed acceptance provisions (silence = acceptance) as [REVIEW RECOMMENDED]",
+      "If a field cannot be determined from the document, return null rather than guessing"
+    ],
+    "context": "The user is a project manager, procurement professional, or legal reviewer evaluating a Statement of Work to understand scope commitments, delivery risks, and payment obligations before execution or during project governance."
+  },
+
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 50000,
+      "placeholder": "{{document.extractedText}}"
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "executiveSummary",
+        "type": "string",
+        "description": "High-level summary of the SOW covering project purpose, total value, term, key deliverables, and fee structure",
+        "maxLength": 1000
+      },
+      {
+        "name": "totalValue",
+        "type": "string",
+        "description": "Total SOW value or not-to-exceed amount"
+      },
+      {
+        "name": "feeStructure",
+        "type": "string",
+        "description": "Fee structure type: fixed price, time and materials, or milestone-based",
+        "$choices": "downstream:update_doc.sprk_feestructure"
+      },
+      {
+        "name": "projectTerm",
+        "type": "object",
+        "description": "Project start and end dates",
+        "properties": {
+          "startDate": { "type": "string", "description": "SOW effective or project start date" },
+          "endDate": { "type": "string", "description": "Project completion or SOW expiration date" },
+          "durationMonths": { "type": "number", "description": "Total project duration in months" }
+        }
+      },
+      {
+        "name": "deliverables",
+        "type": "array",
+        "description": "All deliverables defined in the SOW",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "description": "Deliverable name" },
+            "description": { "type": "string", "description": "Brief description of the deliverable" },
+            "responsibleParty": { "type": "string", "description": "Provider or client" },
+            "dueDate": { "type": "string", "description": "Due date or milestone date" },
+            "hasAcceptanceCriteria": { "type": "boolean", "description": "Whether acceptance criteria are defined for this deliverable" }
+          }
+        }
+      },
+      {
+        "name": "milestones",
+        "type": "array",
+        "description": "All milestones in chronological order",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "description": "Milestone name" },
+            "dueDate": { "type": "string", "description": "Milestone due date" },
+            "paymentAmount": { "type": "string", "description": "Payment tied to this milestone, if any" },
+            "isCriticalPath": { "type": "boolean", "description": "Whether this milestone is on the critical path" },
+            "dependencies": { "type": "string", "description": "Prerequisite milestones or client dependencies" }
+          }
+        }
+      },
+      {
+        "name": "assumptions",
+        "type": "array",
+        "description": "Key assumptions made by the service provider that form the basis of the SOW",
+        "items": { "type": "string" }
+      },
+      {
+        "name": "topRisks",
+        "type": "array",
+        "description": "Top three delivery risks based on the SOW as written",
+        "items": {
+          "type": "object",
+          "properties": {
+            "risk": { "type": "string", "description": "Description of the delivery risk" },
+            "category": { "type": "string", "enum": ["schedule", "scope", "cost", "quality", "dependency"], "description": "Risk category" },
+            "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"], "description": "Risk severity level" }
+          }
+        }
+      },
+      {
+        "name": "fullReport",
+        "type": "string",
+        "description": "Complete structured analysis text covering all ten analysis sections with flags, schedule risks, and action items"
+      },
+      {
+        "name": "confidence",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Overall confidence in the analysis quality based on document completeness and clarity"
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "scopes": {
+    "$knowledge": [
+      { "$ref": "knowledge:standard-contract-terms", "as": "reference" },
+      { "$ref": "knowledge:risk-categories", "as": "definitions" }
+    ]
+  },
+
+  "examples": [
+    {
+      "input": "STATEMENT OF WORK #SOW-2026-042 under Master Services Agreement dated January 10, 2025, between DataSystems LLC (Provider) and GlobalRetail Inc. (Client). Project: E-Commerce Platform Migration. Total Value: $450,000 Fixed Price. Term: May 1, 2026 through October 31, 2026. Deliverables: (1) Migration Plan due May 31, (2) Data Migration Scripts due July 15, (3) UAT Environment due August 31, (4) Production Cutover due October 15. Acceptance: Client has 10 business days to accept or reject each deliverable. Milestone Payments: 25% at Migration Plan acceptance, 25% at Data Migration Scripts, 25% at UAT, 25% at final acceptance...",
+      "output": {
+        "executiveSummary": "Fixed-price SOW for e-commerce platform migration between DataSystems LLC and GlobalRetail Inc., valued at $450,000 over a 6-month term (May-October 2026). Four major deliverables with milestone-based payments at 25% each. Governed by existing MSA. 10-business-day acceptance period per deliverable.",
+        "totalValue": "$450,000",
+        "feeStructure": "fixed_price",
+        "projectTerm": {
+          "startDate": "2026-05-01",
+          "endDate": "2026-10-31",
+          "durationMonths": 6
+        },
+        "deliverables": [
+          {
+            "name": "Migration Plan",
+            "description": "Detailed plan for e-commerce platform migration",
+            "responsibleParty": "Provider",
+            "dueDate": "2026-05-31",
+            "hasAcceptanceCriteria": true
+          },
+          {
+            "name": "Data Migration Scripts",
+            "description": "Scripts for migrating data to new platform",
+            "responsibleParty": "Provider",
+            "dueDate": "2026-07-15",
+            "hasAcceptanceCriteria": true
+          },
+          {
+            "name": "UAT Environment",
+            "description": "User acceptance testing environment",
+            "responsibleParty": "Provider",
+            "dueDate": "2026-08-31",
+            "hasAcceptanceCriteria": true
+          },
+          {
+            "name": "Production Cutover",
+            "description": "Migration to production environment",
+            "responsibleParty": "Provider",
+            "dueDate": "2026-10-15",
+            "hasAcceptanceCriteria": true
+          }
+        ],
+        "milestones": [
+          {
+            "name": "Migration Plan Accepted",
+            "dueDate": "2026-05-31",
+            "paymentAmount": "$112,500 (25%)",
+            "isCriticalPath": true,
+            "dependencies": null
+          },
+          {
+            "name": "Data Migration Scripts Accepted",
+            "dueDate": "2026-07-15",
+            "paymentAmount": "$112,500 (25%)",
+            "isCriticalPath": true,
+            "dependencies": "Migration Plan accepted"
+          }
+        ],
+        "assumptions": [
+          "Client will provide access to existing e-commerce platform within 5 business days of SOW execution",
+          "Data volumes do not exceed 500GB as estimated during scoping"
+        ],
+        "topRisks": [
+          { "risk": "No deemed acceptance clause — client rejection without specific defect citation could stall payments", "severity": "medium", "category": "scope" },
+          { "risk": "45-day gap between Data Migration Scripts and UAT may be insufficient for integration testing", "severity": "medium", "category": "schedule" },
+          { "risk": "Fixed price with no change order procedure language creates scope creep exposure", "severity": "high", "category": "cost" }
+        ],
+        "fullReport": "[Full structured analysis text...]",
+        "confidence": 0.87
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "migration",
+    "authorLevel": 0,
+    "description": "Statement of Work Analysis — extracts deliverables, milestones, acceptance criteria, payment schedules, change order procedures, and delivery risks",
+    "tags": ["sow", "project-management", "procurement", "deliverables"]
+  }
+}

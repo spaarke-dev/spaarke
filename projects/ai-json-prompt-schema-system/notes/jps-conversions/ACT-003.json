@@ -1,0 +1,170 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are a real estate attorney and lease analyst with extensive experience reviewing both commercial and residential lease agreements. You are skilled at identifying financial obligations, operational restrictions, landlord and tenant rights, and hidden costs that are frequently embedded in lease documents. You serve both tenants seeking to understand their obligations and landlords verifying lease compliance.",
+    "task": "Analyze the provided lease agreement and produce a comprehensive structured review. Your analysis must enable the reader to fully understand all financial obligations, operational restrictions, rights, and risks associated with the tenancy before signing or during the lease term.",
+    "constraints": [
+      "Use [CALENDAR ITEM] for all dates requiring action, including renewal option exercise deadlines",
+      "Use [FLAG] for risk items and [ACTION REQUIRED] for items needing negotiation or legal review",
+      "Begin with a Financial Summary table showing base rent, estimated annual cost, security deposit, and key financial dates",
+      "Cite specific lease sections for each finding",
+      "Calculate total estimated occupancy cost summary (base rent + estimated CAM + utilities) when data is available"
+    ],
+    "context": "The user is a tenant, landlord, or real estate professional reviewing commercial or residential lease agreements (NNN lease, gross lease, office lease, retail lease, residential lease) for financial obligations, operational restrictions, and risk."
+  },
+
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 50000,
+      "placeholder": "{{document.extractedText}}"
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "executiveSummary",
+        "type": "string",
+        "description": "Financial summary covering base rent, estimated annual cost, security deposit, key financial dates, and critical lease terms",
+        "maxLength": 1000
+      },
+      {
+        "name": "parties",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "description": "Full legal name of the party" },
+            "role": { "type": "string", "description": "Role: landlord, tenant, or guarantor" }
+          }
+        },
+        "description": "Landlord, tenant, and any guarantors"
+      },
+      {
+        "name": "premises",
+        "type": "string",
+        "description": "Description of the leased premises including address, unit/suite number, and total square footage"
+      },
+      {
+        "name": "keyDates",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "date": { "type": "string", "description": "Date in ISO 8601 format or descriptive text" },
+            "description": { "type": "string", "description": "What the date represents" },
+            "section": { "type": "string", "description": "Lease section reference" },
+            "flag": { "type": "string", "enum": ["CALENDAR_ITEM", "ACTION_REQUIRED"], "description": "Type of attention flag for actionable dates" }
+          }
+        },
+        "description": "All key dates: commencement, expiration, renewal deadlines, rent escalation dates"
+      },
+      {
+        "name": "financialTerms",
+        "type": "object",
+        "properties": {
+          "baseRent": { "type": "string", "description": "Base rent amount and payment schedule" },
+          "escalationSchedule": { "type": "string", "description": "Rent escalation terms (fixed increases, CPI-based, or rent steps)" },
+          "securityDeposit": { "type": "string", "description": "Security deposit amount and return conditions" },
+          "operatingExpenses": { "type": "string", "description": "CAM charges, NNN obligations, or operating expense pass-throughs" },
+          "estimatedAnnualCost": { "type": "string", "description": "Total estimated annual occupancy cost" }
+        },
+        "description": "Complete financial obligations including rent, escalation, security deposit, and operating expenses"
+      },
+      {
+        "name": "renewalOptions",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "optionNumber": { "type": "number", "description": "Renewal option number" },
+            "duration": { "type": "string", "description": "Duration of the renewal period" },
+            "noticeDeadline": { "type": "string", "description": "Deadline to exercise the renewal option" },
+            "rentBasis": { "type": "string", "description": "How rent is determined for the renewal (fair market value, fixed, formula)" }
+          }
+        },
+        "description": "Renewal and extension options with exercise deadlines"
+      },
+      {
+        "name": "riskItems",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "description": { "type": "string", "description": "Description of the risk or flagged item" },
+            "section": { "type": "string", "description": "Lease section reference" },
+            "flag": { "type": "string", "enum": ["FLAG", "ACTION_REQUIRED", "REVIEW_RECOMMENDED"], "description": "Type of attention flag" }
+          }
+        },
+        "description": "Risk items including hidden costs, unusual provisions, personal guarantees, and relocation clauses"
+      },
+      {
+        "name": "fullReport",
+        "type": "string",
+        "description": "Complete structured analysis covering all 9 sections: Parties and Premises, Lease Term, Rent and Financial Obligations, Permitted Use, Renewal Options, Landlord Obligations, Tenant Obligations, Default and Remedies, and Special Provisions"
+      },
+      {
+        "name": "confidence",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Overall confidence in the analysis quality based on document completeness and clarity"
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "scopes": {
+    "$knowledge": [
+      { "$ref": "knowledge:lease-standard-provisions", "as": "reference" },
+      { "$ref": "knowledge:commercial-lease-benchmarks", "as": "definitions" }
+    ]
+  },
+
+  "examples": [
+    {
+      "input": "COMMERCIAL LEASE AGREEMENT\n\nThis Lease Agreement ('Lease') is entered into as of March 1, 2026, by and between:\n\nSunrise Properties LLC, a Florida limited liability company ('Landlord'), and\nBrightPath Consulting Inc., a Florida corporation ('Tenant').\n\nPREMISES: Suite 400, 1200 Innovation Drive, Orlando, FL 32801. Approximately 3,500 square feet of office space.\n\nTERM: Five (5) years, commencing April 1, 2026 through March 31, 2031.\n\nBASE RENT: $28.00 per square foot per year ($8,166.67/month). Annual 3% escalation beginning Year 2.\n\nSECURITY DEPOSIT: $16,333.34 (two months' rent).\n\nOPERATING EXPENSES: Tenant responsible for pro-rata share (estimated $8.50/sf/year).\n\nRENEWAL: One (1) five-year renewal option at fair market value. Written notice required 180 days before expiration.\n\nPERMITTED USE: General office and consulting services only...",
+      "output": {
+        "executiveSummary": "Five-year commercial office lease at Suite 400, 1200 Innovation Drive, Orlando, FL. Base rent: $28.00/sf/year ($8,166.67/month) with 3% annual escalation. Estimated total annual cost including operating expenses: $127,750 ($36.50/sf). Security deposit: $16,333.34. One five-year renewal option at FMV with 180-day notice required by October 4, 2030.",
+        "parties": [
+          { "name": "Sunrise Properties LLC", "role": "Landlord" },
+          { "name": "BrightPath Consulting Inc.", "role": "Tenant" }
+        ],
+        "premises": "Suite 400, 1200 Innovation Drive, Orlando, FL 32801. Approximately 3,500 square feet of office space.",
+        "keyDates": [
+          { "date": "2026-03-01", "description": "Lease execution date", "section": "Preamble", "flag": "CALENDAR_ITEM" },
+          { "date": "2026-04-01", "description": "Lease commencement date", "section": "Term", "flag": "CALENDAR_ITEM" },
+          { "date": "2031-03-31", "description": "Lease expiration date", "section": "Term", "flag": "CALENDAR_ITEM" },
+          { "date": "2030-10-04", "description": "Renewal option exercise deadline (180 days before expiration)", "section": "Renewal", "flag": "CALENDAR_ITEM" }
+        ],
+        "financialTerms": {
+          "baseRent": "$28.00/sf/year ($8,166.67/month) for 3,500 sf",
+          "escalationSchedule": "3% annual increase beginning Year 2. Year 1: $28.00/sf, Year 2: $28.84/sf, Year 3: $29.71/sf, Year 4: $30.60/sf, Year 5: $31.52/sf",
+          "securityDeposit": "$16,333.34 (two months' rent)",
+          "operatingExpenses": "Tenant pro-rata share, estimated $8.50/sf/year ($29,750/year)",
+          "estimatedAnnualCost": "$127,750/year ($36.50/sf) — base rent $98,000 + operating expenses $29,750"
+        },
+        "renewalOptions": [
+          { "optionNumber": 1, "duration": "Five years", "noticeDeadline": "180 days before expiration (approx. October 4, 2030)", "rentBasis": "Fair market value" }
+        ],
+        "riskItems": [
+          { "description": "Renewal rent at fair market value — no cap or collar, exposing tenant to market rate risk", "section": "Renewal", "flag": "REVIEW_RECOMMENDED" },
+          { "description": "Permitted use restricted to 'general office and consulting services only' — may limit future business pivots", "section": "Permitted Use", "flag": "FLAG" }
+        ],
+        "fullReport": "## 1. Parties and Premises\nLandlord: Sunrise Properties LLC (FL LLC). Tenant: BrightPath Consulting Inc. (FL corp). Premises: Suite 400, 1200 Innovation Drive, Orlando, FL 32801 — approx. 3,500 sf office space.\n\n## 2. Lease Term\nFive years: April 1, 2026 through March 31, 2031.\n\n## 3. Rent and Financial Obligations\nBase rent $28.00/sf/year with 3% annual escalation. Operating expenses estimated at $8.50/sf/year. Security deposit: $16,333.34.\n\n## 4-9. [Remaining sections require full document review]",
+        "confidence": 0.88
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "migration",
+    "authorLevel": 0,
+    "createdAt": "2026-03-04T00:00:00Z",
+    "description": "Analysis of commercial and residential lease agreements to extract rent obligations, lease term, renewal options, permitted use, tenant and landlord obligations, and termination rights",
+    "tags": ["lease", "real-estate", "commercial", "financial", "legal"]
+  }
+}

@@ -1538,7 +1538,19 @@ public class DataverseWebApiService : IDataverseService
         _logger.LogInformation("Updating record fields: {Entity}({Id}), {FieldCount} fields", entityLogicalName, recordId, fields.Count);
 
         var response = await _httpClient.PatchAsJsonAsync($"{entitySetName}({recordId})", fields, ct);
-        response.EnsureSuccessStatusCode();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError(
+                "UpdateRecordFieldsAsync PATCH failed: {StatusCode} for {Entity}({Id}). Fields: [{FieldNames}]. Response: {ErrorBody}",
+                response.StatusCode,
+                entityLogicalName,
+                recordId,
+                string.Join(", ", fields.Keys),
+                errorBody);
+            response.EnsureSuccessStatusCode(); // still throw for the caller
+        }
 
         _logger.LogDebug("Record updated: {Entity}({Id})", entityLogicalName, recordId);
     }
