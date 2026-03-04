@@ -1,18 +1,24 @@
 # CLAUDE.md - Sprk.Bff.Api Module
 
-> **Last Updated**: February 24, 2026
+> **Last Updated**: March 4, 2026
 >
 > **Purpose**: Module-specific instructions for the Spaarke BFF (Backend-for-Frontend) API.
+>
+> **See also**: [SDAP System Overview](../../../docs/architecture/sdap-overview.md) for full platform architecture and component model.
 
 ## Module Overview
 
-**Sprk.Bff.Api** is the .NET 8 Minimal API that provides:
-- SharePoint Embedded file operations (upload, download, delete)
-- On-Behalf-Of (OBO) token flow for user impersonation
-- Container management for SPE storage
-- Dataverse integration for document metadata
-- Health checks and observability
-- AI service orchestration (document intelligence, RAG search, chat)
+**Sprk.Bff.Api** is the unified .NET 8 Minimal API serving as the backend for the **SDAP** (Spaarke Data & AI Platform). It provides 7 functional domains:
+
+- **SPE / Documents**: SharePoint Embedded file operations, OBO token exchange, container management
+- **AI Platform**: Chat (SSE), document analysis, RAG search, playbooks, knowledge bases, semantic search
+- **Office Add-ins**: Outlook/Word document save, entity search, sharing
+- **Email / Communication**: Email-to-document automation, outbound communications
+- **Finance Intelligence**: Invoice classification, field extraction, financial aggregation
+- **Workspace / Portfolio**: Portfolio analytics, priority scoring, briefing generation
+- **Background Processing**: 13+ async job handlers via Azure Service Bus
+
+**Scale**: 120+ endpoints, 99+ DI registrations, 13+ background job types.
 
 ## Key Files
 
