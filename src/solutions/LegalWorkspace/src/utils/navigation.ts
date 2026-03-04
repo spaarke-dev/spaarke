@@ -90,3 +90,40 @@ export function openRecordDialog(entityName: string, entityId: string): void {
     console.error("[navigation] openRecordDialog failed:", err);
   }
 }
+
+/**
+ * Open a Dataverse entity list view in a modal dialog.
+ *
+ * Uses Xrm.Navigation.navigateTo with pageType "entitylist" and target 2 (dialog)
+ * to show a system view in a modal overlay.
+ *
+ * @param entityName - The logical name of the entity (e.g. "sprk_matter")
+ * @param viewId     - The GUID of the system view to display
+ */
+export function navigateToEntityList(entityName: string, viewId: string): void {
+  if (!entityName || !viewId) {
+    console.error("[navigation] navigateToEntityList: entityName and viewId are required");
+    return;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm() as any;
+
+  if (!xrm?.Navigation?.navigateTo) {
+    console.error("[navigation] navigateToEntityList: Xrm.Navigation.navigateTo is not available");
+    return;
+  }
+
+  try {
+    xrm.Navigation.navigateTo(
+      { pageType: "entitylist", entityName, viewId },
+      {
+        target: 2,
+        width: { value: 80, unit: "%" },
+        height: { value: 80, unit: "%" },
+      }
+    );
+  } catch (err) {
+    console.error("[navigation] navigateToEntityList failed:", err);
+  }
+}

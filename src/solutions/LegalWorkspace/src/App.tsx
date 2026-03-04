@@ -9,8 +9,26 @@ import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { getWebApi, getUserId } from "./services/xrmProvider";
 import { PageHeader } from "./components/Shell/PageHeader";
 import { WorkspaceGrid } from "./components/Shell/WorkspaceGrid";
+import { SmartToDo } from "./components/SmartToDo/SmartToDo";
 import { FeedTodoSyncProvider } from "./contexts/FeedTodoSyncContext";
 import type { IWebApi } from "./types/xrm";
+
+/**
+ * Parse the `data` query parameter from the URL.
+ * Dataverse passes custom data via `?data=key1%3Dvalue1%26key2%3Dvalue2`.
+ */
+function parseDataParams(): Record<string, string> {
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get("data") ?? "";
+  const result: Record<string, string> = {};
+  if (!raw) return result;
+  const decoded = decodeURIComponent(raw);
+  for (const pair of decoded.split("&")) {
+    const [key, ...rest] = pair.split("=");
+    if (key) result[key.trim()] = rest.join("=").trim();
+  }
+  return result;
+}
 
 const APP_VERSION = "1.0.2";
 
@@ -62,6 +80,10 @@ export const App: React.FC = () => {
   const webApi = React.useMemo<IWebApi | null>(() => getWebApi(), []);
   const userId = React.useMemo(() => getUserId(), []);
 
+  // Check for dialog mode (e.g. ?data=mode%3Dtodo)
+  const dataParams = React.useMemo(() => parseDataParams(), []);
+  const mode = dataParams.mode ?? "";
+
   // Theme listener
   React.useEffect(() => {
     const cleanup = setupThemeListener(() => {
@@ -86,6 +108,19 @@ export const App: React.FC = () => {
             Dataverse Model-Driven App Custom Page.
           </Text>
         </div>
+      </FluentProvider>
+    );
+  }
+
+  // Dialog mode: render only the requested section (full, with side pane)
+  if (mode === "todo") {
+    return (
+      <FluentProvider theme={theme} style={{ height: "100%" }}>
+        <FeedTodoSyncProvider webApi={webApi}>
+          <div className={styles.root}>
+            <SmartToDo webApi={webApi} userId={userId} useDialogForDetail />
+          </div>
+        </FeedTodoSyncProvider>
       </FluentProvider>
     );
   }

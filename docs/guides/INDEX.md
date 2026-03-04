@@ -42,6 +42,10 @@ This directory contains practical guides for implementing features, configuring 
 - [RIBBON-CUSTOMIZATION-GUIDE.md](RIBBON-CUSTOMIZATION-GUIDE.md)
 - [TASK-MANAGEMENT-GUIDE.md](TASK-MANAGEMENT-GUIDE.md)
 
+### Workspace Features
+
+- **[EVENT-TODO-ARCHITECTURE.md](EVENT-TODO-ARCHITECTURE.md)** - Smart To Do Kanban board + Todo Detail side pane architecture, dual-entity data model, score formula, cross-component sync
+
 ### Workspace & Entity Creation
 
 - **[WORKSPACE-ENTITY-CREATION-GUIDE.md](WORKSPACE-ENTITY-CREATION-GUIDE.md)** - **NEW**: Full guide for entity creation wizards (Matter, Project, etc.) — SPE upload, Dataverse records, AI analysis, follow-on actions
@@ -66,6 +70,7 @@ This directory contains practical guides for implementing features, configuring 
 - Email automation → Load EMAIL-TO-DOCUMENT-ARCHITECTURE.md
 - Workspace entity creation → Load WORKSPACE-ENTITY-CREATION-GUIDE.md
 - AI pre-fill → Load WORKSPACE-AI-PREFILL-GUIDE.md
+- To Do / Kanban work → Load EVENT-TODO-ARCHITECTURE.md
 
 ## Phase 3 TODO
 

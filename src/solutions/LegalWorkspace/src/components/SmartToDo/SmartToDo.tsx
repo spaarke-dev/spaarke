@@ -195,6 +195,37 @@ const useStyles = makeStyles({
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
   },
+
+  // ── Split layout: Kanban + inline detail panel ──────────────────────────
+  splitContainer: {
+    display: "flex",
+    flexDirection: "row",
+    flex: "1 1 0",
+    minHeight: 0,
+    overflow: "hidden",
+  },
+  splitKanban: {
+    flex: "1 1 0",
+    display: "flex",
+    flexDirection: "column",
+    minWidth: 0,
+    overflow: "hidden",
+  },
+  inlineDetailPanel: {
+    width: "420px",
+    flexShrink: 0,
+    display: "flex",
+    flexDirection: "column",
+    borderLeftWidth: "1px",
+    borderLeftStyle: "solid",
+    borderLeftColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  inlineDetailIframe: {
+    flex: "1 1 0",
+    border: "none",
+    width: "100%",
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -249,6 +280,12 @@ export interface ISmartToDoProps {
   onCountChange?: (count: number) => void;
   /** Expose the refetch function to the parent (for refresh button in tab header). */
   onRefetchReady?: (refetch: () => void) => void;
+  /** Called when "Show more" is clicked. */
+  onShowMore?: () => void;
+  /** When true, disables card click → side pane behavior. */
+  disableSidePane?: boolean;
+  /** When true, opens todo detail as a nested dialog instead of a side pane (for dialog context). */
+  useDialogForDetail?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -262,6 +299,9 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   embedded = false,
   onCountChange,
   onRefetchReady,
+  onShowMore,
+  disableSidePane = false,
+  useDialogForDetail = false,
 }) => {
   const styles = useStyles();
 
@@ -319,6 +359,23 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
 
   /** Settings popover state */
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+
+  /** Collapsed Kanban columns — Future is collapsed by default */
+  const [collapsedColumns, setCollapsedColumns] = React.useState<ReadonlySet<string>>(
+    new Set(["Future"])
+  );
+
+  const handleToggleCollapse = React.useCallback((columnId: string) => {
+    setCollapsedColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(columnId)) {
+        next.delete(columnId);
+      } else {
+        next.add(columnId);
+      }
+      return next;
+    });
+  }, []);
 
   // -------------------------------------------------------------------------
   // Derived active items: hook items minus dismissed ones, with status overlays
@@ -584,6 +641,40 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   }, [getXrm]);
 
   // -------------------------------------------------------------------------
+  // Inline detail panel (for dialog context — useDialogForDetail)
+  // Renders the TodoDetailSidePane as an iframe panel alongside the Kanban.
+  // The parent exposes Xrm on window (via xrmProvider.ts) so the child
+  // iframe can access it via window.parent.Xrm.
+  // -------------------------------------------------------------------------
+
+  const [inlineDetailEventId, setInlineDetailEventId] = React.useState<string | null>(null);
+
+  const handleCardClickInline = React.useCallback(
+    (eventId: string) => {
+      setInlineDetailEventId(eventId);
+    },
+    []
+  );
+
+  const handleCloseInlineDetail = React.useCallback(() => {
+    setInlineDetailEventId(null);
+    refetch(); // Sync changes when panel closes
+  }, [refetch]);
+
+  // Build iframe URL using the Dataverse client URL
+  const inlineDetailUrl = React.useMemo(() => {
+    if (!inlineDetailEventId) return "";
+    try {
+      const xrm = getXrm();
+      const ctx = xrm?.Utility?.getGlobalContext?.();
+      const clientUrl = ctx?.getClientUrl?.() ?? "";
+      return `${clientUrl}/WebResources/sprk_tododetailsidepane?data=eventId%3D${inlineDetailEventId}`;
+    } catch {
+      return "";
+    }
+  }, [inlineDetailEventId, getXrm]);
+
+  // -------------------------------------------------------------------------
   // BroadcastChannel: listen for saves from TodoDetailSidePane → refetch
   // -------------------------------------------------------------------------
 
@@ -728,16 +819,21 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     (item: IEvent, _index: number, columnId: string) => {
       // Get column accent colour from the columns array
       const col = columns.find((c) => c.id === columnId);
+      const cardClickHandler = disableSidePane
+        ? undefined
+        : useDialogForDetail
+          ? handleCardClickInline
+          : handleCardClick;
       return (
         <KanbanCard
           event={item}
           onPinToggle={handlePinToggle}
-          onClick={handleCardClick}
+          onClick={cardClickHandler}
           accentColor={col?.accentColor}
         />
       );
     },
-    [columns, handlePinToggle, handleCardClick]
+    [columns, handlePinToggle, handleCardClick, handleCardClickInline, disableSidePane, useDialogForDetail]
   );
 
   const getItemId = React.useCallback(
@@ -764,16 +860,18 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       role="region"
       aria-label={`Smart To Do Kanban, ${totalCount} item${totalCount === 1 ? "" : "s"}`}
     >
-      {/* ── KanbanHeader — hidden when embedded ────────────────────────── */}
-      <KanbanHeader
-        totalCount={totalCount}
-        onRecalculate={recalculate}
-        isRecalculating={isRecalculating}
-        onAdd={handleAdd}
-        isAdding={isAdding}
-        onSettingsOpen={() => setSettingsOpen(true)}
-        embedded={embedded}
-      />
+      {/* ── KanbanHeader — hidden in workspace preview (disableSidePane) ── */}
+      {!disableSidePane && (
+        <KanbanHeader
+          totalCount={totalCount}
+          onRecalculate={recalculate}
+          isRecalculating={isRecalculating}
+          onAdd={handleAdd}
+          isAdding={isAdding}
+          onSettingsOpen={() => setSettingsOpen(true)}
+          embedded={embedded}
+        />
+      )}
 
       {/* ── Settings popover — anchor to a hidden trigger ──────────────── */}
       <ThresholdSettingsPopover
@@ -834,14 +932,50 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         </div>
       )}
 
-      {/* ── Main content area (Kanban board + dismissed) ──────────────── */}
+      {/* ── Main content area (Kanban board + optional inline detail panel) ── */}
       {!isLoading && !prefsLoading && !error && (
         <>
           {/* Empty state */}
           {isEmpty && <TodoEmptyState />}
 
-          {/* Kanban board */}
-          {!isEmpty && (
+          {/* Kanban board — with optional inline detail panel */}
+          {!isEmpty && useDialogForDetail && inlineDetailEventId ? (
+            <div className={styles.splitContainer}>
+              <div className={styles.splitKanban}>
+                <div className={styles.boardContainer}>
+                  <KanbanBoard<IEvent>
+                    columns={columns}
+                    onDragEnd={handleDragEnd}
+                    renderCard={renderCard}
+                    getItemId={getItemId}
+                    ariaLabel="Smart To Do Kanban board"
+                    collapsedColumns={collapsedColumns}
+                    onToggleCollapse={handleToggleCollapse}
+                  />
+                </div>
+              </div>
+              <div className={styles.inlineDetailPanel}>
+                <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px", borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    onClick={handleCloseInlineDetail}
+                    aria-label="Close detail panel"
+                  >
+                    Close
+                  </Button>
+                </div>
+                {inlineDetailUrl && (
+                  <iframe
+                    key={inlineDetailEventId}
+                    src={inlineDetailUrl}
+                    className={styles.inlineDetailIframe}
+                    title="To Do Detail"
+                  />
+                )}
+              </div>
+            </div>
+          ) : !isEmpty ? (
             <div className={styles.boardContainer}>
               <KanbanBoard<IEvent>
                 columns={columns}
@@ -849,7 +983,18 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
                 renderCard={renderCard}
                 getItemId={getItemId}
                 ariaLabel="Smart To Do Kanban board"
+                collapsedColumns={collapsedColumns}
+                onToggleCollapse={handleToggleCollapse}
               />
+            </div>
+          ) : null}
+
+          {/* Show more button for workspace preview mode */}
+          {onShowMore && (
+            <div style={{ display: "flex", justifyContent: "center", padding: "8px" }}>
+              <Button appearance="subtle" size="small" onClick={onShowMore}>
+                Show more
+              </Button>
             </div>
           )}
 

@@ -19,6 +19,7 @@ import * as React from "react";
 import {
   makeStyles,
   tokens,
+  Button,
   ToggleButton,
   Badge,
 } from "@fluentui/react-components";
@@ -31,6 +32,7 @@ import {
   DocumentRegular,
   ReceiptRegular,
   CheckboxCheckedRegular,
+  OpenRegular,
 } from "@fluentui/react-icons";
 import { EventFilterCategory } from "../../types/enums";
 import { CategoryCounts } from "../../hooks/useActivityFeedFilters";
@@ -152,6 +154,10 @@ export interface IFilterBarProps {
   categoryCounts: CategoryCounts;
   /** Called when the user clicks a filter pill */
   onFilterChange: (filter: EventFilterCategory) => void;
+  /** When true, renders pills as text-only (no icons or count badges). Default false. */
+  textOnly?: boolean;
+  /** Called when the "open all" icon is clicked (far right of filter bar). */
+  onOpenAll?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,6 +168,8 @@ export const FilterBar: React.FC<IFilterBarProps> = ({
   activeFilter,
   categoryCounts,
   onFilterChange,
+  textOnly = false,
+  onOpenAll,
 }) => {
   const styles = useStyles();
 
@@ -182,26 +190,38 @@ export const FilterBar: React.FC<IFilterBarProps> = ({
             size="small"
             appearance="subtle"
             checked={isActive}
-            icon={pill.icon}
+            icon={textOnly ? undefined : pill.icon}
             onClick={() => onFilterChange(pill.key)}
             aria-label={`${pill.ariaDescription} (${count})`}
             aria-pressed={isActive}
           >
             <span className={styles.pillContent}>
               {pill.label}
-              <Badge
-                className={styles.countBadge}
-                size="small"
-                appearance={isActive ? "filled" : "ghost"}
-                color={isActive ? "brand" : "informative"}
-                aria-hidden="true"
-              >
-                {count > 999 ? "999+" : count}
-              </Badge>
+              {!textOnly && (
+                <Badge
+                  className={styles.countBadge}
+                  size="small"
+                  appearance={isActive ? "filled" : "ghost"}
+                  color={isActive ? "brand" : "informative"}
+                  aria-hidden="true"
+                >
+                  {count > 999 ? "999+" : count}
+                </Badge>
+              )}
             </span>
           </ToggleButton>
         );
       })}
+      {onOpenAll && (
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={<OpenRegular />}
+          onClick={onOpenAll}
+          aria-label="Open all updates"
+          style={{ marginLeft: "auto", flexShrink: 0 }}
+        />
+      )}
     </div>
   );
 };

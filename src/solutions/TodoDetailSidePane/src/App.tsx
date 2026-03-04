@@ -23,6 +23,7 @@ import {
   loadTodoExtension,
   saveTodoFields,
   saveTodoExtensionFields,
+  deactivateTodoExtension,
 } from "./services/todoService";
 import type { IEventFieldUpdates, ITodoExtensionUpdates } from "./services/todoService";
 import { sendTodoSaved } from "./utils/broadcastChannel";
@@ -231,6 +232,23 @@ export function App() {
     [eventId]
   );
 
+  // Deactivate sprk_eventtodo (via direct REST API — Xrm.WebApi ignores statecode)
+  const handleDeactivateTodoExt = React.useCallback(
+    async (todoId: string) => {
+      const result = await deactivateTodoExtension(todoId);
+      if (result.success) {
+        setTodoExt((prev) =>
+          prev ? { ...prev, statecode: 1, statuscode: 2 } : prev
+        );
+        if (eventId) sendTodoSaved(eventId);
+      } else {
+        console.error("[App] Deactivate todo extension failed:", result.error);
+      }
+      return result;
+    },
+    [eventId]
+  );
+
   // Remove from To Do — sets sprk_todoflag = false, notifies Kanban, closes pane
   const handleRemoveTodo = React.useCallback(
     async (evtId: string) => {
@@ -268,6 +286,7 @@ export function App() {
             error={error}
             onSaveEventFields={handleSaveEventFields}
             onSaveTodoExtFields={handleSaveTodoExtFields}
+            onDeactivateTodoExt={handleDeactivateTodoExt}
             onRemoveTodo={handleRemoveTodo}
             onClose={handleClose}
           />

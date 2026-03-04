@@ -52,7 +52,7 @@ export interface IEvent {
   regardingRecordTypeName?: string;
   /** Display name from sprk_assignedto contact lookup (populated via formatted value mapping). */
   assignedToName?: string;
-  sprk_todocolumn?: number;  // Choice: 0=Today, 1=Tomorrow, 2=Future
+  sprk_todocolumn?: number;  // Choice: 100000000=Today, 100000001=Tomorrow, 100000002=Future
   sprk_todopinned?: boolean; // Lock item in assigned Kanban column
   sprk_duedate?: string;  // ISO date
   createdon: string;

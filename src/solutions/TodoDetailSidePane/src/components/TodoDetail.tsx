@@ -270,6 +270,13 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalXS,
     cursor: "pointer",
   },
+  completeBtn: {
+    backgroundColor: tokens.colorPaletteYellowBackground3,
+    color: tokens.colorNeutralForeground1,
+    ":hover": {
+      backgroundColor: tokens.colorPaletteYellowForeground2,
+    },
+  },
   completedBtn: {
     backgroundColor: tokens.colorPaletteGreenBackground3,
     color: tokens.colorNeutralForegroundOnBrand,
@@ -299,6 +306,10 @@ export interface ITodoDetailProps {
     todoId: string,
     fields: ITodoExtensionUpdates
   ) => Promise<{ success: boolean; error?: string }>;
+  /** Deactivate sprk_eventtodo (statecode=1, statuscode=2) via direct REST API. */
+  onDeactivateTodoExt: (
+    todoId: string
+  ) => Promise<{ success: boolean; error?: string }>;
   /** Remove from To Do (sets sprk_todoflag=false, then closes pane). */
   onRemoveTodo?: (eventId: string) => Promise<void>;
   /** Close the side pane. */
@@ -317,6 +328,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     error,
     onSaveEventFields,
     onSaveTodoExtFields,
+    onDeactivateTodoExt,
     onRemoveTodo,
     onClose,
   }) => {
@@ -641,29 +653,37 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
           }
         }
 
-        // Mark as completed on sprk_eventtodo
+        // Mark as completed on sprk_eventtodo — TWO separate calls:
+        // 1) Data fields via Xrm.WebApi  2) State change via direct REST API
         if (todoExtension?.sprk_eventtodoid) {
-          const extUpdates: ITodoExtensionUpdates = {
+          // 1) Save data fields (completed flag, date, notes) while record is still active
+          const dataUpdates: ITodoExtensionUpdates = {
             sprk_completed: true,
             sprk_completeddate: new Date().toISOString(),
-            statuscode: 2,
           };
-          // Also save notes if dirty
           if (isNotesDirty) {
-            extUpdates.sprk_todonotes = toDoNotes;
+            dataUpdates.sprk_todonotes = toDoNotes;
           }
-          const extResult = await onSaveTodoExtFields(
+          const dataResult = await onSaveTodoExtFields(
             todoExtension.sprk_eventtodoid,
-            extUpdates
+            dataUpdates
           );
-          if (!extResult.success) {
-            setSaveError(extResult.error ?? "Failed to mark as completed");
+          if (!dataResult.success) {
+            setSaveError(dataResult.error ?? "Failed to save completion data");
+            setIsCompleting(false);
+            return;
+          }
+
+          // 2) Deactivate via direct REST API (Xrm.WebApi ignores statecode/statuscode)
+          const stateResult = await onDeactivateTodoExt(
+            todoExtension.sprk_eventtodoid
+          );
+          if (!stateResult.success) {
+            setSaveError(stateResult.error ?? "Failed to deactivate record");
             setIsCompleting(false);
             return;
           }
         }
-
-        onClose?.();
       } catch {
         setSaveError("Failed to mark as completed — unexpected error");
       } finally {
@@ -682,7 +702,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       toDoNotes,
       onSaveEventFields,
       onSaveTodoExtFields,
-      onClose,
+      onDeactivateTodoExt,
     ]);
 
     // Open regarding record in a new browser tab
@@ -878,14 +898,11 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
           <div className={styles.divider} role="separator" />
 
           {/* ── To Do Score: title row with circle + info, then sliders ── */}
-          <div className={styles.section}>
+          <div className={styles.section} style={{ marginBottom: "20px" }}>
             <div className={styles.sectionTitleRow}>
               <Text className={styles.sectionTitle} size={300}>
                 To Do Score
               </Text>
-              <div className={styles.scoreCircle}>
-                {Math.round(score.todoScore)}
-              </div>
               <Popover withArrow>
                 <PopoverTrigger disableButtonEnhancement>
                   <Button
@@ -930,6 +947,9 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                   </div>
                 </PopoverSurface>
               </Popover>
+              <div className={styles.scoreCircle} style={{ marginLeft: "auto" }}>
+                {Math.round(score.todoScore)}
+              </div>
             </div>
 
             <div className={styles.sliderRow}>
@@ -984,14 +1004,24 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
           >
             {isSaving ? "Saving..." : "Save"}
           </Button>
-          <Button
-            icon={<CheckmarkRegular />}
-            onClick={handleCompleted}
-            disabled={isSaving || isCompleting}
-            className={styles.completedBtn}
-          >
-            {isCompleting ? "Completing..." : "Completed"}
-          </Button>
+          {todoExtension?.statecode === 1 || todoExtension?.statuscode === 2 ? (
+            <Button
+              icon={<CheckmarkRegular />}
+              disabled
+              className={styles.completedBtn}
+            >
+              Completed
+            </Button>
+          ) : (
+            <Button
+              icon={<CheckmarkRegular />}
+              onClick={handleCompleted}
+              disabled={isSaving || isCompleting}
+              className={styles.completeBtn}
+            >
+              {isCompleting ? "Completing..." : "Complete"}
+            </Button>
+          )}
         </div>
       </div>
     );

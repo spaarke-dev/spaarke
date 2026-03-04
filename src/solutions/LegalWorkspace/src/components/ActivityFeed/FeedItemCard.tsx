@@ -52,7 +52,7 @@ import { PriorityLevel } from "../../types/enums";
 import { formatRelativeTime } from "../../utils/formatRelativeTime";
 import { getTypeIcon, getTypeIconLabel } from "../../utils/typeIconMap";
 import { useFeedTodoSync } from "../../hooks/useFeedTodoSync";
-import { navigateToEntity } from "../../utils/navigation";
+import { navigateToEntity, openRecordDialog } from "../../utils/navigation";
 
 // ---------------------------------------------------------------------------
 // Priority badge token mapping
@@ -499,11 +499,7 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
       if (onEdit) {
         onEdit(event.sprk_eventid);
       } else {
-        navigateToEntity({
-          action: "openRecord",
-          entityName: "sprk_event",
-          entityId: event.sprk_eventid,
-        });
+        openRecordDialog("sprk_event", event.sprk_eventid);
       }
     }, [onEdit, event.sprk_eventid]);
 

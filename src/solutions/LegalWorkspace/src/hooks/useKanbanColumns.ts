@@ -30,16 +30,16 @@ import type { IWebApi } from '../types/xrm';
 
 /** Map TodoColumn string to Dataverse choice value. */
 const COLUMN_TO_CHOICE: Record<TodoColumn, number> = {
-  Today: 0,
-  Tomorrow: 1,
-  Future: 2,
+  Today: 100000000,
+  Tomorrow: 100000001,
+  Future: 100000002,
 };
 
 /** Map Dataverse choice value to TodoColumn string. */
 const CHOICE_TO_COLUMN: Record<number, TodoColumn> = {
-  0: 'Today',
-  1: 'Tomorrow',
-  2: 'Future',
+  100000000: 'Today',
+  100000001: 'Tomorrow',
+  100000002: 'Future',
 };
 
 // ---------------------------------------------------------------------------

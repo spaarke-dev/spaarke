@@ -30,7 +30,12 @@ export function getXrm(): any | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const parentXrm = (window.parent as any)?.Xrm;
-    if (parentXrm?.WebApi) return parentXrm;
+    if (parentXrm?.WebApi) {
+      // Expose on current window so child iframes (e.g. TodoDetailSidePane)
+      // can find it via window.parent.Xrm
+      (window as any).Xrm = parentXrm;
+      return parentXrm;
+    }
   } catch {
     /* cross-origin — swallow */
   }
@@ -38,7 +43,11 @@ export function getXrm(): any | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const topXrm = (window.top as any)?.Xrm;
-    if (topXrm?.WebApi) return topXrm;
+    if (topXrm?.WebApi) {
+      // Expose on current window so child iframes can find it
+      (window as any).Xrm = topXrm;
+      return topXrm;
+    }
   } catch {
     /* cross-origin — swallow */
   }
