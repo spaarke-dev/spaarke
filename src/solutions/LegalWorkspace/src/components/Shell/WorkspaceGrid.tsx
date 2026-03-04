@@ -43,6 +43,10 @@ const LazyWizardDialog = React.lazy(
   () => import("../CreateMatter/WizardDialog")
 );
 
+const LazyProjectWizardDialog = React.lazy(
+  () => import("../CreateProject/ProjectWizardDialog")
+);
+
 const LazyGetStartedExpandDialog = React.lazy(() =>
   import("../GetStarted/GetStartedExpandDialog").then((m) => ({
     default: m.GetStartedExpandDialog,
@@ -243,6 +247,14 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleCloseWizard = React.useCallback(() => setIsWizardOpen(false), []);
 
   // -------------------------------------------------------------------------
+  // Create New Project wizard dialog state
+  // -------------------------------------------------------------------------
+
+  const [isProjectWizardOpen, setIsProjectWizardOpen] = React.useState(false);
+  const handleOpenProjectWizard = React.useCallback(() => setIsProjectWizardOpen(true), []);
+  const handleCloseProjectWizard = React.useCallback(() => setIsProjectWizardOpen(false), []);
+
+  // -------------------------------------------------------------------------
   // Toaster for "Analysis Builder unavailable" informational messages
   // -------------------------------------------------------------------------
 
@@ -323,10 +335,12 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     () => ({
       // "Create New Matter" opens the 3-step wizard dialog (task 022)
       "create-new-matter": handleOpenWizard,
-      // The remaining 6 cards launch Analysis Builder with intent payloads
+      // "Create New Project" opens the 1-step project wizard dialog
+      "create-new-project": handleOpenProjectWizard,
+      // The remaining cards launch Analysis Builder with intent payloads
       ...analysisBuilderHandlers,
     }),
-    [handleOpenWizard, analysisBuilderHandlers]
+    [handleOpenWizard, handleOpenProjectWizard, analysisBuilderHandlers]
   );
 
   // -------------------------------------------------------------------------
@@ -484,6 +498,14 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       {isWizardOpen && (
         <React.Suspense fallback={<DialogLoadingFallback />}>
           <LazyWizardDialog open={isWizardOpen} onClose={handleCloseWizard} webApi={webApi} />
+        </React.Suspense>
+      )}
+
+      {/* Create New Project wizard dialog — single-step project creation.
+          Lazy-loaded: chunk only fetched on first user interaction. */}
+      {isProjectWizardOpen && (
+        <React.Suspense fallback={<DialogLoadingFallback />}>
+          <LazyProjectWizardDialog open={isProjectWizardOpen} onClose={handleCloseProjectWizard} webApi={webApi} />
         </React.Suspense>
       )}
 
