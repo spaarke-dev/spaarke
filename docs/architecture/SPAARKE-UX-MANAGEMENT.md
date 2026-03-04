@@ -1,8 +1,8 @@
 # Spaarke UX Management
 
-> **Last Updated**: December 5, 2025
+> **Last Updated**: March 4, 2026
 >
-> **Purpose**: Documents UX customizations in Spaarke model-driven apps, including themes, ribbons, and other user experience configurations.
+> **Purpose**: Documents UX customizations in Spaarke model-driven apps, including themes, ribbons, reusable dialog/wizard components, and other user experience configurations.
 
 ---
 
@@ -10,7 +10,8 @@
 
 1. [Dark Mode Theme Persistence](#dark-mode-theme-persistence)
 2. [Entity Ribbon Customizations](#entity-ribbon-customizations)
-3. [Maintenance Procedures](#maintenance-procedures)
+3. [Reusable Dialog and Wizard Components](#reusable-dialog-and-wizard-components)
+4. [Maintenance Procedures](#maintenance-procedures)
 
 ---
 
@@ -128,6 +129,127 @@ Example for sprk_Project:
 ```
 Mscrm.HomepageGrid.sprk_project.MainTab.Actions.Controls._children
 ```
+
+---
+
+## Reusable Dialog and Wizard Components
+
+### Component Inventory
+
+| Component | Location | Purpose | Used By |
+|-----------|----------|---------|---------|
+| **WizardShell** | `src/solutions/LegalWorkspace/src/components/Wizard/` | Generic multi-step wizard dialog with sidebar stepper, step navigation, dynamic step injection, and success/error handling | Create New Matter wizard; future Playbook Library wizards |
+
+### WizardShell
+
+**WizardShell** is a domain-free, reusable wizard dialog shell. It owns layout (sidebar stepper + content area + footer), navigation state, and the finish/success flow. All domain logic lives in the consumer.
+
+#### Key Design Principles
+
+- **Zero domain imports** — `wizardShellTypes.ts` imports only React types; all domain content is injected via callbacks
+- **Consumer-owned domain state** — uploaded files, form values, API results are managed by the consumer's own reducer; WizardShell tracks only navigation state
+- **Dynamic steps** — steps can be added/removed at runtime via the imperative `IWizardShellHandle` (e.g., a "Next Steps" selection screen injects follow-on steps)
+
+#### API Summary
+
+```typescript
+// Consumer provides an ordered array of step configs:
+interface IWizardStepConfig {
+  id: string;
+  label: string;
+  renderContent: (handle: IWizardShellHandle) => React.ReactNode; // receives shell handle for dynamic step control
+  canAdvance: () => boolean;      // enables/disables Next button on every render
+  isEarlyFinish?: () => boolean;  // treat Next as Finish before reaching last step
+  footerActions?: React.ReactNode; // step-specific extra footer buttons
+}
+
+// Shell props:
+interface IWizardShellProps {
+  open: boolean;
+  title: string;
+  steps: IWizardStepConfig[];
+  onClose: () => void;
+  onFinish: () => Promise<IWizardSuccessConfig | void>; // return IWizardSuccessConfig to show success screen
+  finishLabel?: string;      // defaults to "Finish"
+  finishingLabel?: string;   // defaults to "Processing..."
+}
+
+// Imperative handle passed to each step's renderContent:
+interface IWizardShellHandle {
+  addDynamicStep(config: IWizardStepConfig, canonicalOrder?: string[]): void;
+  removeDynamicStep(stepId: string): void;
+  readonly state: IWizardShellState; // currentStepIndex, steps[]
+}
+```
+
+#### Success Screen
+
+When `onFinish` resolves with an `IWizardSuccessConfig`, the shell replaces all step content with a success view and hides the footer:
+
+```typescript
+interface IWizardSuccessConfig {
+  icon: React.ReactNode;    // e.g., a checkmark illustration
+  title: string;            // "Matter created successfully"
+  body: React.ReactNode;    // detail text or rich JSX
+  actions: React.ReactNode; // e.g., "Open Matter" / "Close" buttons
+  warnings?: string[];      // partial-success caveats
+}
+```
+
+#### Relationship to Playbook Library
+
+Each card in the Playbook Library opens a wizard that uses WizardShell as its dialog shell. The Playbook Library itself is responsible for which wizard to launch; WizardShell provides the consistent dialog chrome and navigation.
+
+---
+
+### How to Create a New Dialog or Wizard
+
+#### For a standalone dialog (no multi-step flow)
+
+Use a standard Fluent UI v9 `Dialog` or the `SidePanel` component from `@spaarke/ui-components`. Do **not** use WizardShell for single-step dialogs.
+
+#### For a multi-step wizard
+
+1. **Create a step content component** for each step. Each component receives `IWizardShellHandle` from `renderContent` — use it to call `addDynamicStep`/`removeDynamicStep` if steps are conditional.
+
+2. **Build the `IWizardStepConfig[]` array** in your wizard's parent component. Keep domain state (form values, API results) in the parent; pass setters into each step via closure or props.
+
+3. **Implement `onFinish`** as an async function that calls your API and returns `IWizardSuccessConfig` on success, or throws on failure (the shell surfaces the error).
+
+4. **Render `<WizardShell>`** with `open`, `title`, `steps`, `onClose`, and `onFinish`.
+
+```typescript
+// Minimal example
+const steps: IWizardStepConfig[] = [
+  {
+    id: 'details',
+    label: 'Details',
+    renderContent: (_handle) => <DetailsStep value={formState} onChange={setFormState} />,
+    canAdvance: () => !!formState.name,
+  },
+  {
+    id: 'confirm',
+    label: 'Confirm',
+    renderContent: (_handle) => <ConfirmStep data={formState} />,
+    canAdvance: () => true,
+  },
+];
+
+return (
+  <WizardShell
+    open={isOpen}
+    title="Create New Item"
+    steps={steps}
+    onClose={handleClose}
+    onFinish={async () => {
+      const result = await createItem(formState);
+      return { icon: <CheckmarkCircle />, title: 'Item created', body: result.name, actions: <Button onClick={handleClose}>Close</Button> };
+    }}
+  />
+);
+```
+
+5. **Dynamic steps pattern** — if a step's selection should inject or remove subsequent steps, call `handle.addDynamicStep(config, canonicalOrder)` inside `renderContent`. Pass `canonicalOrder` (array of all possible step IDs in desired order) so steps sort correctly regardless of selection order.
 
 ---
 
@@ -253,3 +375,4 @@ Invoke-RestMethod -Uri "$env:DATAVERSE_URL/api/data/v9.2/webresourceset(sprk_The
 
 - [MDA Dark Mode Theme Project](../../projects/mda-darkmode-theme/spec.md) - Original design specification
 - [ADR-006: PCF over Web Resources](../adr/ADR-006-pcf-over-webresources.md) - Architecture decision for UI components
+- [WizardShell Types](../../src/solutions/LegalWorkspace/src/components/Wizard/wizardShellTypes.ts) - Full type definitions and JSDoc for the WizardShell API
