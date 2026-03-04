@@ -4,13 +4,12 @@ using Azure.Search.Documents.Models;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.SemanticSearch;
-using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 using Xunit;
-
 // Alias to avoid ambiguity with Azure.Search.Documents.SearchOptions
 using AppSearchOptions = Sprk.Bff.Api.Models.Ai.SemanticSearch.SearchOptions;
 

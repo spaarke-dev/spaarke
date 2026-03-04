@@ -1,11 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events.Dtos;
-
 // Type aliases to resolve ambiguity between API DTOs and Dataverse models
 using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
-using ApiUpdateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.UpdateEventRequest;
 using ApiRegardingRecordType = Sprk.Bff.Api.Api.Events.Dtos.RegardingRecordType;
+using ApiUpdateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.UpdateEventRequest;
 using DataverseCreateEventRequest = Spaarke.Dataverse.CreateEventRequest;
 using DataverseUpdateEventRequest = Spaarke.Dataverse.UpdateEventRequest;
 

@@ -26,27 +26,27 @@ public class EmlGenerationServiceTests
         string[]? to = null,
         string[]? cc = null,
         string[]? bcc = null) => new()
-    {
-        To = to ?? new[] { "recipient@example.com" },
-        Subject = subject,
-        Body = body,
-        BodyFormat = bodyFormat,
-        CommunicationType = CommunicationType.Email,
-        Cc = cc,
-        Bcc = bcc
-    };
+        {
+            To = to ?? new[] { "recipient@example.com" },
+            Subject = subject,
+            Body = body,
+            BodyFormat = bodyFormat,
+            CommunicationType = CommunicationType.Email,
+            Cc = cc,
+            Bcc = bcc
+        };
 
     private static SendCommunicationResponse CreateResponse(
         string from = "sender@contoso.com",
         string? graphMessageId = null,
         string? correlationId = null) => new()
-    {
-        GraphMessageId = graphMessageId ?? "test-msg-id",
-        Status = CommunicationStatus.Send,
-        SentAt = new DateTimeOffset(2026, 2, 21, 14, 30, 0, TimeSpan.Zero),
-        From = from,
-        CorrelationId = correlationId ?? "test-correlation"
-    };
+        {
+            GraphMessageId = graphMessageId ?? "test-msg-id",
+            Status = CommunicationStatus.Send,
+            SentAt = new DateTimeOffset(2026, 2, 21, 14, 30, 0, TimeSpan.Zero),
+            From = from,
+            CorrelationId = correlationId ?? "test-correlation"
+        };
 
     #endregion
 

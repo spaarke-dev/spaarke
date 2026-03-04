@@ -1,3 +1,4 @@
+using System.Net;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
@@ -10,7 +11,6 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
-using System.Net;
 using Xunit;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
@@ -94,15 +94,15 @@ public class AssociationMappingTests
 
     private static SendCommunicationRequest CreateRequestWithAssociations(
         params CommunicationAssociation[] associations) => new()
-    {
-        To = new[] { "recipient@example.com" },
-        Subject = "Test Subject",
-        Body = "<p>Test body</p>",
-        BodyFormat = BodyFormat.HTML,
-        CommunicationType = CommunicationType.Email,
-        Associations = associations,
-        CorrelationId = "assoc-test-001"
-    };
+        {
+            To = new[] { "recipient@example.com" },
+            Subject = "Test Subject",
+            Body = "<p>Test body</p>",
+            BodyFormat = BodyFormat.HTML,
+            CommunicationType = CommunicationType.Email,
+            Associations = associations,
+            CorrelationId = "assoc-test-001"
+        };
 
     private static GraphServiceClient CreateMockGraphClient()
     {

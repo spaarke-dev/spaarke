@@ -4,13 +4,13 @@ using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
 using Microsoft.Graph.Users.Item.SendMail;
 using Microsoft.Xrm.Sdk;
-using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Communication.Models;
+using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
 namespace Sprk.Bff.Api.Services.Communication;
 

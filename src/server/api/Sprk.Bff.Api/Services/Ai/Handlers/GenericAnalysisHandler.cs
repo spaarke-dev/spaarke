@@ -250,11 +250,11 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 null   // additionalSkills - resolved by executor in future
             );
 
-            #pragma warning disable CS0618 // Obsolete BuildExecutionPrompt retained for flat-text backward compatibility
+#pragma warning disable CS0618 // Obsolete BuildExecutionPrompt retained for flat-text backward compatibility
             var prompt = rendered.Format == PromptFormat.JsonPromptSchema
                 ? rendered.PromptText
                 : BuildExecutionPrompt(context, tool, config);
-            #pragma warning restore CS0618
+#pragma warning restore CS0618
 
             var inputTokens = EstimateTokens(prompt);
             var useStructuredOutput = rendered.JsonSchema != null;
@@ -390,11 +390,11 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 null   // additionalSkills - resolved by executor in future
             );
 
-            #pragma warning disable CS0618 // Obsolete BuildExecutionPrompt retained for flat-text backward compatibility
+#pragma warning disable CS0618 // Obsolete BuildExecutionPrompt retained for flat-text backward compatibility
             prompt = rendered.Format == PromptFormat.JsonPromptSchema
                 ? rendered.PromptText
                 : BuildExecutionPrompt(context, tool, config);
-            #pragma warning restore CS0618
+#pragma warning restore CS0618
 
             // For streaming, constrained decoding (response_format: json_schema) is not
             // wired through StreamCompletionAsync. If the JPS defines structured output,

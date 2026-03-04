@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
@@ -10,8 +12,6 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Communication;
-using System.Net;
-using System.Text;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Tools;

@@ -125,14 +125,14 @@ public class CommunicationAccountServiceTests
         bool sendEnabled = true,
         bool isDefault = false,
         AccountType accountType = AccountType.SharedAccount) => new()
-    {
-        Id = Guid.NewGuid(),
-        Name = name,
-        EmailAddress = email,
-        AccountType = accountType,
-        SendEnabled = sendEnabled,
-        IsDefaultSender = isDefault
-    };
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            EmailAddress = email,
+            AccountType = accountType,
+            SendEnabled = sendEnabled,
+            IsDefaultSender = isDefault
+        };
 
     #endregion
 

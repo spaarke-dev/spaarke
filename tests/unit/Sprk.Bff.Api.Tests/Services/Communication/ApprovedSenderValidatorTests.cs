@@ -19,19 +19,19 @@ public class ApprovedSenderValidatorTests
         string email = "sender@contoso.com",
         string displayName = "Test Sender",
         bool isDefault = false) => new()
-    {
-        Email = email,
-        DisplayName = displayName,
-        IsDefault = isDefault
-    };
+        {
+            Email = email,
+            DisplayName = displayName,
+            IsDefault = isDefault
+        };
 
     private static CommunicationOptions CreateOptions(
         ApprovedSenderConfig[]? senders = null,
         string? defaultMailbox = null) => new()
-    {
-        ApprovedSenders = senders ?? Array.Empty<ApprovedSenderConfig>(),
-        DefaultMailbox = defaultMailbox
-    };
+        {
+            ApprovedSenders = senders ?? Array.Empty<ApprovedSenderConfig>(),
+            DefaultMailbox = defaultMailbox
+        };
 
     private static ApprovedSenderValidator CreateValidator(CommunicationOptions options)
     {

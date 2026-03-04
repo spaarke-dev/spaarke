@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Options;
-using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai;
 

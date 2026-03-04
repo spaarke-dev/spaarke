@@ -2,8 +2,8 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
-using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -333,14 +333,14 @@ public class LlamaParseClient
         var ext = Path.GetExtension(fileName)?.ToLowerInvariant();
         return ext switch
         {
-            ".pdf"  => "application/pdf",
+            ".pdf" => "application/pdf",
             ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ".doc"  => "application/msword",
+            ".doc" => "application/msword",
             ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            ".txt"  => "text/plain",
+            ".txt" => "text/plain",
             ".html" or ".htm" => "text/html",
-            _       => "application/octet-stream"
+            _ => "application/octet-stream"
         };
     }
 
