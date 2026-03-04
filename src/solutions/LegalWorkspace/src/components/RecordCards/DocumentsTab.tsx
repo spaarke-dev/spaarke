@@ -7,6 +7,7 @@
  */
 
 import * as React from "react";
+import { Button } from "@fluentui/react-components";
 import { DataverseService } from "../../services/DataverseService";
 import { useDocumentsTabList } from "../../hooks/useDocumentsTabList";
 import { DocumentCard } from "./DocumentCard";
@@ -21,6 +22,10 @@ export interface IDocumentsTabProps {
   userId: string;
   onCountChange?: (count: number) => void;
   onRefetchReady?: (refetch: () => void) => void;
+  /** Maximum rows to display. */
+  maxVisible?: number;
+  /** Called when "Show more" is clicked. */
+  onShowMore?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -32,6 +37,8 @@ export const DocumentsTab: React.FC<IDocumentsTabProps> = ({
   userId,
   onCountChange,
   onRefetchReady,
+  maxVisible,
+  onShowMore,
 }) => {
   const { documents, isLoading, error, totalCount, refetch } =
     useDocumentsTabList(service, userId, { top: 50 });
@@ -46,16 +53,27 @@ export const DocumentsTab: React.FC<IDocumentsTabProps> = ({
     onRefetchReady?.(refetch);
   }, [refetch, onRefetchReady]);
 
+  const visibleDocs = maxVisible ? documents.slice(0, maxVisible) : documents;
+
   return (
-    <RecordCardList
-      totalCount={totalCount}
-      isLoading={isLoading}
-      error={error}
-      ariaLabel="Documents list"
-    >
-      {documents.map((doc) => (
-        <DocumentCard key={doc.sprk_documentid} document={doc} />
-      ))}
-    </RecordCardList>
+    <>
+      <RecordCardList
+        totalCount={totalCount}
+        isLoading={isLoading}
+        error={error}
+        ariaLabel="Documents list"
+      >
+        {visibleDocs.map((doc) => (
+          <DocumentCard key={doc.sprk_documentid} document={doc} />
+        ))}
+      </RecordCardList>
+      {onShowMore && documents.length > (maxVisible ?? Infinity) && (
+        <div style={{ display: "flex", justifyContent: "center", padding: "8px" }}>
+          <Button appearance="subtle" size="small" onClick={onShowMore}>
+            Show more ({documents.length - (maxVisible ?? 0)} more)
+          </Button>
+        </div>
+      )}
+    </>
   );
 };

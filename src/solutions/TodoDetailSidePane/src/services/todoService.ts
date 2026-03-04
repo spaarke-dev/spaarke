@@ -6,7 +6,7 @@
  *   - sprk_eventtodo: to-do extension fields (notes, completed, statuscode)
  */
 
-import { getXrmWebApi } from "../utils/xrmAccess";
+import { getXrmWebApi, setRecordState } from "../utils/xrmAccess";
 import {
   ITodoRecord,
   ITodoExtension,
@@ -144,6 +144,7 @@ export interface ITodoExtensionUpdates {
   sprk_todonotes?: string;
   sprk_completed?: boolean;
   sprk_completeddate?: string;
+  statecode?: number;
   statuscode?: number;
 }
 
@@ -165,6 +166,29 @@ export async function saveTodoExtensionFields(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[todoService] Failed to save todo extension:", message);
+    return { success: false, error: message };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Deactivate sprk_eventtodo (state change via direct REST API)
+// ---------------------------------------------------------------------------
+
+/**
+ * Deactivate a sprk_eventtodo record (statecode=1 Inactive, statuscode=2 Completed).
+ *
+ * Uses direct REST API fetch because Xrm.WebApi.updateRecord silently ignores
+ * statecode/statuscode fields in some Dataverse environments.
+ */
+export async function deactivateTodoExtension(
+  todoId: string
+): Promise<ISaveResult> {
+  try {
+    await setRecordState("sprk_eventtodos", todoId, 1, 2);
+    return { success: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[todoService] Failed to deactivate todo extension:", message);
     return { success: false, error: message };
   }
 }

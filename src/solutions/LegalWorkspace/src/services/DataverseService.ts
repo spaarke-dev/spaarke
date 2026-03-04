@@ -696,6 +696,34 @@ export class DataverseService {
   }
 
   // -------------------------------------------------------------------------
+  // Generic record count
+  // -------------------------------------------------------------------------
+
+  /**
+   * Get the count of records matching a filter.
+   * Uses a minimal $select + $filter query and counts result entities.
+   *
+   * @param entityName - The logical name of the entity (e.g. "sprk_matter")
+   * @param primaryKey - The primary key field to select (e.g. "sprk_matterid")
+   * @param filter     - OData $filter expression
+   * @param maxCount   - Maximum records to retrieve for counting (default 500)
+   * @returns          IResult<number> — the count of matching records
+   */
+  async getRecordCount(
+    entityName: string,
+    primaryKey: string,
+    filter: string,
+    maxCount: number = 500
+  ): Promise<IResult<number>> {
+    const query = `?$select=${primaryKey}&$filter=${filter}&$top=${maxCount}`;
+
+    return tryCatch(async () => {
+      const result = await this._webApi.retrieveMultipleRecords(entityName, query, maxCount);
+      return result.entities.length;
+    }, `${entityName.toUpperCase()}_COUNT_ERROR`);
+  }
+
+  // -------------------------------------------------------------------------
   // Notification / unread event queries
   // -------------------------------------------------------------------------
 

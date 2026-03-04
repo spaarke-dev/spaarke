@@ -29,6 +29,9 @@ export type {
 export { BriefingDialog } from "./BriefingDialog";
 export type { IBriefingDialogProps } from "./BriefingDialog";
 
+export { GetStartedExpandDialog } from "./GetStartedExpandDialog";
+export type { IGetStartedExpandDialogProps } from "./GetStartedExpandDialog";
+
 export { generateDeterministicNarrative } from "./briefingNarrative";
 export type {
   IBriefingMetrics,

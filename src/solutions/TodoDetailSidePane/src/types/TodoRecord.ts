@@ -64,7 +64,9 @@ export interface ITodoExtension {
   sprk_completed?: boolean;
   /** Completed date (ISO string). */
   sprk_completeddate?: string;
-  /** Status code — Completed = 2. */
+  /** State code — 0 = Active, 1 = Inactive (conditional on statuscode). */
+  statecode?: number;
+  /** Status code — Open = 1 (active), Completed = 2 (inactive). */
   statuscode?: number;
 }
 
@@ -74,5 +76,6 @@ export const TODO_EXTENSION_SELECT = [
   "sprk_todonotes",
   "sprk_completed",
   "sprk_completeddate",
+  "statecode",
   "statuscode",
 ].join(",");

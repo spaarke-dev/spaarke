@@ -59,6 +59,10 @@ export interface IKanbanBoardProps<T> {
   getItemId: (item: T) => string;
   /** Optional aria-label for the board region. */
   ariaLabel?: string;
+  /** Set of column IDs that are currently collapsed. */
+  collapsedColumns?: ReadonlySet<string>;
+  /** Called when a column header is clicked to toggle collapse. */
+  onToggleCollapse?: (columnId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +131,31 @@ const useStyles = makeStyles({
     paddingTop: tokens.spacingVerticalXL,
     paddingBottom: tokens.spacingVerticalXL,
   },
+  columnCollapsed: {
+    flex: "0 0 40px",
+    display: "flex",
+    flexDirection: "column",
+    minWidth: "40px",
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+    overflow: "hidden",
+    cursor: "pointer",
+  },
+  columnCollapsedHeader: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    gap: tokens.spacingVerticalXS,
+  },
+  columnCollapsedTitle: {
+    writingMode: "vertical-rl",
+    transform: "rotate(180deg)",
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -137,7 +166,7 @@ function KanbanBoardInner<T>(
   props: IKanbanBoardProps<T>,
   _ref: React.Ref<HTMLDivElement>
 ) {
-  const { columns, onDragEnd, renderCard, getItemId, ariaLabel } = props;
+  const { columns, onDragEnd, renderCard, getItemId, ariaLabel, collapsedColumns, onToggleCollapse } = props;
   const styles = useStyles();
 
   return (
@@ -147,66 +176,92 @@ function KanbanBoardInner<T>(
         role="region"
         aria-label={ariaLabel ?? "Kanban board"}
       >
-        {columns.map((column) => (
-          <div
-            key={column.id}
-            className={styles.column}
-            role="group"
-            aria-label={column.title}
-            style={
-              column.accentColor
-                ? { borderTopWidth: "3px", borderTopStyle: "solid", borderTopColor: column.accentColor }
-                : undefined
-            }
-          >
-            {/* Column header */}
-            <div className={styles.columnHeader}>
-              <div>
-                <span className={styles.columnTitle}>{column.title}</span>
-                {column.subtitle && (
-                  <div className={styles.columnSubtitle}>{column.subtitle}</div>
-                )}
-              </div>
-              <span className={styles.columnCount} aria-label={`${column.items.length} items`}>
-                {column.items.length}
-              </span>
-            </div>
+        {columns.map((column) => {
+          const isCollapsed = collapsedColumns?.has(column.id) ?? false;
 
-            {/* Droppable card list */}
-            <Droppable droppableId={column.id}>
-              {(provided) => (
-                <div
-                  ref={provided.innerRef}
-                  {...provided.droppableProps}
-                  className={styles.cardList}
-                  role="list"
-                >
-                  {column.items.length === 0 && (
-                    <div className={styles.emptyColumn}>No items</div>
-                  )}
-                  {column.items.map((item, index) => {
-                    const itemId = getItemId(item);
-                    return (
-                      <Draggable key={itemId} draggableId={itemId} index={index}>
-                        {(dragProvided) => (
-                          <div
-                            ref={dragProvided.innerRef}
-                            {...dragProvided.draggableProps}
-                            {...dragProvided.dragHandleProps}
-                            className={styles.cardWrapper}
-                          >
-                            {renderCard(item, index, column.id)}
-                          </div>
-                        )}
-                      </Draggable>
-                    );
-                  })}
-                  {provided.placeholder}
+          if (isCollapsed) {
+            return (
+              <div
+                key={column.id}
+                className={styles.columnCollapsed}
+                role="group"
+                aria-label={`${column.title} (collapsed)`}
+                onClick={() => onToggleCollapse?.(column.id)}
+                style={column.accentColor ? { borderTopWidth: "3px", borderTopStyle: "solid", borderTopColor: column.accentColor } : undefined}
+              >
+                <div className={styles.columnCollapsedHeader}>
+                  <span className={styles.columnCount}>{column.items.length}</span>
+                  <span className={styles.columnCollapsedTitle}>{column.title}</span>
                 </div>
-              )}
-            </Droppable>
-          </div>
-        ))}
+              </div>
+            );
+          }
+
+          return (
+            <div
+              key={column.id}
+              className={styles.column}
+              role="group"
+              aria-label={column.title}
+              style={
+                column.accentColor
+                  ? { borderTopWidth: "3px", borderTopStyle: "solid", borderTopColor: column.accentColor }
+                  : undefined
+              }
+            >
+              {/* Column header */}
+              <div
+                className={styles.columnHeader}
+                style={onToggleCollapse ? { cursor: "pointer" } : undefined}
+                onClick={onToggleCollapse ? () => onToggleCollapse(column.id) : undefined}
+              >
+                <div>
+                  <span className={styles.columnTitle}>{column.title}</span>
+                  {column.subtitle && (
+                    <div className={styles.columnSubtitle}>{column.subtitle}</div>
+                  )}
+                </div>
+                <span className={styles.columnCount} aria-label={`${column.items.length} items`}>
+                  {column.items.length}
+                </span>
+              </div>
+
+              {/* Droppable card list */}
+              <Droppable droppableId={column.id}>
+                {(provided) => (
+                  <div
+                    ref={provided.innerRef}
+                    {...provided.droppableProps}
+                    className={styles.cardList}
+                    role="list"
+                  >
+                    {column.items.length === 0 && (
+                      <div className={styles.emptyColumn}>No items</div>
+                    )}
+                    {column.items.map((item, index) => {
+                      const itemId = getItemId(item);
+                      return (
+                        <Draggable key={itemId} draggableId={itemId} index={index}>
+                          {(dragProvided) => (
+                            <div
+                              ref={dragProvided.innerRef}
+                              {...dragProvided.draggableProps}
+                              {...dragProvided.dragHandleProps}
+                              className={styles.cardWrapper}
+                            >
+                              {renderCard(item, index, column.id)}
+                            </div>
+                          )}
+                        </Draggable>
+                      );
+                    })}
+                    {provided.placeholder}
+                  </div>
+                )}
+              </Droppable>
+            </div>
+          );
+        })}
       </div>
     </DragDropContext>
   );

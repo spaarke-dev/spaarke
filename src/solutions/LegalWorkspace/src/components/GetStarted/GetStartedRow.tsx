@@ -1,5 +1,6 @@
 import * as React from "react";
-import { Text, makeStyles, tokens } from "@fluentui/react-components";
+import { Text, Button, makeStyles, tokens } from "@fluentui/react-components";
+import { MoreHorizontalRegular } from "@fluentui/react-icons";
 import { ActionCard } from "./ActionCard";
 import { ACTION_CARD_CONFIGS, IActionCardConfig } from "./getStartedConfig";
 
@@ -16,6 +17,10 @@ export interface IGetStartedRowProps {
    * Useful to disable a card while its action is in-flight.
    */
   disabledCards?: ReadonlySet<string>;
+  /** Maximum number of action cards to display in the row. Default: show all. */
+  maxVisible?: number;
+  /** Called when the expand/more icon is clicked. */
+  onExpandClick?: () => void;
 }
 
 const useStyles = makeStyles({
@@ -27,50 +32,24 @@ const useStyles = makeStyles({
   sectionTitle: {
     color: tokens.colorNeutralForeground1,
   },
-  /**
-   * Outer scroll container. overflow-x: auto so the horizontal scrollbar
-   * appears only when the content overflows. Scrollbar visibility is further
-   * refined by the scrollbarGutter + hover trick below.
-   */
+  /** Container for the card row — fills available width. */
   scrollContainer: {
-    overflowX: "auto",
-    overflowY: "hidden",
-    // Reserve space for scrollbar so layout does not shift when it appears.
-    scrollbarGutter: "stable",
-    // Smooth momentum scrolling on touch devices (iOS)
-    WebkitOverflowScrolling: "touch",
-    // Hide scrollbar when not hovered; show on hover for discoverability
-    "&:not(:hover)": {
-      scrollbarWidth: "none",
-      // WebKit fallback
-      "::-webkit-scrollbar": {
-        display: "none",
-      },
-    },
-    "&:hover": {
-      scrollbarWidth: "thin",
-      scrollbarColor: `${tokens.colorNeutralStroke1} transparent`,
-    },
     borderRadius: tokens.borderRadiusMedium,
-    paddingBottom: tokens.spacingVerticalXS,
   },
-  /**
-   * Inner flex row. min-width: max-content prevents the row from wrapping
-   * so cards stay on a single line and trigger horizontal scroll instead.
-   */
+  /** Flex row — cards share space equally via flex: 1 1 0 on each card. */
   row: {
     display: "flex",
     flexDirection: "row",
     alignItems: "stretch",
     gap: tokens.spacingHorizontalL,
-    minWidth: "max-content",
-    paddingBottom: tokens.spacingVerticalXS,
   },
   actionCards: {
     display: "flex",
     flexDirection: "row",
     gap: tokens.spacingHorizontalL,
     alignItems: "stretch",
+    flex: "1 1 0",
+    minWidth: 0,
   },
 });
 
@@ -92,8 +71,14 @@ const useStyles = makeStyles({
 export const GetStartedRow: React.FC<IGetStartedRowProps> = ({
   onCardClick = {},
   disabledCards = new Set<string>(),
+  maxVisible,
+  onExpandClick,
 }) => {
   const styles = useStyles();
+
+  const visibleConfigs = maxVisible
+    ? ACTION_CARD_CONFIGS.slice(0, maxVisible)
+    : ACTION_CARD_CONFIGS;
 
   return (
     <section className={styles.section} aria-label="Get Started">
@@ -105,7 +90,7 @@ export const GetStartedRow: React.FC<IGetStartedRowProps> = ({
         <div className={styles.row}>
           {/* Action cards */}
           <div className={styles.actionCards} role="group" aria-label="Quick actions">
-            {ACTION_CARD_CONFIGS.map((config: IActionCardConfig) => (
+            {visibleConfigs.map((config: IActionCardConfig) => (
               <ActionCard
                 key={config.id}
                 icon={config.icon}
@@ -116,6 +101,16 @@ export const GetStartedRow: React.FC<IGetStartedRowProps> = ({
               />
             ))}
           </div>
+          {onExpandClick && (
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<MoreHorizontalRegular />}
+              onClick={onExpandClick}
+              aria-label="Show all actions"
+              style={{ alignSelf: "center" }}
+            />
+          )}
         </div>
       </div>
     </section>

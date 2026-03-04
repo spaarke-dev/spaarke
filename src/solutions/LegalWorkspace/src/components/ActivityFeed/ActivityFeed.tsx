@@ -41,7 +41,7 @@ import { useActivityFeedFilters } from "../../hooks/useActivityFeedFilters";
 import { EventFilterCategory } from "../../types/enums";
 import { IEvent } from "../../types/entities";
 import { useFeedTodoSync } from "../../hooks/useFeedTodoSync";
-import { navigateToEntity } from "../../utils/navigation";
+import { openRecordDialog } from "../../utils/navigation";
 import type { IWebApi } from "../../types/xrm";
 
 // ---------------------------------------------------------------------------
@@ -226,6 +226,12 @@ export interface IActivityFeedProps {
   onCountChange?: (count: number) => void;
   /** Expose the refetch function to the parent (for refresh button in tab header). */
   onRefetchReady?: (refetch: () => void) => void;
+  /** When true, renders filter pills as text-only (no icons or count badges). Default false. */
+  textOnlyFilter?: boolean;
+  /** When true, renders feed items in a 4×2 card grid instead of a vertical list. */
+  gridLayout?: boolean;
+  /** Called when the "open all" icon on the filter bar is clicked. */
+  onOpenAll?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +245,9 @@ export const ActivityFeed: React.FC<IActivityFeedProps> = ({
   embedded = false,
   onCountChange,
   onRefetchReady,
+  textOnlyFilter = false,
+  gridLayout = false,
+  onOpenAll,
 }) => {
   const styles = useStyles();
 
@@ -326,11 +335,7 @@ export const ActivityFeed: React.FC<IActivityFeedProps> = ({
   }, []);
 
   const handleEdit = React.useCallback((eventId: string) => {
-    navigateToEntity({
-      action: "openRecord",
-      entityName: "sprk_event",
-      entityId: eventId,
-    });
+    openRecordDialog("sprk_event", eventId);
   }, []);
 
   return (
@@ -369,6 +374,8 @@ export const ActivityFeed: React.FC<IActivityFeedProps> = ({
         activeFilter={activeFilter}
         categoryCounts={categoryCounts}
         onFilterChange={handleFilterChange}
+        textOnly={textOnlyFilter}
+        onOpenAll={onOpenAll}
       />
 
       {/* Feed content area */}
@@ -424,6 +431,7 @@ export const ActivityFeed: React.FC<IActivityFeedProps> = ({
             onEmail={handleEmail}
             onTeams={handleTeams}
             onEdit={handleEdit}
+            gridLayout={gridLayout}
           />
         )}
       </div>

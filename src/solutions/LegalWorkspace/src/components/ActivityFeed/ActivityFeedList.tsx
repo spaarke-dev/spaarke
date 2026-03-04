@@ -60,9 +60,22 @@ const useStyles = makeStyles({
     // Contain paint to avoid layout thrash during virtualization
     contain: "strict",
   },
+  /** Grid scroll container — no strict containment so grid can size naturally. */
+  gridScrollContainer: {
+    flex: "1 1 0",
+    overflowY: "auto",
+    overflowX: "hidden",
+    padding: tokens.spacingHorizontalM,
+  },
   innerList: {
     display: "flex",
     flexDirection: "column",
+  },
+  /** Fixed 4-column card grid (2 rows × 4 cols = 8 items max). */
+  innerGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: tokens.spacingHorizontalM,
   },
   item: {
     display: "flex",
@@ -213,11 +226,19 @@ export interface IActivityFeedListProps {
   onTeams?: (eventId: string) => void;
   /** Called when the user clicks the Edit action. */
   onEdit?: (eventId: string) => void;
+  /**
+   * When true, renders items in a 4-column × 2-row card grid (max 8 items)
+   * instead of the default virtualized vertical list.
+   */
+  gridLayout?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
+
+/** Maximum items shown in grid layout mode (4 cols × 2 rows). */
+const GRID_MAX_ITEMS = 8;
 
 export const ActivityFeedList: React.FC<IActivityFeedListProps> = ({
   events,
@@ -227,6 +248,7 @@ export const ActivityFeedList: React.FC<IActivityFeedListProps> = ({
   onEmail,
   onTeams,
   onEdit,
+  gridLayout = false,
 }) => {
   const styles = useStyles();
 
@@ -283,10 +305,33 @@ export const ActivityFeedList: React.FC<IActivityFeedListProps> = ({
   const visibleEvents = events.slice(0, visibleCount);
   const hasMore = visibleCount < events.length;
 
-  // Spacer height: items not yet rendered above the visible window.
-  // In this windowing approach we always start from index 0, so no top spacer
-  // is needed — all items below visibleCount are simply not mounted.
-  // The scroll container grows naturally as items are appended.
+  // ── Grid layout mode: 4-column × 2-row card grid (max 8 items) ──────────
+  if (gridLayout) {
+    const gridItems = events.slice(0, GRID_MAX_ITEMS);
+    return (
+      <div
+        className={styles.gridScrollContainer}
+        ref={scrollContainerRef}
+        role="list"
+        aria-label="Updates feed"
+      >
+        <div className={styles.innerGrid}>
+          {gridItems.map((event) => (
+            <FeedItemCard
+              key={event.sprk_eventid}
+              event={event}
+              onAISummary={handleAISummary}
+              onEmail={onEmail}
+              onTeams={onTeams}
+              onEdit={onEdit}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Default: virtualized vertical list ───────────────────────────────────
 
   return (
     <div
