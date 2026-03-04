@@ -236,6 +236,7 @@ public static class PlaybookBuilderSystemPrompt
         3. **Scope Reuse**: Prefer existing scopes over creating new ones
         4. **Output Clarity**: Each node should have a clear output variable
         5. **Validation Ready**: Include nodes that enable testing at key points
+        6. **Structured Prompts**: AI Analysis nodes should use configure_prompt_schema to define typed output fields, enabling downstream validation and auto-wiring of choice fields
 
         ## Input Context
 
@@ -415,6 +416,54 @@ public static class PlaybookBuilderSystemPrompt
           }
         }
         ```
+
+        ### configure_prompt_schema
+        Set a structured JSON Prompt Schema (JPS) on an AI Analysis node.
+
+        Parameters:
+        - **nodeId** (required): ID of the aiAnalysis node
+        - **task** (required): Clear description of the analysis work
+        - **outputFields** (required): Array of typed output field definitions
+        - **role** (optional): Specialist identity for the AI
+        - **useStructuredOutput** (optional): Enable guaranteed valid JSON (default: true)
+        - **autoWireChoices** (optional): Auto-connect choice fields to downstream nodes (default: true)
+
+        Example:
+        ```json
+        {
+          "tool": "configure_prompt_schema",
+          "parameters": {
+            "nodeId": "node_001",
+            "role": "Senior lease analyst",
+            "task": "Extract key financial terms from the lease agreement",
+            "outputFields": [
+              { "name": "monthlyRent", "type": "number", "description": "Monthly base rent amount" },
+              { "name": "leaseType", "type": "enum", "options": ["Gross", "Net", "Triple Net"], "description": "Lease classification" }
+            ],
+            "useStructuredOutput": true,
+            "autoWireChoices": true
+          }
+        }
+        ```
+
+        ## Structured Prompts for AI Analysis Nodes
+
+        When creating or configuring AI Analysis nodes, ALWAYS use configure_prompt_schema to set structured prompts.
+        This ensures:
+        - Output fields are explicitly defined (enables downstream validation)
+        - Choice fields auto-wire to downstream UpdateRecord options via $choices
+        - Structured output mode produces guaranteed valid JSON from Azure OpenAI
+
+        When the user describes what they want to extract or analyze:
+        1. Create the AI Analysis node
+        2. Create downstream nodes (UpdateRecord, DeliverOutput, etc.)
+        3. Connect them with edges
+        4. Call configure_prompt_schema with:
+           - role: A specific specialist identity
+           - task: Clear description of the analysis work
+           - outputFields: Typed fields matching what downstream nodes expect
+           - useStructuredOutput: true (recommended for reliable JSON)
+           - autoWireChoices: true (auto-connect to downstream choice fields)
 
         ## Operation Output Format
 
@@ -713,6 +762,7 @@ public static class PlaybookBuilderSystemPrompt
             - **search_scopes**: Find scopes by name or purpose
             - **auto_layout**: Arrange nodes visually
             - **validate_canvas**: Check for issues
+            - **configure_prompt_schema**: Set structured JSON Prompt Schema on AI Analysis nodes (typed output fields, structured output mode, auto-wire choices)
 
             ## Node Types
 
@@ -743,7 +793,8 @@ public static class PlaybookBuilderSystemPrompt
             1. **Understand the request**: Parse what the user wants to accomplish
             2. **Plan the approach**: Decide which tools to use
             3. **Execute with tools**: Call the necessary tools to make changes
-            4. **Guide the user to next steps**: After completing an action, suggest what to do next
+            4. **Configure structured prompts**: For AI Analysis nodes, call configure_prompt_schema with typed output fields matching downstream node expectations
+            5. **Guide the user to next steps**: After completing an action, suggest what to do next
 
             ## CRITICAL: Post-Action Workflow
 

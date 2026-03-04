@@ -7,7 +7,7 @@ namespace Sprk.Bff.Api.Services.Ai.Builder;
 /// Converted from TL-BUILDER-* scope definitions.
 ///
 /// Tool Categories:
-/// - Canvas Operations: add_node, remove_node, create_edge, update_node_config, auto_layout, validate_canvas
+/// - Canvas Operations: add_node, remove_node, create_edge, update_node_config, auto_layout, validate_canvas, configure_prompt_schema
 /// - Scope Operations: link_scope, search_scopes, create_scope
 /// </summary>
 public static class BuilderToolDefinitions
@@ -27,7 +27,8 @@ public static class BuilderToolDefinitions
             CreateScopeTool,
             SearchScopesTool,
             AutoLayoutTool,
-            ValidateCanvasTool
+            ValidateCanvasTool,
+            ConfigurePromptSchemaTool
         };
     }
 
@@ -40,7 +41,7 @@ public static class BuilderToolDefinitions
         {
             ToolCategory.CanvasOperations => new List<ChatTool>
             {
-                AddNodeTool, RemoveNodeTool, CreateEdgeTool, UpdateNodeConfigTool, AutoLayoutTool, ValidateCanvasTool
+                AddNodeTool, RemoveNodeTool, CreateEdgeTool, UpdateNodeConfigTool, AutoLayoutTool, ValidateCanvasTool, ConfigurePromptSchemaTool
             },
             ToolCategory.ScopeOperations => new List<ChatTool>
             {
@@ -261,6 +262,75 @@ public static class BuilderToolDefinitions
             """)
     );
 
+    /// <summary>
+    /// TL-BUILDER-010: Configure structured prompt schema for an AI node.
+    /// </summary>
+    public static ChatTool ConfigurePromptSchemaTool => ChatTool.CreateFunctionTool(
+        functionName: ToolNames.ConfigurePromptSchema,
+        functionDescription: "Configure the structured prompt schema for an AI node. Creates an optimized JPS with role, task, constraints, and typed output fields. When output fields reference downstream UpdateRecord choice fields, automatically adds $choices references.",
+        functionParameters: BinaryData.FromString("""
+            {
+                "type": "object",
+                "properties": {
+                    "nodeId": {
+                        "type": "string",
+                        "description": "The canvas node ID to configure"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "System-level identity for the AI (e.g., 'Senior lease analyst')"
+                    },
+                    "task": {
+                        "type": "string",
+                        "description": "The specific work to perform (e.g., 'Extract key lease terms from the document')"
+                    },
+                    "constraints": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Behavioral constraints (e.g., 'Only return values found in the document')"
+                    },
+                    "outputFields": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "description": "Field name in the output JSON"
+                                },
+                                "type": {
+                                    "type": "string",
+                                    "enum": ["string", "number", "boolean", "array", "object"],
+                                    "description": "Data type of the field"
+                                },
+                                "description": {
+                                    "type": "string",
+                                    "description": "Purpose of this field for the AI"
+                                },
+                                "enum": {
+                                    "type": "array",
+                                    "items": { "type": "string" },
+                                    "description": "Fixed valid values for this field"
+                                }
+                            },
+                            "required": ["name", "type"]
+                        },
+                        "description": "Typed output fields defining the expected JSON response structure"
+                    },
+                    "useStructuredOutput": {
+                        "type": "boolean",
+                        "description": "Use Azure OpenAI JSON Schema constrained decoding for guaranteed valid JSON"
+                    },
+                    "autoWireChoices": {
+                        "type": "boolean",
+                        "description": "Automatically connect $choices references to downstream UpdateRecord choice field options"
+                    }
+                },
+                "required": ["nodeId", "task", "outputFields"]
+            }
+            """)
+    );
+
     #endregion
 
     #region Scope Operation Tools
@@ -421,6 +491,7 @@ public static class BuilderToolDefinitions
         public const string LinkScope = "link_scope";
         public const string CreateScope = "create_scope";
         public const string SearchScopes = "search_scopes";
+        public const string ConfigurePromptSchema = "configure_prompt_schema";
     }
 
     #endregion

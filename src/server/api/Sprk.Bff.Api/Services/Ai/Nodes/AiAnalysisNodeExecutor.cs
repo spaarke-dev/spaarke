@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai.Nodes;
 
@@ -260,6 +262,11 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
     /// Passes Action.SystemPrompt and Skill context so tool handlers
     /// use the Action's prompt as primary instruction (Option A).
     /// </summary>
+    /// <remarks>
+    /// If the node's <c>ConfigJson</c> contains a <c>promptSchemaOverride</c> and the
+    /// Action's system prompt is in JPS format, the override is merged into the base
+    /// schema before passing to the tool handler. See <see cref="PromptSchemaOverrideMerger"/>.
+    /// </remarks>
     private ToolExecutionContext CreateToolExecutionContext(NodeExecutionContext context)
     {
         // Build previous results dictionary from node outputs
@@ -286,6 +293,10 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             ? context.Action.SystemPrompt
             : null;
 
+        // Merge node-level promptSchemaOverride into the base prompt when both are JPS.
+        // The override comes from ConfigJson.promptSchemaOverride on the playbook node.
+        actionSystemPrompt = ApplyPromptSchemaOverride(actionSystemPrompt, context.Node.ConfigJson);
+
         return new ToolExecutionContext
         {
             AnalysisId = context.RunId,
@@ -296,6 +307,7 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             ActionSystemPrompt = actionSystemPrompt,
             SkillContext = skillContext,
             KnowledgeContext = knowledgeContext,
+            DownstreamNodes = context.DownstreamNodes,
             MaxTokens = context.MaxTokens,
             Temperature = context.Temperature,
             ModelDeploymentId = context.ModelDeploymentId ?? context.Node.ModelDeploymentId,
@@ -303,6 +315,80 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             CreatedAt = context.CreatedAt
         };
     }
+
+    /// <summary>
+    /// Applies a node-level <c>promptSchemaOverride</c> from ConfigJson to the base
+    /// Action system prompt. Only applies when the base prompt is in JPS format and
+    /// the override can be extracted and parsed.
+    /// </summary>
+    /// <param name="basePrompt">The Action's system prompt (flat text or JPS JSON).</param>
+    /// <param name="configJson">The node's ConfigJson (may contain <c>promptSchemaOverride</c>).</param>
+    /// <returns>
+    /// The merged JPS JSON string if both base and override are present; otherwise the
+    /// original <paramref name="basePrompt"/> unchanged.
+    /// </returns>
+    private string? ApplyPromptSchemaOverride(string? basePrompt, string? configJson)
+    {
+        if (string.IsNullOrWhiteSpace(basePrompt) || string.IsNullOrWhiteSpace(configJson))
+            return basePrompt;
+
+        // Only merge when the base prompt is JPS format
+        if (!IsJpsFormat(basePrompt))
+            return basePrompt;
+
+        // Extract override from ConfigJson
+        var schemaOverride = PromptSchemaOverrideMerger.ExtractOverride(configJson);
+        if (schemaOverride is null)
+            return basePrompt;
+
+        try
+        {
+            // Parse the base prompt as PromptSchema
+            var baseSchema = JsonSerializer.Deserialize<PromptSchema>(basePrompt, JpsDeserializeOptions);
+            if (baseSchema is null)
+                return basePrompt;
+
+            // Merge base + override
+            var merged = PromptSchemaOverrideMerger.Merge(baseSchema, schemaOverride);
+
+            // Re-serialize to JSON
+            var mergedJson = JsonSerializer.Serialize(merged, JpsSerializeOptions);
+
+            _logger.LogDebug(
+                "Applied promptSchemaOverride from node ConfigJson to Action system prompt");
+
+            return mergedJson;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to parse or merge promptSchemaOverride; using base prompt unchanged");
+            return basePrompt;
+        }
+    }
+
+    /// <summary>
+    /// Detects whether a raw prompt string is in JPS format.
+    /// Matches the same detection logic as <see cref="PromptSchemaRenderer"/>.
+    /// </summary>
+    private static bool IsJpsFormat(string rawPrompt)
+    {
+        return rawPrompt.TrimStart().StartsWith('{') && rawPrompt.Contains("\"$schema\"");
+    }
+
+    private static readonly JsonSerializerOptions JpsDeserializeOptions = new()
+    {
+        PropertyNameCaseInsensitive = false,
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true
+    };
+
+    private static readonly JsonSerializerOptions JpsSerializeOptions = new()
+    {
+        WriteIndented = false,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
 
     /// <summary>
     /// Builds knowledge context string from resolved scopes.

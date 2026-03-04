@@ -85,6 +85,14 @@ public record ToolExecutionContext
     public Guid? ModelDeploymentId { get; init; }
 
     /// <summary>
+    /// Downstream node info for <c>$choices</c> resolution in JPS prompts.
+    /// Contains output variable names and configuration JSON from nodes that
+    /// consume this AI node's output (e.g., UpdateRecord nodes with fieldMappings).
+    /// Null when downstream node info is not available or not applicable.
+    /// </summary>
+    public IReadOnlyList<DownstreamNodeInfo>? DownstreamNodes { get; init; }
+
+    /// <summary>
     /// Correlation ID for distributed tracing.
     /// </summary>
     public string? CorrelationId { get; init; }

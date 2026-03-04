@@ -123,4 +123,24 @@ public interface IOpenAiClient
         string schemaName,
         string deploymentName,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get a structured completion as raw JSON string that conforms to a JSON schema.
+    /// Uses constrained decoding (response_format: json_schema) to guarantee valid JSON output.
+    /// Unlike the generic overload, this returns the raw JSON string without deserialization,
+    /// suitable for dynamic schemas resolved at runtime (e.g., from JPS prompt definitions).
+    /// Protected by circuit breaker - throws OpenAiCircuitBrokenException when open.
+    /// </summary>
+    /// <param name="prompt">The prompt text to send to the model.</param>
+    /// <param name="jsonSchema">The JSON schema that the response must conform to.</param>
+    /// <param name="schemaName">A name identifying the schema (e.g., "prompt_response").</param>
+    /// <param name="model">Optional model override. Defaults to configured SummarizeModel.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The raw JSON string response conforming to the schema.</returns>
+    Task<string> GetStructuredCompletionRawAsync(
+        string prompt,
+        BinaryData jsonSchema,
+        string schemaName,
+        string? model = null,
+        CancellationToken cancellationToken = default);
 }

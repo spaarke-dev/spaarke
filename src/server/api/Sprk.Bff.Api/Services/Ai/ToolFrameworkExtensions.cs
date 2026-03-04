@@ -25,6 +25,9 @@ public static class ToolFrameworkExtensions
         services.Configure<ToolFrameworkOptions>(
             configuration.GetSection(ToolFrameworkOptions.SectionName));
 
+        // Register prompt schema renderer (stateless, singleton)
+        services.AddSingleton<PromptSchemaRenderer>();
+
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());
 
@@ -46,6 +49,9 @@ public static class ToolFrameworkExtensions
     {
         // Register configuration options
         services.Configure(configureOptions);
+
+        // Register prompt schema renderer (stateless, singleton)
+        services.AddSingleton<PromptSchemaRenderer>();
 
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());

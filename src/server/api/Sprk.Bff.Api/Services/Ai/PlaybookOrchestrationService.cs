@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
+using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -305,6 +307,9 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     errors.Add($"Output variable '{node.OutputVariable}' is used by multiple nodes");
                 }
             }
+
+            // Validate JPS prompt schemas on AI nodes
+            await ValidatePromptSchemasAsync(nodes, graph, errors, warnings, cancellationToken);
 
             // Warn about disabled nodes
             var disabledNodes = nodes.Where(n => !n.IsActive).ToList();
@@ -954,9 +959,15 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 return errorOutput;
             }
 
+            // Collect downstream node info for $choices resolution in JPS prompts.
+            // For AI analysis nodes, look at dependent nodes (nodes that consume this node's output)
+            // and collect UpdateRecord-type nodes with their ConfigJson (which contains fieldMappings).
+            var downstreamNodes = CollectDownstreamNodeInfo(node, graph);
+
             // Create node execution context with streaming callback for per-token SSE events
             var nodeContext = runContext.CreateNodeContext(node, action, scopes, actionType) with
             {
+                DownstreamNodes = downstreamNodes,
                 OnTokenReceived = async text =>
                 {
                     await writer.WriteAsync(PlaybookStreamEvent.NodeProgress(
@@ -1033,6 +1044,188 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 runContext.RunId, runContext.PlaybookId, node.Id, node.Name, ex.Message), cancellationToken);
 
             return errorOutput;
+        }
+    }
+
+    /// <summary>
+    /// Collects downstream node info for <c>$choices</c> resolution.
+    /// Examines nodes that depend on the given node and returns info for
+    /// UpdateRecord-type nodes that may contain fieldMappings with option sets.
+    /// </summary>
+    /// <param name="node">The current node being executed.</param>
+    /// <param name="graph">The execution graph containing all nodes and edges.</param>
+    /// <returns>
+    /// List of downstream node info, or null if no relevant downstream nodes exist.
+    /// </returns>
+    private static IReadOnlyList<DownstreamNodeInfo>? CollectDownstreamNodeInfo(
+        PlaybookNodeDto node,
+        ExecutionGraph graph)
+    {
+        var dependentIds = graph.GetDependents(node.Id);
+        if (dependentIds.Count == 0)
+            return null;
+
+        List<DownstreamNodeInfo>? result = null;
+
+        foreach (var dependentId in dependentIds)
+        {
+            var dependentNode = graph.GetNode(dependentId);
+            if (dependentNode is null)
+                continue;
+
+            // Only collect nodes that are likely UpdateRecord type.
+            // Check ConfigJson for __actionType == UpdateRecord (22).
+            var dependentActionType = ExtractActionTypeFromConfig(dependentNode.ConfigJson);
+            if (dependentActionType != Nodes.ActionType.UpdateRecord)
+                continue;
+
+            // Only include if ConfigJson exists (it should contain fieldMappings)
+            if (string.IsNullOrWhiteSpace(dependentNode.ConfigJson))
+                continue;
+
+            result ??= new List<DownstreamNodeInfo>();
+            result.Add(new DownstreamNodeInfo(
+                dependentNode.OutputVariable,
+                dependentNode.ConfigJson));
+        }
+
+        return result;
+    }
+
+    #endregion
+
+    #region Private Methods - JPS Validation
+
+    /// <summary>
+    /// Detects whether a system prompt is in JSON Prompt Schema (JPS) format.
+    /// A prompt is JPS if it starts with '{' and contains "$schema".
+    /// </summary>
+    private static bool IsJpsPrompt(string? systemPrompt)
+    {
+        if (string.IsNullOrWhiteSpace(systemPrompt))
+            return false;
+
+        var trimmed = systemPrompt.TrimStart();
+        return trimmed.StartsWith('{') && trimmed.Contains("\"$schema\"", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Validates JPS prompt schemas on AI analysis nodes before playbook execution.
+    /// Checks schema parseability, required fields, structured output compatibility,
+    /// and $choices downstream node resolution.
+    /// </summary>
+    /// <remarks>
+    /// Per ADR-015: only logs field names and node IDs — never prompt content.
+    /// Flat text prompts are skipped (no JPS validation applied).
+    /// </remarks>
+    private async Task ValidatePromptSchemasAsync(
+        PlaybookNodeDto[] nodes,
+        ExecutionGraph graph,
+        List<string> errors,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        // Only validate AI analysis nodes that have an action
+        var aiNodes = nodes.Where(n => n.IsActive && n.NodeType == NodeType.AIAnalysis && n.ActionId != Guid.Empty).ToList();
+        if (aiNodes.Count == 0)
+            return;
+
+        foreach (var node in aiNodes)
+        {
+            // Load the action to get the system prompt
+            var action = await _scopeResolver.GetActionAsync(node.ActionId, cancellationToken);
+            if (action == null)
+            {
+                // Already handled by existing validation — skip here
+                continue;
+            }
+
+            // Skip flat text prompts — JPS validation only applies to JPS schemas
+            if (!IsJpsPrompt(action.SystemPrompt))
+                continue;
+
+            _logger.LogDebug(
+                "Validating JPS schema for node {NodeId} ({NodeName})",
+                node.Id, node.Name);
+
+            // (a) Schema parseable: verify it deserializes to a valid PromptSchema
+            PromptSchema? schema;
+            try
+            {
+                schema = JsonSerializer.Deserialize<PromptSchema>(action.SystemPrompt, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = false
+                });
+            }
+            catch (JsonException ex)
+            {
+                errors.Add($"Node '{node.Name}': JPS schema is not valid JSON — {ex.Message}");
+                continue;
+            }
+
+            if (schema == null)
+            {
+                errors.Add($"Node '{node.Name}': JPS schema deserialized to null");
+                continue;
+            }
+
+            // (b) Required fields: verify instruction.task is not null/empty
+            if (string.IsNullOrWhiteSpace(schema.Instruction.Task))
+            {
+                errors.Add($"Node '{node.Name}': JPS schema is missing required 'instruction.task' field");
+            }
+
+            // (c) Structured output compatible: if structuredOutput=true, verify output.fields is not empty
+            if (schema.Output is { StructuredOutput: true })
+            {
+                if (schema.Output.Fields == null || schema.Output.Fields.Count == 0)
+                {
+                    errors.Add($"Node '{node.Name}': JPS schema has structuredOutput=true but output.fields is empty — at least one output field is required for structured decoding");
+                }
+            }
+
+            // (d) $choices resolvable: if any output field has $choices, verify the downstream node exists
+            if (schema.Output?.Fields != null)
+            {
+                foreach (var field in schema.Output.Fields)
+                {
+                    if (string.IsNullOrEmpty(field.Choices))
+                        continue;
+
+                    // $choices format: "downstream:{outputVariable}.{fieldName}"
+                    if (field.Choices.StartsWith("downstream:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var reference = field.Choices["downstream:".Length..];
+                        var dotIndex = reference.IndexOf('.');
+                        var targetOutputVariable = dotIndex > 0 ? reference[..dotIndex] : reference;
+
+                        // Check if a downstream node with that output variable exists in the graph
+                        var dependentIds = graph.GetDependents(node.Id);
+                        var targetExists = false;
+
+                        foreach (var depId in dependentIds)
+                        {
+                            var depNode = graph.GetNode(depId);
+                            if (depNode != null &&
+                                string.Equals(depNode.OutputVariable, targetOutputVariable, StringComparison.OrdinalIgnoreCase))
+                            {
+                                targetExists = true;
+                                break;
+                            }
+                        }
+
+                        if (!targetExists)
+                        {
+                            // Warning, not error — downstream node may not be directly dependent
+                            // or may be resolved at runtime through indirect graph paths
+                            warnings.Add(
+                                $"Node '{node.Name}': output field '{field.Name}' has $choices reference " +
+                                $"'downstream:{targetOutputVariable}' but no direct downstream node with " +
+                                $"outputVariable '{targetOutputVariable}' was found in the graph");
+                        }
+                    }
+                }
+            }
         }
     }
 

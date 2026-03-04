@@ -25,6 +25,8 @@ public class EmailAnalysisIntegrationTests
     private readonly Mock<IPlaybookService> _playbookServiceMock;
     private readonly Mock<IScopeResolverService> _scopeResolverMock;
     private readonly Mock<IToolHandlerRegistry> _toolHandlerRegistryMock;
+    private readonly Mock<INodeService> _nodeServiceMock;
+    private readonly Mock<IPlaybookOrchestrationService> _playbookOrchestratorMock;
     private readonly Mock<ILogger<AppOnlyAnalysisService>> _loggerMock;
     private readonly AppOnlyAnalysisService _service;
 
@@ -36,6 +38,8 @@ public class EmailAnalysisIntegrationTests
         _playbookServiceMock = new Mock<IPlaybookService>();
         _scopeResolverMock = new Mock<IScopeResolverService>();
         _toolHandlerRegistryMock = new Mock<IToolHandlerRegistry>();
+        _nodeServiceMock = new Mock<INodeService>();
+        _playbookOrchestratorMock = new Mock<IPlaybookOrchestrationService>();
         _loggerMock = new Mock<ILogger<AppOnlyAnalysisService>>();
 
         _service = new AppOnlyAnalysisService(
@@ -45,6 +49,8 @@ public class EmailAnalysisIntegrationTests
             _playbookServiceMock.Object,
             _scopeResolverMock.Object,
             _toolHandlerRegistryMock.Object,
+            _nodeServiceMock.Object,
+            _playbookOrchestratorMock.Object,
             _loggerMock.Object);
     }
 

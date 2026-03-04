@@ -108,6 +108,13 @@ public record NodeExecutionContext
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 
     /// <summary>
+    /// Downstream node info for <c>$choices</c> resolution in JPS prompts.
+    /// Populated by the orchestration service with information about nodes that
+    /// consume this node's output (e.g., UpdateRecord nodes with fieldMappings).
+    /// </summary>
+    public IReadOnlyList<DownstreamNodeInfo>? DownstreamNodes { get; init; }
+
+    /// <summary>
     /// Optional callback invoked for each streaming token from the AI model.
     /// When set, node executors supporting streaming will invoke this for each token,
     /// enabling per-token SSE events (NodeProgress) to reach the client.

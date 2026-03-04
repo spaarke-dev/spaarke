@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
@@ -15,18 +16,18 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Nodes;
 public class UpdateRecordNodeExecutorTests
 {
     private readonly Mock<ITemplateEngine> _templateEngineMock;
-    private readonly Mock<IHttpClientFactory> _httpClientFactoryMock;
+    private readonly Mock<IDataverseService> _dataverseServiceMock;
     private readonly Mock<ILogger<UpdateRecordNodeExecutor>> _loggerMock;
     private readonly UpdateRecordNodeExecutor _executor;
 
     public UpdateRecordNodeExecutorTests()
     {
         _templateEngineMock = new Mock<ITemplateEngine>();
-        _httpClientFactoryMock = new Mock<IHttpClientFactory>();
+        _dataverseServiceMock = new Mock<IDataverseService>();
         _loggerMock = new Mock<ILogger<UpdateRecordNodeExecutor>>();
         _executor = new UpdateRecordNodeExecutor(
             _templateEngineMock.Object,
-            _httpClientFactoryMock.Object,
+            _dataverseServiceMock.Object,
             _loggerMock.Object);
     }
 

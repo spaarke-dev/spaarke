@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -32,6 +33,7 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
 
     private readonly IOpenAiClient _openAiClient;
     private readonly IScopeResolverService _scopeResolver;
+    private readonly PromptSchemaRenderer _promptSchemaRenderer;
     private readonly ILogger<GenericAnalysisHandler> _logger;
 
     /// <summary>
@@ -96,10 +98,12 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
     public GenericAnalysisHandler(
         IOpenAiClient openAiClient,
         IScopeResolverService scopeResolver,
+        PromptSchemaRenderer promptSchemaRenderer,
         ILogger<GenericAnalysisHandler> logger)
     {
         _openAiClient = openAiClient;
         _scopeResolver = scopeResolver;
+        _promptSchemaRenderer = promptSchemaRenderer;
         _logger = logger;
     }
 
@@ -233,18 +237,54 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 PropertyNameCaseInsensitive = true
             })!;
 
-            // Build the execution prompt
-            var prompt = BuildExecutionPrompt(context, tool, config);
+            // Build the execution prompt — try PromptSchemaRenderer first,
+            // fall back to legacy BuildExecutionPrompt for flat text.
+            var rendered = _promptSchemaRenderer.Render(
+                context.ActionSystemPrompt,
+                context.SkillContext,
+                context.KnowledgeContext,
+                context.Document?.ExtractedText,
+                null,  // templateParameters - not yet wired
+                context.DownstreamNodes,
+                null,  // additionalKnowledge - resolved by executor in future
+                null   // additionalSkills - resolved by executor in future
+            );
+
+            var prompt = rendered.Format == PromptFormat.JsonPromptSchema
+                ? rendered.PromptText
+                : BuildExecutionPrompt(context, tool, config);
+
             var inputTokens = EstimateTokens(prompt);
+            var useStructuredOutput = rendered.JsonSchema != null;
 
             _logger.LogDebug(
-                "Executing generic tool with operation: {Operation}, estimated tokens: {Tokens}",
-                config.Operation, inputTokens);
+                "Executing generic tool with operation: {Operation}, format: {Format}, structuredOutput: {StructuredOutput}, estimated tokens: {Tokens}",
+                config.Operation, rendered.Format, useStructuredOutput, inputTokens);
 
-            // Execute AI call (maxTokens and temperature handled by service configuration)
-            var response = await _openAiClient.GetCompletionAsync(
-                prompt,
-                cancellationToken: cancellationToken);
+            // Execute AI call — use constrained decoding when JPS defines a JSON Schema,
+            // otherwise fall back to standard text completion.
+            string response;
+            if (useStructuredOutput)
+            {
+                var schemaBinaryData = BinaryData.FromString(rendered.JsonSchema!.ToJsonString());
+                var schemaName = rendered.SchemaName ?? "prompt_response";
+
+                _logger.LogInformation(
+                    "Using structured output (response_format: json_schema) for analysis {AnalysisId}, schema: {SchemaName}",
+                    context.AnalysisId, schemaName);
+
+                response = await _openAiClient.GetStructuredCompletionRawAsync(
+                    prompt,
+                    schemaBinaryData,
+                    schemaName,
+                    cancellationToken: cancellationToken);
+            }
+            else
+            {
+                response = await _openAiClient.GetCompletionAsync(
+                    prompt,
+                    cancellationToken: cancellationToken);
+            }
 
             var outputTokens = EstimateTokens(response);
 
@@ -335,12 +375,43 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 PropertyNameCaseInsensitive = true
             })!;
 
-            prompt = BuildExecutionPrompt(context, tool, config);
+            // Build the execution prompt — try PromptSchemaRenderer first,
+            // fall back to legacy BuildExecutionPrompt for flat text.
+            var rendered = _promptSchemaRenderer.Render(
+                context.ActionSystemPrompt,
+                context.SkillContext,
+                context.KnowledgeContext,
+                context.Document?.ExtractedText,
+                null,  // templateParameters - not yet wired
+                context.DownstreamNodes,
+                null,  // additionalKnowledge - resolved by executor in future
+                null   // additionalSkills - resolved by executor in future
+            );
+
+            prompt = rendered.Format == PromptFormat.JsonPromptSchema
+                ? rendered.PromptText
+                : BuildExecutionPrompt(context, tool, config);
+
+            // For streaming, constrained decoding (response_format: json_schema) is not
+            // wired through StreamCompletionAsync. If the JPS defines structured output,
+            // append the schema as a text instruction so the model still targets the shape.
+            if (rendered.JsonSchema != null)
+            {
+                _logger.LogWarning(
+                    "Structured output requested for streaming analysis {AnalysisId} but constrained decoding is not available for streaming. " +
+                    "Falling back to schema instruction in prompt text. Schema: {SchemaName}",
+                    context.AnalysisId, rendered.SchemaName ?? "prompt_response");
+
+                prompt += "\n\n## Required Response Format\n\nYou MUST return valid JSON conforming to this schema:\n```json\n"
+                    + rendered.JsonSchema.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true })
+                    + "\n```\nReturn ONLY the JSON object, no markdown code fences or additional text.";
+            }
+
             inputTokens = EstimateTokens(prompt);
 
             _logger.LogDebug(
-                "Streaming generic tool with operation: {Operation}, estimated input tokens: {Tokens}",
-                config.Operation, inputTokens);
+                "Streaming generic tool with operation: {Operation}, format: {Format}, structuredOutput: {StructuredOutput}, estimated input tokens: {Tokens}",
+                config.Operation, rendered.Format, rendered.JsonSchema != null, inputTokens);
         }
         catch (Exception ex)
         {
@@ -405,6 +476,7 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
     /// When ActionSystemPrompt is present, it replaces the tool's prompt template entirely.
     /// Skills and knowledge context are appended as additional context sections.
     /// </remarks>
+    [Obsolete("Use PromptSchemaRenderer.Render() instead. Will be removed after JPS migration.")]
     private static string BuildExecutionPrompt(ToolExecutionContext context, AnalysisTool tool, GenericToolConfig config)
     {
         // Priority: Action SystemPrompt > Tool PromptTemplate > operation default.
