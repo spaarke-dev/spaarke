@@ -72,14 +72,14 @@ export function openRecordDialog(entityName: string, entityId: string): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const xrm = getXrm() as any;
 
-  if (!xrm?.Navigation?.openForm) {
-    console.error("[navigation] openRecordDialog: Xrm.Navigation.openForm is not available");
+  if (!xrm?.Navigation?.navigateTo) {
+    console.error("[navigation] openRecordDialog: Xrm.Navigation.navigateTo is not available");
     return;
   }
 
   try {
-    xrm.Navigation.openForm(
-      { entityName, entityId },
+    xrm.Navigation.navigateTo(
+      { pageType: "entityrecord", entityName, entityId },
       {
         target: 2,
         width: { value: 80, unit: "%" },
