@@ -1,0 +1,47 @@
+<task id="053" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>IaC Bicep deployment pipeline (templates)</title>
+    <tags>infrastructure, ci-cd, bicep</tags>
+    <phase>5.1</phase>
+    <estimate>4h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-5.1</parallel-group>
+    <dependencies>050</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create Bicep parameter files for dev/staging/prod and add what-if preview to CI/CD.</goal>
+    <context>Phase 4 infrastructure work produced multiple Bicep modules but parameter files are only defined for dev. Staging and production parameter files are needed for the environment promotion pipeline. The what-if preview step provides a safety gate — operators can review what changes Bicep will make before deployment executes.</context>
+    <constraints>
+      - Parameter files must exist for all 3 environments: dev, staging, prod
+      - Production parameters must use production-grade SKUs and replica counts
+      - Staging parameters should mirror production (to catch issues before prod)
+      - What-if preview must be a separate pipeline step from deployment
+      - Parameter files must not contain secrets — use Key Vault references
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/azure-deployment.md" reason="Azure deployment constraints and Bicep patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Create infrastructure/bicep/params/dev.bicepparam</step>
+    <step id="2">Create staging.bicepparam</step>
+    <step id="3">Create prod.bicepparam</step>
+    <step id="4">Add what-if preview step to CI pipeline</step>
+    <step id="5">Add deployment step with environment selection</step>
+    <step id="6">Test what-if for dev environment</step>
+    <step id="7">Deploy dev using pipeline</step>
+  </steps>
+  <outputs>
+    <artifact>infrastructure/bicep/params/dev.bicepparam</artifact>
+    <artifact>infrastructure/bicep/params/staging.bicepparam</artifact>
+    <artifact>infrastructure/bicep/params/prod.bicepparam</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Parameter files exist for dev, staging, and prod environments</criterion>
+    <criterion>What-if preview works for all environments</criterion>
+    <criterion>Dev deployment tested via pipeline</criterion>
+    <criterion>No secrets in parameter files — Key Vault references used</criterion>
+  </acceptance-criteria>
+</task>

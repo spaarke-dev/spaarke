@@ -1,0 +1,50 @@
+<task id="028" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Dataverse request batching ($batch)</title>
+    <tags>bff-api, dataverse, performance</tags>
+    <phase>3.2</phase>
+    <estimate>5h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>004</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Batch multi-query Dataverse operations using OData $batch. Target: scorecard calculation 3 calls → 1, field mapping 2 calls → 1.</goal>
+    <context>Several services make multiple sequential Dataverse queries that could be batched into a single OData $batch request. ScorecardCalculatorService makes 3 KPI queries sequentially. Field mapping loads profile + rules in 2 calls. Each round-trip to Dataverse adds ~100-200ms latency. OData $batch combines multiple requests into a single HTTP call, reducing latency proportionally to the number of batched requests. Where $batch is not applicable, Task.WhenAll provides parallel execution as a fallback.</context>
+    <constraints>
+      - Use OData $batch for read-only multi-query scenarios
+      - Fallback to Task.WhenAll where $batch is not supported or practical
+      - Must not change response semantics — callers get same data shapes
+      - Thread-safety fixes from task 004 must be in place before modifying DataverseService
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/data.md" reason="Dataverse data access constraints" />
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Entity operation patterns including batch" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Read current sequential query patterns in ScorecardCalculatorService and FieldMapping services</step>
+    <step id="2">Implement $batch OData helper in DataverseWebApiService — compose and parse multipart batch requests</step>
+    <step id="3">Batch scorecard 3 KPI queries into 1 $batch request</step>
+    <step id="4">Batch field mapping profile + rules into 1 call using $expand or $batch</step>
+    <step id="5">Identify and batch applicable multi-entity authorization checks</step>
+    <step id="6">Add fallback to Task.WhenAll where $batch is not supported</step>
+    <step id="7">Unit tests for batch composition, parsing, and fallback scenarios</step>
+    <step id="8">Run dotnet test — verify all tests pass</step>
+  </steps>
+  <outputs>
+    <artifact>Updated src/server/api/Sprk.Bff.Api/Services/Dataverse/DataverseWebApiService.cs with $batch helper</artifact>
+    <artifact>Updated ScorecardCalculatorService with batched queries</artifact>
+    <artifact>Updated FieldMapping service with batched queries</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>$batch OData helper exists in DataverseWebApiService</criterion>
+    <criterion>Scorecard calculation uses 1 $batch call instead of 3 sequential calls</criterion>
+    <criterion>Field mapping uses 1 call (via $batch or $expand) instead of 2</criterion>
+    <criterion>Fallback to Task.WhenAll works where $batch is not applicable</criterion>
+    <criterion>Response data shapes unchanged — no breaking changes for callers</criterion>
+    <criterion>dotnet test passes with no regressions</criterion>
+  </acceptance-criteria>
+</task>

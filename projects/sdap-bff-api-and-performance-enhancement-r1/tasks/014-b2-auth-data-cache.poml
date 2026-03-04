@@ -1,0 +1,55 @@
+<task id="014" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Authorization data snapshot cache</title>
+    <tags>bff-api, caching, redis, auth, performance</tags>
+    <phase>2.1</phase>
+    <estimate>6h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-2.1</parallel-group>
+    <dependencies>003</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Cache authorization data (user roles, team memberships, resource access) in Redis with short TTLs while keeping authorization decisions computed fresh per request (per ADR-003).</goal>
+    <context>Authorization checks are a major latency contributor because they repeatedly query Dataverse for user roles, team memberships, and resource access on every request. This task caches the underlying DATA (roles, teams, access records) in Redis with short TTLs, but authorization DECISIONS (allow/deny) must always be computed fresh per request. This distinction is critical per ADR-003: cache the inputs, never cache the outputs of authorization logic.</context>
+    <constraints>
+      - Follow ADR-003: Authorization decisions MUST be computed fresh per request — never cache allow/deny results
+      - Follow ADR-009: Redis-first caching — short TTLs for auth data
+      - Cache the DATA (roles, teams, access records), NOT the DECISIONS (allow/deny)
+      - TTLs must be short: roles 2min, teams 2min, resource access 60s
+      - Graceful degradation: Redis failure must fall back to live Dataverse queries
+      - Security-sensitive: incorrect caching could cause authorization bypass
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-003-authorization.md" reason="Authorization model — decisions must be fresh per request" />
+      <file path=".claude/adr/ADR-009-redis-caching.md" reason="Redis-first caching strategy" />
+      <file path=".claude/patterns/caching/distributed-cache.md" reason="Distributed cache implementation patterns" />
+      <file path=".claude/constraints/auth.md" reason="Authentication and authorization constraints" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Create Services/Caching/AuthDataCacheService.cs with cache-aside pattern for auth data</step>
+    <step id="2">Define cache key patterns: sdap:auth:roles:{userOid} (2min TTL), sdap:auth:teams:{userOid} (2min TTL), sdap:auth:access:{userOid}:{resourceId} (60s TTL)</step>
+    <step id="3">Implement graceful degradation on Redis failure — fall back to live Dataverse queries</step>
+    <step id="4">Integrate into AuthorizationService — cache the DATA lookups (roles, teams, access), NOT the decisions</step>
+    <step id="5">Ensure per-request authorization decisions are still computed fresh from cached data</step>
+    <step id="6">Add unit tests verifying: cache hit reduces Dataverse calls, decisions always fresh even with cached data, graceful degradation on Redis failure</step>
+    <step id="7">Add integration test with Redis verifying end-to-end auth data caching</step>
+    <step id="8">Run dotnet test — verify all tests pass</step>
+  </steps>
+  <outputs>
+    <artifact>src/server/api/Sprk.Bff.Api/Services/Caching/AuthDataCacheService.cs</artifact>
+    <artifact>Updated AuthorizationService with cached data lookups</artifact>
+    <artifact>Unit and integration tests for auth data caching</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>AuthDataCacheService caches user roles, team memberships, and resource access in Redis</criterion>
+    <criterion>Authorization decisions are ALWAYS computed fresh per request (ADR-003 compliance)</criterion>
+    <criterion>Short TTLs enforced: roles 2min, teams 2min, resource access 60s</criterion>
+    <criterion>Graceful degradation verified: Redis failure falls back to live Dataverse queries</criterion>
+    <criterion>Unit tests verify cache hit/miss behavior and fresh decision computation</criterion>
+    <criterion>Integration test with Redis passes</criterion>
+    <criterion>dotnet test passes</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,47 @@
+<task id="045" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Redis production hardening</title>
+    <tags>infrastructure, azure, security, bicep</tags>
+    <phase>4.3</phase>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-4.3</parallel-group>
+    <dependencies>041</dependencies>
+  </metadata>
+  <prompt>
+    <goal>VNet inject Redis, enable RDB persistence, configure eviction, disable public access.</goal>
+    <context>Redis currently runs with default Azure Cache settings including public access. For production readiness, Redis must be VNet-injected (routed through the private endpoint created in task 041), have RDB persistence enabled for durability, use allkeys-lru eviction to handle memory pressure gracefully, and have public access disabled. This hardens Redis for production use alongside the caching improvements in Phase 2.</context>
+    <constraints>
+      - Redis must be accessible only via VNet (snet-redis subnet)
+      - RDB persistence: 15-minute snapshot interval
+      - Eviction policy: allkeys-lru
+      - Public access must be disabled after VNet injection verified
+      - App Service Redis connection string must be updated to use private endpoint
+      - Existing cache operations must continue working after migration
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/azure-deployment.md" reason="Azure deployment constraints and Bicep patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Update infrastructure/bicep/modules/redis.bicep with VNet injection</step>
+    <step id="2">Enable RDB persistence (15-min snapshots)</step>
+    <step id="3">Set allkeys-lru eviction policy</step>
+    <step id="4">Disable public access (private endpoint only)</step>
+    <step id="5">Update App Service Redis connection to use private endpoint</step>
+    <step id="6">Deploy and verify Redis accessible only via VNet</step>
+    <step id="7">Verify cache operations still work</step>
+  </steps>
+  <outputs>
+    <artifact>infrastructure/bicep/modules/redis.bicep</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Redis VNet-injected into snet-redis subnet</criterion>
+    <criterion>RDB persistence enabled with 15-minute snapshots</criterion>
+    <criterion>allkeys-lru eviction policy configured</criterion>
+    <criterion>Public access disabled — private endpoint only</criterion>
+    <criterion>Cache operations verified working through VNet</criterion>
+  </acceptance-criteria>
+</task>

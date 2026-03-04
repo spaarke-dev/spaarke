@@ -1,0 +1,43 @@
+<task id="090" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Project wrap-up</title>
+    <tags>project-management</tags>
+    <phase>7</phase>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>058, 059</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Complete project wrap-up: update README status, create lessons-learned, archive artifacts.</goal>
+    <context>All implementation, infrastructure, CI/CD, testing, and documentation tasks are complete. This final task performs project wrap-up — updating the project README to reflect completion, verifying all graduation criteria are met, documenting lessons learned for future projects, running repository cleanup, and creating a final PR summary for the merge to master.</context>
+    <constraints>
+      - README.md status must be updated to "Complete"
+      - All graduation criteria must be verified before marking complete
+      - Lessons learned should capture both technical and process insights
+      - /repo-cleanup must run to validate repository structure
+      - Final PR summary should reference all success criteria
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files />
+  </knowledge>
+  <steps>
+    <step id="1">Update README.md status to Complete</step>
+    <step id="2">Verify all graduation criteria checked</step>
+    <step id="3">Create notes/lessons-learned.md</step>
+    <step id="4">Run /repo-cleanup</step>
+    <step id="5">Create final PR summary</step>
+  </steps>
+  <outputs>
+    <artifact>projects/sdap-bff-api-and-performance-enhancement-r1/README.md</artifact>
+    <artifact>projects/sdap-bff-api-and-performance-enhancement-r1/notes/lessons-learned.md</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>README shows project status as Complete</criterion>
+    <criterion>All graduation criteria verified and documented</criterion>
+    <criterion>Lessons learned documented with technical and process insights</criterion>
+    <criterion>Repository cleanup passes with no issues</criterion>
+    <criterion>Final PR summary created with success criteria references</criterion>
+  </acceptance-criteria>
+</task>

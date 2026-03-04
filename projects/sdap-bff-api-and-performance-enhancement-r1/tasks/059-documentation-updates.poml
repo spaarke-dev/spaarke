@@ -1,0 +1,45 @@
+<task id="059" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Documentation updates</title>
+    <tags>documentation</tags>
+    <phase>6.2</phase>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>058</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Update architecture docs, BFF API CLAUDE.md, and operational guides for all changes.</goal>
+    <context>The project has made significant changes to the BFF API architecture (modular startup, feature flags), performance (caching layers, priority queues, Graph client pooling), AI pipeline (streaming, chunking), infrastructure (VNet, private endpoints, autoscaling, slots), and CI/CD. All documentation must be updated to reflect the current state so future developers and AI agents have accurate context.</context>
+    <constraints>
+      - sdap-overview.md must reflect new architecture (modules, priority queues, caching layers)
+      - BFF API CLAUDE.md must reflect new module structure and key files
+      - Operational guides must be actionable for operations team
+      - Documentation must be concise and AI-optimized (following existing style)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path="docs/architecture/sdap-overview.md" reason="Current SDAP architecture documentation" />
+      <file path="src/server/api/Sprk.Bff.Api/CLAUDE.md" reason="BFF API module-specific instructions" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Update sdap-overview.md with new architecture (modules, priority queues, caching layers)</step>
+    <step id="2">Update BFF API CLAUDE.md with new module structure</step>
+    <step id="3">Add caching operations guide</step>
+    <step id="4">Add priority queue operations guide</step>
+    <step id="5">Update deployment guide for slots</step>
+  </steps>
+  <outputs>
+    <artifact>docs/architecture/sdap-overview.md</artifact>
+    <artifact>src/server/api/Sprk.Bff.Api/CLAUDE.md</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>sdap-overview.md reflects all architectural changes</criterion>
+    <criterion>BFF API CLAUDE.md reflects new module structure and key files</criterion>
+    <criterion>Caching operations guide available</criterion>
+    <criterion>Priority queue operations guide available</criterion>
+    <criterion>Deployment guide updated for slot-based deployments</criterion>
+  </acceptance-criteria>
+</task>

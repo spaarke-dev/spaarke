@@ -1,0 +1,54 @@
+<task id="013" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Graph metadata cache SpeFileStore integration</title>
+    <tags>bff-api, caching, redis, performance</tags>
+    <phase>2.2</phase>
+    <estimate>5h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>012</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Integrate GraphMetadataCacheService into SpeFileStore facade for file metadata, folder listings, container-to-drive mappings, and permissions lookups.</goal>
+    <context>Task 012 created the GraphMetadataCacheService infrastructure. This task wires it into the SpeFileStore facade so all Graph metadata operations benefit from caching. Cache invalidation must occur on write operations (upload, delete, move) to prevent stale data. The SpeFileStore facade is the single point of Graph API interaction per ADR-007, making it the ideal integration point.</context>
+    <constraints>
+      - Follow ADR-007: SpeFileStore facade — no Graph SDK types leak above facade
+      - Follow ADR-009: Redis-first caching — cache at the facade layer
+      - Cache invalidation MUST occur on all write operations (upload, delete, move, rename)
+      - Container-to-drive mapping should use 24hr TTL (rarely changes)
+      - Cache hit rate metrics must be instrumented for observability
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-007-spe-file-store.md" reason="SpeFileStore facade constraints — no Graph SDK type leakage" />
+      <file path=".claude/adr/ADR-009-redis-caching.md" reason="Redis-first caching strategy" />
+      <file path=".claude/patterns/caching/distributed-cache.md" reason="Cache integration patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Inject GraphMetadataCacheService into SpeFileStore constructor</step>
+    <step id="2">Add caching to file metadata retrieval (GetFileAsync, GetFilePropertiesAsync, etc.)</step>
+    <step id="3">Add caching to folder listing operations (GetFolderContentsAsync, etc.)</step>
+    <step id="4">Add caching to container-to-drive ID mapping with 24hr TTL</step>
+    <step id="5">Add caching to permission lookups</step>
+    <step id="6">Add cache invalidation on write operations (upload, delete, move, rename)</step>
+    <step id="7">Add integration tests with Redis verifying cache behavior end-to-end</step>
+    <step id="8">Verify cache hit rate metrics instrumentation for observability</step>
+    <step id="9">Run dotnet test — verify all tests pass</step>
+  </steps>
+  <outputs>
+    <artifact>Updated SpeFileStore with cache integration</artifact>
+    <artifact>Integration tests for cached SpeFileStore operations</artifact>
+    <artifact>Cache hit rate metrics instrumentation</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All Graph metadata operations in SpeFileStore use cache-aside pattern</criterion>
+    <criterion>Cache invalidation occurs on all write operations (upload, delete, move, rename)</criterion>
+    <criterion>Container-to-drive mapping uses 24hr TTL</criterion>
+    <criterion>Integration tests verify cache hit, miss, and invalidation scenarios</criterion>
+    <criterion>Cache hit rate metrics are instrumented</criterion>
+    <criterion>SC-05 target (p95 latency reduction) is achievable with caching in place</criterion>
+    <criterion>dotnet test passes</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,46 @@
+<task id="046" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Key Vault hardening</title>
+    <tags>infrastructure, azure, security, bicep</tags>
+    <phase>4.3</phase>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-4.3</parallel-group>
+    <dependencies>041</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Restrict Key Vault to VNet, enable secret rotation policy, audit role assignments.</goal>
+    <context>Key Vault currently allows public network access and does not have automated secret rotation. With private endpoints in place (task 041), Key Vault can be restricted to VNet-only access. Secret rotation policies reduce the risk of stale credentials, and auditing role assignments ensures least-privilege access.</context>
+    <constraints>
+      - Key Vault network rules must restrict to VNet only (snet-app subnet)
+      - Secret rotation policy must be enabled
+      - All current role assignments must be documented before changes
+      - App Service must retain access via managed identity
+      - Disable public access after VNet restriction verified
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/azure-deployment.md" reason="Azure deployment constraints and Bicep patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Update key-vault.bicep with network rules (VNet only)</step>
+    <step id="2">Enable secret rotation policy</step>
+    <step id="3">Audit and document current role assignments</step>
+    <step id="4">Disable public access</step>
+    <step id="5">Verify App Service can still access secrets</step>
+    <step id="6">Deploy</step>
+  </steps>
+  <outputs>
+    <artifact>infrastructure/bicep/modules/key-vault.bicep</artifact>
+    <artifact>projects/sdap-bff-api-and-performance-enhancement-r1/notes/keyvault-role-assignments.md</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Key Vault restricted to VNet-only access</criterion>
+    <criterion>Secret rotation policy enabled</criterion>
+    <criterion>Role assignments audited and documented</criterion>
+    <criterion>Public access disabled</criterion>
+    <criterion>App Service access via managed identity verified</criterion>
+  </acceptance-criteria>
+</task>

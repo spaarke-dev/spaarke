@@ -1,0 +1,49 @@
+<task id="041" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Private endpoints for all services</title>
+    <tags>infrastructure, azure, security, bicep</tags>
+    <phase>4.2</phase>
+    <estimate>8h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-4.2</parallel-group>
+    <dependencies>040</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create private endpoints for Key Vault, Storage, Service Bus, Azure OpenAI, AI Search, Document Intelligence.</goal>
+    <context>With the VNet and subnets in place (task 040), private endpoints enable secure communication between the App Service and all dependent Azure services without traversing the public internet. This is a foundational security improvement that subsequent hardening tasks (045-047) and the public access disable task (050) depend on. Private endpoints are deployed alongside public endpoints initially to allow a phased transition.</context>
+    <constraints>
+      - Deploy private endpoints into snet-pe subnet (from task 040)
+      - Create a reusable Bicep module for private endpoint provisioning
+      - Configure private DNS zones for each service type
+      - Do NOT disable public access yet — that happens in task 050
+      - All 6 services must have private endpoints: Key Vault, Storage, Service Bus, Azure OpenAI, AI Search, Document Intelligence
+      - Document rollback procedure for each service
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/azure-deployment.md" reason="Azure deployment constraints and Bicep patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Create infrastructure/bicep/modules/private-endpoint.bicep (reusable module)</step>
+    <step id="2">Add private endpoints for each service</step>
+    <step id="3">Configure private DNS zones</step>
+    <step id="4">Verify DNS resolution from VNet</step>
+    <step id="5">Deploy alongside public endpoints (don't disable public yet)</step>
+    <step id="6">Test connectivity through private endpoints</step>
+    <step id="7">Document rollback procedure</step>
+  </steps>
+  <outputs>
+    <artifact>infrastructure/bicep/modules/private-endpoint.bicep</artifact>
+    <artifact>infrastructure/bicep/modules/private-dns-zone.bicep</artifact>
+    <artifact>projects/sdap-bff-api-and-performance-enhancement-r1/notes/private-endpoint-rollback.md</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All 6 services have private endpoints deployed in snet-pe subnet</criterion>
+    <criterion>Private DNS zones resolve correctly from within VNet</criterion>
+    <criterion>Public access remains active as fallback</criterion>
+    <criterion>Rollback procedure documented</criterion>
+    <criterion>Connectivity verified through private endpoints for all services</criterion>
+  </acceptance-criteria>
+</task>

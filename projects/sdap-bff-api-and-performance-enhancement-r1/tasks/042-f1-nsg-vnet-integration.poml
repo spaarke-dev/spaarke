@@ -1,0 +1,44 @@
+<task id="042" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>NSG rules and App Service VNet integration</title>
+    <tags>infrastructure, azure, security, bicep</tags>
+    <phase>4.2</phase>
+    <estimate>4h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-4.2</parallel-group>
+    <dependencies>040</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Configure NSG rules for inter-service communication and enable VNet integration on App Service.</goal>
+    <context>The VNet created in task 040 has NSG skeletons but no rules. This task defines the security rules that control traffic flow between subnets and integrates the App Service into the VNet so all outbound traffic from the BFF API routes through the VNet. This is required before private endpoints can be the sole communication path.</context>
+    <constraints>
+      - snet-app NSG: allow outbound to snet-pe and snet-redis, deny internet except required Azure services
+      - snet-redis NSG: allow inbound from snet-app only
+      - snet-pe NSG: allow inbound from snet-app only
+      - App Service VNet integration must use snet-app subnet
+      - All existing service connectivity must continue working after integration
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/azure-deployment.md" reason="Azure deployment constraints and Bicep patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Define NSG rules for snet-app (outbound to PE subnet, deny internet except required)</step>
+    <step id="2">Define NSG rules for snet-redis (inbound from app subnet only)</step>
+    <step id="3">Define NSG rules for snet-pe (inbound from app subnet)</step>
+    <step id="4">Enable VNet integration on App Service</step>
+    <step id="5">Deploy and verify connectivity</step>
+    <step id="6">Test App Service can reach all services through VNet</step>
+  </steps>
+  <outputs>
+    <artifact>infrastructure/bicep/modules/nsg-rules.bicep</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>NSG rules deployed for all 3 subnets with correct allow/deny rules</criterion>
+    <criterion>App Service VNet-integrated via snet-app subnet</criterion>
+    <criterion>All services reachable from App Service through VNet</criterion>
+    <criterion>No connectivity regressions</criterion>
+  </acceptance-criteria>
+</task>

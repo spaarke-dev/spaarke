@@ -1,0 +1,47 @@
+<task id="030" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Phase 3 integration verification</title>
+    <tags>testing, verification</tags>
+    <phase>3.3</phase>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>021, 023, 025, 026, 027, 028, 029</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify all Phase 3 resilience and AI performance changes work together.</goal>
+    <context>Phase 3 introduced priority job queues (020-021), persistent analysis state (022-023), resource budget tracking (024-025), parallel tool execution (026), batch embeddings (027), Dataverse request batching (028), and pagination support (029). This verification task ensures all features integrate correctly, tests pass, and no regressions were introduced across the phase.</context>
+    <constraints>
+      - All dotnet build must succeed
+      - All dotnet test must pass
+      - Architecture tests must pass
+      - Each Phase 3 feature must be individually verified
+      - Document results in notes/phase3-verification.md
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/testing.md" reason="Testing constraints and verification requirements" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Run dotnet build — verify full solution compiles with no errors or warnings</step>
+    <step id="2">Run dotnet test — verify all unit and integration tests pass</step>
+    <step id="3">Run architecture tests — verify DI registration count, dependency rules</step>
+    <step id="4">Verify parallel tool execution: read-only tools run in parallel, write tools sequential</step>
+    <step id="5">Verify priority queue routing: jobs route to correct tier (critical/standard/bulk)</step>
+    <step id="6">Verify resource budget tracking: budgets tracked per request, warn-only mode functional</step>
+    <step id="7">Verify persistent analysis state: Redis hot layer + Dataverse durable layer + fallback read</step>
+    <step id="8">Document all verification results in notes/phase3-verification.md</step>
+  </steps>
+  <outputs>
+    <artifact>projects/sdap-bff-api-and-performance-enhancement-r1/notes/phase3-verification.md</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>dotnet build succeeds with no errors</criterion>
+    <criterion>All unit and integration tests pass</criterion>
+    <criterion>Architecture tests pass (DI count, dependency rules)</criterion>
+    <criterion>All Phase 3 features individually verified and documented</criterion>
+    <criterion>phase3-verification.md created with complete results</criterion>
+  </acceptance-criteria>
+</task>

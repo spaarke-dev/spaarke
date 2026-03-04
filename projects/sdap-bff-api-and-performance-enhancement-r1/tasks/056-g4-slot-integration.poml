@@ -1,0 +1,44 @@
+<task id="056" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Deployment slot CI/CD integration</title>
+    <tags>ci-cd, infrastructure</tags>
+    <phase>5.4</phase>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>044, 055</dependencies>
+  </metadata>
+  <prompt>
+    <goal>CI/CD deploys to staging slot, health check, manual swap to production.</goal>
+    <context>Task 044 created the deployment slot infrastructure and task 055 established the environment promotion pipeline. This task integrates deployment slots into the CI/CD pipeline so that deployments target the staging slot first, run health checks to verify the deployment is healthy, and then swap to production. This provides zero-downtime deployments as part of the automated pipeline.</context>
+    <constraints>
+      - Deployment must target staging slot, not production slot directly
+      - Health check must pass on /healthz before swap is allowed
+      - Swap can be manual trigger or auto after health check (configurable)
+      - Warm-up endpoint must be called before health check
+      - Rollback: swap back to previous version if health check fails
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/azure-deployment.md" reason="Azure deployment constraints and Bicep patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Update deployment workflow to target staging slot</step>
+    <step id="2">Add health check verification step after staging deploy</step>
+    <step id="3">Add swap step (manual trigger or auto after health check)</step>
+    <step id="4">Configure warm-up endpoint</step>
+    <step id="5">Test full flow: deploy, health check, swap</step>
+  </steps>
+  <outputs>
+    <artifact>.github/workflows/deploy-infrastructure.yml</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Pipeline deploys to staging slot (not production directly)</criterion>
+    <criterion>Health check runs on /healthz after staging deployment</criterion>
+    <criterion>Swap to production works after health check passes</criterion>
+    <criterion>Warm-up endpoint configured and called before health check</criterion>
+    <criterion>Full deploy, health check, swap flow tested</criterion>
+  </acceptance-criteria>
+</task>

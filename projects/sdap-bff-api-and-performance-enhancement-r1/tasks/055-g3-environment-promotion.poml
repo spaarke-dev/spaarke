@@ -1,0 +1,45 @@
+<task id="055" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Environment promotion pipeline</title>
+    <tags>ci-cd</tags>
+    <phase>5.3</phase>
+    <estimate>4h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>054</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Define dev to staging to prod progression with manual approval gate for prod.</goal>
+    <context>The IaC deployment pipeline (task 054) handles individual environment deployments. The promotion pipeline orchestrates the progression from dev through staging to production, ensuring each environment is validated before promoting to the next. Dev to staging is automatic on merge to release branch; staging to prod requires manual approval. This completes the CI/CD pipeline and addresses success criterion SC-15.</context>
+    <constraints>
+      - Dev to staging: automatic promotion on merge to release branch
+      - Staging to prod: manual approval required
+      - Smoke tests must run between promotions
+      - GitHub environments must be configured with required reviewers for prod
+      - Pipeline must be idempotent — re-running a promotion should be safe
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/azure-deployment.md" reason="Azure deployment constraints and Bicep patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Create .github/workflows/promote-environment.yml (or update existing)</step>
+    <step id="2">Define dev to staging auto-promotion (on merge to release branch)</step>
+    <step id="3">Define staging to prod manual approval</step>
+    <step id="4">Add smoke tests between promotions</step>
+    <step id="5">Configure GitHub environments with required reviewers</step>
+    <step id="6">Test promotion flow</step>
+  </steps>
+  <outputs>
+    <artifact>.github/workflows/promote-environment.yml</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Promotion pipeline works end-to-end</criterion>
+    <criterion>Auto dev to staging promotion on release branch merge</criterion>
+    <criterion>Manual staging to prod with approval gate</criterion>
+    <criterion>Smoke tests run between promotions</criterion>
+    <criterion>SC-15 verified — CI/CD pipeline with environment promotion</criterion>
+  </acceptance-criteria>
+</task>

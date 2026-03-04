@@ -1,0 +1,50 @@
+<task id="027" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Batch embedding API</title>
+    <tags>bff-api, ai, performance</tags>
+    <phase>3.1</phase>
+    <estimate>4h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-3.1</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Batch embedding requests when multiple are needed in the same scope. Target: 2 embeddings in ~200ms instead of 350-400ms.</goal>
+    <context>The current embedding generation flow sends one embedding request per text. When search tools need embeddings for multiple texts (e.g., query + context), each is sent as a separate API call. The OpenAI embeddings API supports batch input — sending multiple texts in a single call. This reduces network round-trips and API overhead, nearly halving latency for multi-embedding scenarios.</context>
+    <constraints>
+      - Follow ADR-013: AI stays in BFF, no separate service
+      - Follow ADR-014: AI caching — check cache before generating embeddings
+      - Batch embedding must use OpenAI batch embedding endpoint (multiple texts in single request)
+      - Single-text calls must still work (batch of 1)
+      - Must integrate with existing embedding cache layer
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-013-ai-architecture.md" reason="AI architecture — embedding generation in BFF" />
+      <file path=".claude/adr/ADR-014-ai-caching.md" reason="AI caching — cache embeddings before regenerating" />
+      <file path=".claude/constraints/ai.md" reason="AI-specific constraints and rules" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Read current embedding generation flow — identify where single-text embedding calls are made</step>
+    <step id="2">Create GenerateBatchEmbeddingsAsync method that accepts multiple texts and returns embeddings array</step>
+    <step id="3">Use OpenAI batch embedding endpoint — send multiple texts in single API call</step>
+    <step id="4">Check embedding cache for each text before including in batch request (skip already-cached)</step>
+    <step id="5">Integrate batch method into search tools that need multiple embeddings in the same scope</step>
+    <step id="6">Unit tests for batch vs single embedding scenarios, cache hit/miss combinations</step>
+    <step id="7">Run dotnet test — verify all tests pass</step>
+  </steps>
+  <outputs>
+    <artifact>Updated Ai/Services/ embedding service with batch support</artifact>
+    <artifact>Updated search tools with batch embedding integration</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>GenerateBatchEmbeddingsAsync method exists and sends multiple texts in single API call</criterion>
+    <criterion>Embedding cache is checked before including texts in batch request</criterion>
+    <criterion>Batch method integrated into search tools that need multiple embeddings</criterion>
+    <criterion>Single-text calls still work (backward compatible)</criterion>
+    <criterion>Unit tests pass for batch, single, and cache scenarios</criterion>
+    <criterion>Target achievable: 2 embeddings in ~200ms (down from 350-400ms)</criterion>
+  </acceptance-criteria>
+</task>

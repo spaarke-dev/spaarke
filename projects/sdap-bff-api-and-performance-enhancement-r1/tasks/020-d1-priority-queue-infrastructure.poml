@@ -1,0 +1,52 @@
+<task id="020" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Priority job queue infrastructure</title>
+    <tags>bff-api, jobs, resilience, service-bus</tags>
+    <phase>3.1</phase>
+    <estimate>4h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-3.2</parallel-group>
+    <dependencies>003</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create 3-tier priority queue infrastructure with independent concurrency: critical (5 concurrent), standard (3), bulk (2).</goal>
+    <context>The current single-queue job processing model does not differentiate between urgent document processing and bulk indexing operations. This creates head-of-line blocking where low-priority bulk jobs can delay critical user-initiated operations. A 3-tier priority queue system ensures critical jobs (DocumentProcessing) get dedicated concurrency while bulk operations (BulkRagIndexing) don't starve but also don't block interactive workflows.</context>
+    <constraints>
+      - Follow ADR-004: Idempotent jobs, deterministic keys — all queues must preserve idempotency
+      - Follow ADR-001: Minimal API + BackgroundService — queue processors are BackgroundServices
+      - Queue names: sdap-jobs-critical, sdap-jobs-standard, sdap-jobs-bulk
+      - Concurrency limits: critical=5, standard=3, bulk=2
+      - Each tier runs as an independent processor with its own concurrency
+      - Existing single-queue processor must remain operational during migration (task 021)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-004-job-contract.md" reason="Job contract, idempotency, deterministic keys" />
+      <file path=".claude/constraints/jobs.md" reason="Job processing constraints and rules" />
+      <file path=".claude/patterns/api/background-workers.md" reason="BackgroundService patterns for queue processors" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Define queue configuration — 3 Service Bus queues: sdap-jobs-critical, sdap-jobs-standard, sdap-jobs-bulk</step>
+    <step id="2">Create PriorityQueueConfiguration with concurrency settings per tier (critical=5, standard=3, bulk=2)</step>
+    <step id="3">Create PriorityServiceBusJobProcessor extending existing processor pattern — one processor per tier</step>
+    <step id="4">Map job types to priority tiers: DocumentProcessing→critical, EmailToDocument→standard, BulkRagIndexing→bulk</step>
+    <step id="5">Add Bicep templates for 2 new Service Bus queues (sdap-jobs-critical, sdap-jobs-bulk — sdap-jobs-standard reuses existing)</step>
+    <step id="6">Unit tests for job type → priority tier routing logic</step>
+    <step id="7">Run dotnet build — verify compilation</step>
+  </steps>
+  <outputs>
+    <artifact>src/server/api/Sprk.Bff.Api/Infrastructure/Jobs/PriorityQueueConfiguration.cs</artifact>
+    <artifact>src/server/api/Sprk.Bff.Api/Infrastructure/Jobs/PriorityServiceBusJobProcessor.cs</artifact>
+    <artifact>src/server/api/Sprk.Bff.Api/Infrastructure/Jobs/JobPriorityMapper.cs</artifact>
+    <artifact>infrastructure/bicep/service-bus-queues.bicep</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>3 queue processors created with independent concurrency (critical=5, standard=3, bulk=2)</criterion>
+    <criterion>Job type → priority tier routing is configured and tested</criterion>
+    <criterion>Bicep templates for 2 new Service Bus queues are ready for deployment</criterion>
+    <criterion>Existing single-queue processor remains untouched for migration compatibility</criterion>
+    <criterion>dotnet build succeeds</criterion>
+  </acceptance-criteria>
+</task>

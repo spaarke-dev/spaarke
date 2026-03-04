@@ -1,0 +1,46 @@
+<task id="052" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Test suite re-enablement</title>
+    <tags>testing, ci-cd</tags>
+    <phase>5.1</phase>
+    <estimate>5h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-5.1</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Fix interface changes that caused test disablement. Re-enable dotnet test as deployment gate.</goal>
+    <context>The test suite has accumulated failures due to interface changes across Phases 1-3 (module extraction, caching layer additions, priority queue infrastructure). Tests that were disabled or skipped during development must be fixed to reflect current interfaces. Re-enabling the test gate is critical for CI/CD pipeline reliability and directly supports success criterion SC-15.</context>
+    <constraints>
+      - All tests must pass — no skipped or ignored tests without documented reason
+      - Fix tests to match current interfaces, don't revert interfaces to match old tests
+      - Add missing mocks for new dependencies (cache services, priority queues, etc.)
+      - Test gate must block deployment on failure
+      - Follow testing patterns from .claude/patterns/testing/
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/testing.md" reason="Testing requirements and standards" />
+      <file path=".claude/patterns/testing/integration-tests.md" reason="Integration test patterns" />
+      <file path=".claude/patterns/testing/unit-test-structure.md" reason="Unit test structure and conventions" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Run dotnet test, collect all failures</step>
+    <step id="2">Categorize failures (interface changes, missing mocks, stale assertions)</step>
+    <step id="3">Fix each test or update to match current interfaces</step>
+    <step id="4">Verify all tests pass</step>
+    <step id="5">Add test step to CI pipeline (if not already)</step>
+    <step id="6">Run full test suite to confirm</step>
+  </steps>
+  <outputs>
+    <artifact>tests/</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All tests pass with dotnet test</criterion>
+    <criterion>Test pipeline gate configured to block deployment on failure</criterion>
+    <criterion>No skipped tests without documented justification</criterion>
+    <criterion>SC-15 achievable — test gate operational</criterion>
+  </acceptance-criteria>
+</task>

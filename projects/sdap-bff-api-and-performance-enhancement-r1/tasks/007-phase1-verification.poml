@@ -1,0 +1,48 @@
+<task id="007" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Phase 1 integration verification</title>
+    <tags>testing, verification</tags>
+    <phase>1.4</phase>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>003, 004, 005, 006</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify all Phase 1 changes work together. Run full test suite, verify architecture tests pass, check success criteria.</goal>
+    <context>Phase 1 (Foundation) includes 6 implementation tasks: Program.cs decomposition (001-003), thread-safety fixes (004), explicit column selection (005), and debug endpoint removal (006). This verification task ensures all changes integrate correctly, no regressions were introduced, and all Phase 1 success criteria are met before proceeding to Phase 2.</context>
+    <constraints>
+      - All tests must pass — zero failures, zero skipped tests that were previously passing
+      - Architecture tests (ArchTests) must pass — validates structural rules
+      - Success criteria are binary — either met or not met, no partial credit
+      - Document any issues found with specific file, line, and description
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/testing.md" reason="Testing standards and requirements" />
+      <file path=".claude/patterns/testing/integration-tests.md" reason="Integration test patterns and verification approach" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Run dotnet build for entire solution — verify zero errors and zero warnings (or only pre-existing warnings)</step>
+    <step id="2">Run dotnet test for all test projects — capture full results with pass/fail counts</step>
+    <step id="3">Run architecture tests (Spaarke.ArchTests) specifically — verify structural rules pass</step>
+    <step id="4">Verify SC-01: Program.cs line count is under 200 lines (count with wc -l or equivalent)</step>
+    <step id="5">Verify SC-07: zero ColumnSet(true) occurrences in codebase (search and confirm)</step>
+    <step id="6">Verify SC-08: zero thread-safety issues in DataverseWebApiService (review for shared mutable state)</step>
+    <step id="7">Document all results in projects/sdap-bff-api-and-performance-enhancement-r1/notes/phase1-verification.md</step>
+  </steps>
+  <outputs>
+    <artifact>projects/sdap-bff-api-and-performance-enhancement-r1/notes/phase1-verification.md</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>dotnet build succeeds for entire solution with zero errors</criterion>
+    <criterion>dotnet test passes for all test projects with zero failures</criterion>
+    <criterion>Architecture tests (ArchTests) pass with zero violations</criterion>
+    <criterion>SC-01 verified: Program.cs is under 200 lines</criterion>
+    <criterion>SC-07 verified: zero ColumnSet(true) in codebase</criterion>
+    <criterion>SC-08 verified: zero thread-safety issues in DataverseWebApiService</criterion>
+    <criterion>phase1-verification.md exists with complete pass/fail documentation</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,49 @@
+<task id="023" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Persistent analysis state — Dataverse durable layer</title>
+    <tags>bff-api, dataverse, resilience</tags>
+    <phase>3.2</phase>
+    <estimate>4h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>022</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Add Dataverse durable write (async fire-and-forget with retry) as persistence layer behind Redis.</goal>
+    <context>Task 022 added Redis as the hot layer for analysis results. This task adds Dataverse as the durable persistence layer. Writes to Dataverse are async fire-and-forget with retry — they must not block the request. The dual-write pattern is: Redis (fast, synchronous) + Dataverse (durable, asynchronous). On Redis miss, Dataverse serves as the fallback read source. A feature flag controls whether durable persistence is active.</context>
+    <constraints>
+      - Dataverse write must be async fire-and-forget — must not block the request path
+      - Retry logic for Dataverse writes (transient failures)
+      - Dual-write: Redis (sync, fast) + Dataverse (async, durable)
+      - Feature flag: Analysis:Persistence:Enabled (default: true)
+      - Analysis must survive BFF restart — SC-09 verification
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/data.md" reason="Dataverse data access constraints" />
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Entity CRUD operation patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Verify sprk_analysisresult entity schema in Dataverse — confirm fields for analysis state storage</step>
+    <step id="2">Implement async Dataverse write with fire-and-forget pattern and retry logic for transient failures</step>
+    <step id="3">Wire dual-write into AnalysisStateCacheService: Redis (fast, sync) + Dataverse (durable, async)</step>
+    <step id="4">Implement Dataverse fallback read when Redis miss — warm result back into Redis</step>
+    <step id="5">Add feature flag Analysis:Persistence:Enabled (default: true) to control durable writes</step>
+    <step id="6">Integration test: write analysis state → simulate restart → verify recovery from Dataverse</step>
+    <step id="7">Run dotnet test — verify all tests pass</step>
+  </steps>
+  <outputs>
+    <artifact>Updated src/server/api/Sprk.Bff.Api/Services/Caching/AnalysisStateCacheService.cs with dual-write</artifact>
+    <artifact>Updated appsettings.json with Analysis:Persistence:Enabled flag</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Dual-write working: Redis (sync) + Dataverse (async fire-and-forget with retry)</criterion>
+    <criterion>Analysis state survives BFF restart — recoverable from Dataverse</criterion>
+    <criterion>Feature flag Analysis:Persistence:Enabled controls durable writes</criterion>
+    <criterion>Dataverse write does not block request path</criterion>
+    <criterion>SC-09 (analysis survives restart) verified via integration test</criterion>
+    <criterion>dotnet test passes with no regressions</criterion>
+  </acceptance-criteria>
+</task>

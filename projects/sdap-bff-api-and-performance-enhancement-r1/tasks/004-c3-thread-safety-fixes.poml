@@ -1,0 +1,51 @@
+<task id="004" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Fix thread-safety bugs in DataverseWebApiService</title>
+    <tags>bff-api, dataverse, bug-fix, critical</tags>
+    <phase>1.1</phase>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-1.1</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Fix 2 critical thread-safety bugs: mutable _currentToken without synchronization, mutable DefaultRequestHeaders on shared HttpClient.</goal>
+    <context>DataverseWebApiService is registered as a singleton and shared across all concurrent requests. Two thread-safety bugs exist: (1) _currentToken field is read and written without synchronization, causing potential race conditions during token refresh; (2) DefaultRequestHeaders on the shared HttpClient are mutated per-request, which can cause headers from one request to leak into another under concurrency. Both bugs can cause intermittent auth failures and data corruption under load.</context>
+    <constraints>
+      - Use SemaphoreSlim for token refresh synchronization — not lock() which blocks threads
+      - Use per-request HttpRequestMessage headers instead of mutating shared DefaultRequestHeaders
+      - Maintain backward compatibility — no API signature changes to public methods
+      - All concurrent access patterns must be covered by unit tests
+      - Zero allocation overhead for the happy path (token still valid)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/data.md" reason="Data access constraints and patterns" />
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="Dataverse entity operation patterns" />
+      <file path=".claude/patterns/dataverse/web-api-client.md" reason="WebAPI client patterns and thread-safety guidance" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Read DataverseWebApiService.cs — identify all shared mutable state and thread-safety issues</step>
+    <step id="2">Implement SemaphoreSlim-guarded token refresh pattern: check-lock-check to minimize contention</step>
+    <step id="3">Replace all DefaultRequestHeaders mutations with per-request HttpRequestMessage header assignments</step>
+    <step id="4">Add unit tests for concurrent token refresh (verify single refresh under contention)</step>
+    <step id="5">Add unit tests for concurrent request execution (verify header isolation)</step>
+    <step id="6">Run dotnet build to verify compilation</step>
+    <step id="7">Run dotnet test to verify all tests pass including new concurrency tests</step>
+  </steps>
+  <outputs>
+    <artifact>src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs (thread-safe)</artifact>
+    <artifact>tests/Spaarke.Dataverse.Tests/DataverseWebApiServiceConcurrencyTests.cs</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>No mutable shared state in DataverseWebApiService — _currentToken protected by SemaphoreSlim</criterion>
+    <criterion>All HTTP requests use per-request HttpRequestMessage headers, not DefaultRequestHeaders</criterion>
+    <criterion>Concurrent token refresh test passes — only one refresh occurs under contention</criterion>
+    <criterion>Concurrent request test passes — headers are isolated between requests</criterion>
+    <criterion>dotnet build succeeds with zero errors</criterion>
+    <criterion>dotnet test passes with zero regressions</criterion>
+    <criterion>SC-08 success criterion met: zero thread-safety issues in DataverseWebApiService</criterion>
+  </acceptance-criteria>
+</task>

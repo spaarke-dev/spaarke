@@ -1,0 +1,51 @@
+<task id="025" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Resource budget endpoint filter and enforcement</title>
+    <tags>bff-api, resilience, api</tags>
+    <phase>3.2</phase>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>024</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create endpoint filter that enforces resource budgets with 429 ProblemDetails, starting in warn-only mode.</goal>
+    <context>Task 024 created the resource budget tracking infrastructure. This task adds the enforcement layer as an endpoint filter (per ADR-008). The filter checks resource consumption against budgets and returns 429 Too Many Requests with ProblemDetails when a budget is exceeded. The filter starts in warn-only mode (log but don't reject) to allow monitoring before enforcement. A config flag switches between warn-only and enforce modes.</context>
+    <constraints>
+      - Follow ADR-008: Use endpoint filters for enforcement, not global middleware
+      - Follow ADR-019: Return ProblemDetails for 429 responses
+      - Follow ADR-015: Log only identifiers and budget consumption metrics, not request content
+      - Default mode: warn-only (log budget exceedance but don't reject)
+      - Config flag to switch to enforce mode
+      - Apply filter to AI and batch endpoints
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-008-endpoint-filters.md" reason="Endpoint filter pattern — no global middleware" />
+      <file path=".claude/adr/ADR-019-problem-details.md" reason="ProblemDetails format for 429 responses" />
+      <file path=".claude/patterns/api/endpoint-filters.md" reason="Endpoint filter implementation patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Create Api/Filters/ResourceBudgetFilter.cs — endpoint filter that checks ResourceBudgetContext</step>
+    <step id="2">Return 429 ProblemDetails when budget exceeded (in enforce mode) with details on which resource was exhausted</step>
+    <step id="3">Add enforcement mode config: ResourceBudget:Mode (warn-only | enforce, default: warn-only)</step>
+    <step id="4">Apply filter to AI endpoints (chat, analysis) and batch endpoints</step>
+    <step id="5">Log budget consumption per request — identifiers only, not content (ADR-015 compliance)</step>
+    <step id="6">Unit tests for warn-only mode (logs but passes through) and enforce mode (returns 429)</step>
+    <step id="7">Run dotnet test — verify all tests pass</step>
+  </steps>
+  <outputs>
+    <artifact>src/server/api/Sprk.Bff.Api/Api/Filters/ResourceBudgetFilter.cs</artifact>
+    <artifact>Updated appsettings.json with ResourceBudget:Mode setting</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>ResourceBudgetFilter exists and checks resource consumption against budgets</criterion>
+    <criterion>Warn-only mode (default): logs exceedance but allows request to proceed</criterion>
+    <criterion>Enforce mode: returns 429 ProblemDetails with resource exhaustion details</criterion>
+    <criterion>Filter applied to AI and batch endpoints</criterion>
+    <criterion>Logging complies with ADR-015 — identifiers and metrics only, no content</criterion>
+    <criterion>dotnet test passes with no regressions</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,46 @@
+<task id="006" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Remove debug endpoints from non-dev environments</title>
+    <tags>bff-api, security, cleanup</tags>
+    <phase>1.1</phase>
+    <estimate>1h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-1.1</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Conditionally exclude /debug/* and anonymous health endpoints from non-development environments.</goal>
+    <context>Debug endpoints (e.g., /debug/*) and certain anonymous diagnostic endpoints are currently registered in all environments, including staging and production. These endpoints can expose internal state, configuration details, and bypass authentication. They must be restricted to development-only via IHostEnvironment.IsDevelopment() checks. The /healthz endpoint must remain available in all environments for Azure App Service health probes.</context>
+    <constraints>
+      - Use IHostEnvironment.IsDevelopment() to gate debug endpoints — not custom feature flags
+      - /healthz MUST remain available in all environments (Azure health probe dependency)
+      - /ping may remain available in all environments (lightweight availability check)
+      - Do not remove debug endpoints entirely — they are valuable for local development
+      - Follow ADR-008: endpoint filters for any auth-related changes
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/api.md" reason="API security constraints and endpoint rules" />
+      <file path=".claude/patterns/api/endpoint-definition.md" reason="Endpoint definition patterns and environment gating" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Identify all debug and temporary endpoints in EndpointStartup.cs (or Program.cs if not yet extracted) — list route, method, and purpose</step>
+    <step id="2">Wrap debug endpoints with if (app.Environment.IsDevelopment()) guard</step>
+    <step id="3">Verify /healthz endpoint remains registered unconditionally in all environments</step>
+    <step id="4">Verify /ping endpoint remains registered unconditionally (if applicable)</step>
+    <step id="5">Run dotnet build to verify compilation</step>
+    <step id="6">Run dotnet test to verify no regressions</step>
+  </steps>
+  <outputs>
+    <artifact>Modified endpoint registration file with environment-gated debug endpoints</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All /debug/* endpoints are conditionally excluded from non-development environments</criterion>
+    <criterion>Anonymous diagnostic endpoints are gated to development-only</criterion>
+    <criterion>/healthz endpoint works in all environments</criterion>
+    <criterion>dotnet build succeeds with zero errors</criterion>
+    <criterion>dotnet test passes with zero regressions</criterion>
+  </acceptance-criteria>
+</task>

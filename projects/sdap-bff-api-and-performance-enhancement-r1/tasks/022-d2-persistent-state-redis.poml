@@ -1,0 +1,49 @@
+<task id="022" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Persistent analysis state — Redis hot layer</title>
+    <tags>bff-api, caching, redis, resilience</tags>
+    <phase>3.1</phase>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-3.2</parallel-group>
+    <dependencies>003</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Add Redis hot layer for analysis results with 24h TTL. Read path: Redis first → Dataverse fallback → warm into Redis.</goal>
+    <context>Analysis results are currently held in-memory and lost on restart. This task adds Redis as a hot persistence layer with a 24h TTL. The read path checks Redis first, falls back to Dataverse, and warms results back into Redis on miss. Task 023 adds the Dataverse durable layer behind this. Redis failures must degrade gracefully — bypass cache, don't fail the request.</context>
+    <constraints>
+      - Follow ADR-009: Redis-first caching — no IMemoryCache without profiling proof
+      - 24h TTL for analysis results in Redis
+      - Read path: Redis first → Dataverse fallback → warm-back into Redis
+      - Graceful degradation: bypass cache on Redis failure, don't fail the request
+      - No proactive cache warming (organic warm-up only, per project decisions)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-009-redis-caching.md" reason="Redis-first caching strategy and constraints" />
+      <file path=".claude/patterns/caching/distributed-cache.md" reason="Distributed cache implementation patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Read WorkingDocumentService.cs — understand current in-memory analysis state pattern</step>
+    <step id="2">Create Services/Caching/AnalysisStateCacheService.cs with Redis read/write operations</step>
+    <step id="3">Implement Redis write with 24h TTL for analysis results</step>
+    <step id="4">Implement read path: Redis first, Dataverse fallback, warm-back into Redis on miss</step>
+    <step id="5">Integrate AnalysisStateCacheService into WorkingDocumentService</step>
+    <step id="6">Add graceful degradation on Redis failure — bypass cache, log warning, continue with Dataverse</step>
+    <step id="7">Unit tests for read/write/fallback/degradation scenarios</step>
+    <step id="8">Run dotnet test — verify all tests pass</step>
+  </steps>
+  <outputs>
+    <artifact>src/server/api/Sprk.Bff.Api/Services/Caching/AnalysisStateCacheService.cs</artifact>
+    <artifact>Updated WorkingDocumentService.cs with cache integration</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Analysis results are persisted to Redis with 24h TTL</criterion>
+    <criterion>Read path works: Redis hit returns cached result, Redis miss falls back to Dataverse and warms Redis</criterion>
+    <criterion>Graceful degradation: Redis failure bypasses cache without failing the request</criterion>
+    <criterion>No IMemoryCache used — Redis only</criterion>
+    <criterion>dotnet test passes with no regressions</criterion>
+  </acceptance-criteria>
+</task>

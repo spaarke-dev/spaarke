@@ -1,0 +1,46 @@
+<task id="044" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Deployment slot configuration</title>
+    <tags>infrastructure, azure, bicep</tags>
+    <phase>4.1</phase>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-4.1</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Configure staging slot on P1v3 plan. Deploy to staging, health check, swap to production.</goal>
+    <context>The BFF API currently deploys directly to production, creating risk of downtime during deployments. A staging slot enables zero-downtime deployments by deploying to staging first, running health checks to verify the deployment is healthy, then swapping staging to production. This directly addresses success criterion SC-14.</context>
+    <constraints>
+      - Use P1v3 App Service Plan (supports deployment slots)
+      - Staging slot must have its own app settings (sticky slot settings)
+      - Health check endpoint: /healthz for warm-up verification
+      - Swap must only proceed after health check passes
+      - Document the swap procedure for operations team
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/azure-deployment.md" reason="Azure deployment constraints and Bicep patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Update app-service.bicep with staging slot definition</step>
+    <step id="2">Configure slot-specific app settings (sticky slots)</step>
+    <step id="3">Configure health check endpoint for warm-up (/healthz)</step>
+    <step id="4">Deploy staging slot</step>
+    <step id="5">Test deploy, health check, swap workflow</step>
+    <step id="6">Document swap procedure</step>
+  </steps>
+  <outputs>
+    <artifact>infrastructure/bicep/modules/app-service.bicep</artifact>
+    <artifact>projects/sdap-bff-api-and-performance-enhancement-r1/notes/slot-swap-procedure.md</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Staging slot operational on P1v3 plan</criterion>
+    <criterion>Sticky slot settings configured for environment-specific values</criterion>
+    <criterion>Health check warm-up configured on /healthz</criterion>
+    <criterion>Deploy, health check, swap workflow tested end-to-end</criterion>
+    <criterion>SC-14 verified — deployment slot swap works</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,46 @@
+<task id="016" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Request-scoped document metadata cache</title>
+    <tags>bff-api, caching, performance</tags>
+    <phase>2.1</phase>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>Wave-2.1</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Extend existing RequestCache pattern to cover document metadata so GetDocumentAsync hits Dataverse only once per request.</goal>
+    <context>Multiple operations within a single HTTP request call GetDocumentAsync repeatedly for the same document, resulting in redundant Dataverse queries. The codebase already has a RequestCache pattern (scoped to the HTTP request lifetime). This task extends that pattern to cover document metadata lookups, ensuring GetDocumentAsync hits Dataverse only once per request per document ID. This has no dependency on Redis and can start during Phase 1.</context>
+    <constraints>
+      - Follow ADR-009: Redis-first for cross-request caching, but request-scoped cache is appropriate here
+      - Request-scoped cache must be disposed at end of HTTP request (scoped lifetime)
+      - Must not change the public API of GetDocumentAsync
+      - Cache key must include document ID for per-document isolation
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-009-redis-caching.md" reason="Caching strategy context — request-scoped is complementary to Redis" />
+      <file path=".claude/patterns/caching/request-cache.md" reason="Existing RequestCache pattern to extend" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Read existing RequestCache implementation to understand the pattern</step>
+    <step id="2">Add document metadata caching using requestCache.GetOrAddAsync("doc:{documentId}", ...) pattern</step>
+    <step id="3">Identify all call sites that call GetDocumentAsync multiple times per request</step>
+    <step id="4">Apply request-scoped caching at those call sites</step>
+    <step id="5">Add unit test verifying single Dataverse call per request per document</step>
+    <step id="6">Run dotnet test — verify all tests pass</step>
+  </steps>
+  <outputs>
+    <artifact>Updated document service with request-scoped caching</artifact>
+    <artifact>Unit test verifying single Dataverse call per request</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>GetDocumentAsync called at most once per request per document ID</criterion>
+    <criterion>Request-scoped cache properly disposed at end of request</criterion>
+    <criterion>Existing RequestCache pattern extended (not duplicated)</criterion>
+    <criterion>Unit test verifies single Dataverse call per request</criterion>
+    <criterion>dotnet test passes</criterion>
+  </acceptance-criteria>
+</task>

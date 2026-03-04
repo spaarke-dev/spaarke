@@ -1,0 +1,51 @@
+<task id="011" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Integrate feature flags into all DI modules</title>
+    <tags>bff-api, architecture, feature-flags</tags>
+    <phase>2.2</phase>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>010</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Wire ModuleState checks into all 8 DI modules and ServiceBusJobProcessor. When disabled: skip DI registration, skip-and-complete job messages.</goal>
+    <context>With ModuleState and ModuleGateFilter created in task 010, this task integrates feature flag checks into every DI module (Ai, Communication, Documents, Finance, Office, Workers, Workspace, Email) and the ServiceBusJobProcessor. Disabled modules should not register their services and should gracefully skip-and-complete any job messages routed to them.</context>
+    <constraints>
+      - Follow ADR-010: DI minimalism — conditional registration must not inflate DI count
+      - Each DI module must check ModuleState before registering services
+      - ServiceBusJobProcessor must skip-and-complete messages for disabled modules (not dead-letter)
+      - Startup logging must clearly indicate which modules are registered and which are skipped
+      - Must not break existing module functionality when all modules are enabled (default)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-010-di-minimalism.md" reason="DI registration constraints" />
+      <file path=".claude/patterns/api/service-registration.md" reason="Service registration patterns for DI modules" />
+      <file path=".claude/constraints/jobs.md" reason="Background job processing constraints" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Update each DI module (Ai, Communication, Documents, Finance, Office, Workers, Workspace, Email) to check ModuleState before registering services</step>
+    <step id="2">Update ServiceBusJobProcessor to skip-and-complete messages for disabled modules</step>
+    <step id="3">Add startup logging of registered/skipped modules with clear console output</step>
+    <step id="4">Add integration test: disable a module, verify 503 response on its endpoints, verify other modules remain unaffected</step>
+    <step id="5">Run dotnet build — verify compilation</step>
+    <step id="6">Run dotnet test — verify all tests pass including new integration test</step>
+  </steps>
+  <outputs>
+    <artifact>Updated DI module files (8 modules)</artifact>
+    <artifact>Updated ServiceBusJobProcessor</artifact>
+    <artifact>Integration test for feature flag behavior</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All 8 DI modules check ModuleState before registering services</criterion>
+    <criterion>ServiceBusJobProcessor skip-and-completes messages for disabled modules</criterion>
+    <criterion>Startup logging clearly shows registered vs skipped modules</criterion>
+    <criterion>Integration test verifies: disabled module returns 503, other modules unaffected</criterion>
+    <criterion>SC-16 verified: domain isolation works at runtime</criterion>
+    <criterion>dotnet build succeeds</criterion>
+    <criterion>dotnet test passes</criterion>
+  </acceptance-criteria>
+</task>

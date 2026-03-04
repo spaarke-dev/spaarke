@@ -1,0 +1,44 @@
+<task id="050" project="sdap-bff-api-and-performance-enhancement-r1">
+  <metadata>
+    <title>Disable public access on all resources</title>
+    <tags>infrastructure, azure, security</tags>
+    <phase>4.4</phase>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>none</parallel-group>
+    <dependencies>041, 042, 045, 046, 047</dependencies>
+  </metadata>
+  <prompt>
+    <goal>After all private endpoints confirmed working, disable public access on all Azure services. SC-12 completion.</goal>
+    <context>This is the culmination of the VNet security work. Tasks 041 (private endpoints), 042 (NSG/VNet integration), 045 (Redis hardening), 046 (Key Vault hardening), and 047 (Storage hardening) have each established private connectivity for individual services. This task performs the final verification and disables public access across all remaining services, completing success criterion SC-12.</context>
+    <constraints>
+      - All private endpoints must be verified working BEFORE disabling public access
+      - Disable public access on: Key Vault, Storage, Service Bus, Azure OpenAI, AI Search, Document Intelligence
+      - App Service must still reach all services through VNet
+      - Full test suite must pass after public access disabled
+      - Rollback procedure must be documented (re-enable public endpoints)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file path=".claude/constraints/azure-deployment.md" reason="Azure deployment constraints and Bicep patterns" />
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Verify all services accessible via private endpoints</step>
+    <step id="2">Disable public access on each service (Key Vault, Storage, Service Bus, OpenAI, AI Search, Doc Intel)</step>
+    <step id="3">Verify App Service still reaches all services</step>
+    <step id="4">Run full test suite against dev</step>
+    <step id="5">Document rollback procedure (re-enable public endpoints)</step>
+  </steps>
+  <outputs>
+    <artifact>projects/sdap-bff-api-and-performance-enhancement-r1/notes/public-access-disable-rollback.md</artifact>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All services behind private endpoints only — public access disabled</criterion>
+    <criterion>App Service connectivity to all services verified</criterion>
+    <criterion>Full test suite passes</criterion>
+    <criterion>Rollback procedure documented</criterion>
+    <criterion>SC-12 verified — all resources behind VNet/private endpoints</criterion>
+  </acceptance-criteria>
+</task>
