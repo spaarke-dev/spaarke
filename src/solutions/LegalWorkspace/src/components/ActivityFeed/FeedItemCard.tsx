@@ -543,11 +543,20 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
         role="listitem"
         tabIndex={0}
         aria-label={cardAriaLabel}
-        onClick={handleEdit}
+        onClick={(e: React.MouseEvent<HTMLDivElement>) => {
+          // Only open dialog if click is on the card background, not on
+          // interactive children (buttons, links, menu items, tooltips)
+          const target = e.target as HTMLElement;
+          if (target.closest("button, [role='link'], [role='menuitem'], [role='menuitemcheckbox'], a")) return;
+          handleEdit();
+        }}
         onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
           if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            handleEdit();
+            // Only if the card div itself has focus (not a child button)
+            if (e.target === e.currentTarget) {
+              e.preventDefault();
+              handleEdit();
+            }
           }
         }}
         style={{ cursor: "pointer" }}
