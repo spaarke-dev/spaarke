@@ -1,14 +1,14 @@
 /**
- * useQuickSummaryCounts — React hook that fires 4 parallel webApi count
+ * useQuickSummaryCounts — React hook that fires parallel webApi count
  * queries on mount and exposes the results as a Record<cardId, count>.
  *
- * Each card query selects only the primary key with a $top=500 cap so that
- * retrieveMultipleRecords returns a lightweight entity array whose length
- * is the count.
+ * Also fetches badge counts (New / Overdue) for each card that has a
+ * badgeFilter configured.
  *
  * Usage:
- *   const { counts, isLoading, error, refetch } = useQuickSummaryCounts(webApi, userId);
+ *   const { counts, badgeCounts, isLoading, refetch } = useQuickSummaryCounts(webApi, userId);
  *   const matterCount = counts["my-matters"]; // number | undefined
+ *   const newMatters = badgeCounts["my-matters"]; // number | undefined
  */
 
 import * as React from "react";
@@ -18,6 +18,8 @@ import { QUICK_SUMMARY_CARDS } from "../components/QuickSummary/quickSummaryConf
 export interface IQuickSummaryCountsResult {
   /** Map of card id to count. undefined means the individual query failed. */
   counts: Record<string, number | undefined>;
+  /** Map of card id to badge count (New or Overdue). undefined if not applicable or failed. */
+  badgeCounts: Record<string, number | undefined>;
   /** True while any query is still in flight. */
   isLoading: boolean;
   /** Non-null if the entire batch failed. */
@@ -31,6 +33,7 @@ export function useQuickSummaryCounts(
   userId: string
 ): IQuickSummaryCountsResult {
   const [counts, setCounts] = React.useState<Record<string, number | undefined>>({});
+  const [badgeCounts, setBadgeCounts] = React.useState<Record<string, number | undefined>>({});
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -38,22 +41,41 @@ export function useQuickSummaryCounts(
     setIsLoading(true);
     setError(null);
     try {
-      const results = await Promise.all(
-        QUICK_SUMMARY_CARDS.map(async (card) => {
-          try {
-            const query = `?$select=${card.primaryKey}&$filter=${card.countFilter(userId)}&$top=500`;
-            const result = await webApi.retrieveMultipleRecords(card.entityName, query, 500);
-            return { id: card.id, count: result.entities.length };
-          } catch {
-            return { id: card.id, count: undefined };
-          }
-        })
-      );
+      // Build all queries: main counts + badge counts
+      const mainQueries = QUICK_SUMMARY_CARDS.map(async (card) => {
+        try {
+          const query = `?$select=${card.primaryKey}&$filter=${card.countFilter(userId)}&$top=500`;
+          const result = await webApi.retrieveMultipleRecords(card.entityName, query, 500);
+          return { id: card.id, count: result.entities.length };
+        } catch {
+          return { id: card.id, count: undefined };
+        }
+      });
+
+      const badgeQueries = QUICK_SUMMARY_CARDS.map(async (card) => {
+        if (!card.badgeFilter) return { id: card.id, count: undefined };
+        try {
+          const filter = card.badgeFilter(userId);
+          const query = `?$select=${card.primaryKey}&$filter=${filter}&$top=100`;
+          const result = await webApi.retrieveMultipleRecords(card.entityName, query, 100);
+          return { id: card.id, count: result.entities.length };
+        } catch {
+          return { id: card.id, count: undefined };
+        }
+      });
+
+      const [mainResults, badgeResults] = await Promise.all([
+        Promise.all(mainQueries),
+        Promise.all(badgeQueries),
+      ]);
+
       const newCounts: Record<string, number | undefined> = {};
-      for (const r of results) {
-        newCounts[r.id] = r.count;
-      }
+      for (const r of mainResults) newCounts[r.id] = r.count;
       setCounts(newCounts);
+
+      const newBadgeCounts: Record<string, number | undefined> = {};
+      for (const r of badgeResults) newBadgeCounts[r.id] = r.count;
+      setBadgeCounts(newBadgeCounts);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load counts");
     } finally {
@@ -65,5 +87,5 @@ export function useQuickSummaryCounts(
     fetchCounts();
   }, [fetchCounts]);
 
-  return { counts, isLoading, error, refetch: fetchCounts };
+  return { counts, badgeCounts, isLoading, error, refetch: fetchCounts };
 }

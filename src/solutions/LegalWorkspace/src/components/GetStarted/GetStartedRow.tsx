@@ -1,6 +1,5 @@
 import * as React from "react";
-import { Text, Button, makeStyles, tokens } from "@fluentui/react-components";
-import { MoreHorizontalRegular } from "@fluentui/react-icons";
+import { makeStyles, tokens } from "@fluentui/react-components";
 import { ActionCard } from "./ActionCard";
 import { ACTION_CARD_CONFIGS, IActionCardConfig } from "./getStartedConfig";
 
@@ -19,30 +18,10 @@ export interface IGetStartedRowProps {
   disabledCards?: ReadonlySet<string>;
   /** Maximum number of action cards to display in the row. Default: show all. */
   maxVisible?: number;
-  /** Called when the expand/more icon is clicked. */
-  onExpandClick?: () => void;
 }
 
 const useStyles = makeStyles({
-  section: {
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalM,
-  },
-  sectionTitle: {
-    color: tokens.colorNeutralForeground1,
-  },
-  /** Container for the card row — fills available width. */
-  scrollContainer: {
-    borderRadius: tokens.borderRadiusMedium,
-  },
   /** Flex row — cards share space equally via flex: 1 1 0 on each card. */
-  row: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "stretch",
-    gap: tokens.spacingHorizontalL,
-  },
   actionCards: {
     display: "flex",
     flexDirection: "row",
@@ -72,7 +51,6 @@ export const GetStartedRow: React.FC<IGetStartedRowProps> = ({
   onCardClick = {},
   disabledCards = new Set<string>(),
   maxVisible,
-  onExpandClick,
 }) => {
   const styles = useStyles();
 
@@ -81,39 +59,18 @@ export const GetStartedRow: React.FC<IGetStartedRowProps> = ({
     : ACTION_CARD_CONFIGS;
 
   return (
-    <section className={styles.section} aria-label="Get Started">
-      <Text size={400} weight="semibold" className={styles.sectionTitle}>
-        Get Started
-      </Text>
-
-      <div className={styles.scrollContainer}>
-        <div className={styles.row}>
-          {/* Action cards */}
-          <div className={styles.actionCards} role="group" aria-label="Quick actions">
-            {visibleConfigs.map((config: IActionCardConfig) => (
-              <ActionCard
-                key={config.id}
-                icon={config.icon}
-                label={config.label}
-                ariaLabel={config.ariaLabel}
-                onClick={onCardClick[config.id]}
-                disabled={disabledCards.has(config.id)}
-              />
-            ))}
-          </div>
-          {onExpandClick && (
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<MoreHorizontalRegular />}
-              onClick={onExpandClick}
-              aria-label="Show all actions"
-              style={{ alignSelf: "center" }}
-            />
-          )}
-        </div>
-      </div>
-    </section>
+    <div className={styles.actionCards} role="group" aria-label="Quick actions">
+      {visibleConfigs.map((config: IActionCardConfig) => (
+        <ActionCard
+          key={config.id}
+          icon={config.icon}
+          label={config.label}
+          ariaLabel={config.ariaLabel}
+          onClick={onCardClick[config.id]}
+          disabled={disabledCards.has(config.id)}
+        />
+      ))}
+    </div>
   );
 };
 

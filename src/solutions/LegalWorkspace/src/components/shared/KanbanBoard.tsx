@@ -111,13 +111,11 @@ const useStyles = makeStyles({
   },
   cardList: {
     flex: "1 1 0",
-    overflowY: "auto",
+    overflowY: "hidden",
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
-    scrollbarWidth: "thin",
-    scrollbarColor: `${tokens.colorNeutralStroke1} transparent`,
   },
   cardWrapper: {
     marginBottom: tokens.spacingVerticalXS,
