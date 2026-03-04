@@ -16,6 +16,8 @@ public static class DocumentProfileFieldMapper
     /// <param name="outputTypeName">Output type name (e.g., "TL;DR", "Summary", "Keywords")</param>
     /// <returns>Dataverse field name (e.g., "sprk_filetldr", "sprk_filesummary") or null if no mapping exists.</returns>
     /// <remarks>
+    /// Supports both legacy output type names ("TL;DR", "Document Type") and
+    /// JPS structured output field names ("tldr", "documentType").
     /// Field names use the sprk_file* prefix from the original schema (sprk_filesummary, sprk_filetldr, sprk_filekeywords).
     /// The sprk_entities field was added later for extracted entities JSON.
     /// </remarks>
@@ -23,11 +25,15 @@ public static class DocumentProfileFieldMapper
     {
         return outputTypeName?.ToLowerInvariant() switch
         {
+            // Legacy output type names
             "tl;dr" => "sprk_filetldr",
             "summary" => "sprk_filesummary",
             "keywords" => "sprk_filekeywords",
             "document type" => "sprk_documenttype",
             "entities" => "sprk_entities",
+            // JPS structured output field names
+            "tldr" => "sprk_filetldr",
+            "documenttype" => "sprk_documenttype",
             _ => null
         };
     }
@@ -46,8 +52,9 @@ public static class DocumentProfileFieldMapper
             return null;
         }
 
-        // Entities output type should be stored as JSON
-        if (outputTypeName?.Equals("Entities", StringComparison.OrdinalIgnoreCase) == true)
+        // Entities output type should be stored as JSON (supports both legacy "Entities" and JPS "entities")
+        if (outputTypeName?.Equals("Entities", StringComparison.OrdinalIgnoreCase) == true
+            || outputTypeName?.Equals("entities", StringComparison.Ordinal) == true)
         {
             // If value is already JSON, validate and return as-is
             // If not, wrap in a simple structure
