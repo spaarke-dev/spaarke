@@ -1,11 +1,14 @@
 import * as React from "react";
 import {
   Text,
+  Badge,
   Spinner,
   makeStyles,
   shorthands,
   tokens,
 } from "@fluentui/react-components";
+import type { FluentIcon } from "@fluentui/react-icons";
+import type { BadgeType } from "./quickSummaryConfig";
 
 export interface IQuickSummaryMetricCardProps {
   /** Display title shown below the count number. */
@@ -18,10 +21,17 @@ export interface IQuickSummaryMetricCardProps {
   onClick: () => void;
   /** Accessible label for the card button. */
   ariaLabel: string;
+  /** Fluent v9 icon component for the card. */
+  icon: FluentIcon;
+  /** Badge type: "new" (green) or "overdue" (red). */
+  badgeType?: BadgeType;
+  /** Badge count. Shown only when > 0 and not loading. */
+  badgeCount?: number;
 }
 
 const useStyles = makeStyles({
   card: {
+    position: "relative",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
@@ -41,30 +51,38 @@ const useStyles = makeStyles({
     transitionProperty: "box-shadow, background-color, border-color",
     transitionDuration: tokens.durationNormal,
     transitionTimingFunction: tokens.curveEasyEase,
-    // Focus ring for keyboard navigation
     ":focus-visible": {
       outlineWidth: "2px",
       outlineStyle: "solid",
       outlineColor: tokens.colorBrandStroke1,
       outlineOffset: "2px",
     },
-    // Hover elevation
     ":hover": {
       backgroundColor: tokens.colorNeutralBackground1Hover,
       ...shorthands.borderColor(tokens.colorNeutralStroke1Hover),
       boxShadow: tokens.shadow4,
     },
-    // Active / pressed state
     ":active": {
       backgroundColor: tokens.colorNeutralBackground1Pressed,
       ...shorthands.borderColor(tokens.colorNeutralStroke1Pressed),
       boxShadow: tokens.shadow2,
     },
   },
+  iconWrapper: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "32px",
+    height: "32px",
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorBrandBackground2,
+    color: tokens.colorBrandForeground1,
+    marginBottom: tokens.spacingVerticalXS,
+  },
   count: {
     color: tokens.colorNeutralForeground1,
-    lineHeight: tokens.lineHeightBase700,
-    marginBottom: tokens.spacingVerticalXS,
+    lineHeight: tokens.lineHeightBase600,
+    marginBottom: tokens.spacingVerticalXXS,
   },
   title: {
     color: tokens.colorNeutralForeground3,
@@ -75,22 +93,19 @@ const useStyles = makeStyles({
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    height: "28px",
-    marginBottom: tokens.spacingVerticalXS,
+    height: "24px",
+    marginBottom: tokens.spacingVerticalXXS,
+  },
+  badgeWrapper: {
+    position: "absolute",
+    top: "8px",
+    right: "8px",
   },
 });
 
 /**
- * QuickSummaryMetricCard — interactive card displaying a single count metric.
- *
- * Renders a Fluent v9 styled card with:
- *   - Large count number (fontSizeBase700, semibold)
- *   - Title label below (fontSizeBase200, foreground3)
- *   - Hover elevation (shadow4) and focus ring (2px colorBrandStroke1)
- *   - Loading state with Spinner
- *   - Error state showing em-dash
- *   - Full keyboard support (Enter / Space)
- *   - Semantic tokens throughout (zero hardcoded colors, dark mode compatible)
+ * QuickSummaryMetricCard — interactive card displaying a single count metric
+ * with icon, notification badge, and click-to-navigate.
  */
 export const QuickSummaryMetricCard: React.FC<IQuickSummaryMetricCardProps> = ({
   title,
@@ -98,6 +113,9 @@ export const QuickSummaryMetricCard: React.FC<IQuickSummaryMetricCardProps> = ({
   isLoading,
   onClick,
   ariaLabel,
+  icon: Icon,
+  badgeType,
+  badgeCount,
 }) => {
   const styles = useStyles();
 
@@ -111,20 +129,7 @@ export const QuickSummaryMetricCard: React.FC<IQuickSummaryMetricCardProps> = ({
     [onClick]
   );
 
-  const renderCount = (): React.ReactNode => {
-    if (isLoading) {
-      return (
-        <div className={styles.spinnerWrapper}>
-          <Spinner size="small" />
-        </div>
-      );
-    }
-    return (
-      <Text size={700} weight="semibold" className={styles.count}>
-        {count !== undefined ? count : "\u2014"}
-      </Text>
-    );
-  };
+  const showBadge = !isLoading && badgeType && badgeCount !== undefined && badgeCount > 0;
 
   return (
     <div
@@ -135,7 +140,36 @@ export const QuickSummaryMetricCard: React.FC<IQuickSummaryMetricCardProps> = ({
       onKeyDown={handleKeyDown}
       className={styles.card}
     >
-      {renderCount()}
+      {/* Notification badge */}
+      {showBadge && (
+        <div className={styles.badgeWrapper}>
+          <Badge
+            appearance="filled"
+            color={badgeType === "overdue" ? "danger" : "success"}
+            size="small"
+          >
+            {badgeCount} {badgeType === "overdue" ? "Overdue" : "New"}
+          </Badge>
+        </div>
+      )}
+
+      {/* Icon */}
+      <div className={styles.iconWrapper} aria-hidden="true">
+        <Icon fontSize={16} />
+      </div>
+
+      {/* Count */}
+      {isLoading ? (
+        <div className={styles.spinnerWrapper}>
+          <Spinner size="small" />
+        </div>
+      ) : (
+        <Text size={600} weight="semibold" className={styles.count}>
+          {count !== undefined ? count : "\u2014"}
+        </Text>
+      )}
+
+      {/* Title */}
       <Text size={200} className={styles.title}>
         {title}
       </Text>

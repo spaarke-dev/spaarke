@@ -543,6 +543,14 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
         role="listitem"
         tabIndex={0}
         aria-label={cardAriaLabel}
+        onClick={handleEdit}
+        onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleEdit();
+          }
+        }}
+        style={{ cursor: "pointer" }}
       >
         <div className={styles.mainRow}>
           {/* Type icon in 40px circle */}

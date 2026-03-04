@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Text, makeStyles, tokens } from "@fluentui/react-components";
+import { makeStyles, tokens } from "@fluentui/react-components";
 import { QuickSummaryMetricCard } from "./QuickSummaryMetricCard";
 import { QUICK_SUMMARY_CARDS } from "./quickSummaryConfig";
 import { useQuickSummaryCounts } from "../../hooks/useQuickSummaryCounts";
@@ -14,11 +14,6 @@ export interface IQuickSummaryRowProps {
 }
 
 const useStyles = makeStyles({
-  section: {
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalM,
-  },
   row: {
     display: "flex",
     flexDirection: "row",
@@ -28,41 +23,38 @@ const useStyles = makeStyles({
 });
 
 /**
- * QuickSummaryRow — renders the "Quick Summary" section title and 4 metric cards.
+ * QuickSummaryRow — renders 4 metric cards in a horizontal row.
  *
- * Each card shows a live count fetched via useQuickSummaryCounts and navigates
- * to the corresponding Dataverse system view when clicked.
+ * Each card shows a live count, an icon, and a notification badge
+ * (green "New" or red "Overdue"). Clicking navigates to the
+ * corresponding Dataverse system view.
  *
- * Layout:
- *   - "Quick Summary" heading (size 400, weight semibold)
- *   - Horizontal flex row with spacingHorizontalL gap
- *   - 4 QuickSummaryMetricCard components (equal flex distribution)
+ * The section title, toolbar, and card wrapper are now provided by
+ * WorkspaceGrid (same sectionCard pattern as other sections).
  */
 export const QuickSummaryRow: React.FC<IQuickSummaryRowProps> = ({
   webApi,
   userId,
 }) => {
   const styles = useStyles();
-  const { counts, isLoading } = useQuickSummaryCounts(webApi, userId);
+  const { counts, badgeCounts, isLoading } = useQuickSummaryCounts(webApi, userId);
 
   return (
-    <section className={styles.section}>
-      <Text size={400} weight="semibold">
-        Quick Summary
-      </Text>
-      <div className={styles.row}>
-        {QUICK_SUMMARY_CARDS.map((card) => (
-          <QuickSummaryMetricCard
-            key={card.id}
-            title={card.title}
-            count={counts[card.id]}
-            isLoading={isLoading}
-            ariaLabel={card.ariaLabel}
-            onClick={() => navigateToEntityList(card.entityName, card.viewId)}
-          />
-        ))}
-      </div>
-    </section>
+    <div className={styles.row}>
+      {QUICK_SUMMARY_CARDS.map((card) => (
+        <QuickSummaryMetricCard
+          key={card.id}
+          title={card.title}
+          count={counts[card.id]}
+          isLoading={isLoading}
+          ariaLabel={card.ariaLabel}
+          icon={card.icon}
+          badgeType={card.badgeType}
+          badgeCount={badgeCounts[card.id]}
+          onClick={() => navigateToEntityList(card.entityName, card.viewId)}
+        />
+      ))}
+    </div>
   );
 };
 

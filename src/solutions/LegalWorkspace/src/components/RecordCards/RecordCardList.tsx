@@ -31,10 +31,7 @@ const LOAD_BATCH_SIZE = 20;
 const useStyles = makeStyles({
   scrollContainer: {
     flex: "1 1 0",
-    overflowY: "scroll",
-    overflowX: "hidden",
-    scrollBehavior: "smooth",
-    contain: "strict",
+    overflow: "hidden",
   },
   innerList: {
     display: "flex",

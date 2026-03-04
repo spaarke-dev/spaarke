@@ -63,8 +63,7 @@ const useStyles = makeStyles({
   /** Grid scroll container — no strict containment so grid can size naturally. */
   gridScrollContainer: {
     flex: "1 1 0",
-    overflowY: "auto",
-    overflowX: "hidden",
+    overflow: "hidden",
     padding: tokens.spacingHorizontalM,
   },
   innerList: {

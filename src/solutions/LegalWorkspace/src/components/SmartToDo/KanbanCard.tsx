@@ -136,8 +136,6 @@ const useStyles = makeStyles({
     width: "40px",
     height: "40px",
     borderRadius: "50%",
-    backgroundColor: tokens.colorBrandBackground2,
-    color: tokens.colorBrandForeground1,
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase300,
     lineHeight: "1",
@@ -296,6 +294,13 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
       .filter(Boolean)
       .join(" ");
 
+    // Score circle colour: red (>=60), yellow (30-59), green (<30)
+    const scoreCircleStyle: React.CSSProperties = roundedScore >= 60
+      ? { backgroundColor: tokens.colorPaletteRedBackground3, color: tokens.colorNeutralForegroundOnBrand }
+      : roundedScore >= 30
+        ? { backgroundColor: tokens.colorPaletteYellowBackground3, color: tokens.colorNeutralForeground1 }
+        : { backgroundColor: tokens.colorPaletteGreenBackground3, color: tokens.colorNeutralForegroundOnBrand };
+
     // Left accent border via inline style (colour is a runtime prop)
     const accentStyle: React.CSSProperties | undefined = accentColor
       ? {
@@ -322,6 +327,7 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
         {/* Score circle — prominent left visual anchor */}
         <div
           className={styles.scoreCircle}
+          style={scoreCircleStyle}
           title={`To Do Score: ${roundedScore}`}
           aria-hidden="true"
         >

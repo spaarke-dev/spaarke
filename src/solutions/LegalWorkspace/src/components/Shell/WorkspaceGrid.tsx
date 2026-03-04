@@ -43,8 +43,16 @@ const LazyWizardDialog = React.lazy(
   () => import("../CreateMatter/WizardDialog")
 );
 
-const LazyGetStartedExpandDialog = React.lazy(
-  () => import("../GetStarted/GetStartedExpandDialog")
+const LazyGetStartedExpandDialog = React.lazy(() =>
+  import("../GetStarted/GetStartedExpandDialog").then((m) => ({
+    default: m.GetStartedExpandDialog,
+  }))
+);
+
+const LazyQuickSummaryDashboardDialog = React.lazy(() =>
+  import("../QuickSummary/QuickSummaryDashboardDialog").then((m) => ({
+    default: m.QuickSummaryDashboardDialog,
+  }))
 );
 
 // ---------------------------------------------------------------------------
@@ -108,7 +116,7 @@ const useStyles = makeStyles({
     borderColor: tokens.colorNeutralStroke2,
     borderRadius: tokens.borderRadiusMedium,
     overflow: "hidden",
-    minHeight: "305px",
+    minHeight: "325px",
   },
   row2Header: {
     display: "flex",
@@ -219,6 +227,14 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleExpandClose = React.useCallback(() => setIsExpandOpen(false), []);
 
   // -------------------------------------------------------------------------
+  // Quick Summary Dashboard dialog state
+  // -------------------------------------------------------------------------
+
+  const [isDashboardOpen, setIsDashboardOpen] = React.useState(false);
+  const handleDashboardOpen = React.useCallback(() => setIsDashboardOpen(true), []);
+  const handleDashboardClose = React.useCallback(() => setIsDashboardOpen(false), []);
+
+  // -------------------------------------------------------------------------
   // Create New Matter wizard dialog state
   // -------------------------------------------------------------------------
 
@@ -325,12 +341,45 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       <div className={styles.grid}>
         {/* Row 1: Get Started (left) + Quick Summary (right) — 50/50 split */}
         <div className={styles.row1}>
-          <GetStartedRow
-            onCardClick={cardClickHandlers}
-            maxVisible={4}
-            onExpandClick={handleExpandClick}
-          />
-          <QuickSummaryRow webApi={webApi} userId={userId} />
+          <div className={styles.sectionCard} style={{ minHeight: "auto" }}>
+            <Text className={styles.sectionTitle} size={400} weight="semibold">
+              Get Started
+            </Text>
+            <div className={styles.toolbar} role="toolbar" aria-label="Get Started toolbar">
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<OpenRegular />}
+                onClick={handleExpandClick}
+                aria-label="Open Playbook Library"
+                style={{ marginLeft: "auto" }}
+              />
+            </div>
+            <div style={{ padding: tokens.spacingHorizontalM, paddingTop: tokens.spacingVerticalS, paddingBottom: tokens.spacingVerticalM }}>
+              <GetStartedRow
+                onCardClick={cardClickHandlers}
+                maxVisible={4}
+              />
+            </div>
+          </div>
+          <div className={styles.sectionCard} style={{ minHeight: "auto" }}>
+            <Text className={styles.sectionTitle} size={400} weight="semibold">
+              Quick Summary
+            </Text>
+            <div className={styles.toolbar} role="toolbar" aria-label="Quick Summary toolbar">
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<OpenRegular />}
+                onClick={handleDashboardOpen}
+                aria-label="Open Quick Summary Dashboard"
+                style={{ marginLeft: "auto" }}
+              />
+            </div>
+            <div style={{ padding: tokens.spacingHorizontalM, paddingTop: tokens.spacingVerticalS, paddingBottom: tokens.spacingVerticalM }}>
+              <QuickSummaryRow webApi={webApi} userId={userId} />
+            </div>
+          </div>
         </div>
 
         {/* Row 2: Latest Updates — full-width bordered card */}
@@ -392,7 +441,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
               />
             </div>
           </div>
-          <div className={styles.sectionCard}>
+          <div className={styles.sectionCard} style={{ minHeight: "auto", overflow: "visible" }}>
             <Text className={styles.sectionTitle} size={400} weight="semibold">
               My Documents
             </Text>
@@ -406,7 +455,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
                 style={{ marginLeft: "auto" }}
               />
             </div>
-            <div className={styles.sectionContent}>
+            <div className={styles.sectionContent} style={{ overflow: "visible" }}>
               <DocumentsTab
                 service={service}
                 userId={userId}
@@ -435,6 +484,16 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       {isWizardOpen && (
         <React.Suspense fallback={<DialogLoadingFallback />}>
           <LazyWizardDialog open={isWizardOpen} onClose={handleCloseWizard} webApi={webApi} />
+        </React.Suspense>
+      )}
+
+      {/* Quick Summary Dashboard dialog — Coming Soon placeholder */}
+      {isDashboardOpen && (
+        <React.Suspense fallback={<DialogLoadingFallback />}>
+          <LazyQuickSummaryDashboardDialog
+            open={isDashboardOpen}
+            onClose={handleDashboardClose}
+          />
         </React.Suspense>
       )}
     </>

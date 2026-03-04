@@ -29,17 +29,11 @@ export interface IGetStartedExpandDialogProps {
 
 const useStyles = makeStyles({
   surface: {
-    maxWidth: "680px",
-  },
-  titleRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    maxWidth: "720px",
   },
   grid: {
-    display: "flex",
-    flexWrap: "wrap",
+    display: "grid",
+    gridTemplateColumns: "repeat(4, 1fr)",
     gap: tokens.spacingHorizontalL,
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalM,
@@ -74,11 +68,11 @@ export const GetStartedExpandDialog: React.FC<IGetStartedExpandDialogProps> = ({
             />
           }
         >
-          Get Started
+          Playbook Library
         </DialogTitle>
 
         <DialogBody>
-          <div className={styles.grid} role="group" aria-label="All quick actions">
+          <div className={styles.grid} role="group" aria-label="Playbook Library">
             {ACTION_CARD_CONFIGS.map((config: IActionCardConfig) => (
               <ActionCard
                 key={config.id}
