@@ -117,6 +117,9 @@ const SPRK_CHAT_ICON =
 /** Log prefix for console output */
 const LOG_PREFIX = "[Spaarke.SprkChat]";
 
+/** Whether auto-init has already run (prevent duplicate registration) */
+let _autoInitDone = false;
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -362,17 +365,81 @@ async function openSprkChatPane(
 }
 
 // ============================================================================
+// Auto-Init: Register pane in side pane launcher on script load
+// ============================================================================
+
+/**
+ * Auto-register SprkChat in the side pane launcher so the icon is always
+ * visible (like Microsoft Copilot). The pane starts collapsed — user clicks
+ * the icon to expand it.
+ *
+ * Called automatically when the ribbon evaluates enable rules (script load).
+ * Uses a guard flag to prevent duplicate registration.
+ */
+async function autoInitSidePane(): Promise<void> {
+    if (_autoInitDone) return;
+    _autoInitDone = true;
+
+    const sidePanes = getSidePanesApi();
+    if (!sidePanes) {
+        console.log(LOG_PREFIX, "autoInit: sidePanes API not available yet, will retry on enable");
+        _autoInitDone = false; // Allow retry
+        return;
+    }
+
+    // Check if pane already exists (e.g., from a previous navigation)
+    const existing = sidePanes.getPane(SPRK_CHAT_PANE_ID);
+    if (existing) {
+        console.log(LOG_PREFIX, "autoInit: pane already registered");
+        return;
+    }
+
+    try {
+        console.log(LOG_PREFIX, "autoInit: registering SprkChat in side pane launcher");
+
+        const pane = await sidePanes.createPane({
+            paneId: SPRK_CHAT_PANE_ID,
+            title: SPRK_CHAT_PANE_TITLE,
+            imageSrc: SPRK_CHAT_ICON,
+            canClose: true,
+            width: SPRK_CHAT_PANE_WIDTH,
+            isSelected: false, // Start collapsed — icon visible in launcher bar
+        });
+
+        // Navigate to the Code Page (no record context yet — will update on openPane)
+        await pane.navigate({
+            pageType: "webresource",
+            webresourceName: SPRK_CHAT_WEB_RESOURCE,
+            data: "",
+        });
+
+        console.log(LOG_PREFIX, "autoInit: SprkChat registered in side pane launcher");
+    } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.warn(LOG_PREFIX, "autoInit: could not register pane:", msg);
+        _autoInitDone = false; // Allow retry
+    }
+}
+
+// ============================================================================
 // Enable / Visibility Rules (for ribbon configuration)
 // ============================================================================
 
 /**
  * Enable rule: SprkChat button is enabled when sidePanes API is available.
- * Ribbon configuration should reference this as an EnableRule.
+ * Also triggers auto-registration of the side pane on first call.
  *
  * @returns true if button should be enabled
  */
 function enableSprkChatPane(): boolean {
-    return getSidePanesApi() !== null;
+    const available = getSidePanesApi() !== null;
+
+    // Trigger auto-init on first enable check (script load)
+    if (available && !_autoInitDone) {
+        autoInitSidePane();
+    }
+
+    return available;
 }
 
 /**
@@ -406,6 +473,7 @@ _window.Spaarke.SprkChat = _window.Spaarke.SprkChat || {};
 _window.Spaarke.SprkChat.openPane = openSprkChatPane;
 _window.Spaarke.SprkChat.enable = enableSprkChatPane;
 _window.Spaarke.SprkChat.show = showSprkChatPane;
+_window.Spaarke.SprkChat.autoInit = autoInitSidePane;
 
 // Also export for module-based consumption (if imported by other TypeScript)
-export { openSprkChatPane, enableSprkChatPane, showSprkChatPane };
+export { openSprkChatPane, enableSprkChatPane, showSprkChatPane, autoInitSidePane };

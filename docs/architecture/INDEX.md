@@ -32,6 +32,12 @@ This directory contains comprehensive architecture documentation covering system
 ### UI Components
 
 - [universal-dataset-grid-architecture.md](universal-dataset-grid-architecture.md) - Universal DataGrid for PCF and Custom Pages with OOB parity
+- **[SIDE-PANE-PLATFORM-ARCHITECTURE.md](SIDE-PANE-PLATFORM-ARCHITECTURE.md)** - Always-available side panes (like Copilot): SidePaneManager, context detection, cross-pane communication, auth patterns
+
+### AI
+
+- [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md) - Four-tier AI framework: Scope Library, Composition, Runtime, Infrastructure
+- [SPAARKE-AI-STRATEGY.md](SPAARKE-AI-STRATEGY.md) - AI strategy and adoption analysis
 
 ### Platform Components
 
@@ -53,7 +59,8 @@ This directory contains comprehensive architecture documentation covering system
 - Working with SDAP → Load sdap-*.md files
 - Workspace integration → Load sdap-workspace-integration-patterns.md
 - Creating new resources → Load AZURE-RESOURCE-NAMING-CONVENTION.md
-- Understanding AI features → Load SPAARKE-AI-STRATEGY.md
+- Understanding AI features → Load SPAARKE-AI-STRATEGY.md, AI-ARCHITECTURE.md
+- Side panes, context awareness, cross-pane communication → Load SIDE-PANE-PLATFORM-ARCHITECTURE.md
 
 ## Phase 3 TODO
 
