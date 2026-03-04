@@ -32,3 +32,18 @@ export type {
   IGridFeatures,
   GridConfigViewType,
 } from "./ConfigurationService";
+export { SprkChatBridge } from "./SprkChatBridge";
+export type {
+  SprkChatBridgeEventMap,
+  SprkChatBridgeEventName,
+  SprkChatBridgeHandler,
+  SprkChatBridgeOptions,
+  SprkChatBridgeUnsubscribe,
+  DocumentStreamStartPayload,
+  DocumentStreamTokenPayload,
+  DocumentStreamEndPayload,
+  DocumentReplacedPayload,
+  ReAnalysisProgressPayload,
+  SelectionChangedPayload,
+  ContextChangedPayload,
+} from "./SprkChatBridge";

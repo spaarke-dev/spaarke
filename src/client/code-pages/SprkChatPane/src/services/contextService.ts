@@ -98,15 +98,18 @@ export type ContextChangeCallback = (
  * "out-of-the-box" mapping; they can be overridden at runtime.
  */
 const DEFAULT_PLAYBOOK_MAP: Record<string, string> = {
-    sprk_matter: "legal-analysis",
-    sprk_project: "project-analysis",
-    sprk_invoice: "financial-review",
+    // All entity types currently use SprkChat Document Assistant playbook.
+    // Add entity-specific playbook GUIDs here as they are created in Dataverse.
+    sprk_matter: "5ece14f7-8a17-f111-8343-7ced8d1dc988",
+    sprk_project: "5ece14f7-8a17-f111-8343-7ced8d1dc988",
+    sprk_invoice: "5ece14f7-8a17-f111-8343-7ced8d1dc988",
 };
 
 /**
  * Fallback playbook when no entity-specific mapping exists.
+ * Uses the SprkChat Document Assistant playbook GUID from Dataverse.
  */
-const FALLBACK_PLAYBOOK_ID = "general-assistant";
+const FALLBACK_PLAYBOOK_ID = "5ece14f7-8a17-f111-8343-7ced8d1dc988";
 
 /**
  * Runtime playbook mapping. Initialized from DEFAULT_PLAYBOOK_MAP and
