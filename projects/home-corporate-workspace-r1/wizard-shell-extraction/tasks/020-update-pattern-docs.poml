@@ -1,0 +1,36 @@
+<task id="020" project="wizard-shell-extraction">
+  <metadata>
+    <title>Update custom dialogs pattern documentation</title>
+    <phase>3</phase>
+    <tags>docs, patterns</tags>
+    <estimate>30m</estimate>
+    <dependencies>004</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Update .claude/patterns/webresource/custom-dialogs-in-dataverse.md with the WizardShell pattern.</goal>
+    <context>
+      Add a section documenting WizardShell as a reusable multi-step dialog pattern.
+      Include: API overview, step config example, dynamic step example, success screen example.
+      Reference the Wizard/ folder and key files.
+    </context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/webresource/custom-dialogs-in-dataverse.md</file>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/wizardShellTypes.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read existing custom-dialogs-in-dataverse.md</step>
+    <step>Add "Multi-Step Wizard Dialogs" section with WizardShell pattern</step>
+    <step>Include code examples: basic usage, step config, dynamic steps, onFinish with success config</step>
+  </steps>
+
+  <outputs>
+    <file>.claude/patterns/webresource/custom-dialogs-in-dataverse.md</file>
+  </outputs>
+</task>

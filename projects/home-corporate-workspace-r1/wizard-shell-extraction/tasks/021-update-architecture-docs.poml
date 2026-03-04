@@ -1,0 +1,35 @@
+<task id="021" project="wizard-shell-extraction">
+  <metadata>
+    <title>Update SPAARKE-UX-MANAGEMENT architecture docs</title>
+    <phase>3</phase>
+    <tags>docs, architecture</tags>
+    <estimate>30m</estimate>
+    <dependencies>004</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Update docs/architecture/SPAARKE-UX-MANAGEMENT.md with WizardShell in the component inventory.</goal>
+    <context>
+      Add WizardShell to the UI component inventory documenting: purpose, location, API summary,
+      reuse pattern for new wizards, relationship to Playbook Library.
+    </context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/SPAARKE-UX-MANAGEMENT.md</file>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/wizardShellTypes.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read existing SPAARKE-UX-MANAGEMENT.md</step>
+    <step>Add WizardShell to the component inventory section</step>
+    <step>Document: purpose, file location, props summary, how to create a new wizard consumer</step>
+  </steps>
+
+  <outputs>
+    <file>docs/architecture/SPAARKE-UX-MANAGEMENT.md</file>
+  </outputs>
+</task>

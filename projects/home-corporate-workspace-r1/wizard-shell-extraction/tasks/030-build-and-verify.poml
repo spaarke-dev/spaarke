@@ -1,0 +1,32 @@
+<task id="030" project="wizard-shell-extraction">
+  <metadata>
+    <title>Build and functional verification</title>
+    <phase>4</phase>
+    <tags>build, verification</tags>
+    <estimate>30m</estimate>
+    <dependencies>010, 011, 012, 020, 021</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Build the LegalWorkspace solution and verify the Create New Matter wizard works identically.</goal>
+  </prompt>
+
+  <steps>
+    <step>Run npm run build in src/solutions/LegalWorkspace — verify zero errors</step>
+    <step>Verify corporateworkspace.html is produced</step>
+    <step>Deploy and test: Create New Matter opens from workspace cards</step>
+    <step>Test: Create New Matter opens from Playbook Library dialog</step>
+    <step>Test: All 3 base steps (file upload, form, next steps)</step>
+    <step>Test: Dynamic follow-on steps inject/remove correctly</step>
+    <step>Test: Finish flow — spinner, success screen, View Matter button</step>
+    <step>Test: Error handling — blocked Next, error bar</step>
+    <step>Test: Cancel/X closes dialog, Back navigates correctly</step>
+    <step>Test: Dark mode renders correctly</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Build succeeds with zero TypeScript errors</criterion>
+    <criterion>Create New Matter wizard functionally identical to pre-refactor</criterion>
+  </acceptance-criteria>
+</task>

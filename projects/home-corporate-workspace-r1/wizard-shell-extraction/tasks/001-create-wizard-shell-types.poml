@@ -1,0 +1,41 @@
+<task id="001" project="wizard-shell-extraction">
+  <metadata>
+    <title>Create WizardShell type definitions</title>
+    <phase>1</phase>
+    <tags>typescript, types, wizard</tags>
+    <estimate>1h</estimate>
+    <dependencies>none</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create the generic type definitions for the WizardShell component in a new Wizard/ folder.</goal>
+    <context>
+      Extracting generic wizard types from CreateMatter/wizardTypes.ts. The new file must have ZERO
+      domain imports — only React types and Fluent UI types.
+    </context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/wizardTypes.ts</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/WizardDialog.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create folder: src/solutions/LegalWorkspace/src/components/Wizard/</step>
+    <step>Create wizardShellTypes.ts with: WizardStepStatus, IWizardShellStep, WizardShellAction (navigation only), IWizardShellState, IWizardStepConfig (id, label, renderContent, canAdvance, isEarlyFinish, footerActions), IWizardShellHandle (addDynamicStep, removeDynamicStep, state), IWizardSuccessConfig (icon, title, body, actions, warnings), IWizardShellProps (open, title, steps, onClose, onFinish, finishingLabel, finishLabel, ariaLabel)</step>
+    <step>Verify no imports from CreateMatter/ or any domain code</step>
+  </steps>
+
+  <outputs>
+    <file>src/solutions/LegalWorkspace/src/components/Wizard/wizardShellTypes.ts</file>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>File compiles with zero TypeScript errors</criterion>
+    <criterion>No domain-specific imports (only React types)</criterion>
+    <criterion>All interfaces documented with JSDoc</criterion>
+  </acceptance-criteria>
+</task>
