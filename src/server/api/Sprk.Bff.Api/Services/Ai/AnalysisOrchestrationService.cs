@@ -14,11 +14,10 @@ using Sprk.Bff.Api.Services.Ai.Export;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Telemetry;
-
+using AiExtractedEntities = Sprk.Bff.Api.Models.Ai.ExtractedEntities;
 // Explicit aliases to resolve ambiguity with types in the same namespace (Sprk.Bff.Api.Services.Ai).
 // AppOnlyAnalysisService defines DocumentAnalysisResult; AnalysisEndpoints defines ExtractedEntities.
 using AnalysisDocumentResult = Sprk.Bff.Api.Models.Ai.DocumentAnalysisResult;
-using AiExtractedEntities = Sprk.Bff.Api.Models.Ai.ExtractedEntities;
 
 namespace Sprk.Bff.Api.Services.Ai;
 

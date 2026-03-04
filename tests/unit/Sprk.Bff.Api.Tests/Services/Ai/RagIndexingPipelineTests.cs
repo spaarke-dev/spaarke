@@ -10,10 +10,9 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Xunit;
-
+using AzureIndexingResult = Azure.Search.Documents.Models.IndexingResult;
 // Alias to distinguish our IndexingResult from Azure SDK's Azure.Search.Documents.Models.IndexingResult
 using PipelineIndexingResult = Sprk.Bff.Api.Models.Ai.IndexingResult;
-using AzureIndexingResult = Azure.Search.Documents.Models.IndexingResult;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai;
 

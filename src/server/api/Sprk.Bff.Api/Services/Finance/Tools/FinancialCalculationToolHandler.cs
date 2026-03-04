@@ -1,10 +1,10 @@
+using System.Text.Json;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Telemetry;
-using System.Text.Json;
 
 namespace Sprk.Bff.Api.Services.Finance.Tools;
 

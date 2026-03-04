@@ -1,3 +1,4 @@
+using System.Net;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
@@ -10,7 +11,6 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
-using System.Net;
 using Xunit;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
@@ -105,18 +105,18 @@ public class DataverseRecordCreationTests
         CommunicationType communicationType = CommunicationType.Email,
         CommunicationAssociation[]? associations = null,
         string? correlationId = "test-corr-001") => new()
-    {
-        To = to ?? new[] { "recipient@example.com" },
-        Cc = cc,
-        Bcc = bcc,
-        Subject = subject,
-        Body = body,
-        BodyFormat = bodyFormat,
-        FromMailbox = fromMailbox,
-        CommunicationType = communicationType,
-        Associations = associations,
-        CorrelationId = correlationId
-    };
+        {
+            To = to ?? new[] { "recipient@example.com" },
+            Cc = cc,
+            Bcc = bcc,
+            Subject = subject,
+            Body = body,
+            BodyFormat = bodyFormat,
+            FromMailbox = fromMailbox,
+            CommunicationType = communicationType,
+            Associations = associations,
+            CorrelationId = correlationId
+        };
 
     private static GraphServiceClient CreateMockGraphClient(
         HttpStatusCode responseCode = HttpStatusCode.Accepted)

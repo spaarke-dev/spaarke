@@ -5,10 +5,9 @@ using Azure.Search.Documents.Models;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
-
+using AzureIndexingResult = Azure.Search.Documents.Models.IndexingResult;
 // Disambiguate between our pipeline result type and the Azure SDK indexing result type.
 using PipelineIndexingResult = Sprk.Bff.Api.Models.Ai.IndexingResult;
-using AzureIndexingResult = Azure.Search.Documents.Models.IndexingResult;
 
 namespace Sprk.Bff.Api.Services.Ai;
 

@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
@@ -9,8 +11,6 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
-using System.Net;
-using System.Text;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Communication;
@@ -77,14 +77,14 @@ public class AttachmentValidationTests
 
     private static SendCommunicationRequest CreateValidRequest(
         string[]? attachmentDocumentIds = null) => new()
-    {
-        To = new[] { "recipient@example.com" },
-        Subject = "Test Subject",
-        Body = "<p>Test body</p>",
-        BodyFormat = BodyFormat.HTML,
-        CommunicationType = CommunicationType.Email,
-        AttachmentDocumentIds = attachmentDocumentIds
-    };
+        {
+            To = new[] { "recipient@example.com" },
+            Subject = "Test Subject",
+            Body = "<p>Test body</p>",
+            BodyFormat = BodyFormat.HTML,
+            CommunicationType = CommunicationType.Email,
+            AttachmentDocumentIds = attachmentDocumentIds
+        };
 
     private static GraphServiceClient CreateMockGraphClient(
         HttpStatusCode responseCode = HttpStatusCode.Accepted)

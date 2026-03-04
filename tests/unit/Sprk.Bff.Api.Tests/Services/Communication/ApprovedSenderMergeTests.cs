@@ -65,11 +65,11 @@ public class ApprovedSenderMergeTests
         string email,
         string displayName = "Test Sender",
         bool isDefault = false) => new()
-    {
-        Email = email,
-        DisplayName = displayName,
-        IsDefault = isDefault
-    };
+        {
+            Email = email,
+            DisplayName = displayName,
+            IsDefault = isDefault
+        };
 
     private static DataverseEntity CreateCommunicationAccountEntity(
         string email,

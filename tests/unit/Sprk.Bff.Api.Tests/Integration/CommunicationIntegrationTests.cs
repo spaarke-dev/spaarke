@@ -1,3 +1,6 @@
+using System.Net;
+using System.Security.Claims;
+using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
@@ -16,9 +19,6 @@ using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
-using System.Net;
-using System.Security.Claims;
-using System.Text;
 using Xunit;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
@@ -113,16 +113,16 @@ public class CommunicationIntegrationTests
         string? fromMailbox = null,
         string? correlationId = null,
         CommunicationAssociation[]? associations = null) => new()
-    {
-        To = to ?? new[] { "recipient@example.com" },
-        Subject = subject,
-        Body = body,
-        BodyFormat = BodyFormat.HTML,
-        FromMailbox = fromMailbox,
-        CommunicationType = CommunicationType.Email,
-        CorrelationId = correlationId,
-        Associations = associations
-    };
+        {
+            To = to ?? new[] { "recipient@example.com" },
+            Subject = subject,
+            Body = body,
+            BodyFormat = BodyFormat.HTML,
+            FromMailbox = fromMailbox,
+            CommunicationType = CommunicationType.Email,
+            CorrelationId = correlationId,
+            Associations = associations
+        };
 
     /// <summary>
     /// Builds a fully-wired CommunicationService with the given mocks.

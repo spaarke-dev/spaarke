@@ -1,3 +1,6 @@
+using System.Net;
+using System.Security.Claims;
+using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
@@ -12,9 +15,6 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
-using System.Net;
-using System.Security.Claims;
-using System.Text;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Communication;
@@ -90,15 +90,15 @@ public class CommunicationServiceTests
         string body = "<p>Test body</p>",
         string? fromMailbox = null,
         string? correlationId = null) => new()
-    {
-        To = to ?? new[] { "recipient@example.com" },
-        Subject = subject,
-        Body = body,
-        BodyFormat = BodyFormat.HTML,
-        FromMailbox = fromMailbox,
-        CommunicationType = CommunicationType.Email,
-        CorrelationId = correlationId
-    };
+        {
+            To = to ?? new[] { "recipient@example.com" },
+            Subject = subject,
+            Body = body,
+            BodyFormat = BodyFormat.HTML,
+            FromMailbox = fromMailbox,
+            CommunicationType = CommunicationType.Email,
+            CorrelationId = correlationId
+        };
 
     private static GraphServiceClient CreateMockGraphClient(
         HttpStatusCode responseCode = HttpStatusCode.Accepted)

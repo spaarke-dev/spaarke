@@ -412,7 +412,7 @@ public sealed class PromptSchemaRenderer
                 }
                 break;
 
-            // boolean and other types: no additional constraints beyond description/enum
+                // boolean and other types: no additional constraints beyond description/enum
         }
 
         return prop;
