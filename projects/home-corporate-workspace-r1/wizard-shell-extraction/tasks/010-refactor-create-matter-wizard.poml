@@ -1,0 +1,65 @@
+<task id="010" project="wizard-shell-extraction">
+  <metadata>
+    <title>Refactor CreateMatter WizardDialog to use WizardShell</title>
+    <phase>2</phase>
+    <tags>react, refactor, wizard</tags>
+    <estimate>3h</estimate>
+    <dependencies>004, 005</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Refactor CreateMatter/WizardDialog.tsx from ~885 lines to ~280 lines by consuming WizardShell.</goal>
+    <context>
+      This is the critical refactoring task. The WizardDialog component must:
+      1. Remove all shell logic (Dialog, styles, reducer navigation, stepper, footer chrome)
+      2. Keep all domain state (files, form values, contacts, email, SPE container)
+      3. Keep all domain effects (SPE lookup, dynamic step sync, email pre-fill)
+      4. Build IWizardStepConfig[] with renderContent closures for each step
+      5. Build handleFinish that returns IWizardSuccessConfig
+      6. Use shellRef for dynamic step add/remove from useEffect
+
+      The domain file upload reducer (ADD_FILES, REMOVE_FILE, etc.) stays as a separate
+      useReducer in this component — only navigation state moved to WizardShell.
+
+      The 3 base steps (add-files, create-record, next-steps) are defined in stepConfigs.
+      Follow-on steps (assign-counsel, draft-summary, send-email) are added dynamically
+      via shellRef.current.addDynamicStep() from the selectedActions useEffect.
+    </context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/WizardDialog.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/wizardTypes.ts</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/SuccessConfirmation.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/WizardShell.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/wizardShellTypes.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read current WizardDialog.tsx thoroughly — identify all domain state, effects, and step rendering</step>
+    <step>Create domain-only file upload reducer (ADD_FILES, REMOVE_FILE, SET_VALIDATION_ERRORS, CLEAR_VALIDATION_ERRORS)</step>
+    <step>Build stepConfigs array with renderContent closures for add-files, create-record, next-steps</step>
+    <step>Build handleFinish that calls MatterService.createMatter and returns IWizardSuccessConfig</step>
+    <step>Convert dynamic step sync useEffect to use shellRef.current.addDynamicStep/removeDynamicStep</step>
+    <step>Remove all shell imports (Dialog, DialogSurface, WizardStepper, etc.) — replaced by WizardShell</step>
+    <step>Remove all shell styles — they live in WizardShell now</step>
+    <step>Render only: &lt;WizardShell ref={shellRef} steps={stepConfigs} onFinish={handleFinish} ... /&gt;</step>
+    <step>Verify the default export still works for React.lazy() in WorkspaceGrid</step>
+  </steps>
+
+  <outputs>
+    <file>src/solutions/LegalWorkspace/src/components/CreateMatter/WizardDialog.tsx</file>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>WizardDialog.tsx reduced from ~885 to ~280 lines</criterion>
+    <criterion>No shell logic remains (Dialog, styles, reducer navigation, stepper, footer)</criterion>
+    <criterion>All domain state and effects preserved</criterion>
+    <criterion>Dynamic follow-on steps work via shellRef</criterion>
+    <criterion>Default export maintained for React.lazy() compatibility</criterion>
+    <criterion>npm run build succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

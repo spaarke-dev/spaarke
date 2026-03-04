@@ -1,0 +1,42 @@
+<task id="003" project="wizard-shell-extraction">
+  <metadata>
+    <title>Create WizardSuccessScreen component</title>
+    <phase>1</phase>
+    <tags>react, fluent-ui, wizard</tags>
+    <estimate>30m</estimate>
+    <dependencies>001</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create a generic success screen component that replaces the domain-specific SuccessConfirmation.tsx.</goal>
+    <context>
+      The success screen renders: icon, title, body (ReactNode), action buttons, and optional warnings.
+      All content is provided via IWizardSuccessConfig — the component has zero domain knowledge.
+      Follow the layout pattern from CreateMatter/SuccessConfirmation.tsx but make it fully generic.
+    </context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/SuccessConfirmation.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/wizardShellTypes.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create WizardSuccessScreen.tsx — accepts IWizardSuccessConfig prop</step>
+    <step>Render centered layout: icon, title (Text size 600), body (ReactNode), actions row, optional warnings (MessageBar intent="warning")</step>
+    <step>Use Fluent v9 semantic tokens only — zero hardcoded colors</step>
+  </steps>
+
+  <outputs>
+    <file>src/solutions/LegalWorkspace/src/components/Wizard/WizardSuccessScreen.tsx</file>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No domain-specific imports</criterion>
+    <criterion>Renders icon, title, body, actions, warnings from config</criterion>
+    <criterion>Dark mode compatible via semantic tokens</criterion>
+  </acceptance-criteria>
+</task>

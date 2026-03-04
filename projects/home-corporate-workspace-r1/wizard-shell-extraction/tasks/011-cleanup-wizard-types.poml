@@ -1,0 +1,25 @@
+<task id="011" project="wizard-shell-extraction">
+  <metadata>
+    <title>Clean up CreateMatter wizardTypes.ts</title>
+    <phase>2</phase>
+    <tags>typescript, cleanup</tags>
+    <estimate>15m</estimate>
+    <dependencies>010</dependencies>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Remove generic types from CreateMatter/wizardTypes.ts that were migrated to Wizard/wizardShellTypes.ts.</goal>
+  </prompt>
+
+  <steps>
+    <step>Remove WizardStepStatus, IWizardStep, navigation WizardAction cases from wizardTypes.ts</step>
+    <step>Remove IWizardState.currentStepIndex and .steps fields (navigation state now in shell)</step>
+    <step>Keep domain types: AcceptedMimeType, UploadedFileType, IUploadedFile, IFileValidationError, IWizardDialogProps, IFileUploadZoneProps, IUploadedFileListProps</step>
+    <step>Update any imports in CreateMatter/ files that referenced the removed types</step>
+  </steps>
+
+  <outputs>
+    <file>src/solutions/LegalWorkspace/src/components/CreateMatter/wizardTypes.ts</file>
+  </outputs>
+</task>

@@ -1,0 +1,62 @@
+<task id="004" project="wizard-shell-extraction">
+  <metadata>
+    <title>Create WizardShell component</title>
+    <phase>1</phase>
+    <tags>react, fluent-ui, wizard, dialog</tags>
+    <estimate>2h</estimate>
+    <dependencies>001, 002, 003</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create the reusable WizardShell component — the main extraction target.</goal>
+    <context>
+      WizardShell is a React.forwardRef component that renders: Fluent v9 Dialog (1100px surface),
+      custom title bar with close button, left sidebar (WizardStepper), right content area (step
+      renderContent), and footer (Cancel/Back/Next/Finish). It owns the navigation reducer, error
+      state, finishing spinner, and success screen.
+
+      The consumer provides IWizardStepConfig[] and an onFinish async handler. Dynamic steps are
+      managed via IWizardShellHandle exposed through useImperativeHandle.
+
+      Extract styles from CreateMatter/WizardDialog.tsx: surface, body, titleBar, mainArea,
+      contentArea, footer, footerLeft, footerRight, progressRow.
+    </context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/WizardDialog.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/WizardStepper.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/wizardShellTypes.ts</file>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/wizardShellReducer.ts</file>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/WizardSuccessScreen.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create WizardShell.tsx as React.forwardRef with IWizardShellHandle</step>
+    <step>Copy layout styles from WizardDialog.tsx (surface, body, titleBar, mainArea, contentArea, footer)</step>
+    <step>Wire useReducer with wizardShellReducer + buildInitialShellState</step>
+    <step>Implement useImperativeHandle exposing addDynamicStep, removeDynamicStep, state</step>
+    <step>Maintain configMap ref for step configs (base steps from props + dynamic steps from handle)</step>
+    <step>Implement canAdvance/isEarlyFinish evaluation from current step config</step>
+    <step>Implement handleFinish: set isFinishing, call onFinish, handle success config or error</step>
+    <step>Render: Dialog + titleBar + WizardStepper + content (renderContent or WizardSuccessScreen) + footer</step>
+    <step>Footer logic: Cancel, Back (hidden on step 0), Next/Finish (disabled when !canAdvance), finishing spinner</step>
+    <step>Reset state on open change (useEffect on open prop)</step>
+  </steps>
+
+  <outputs>
+    <file>src/solutions/LegalWorkspace/src/components/Wizard/WizardShell.tsx</file>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Component renders Dialog with sidebar + content + footer</criterion>
+    <criterion>Step navigation works (Next/Back/dynamic add/remove)</criterion>
+    <criterion>onFinish async flow: spinner → success screen or error bar</criterion>
+    <criterion>Handle exposed via ref for dynamic step operations</criterion>
+    <criterion>Zero domain-specific code — fully reusable</criterion>
+    <criterion>Dark mode compatible via semantic tokens</criterion>
+  </acceptance-criteria>
+</task>

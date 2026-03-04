@@ -1,20 +1,14 @@
 /**
  * WizardDialog.tsx
- * Multi-step wizard dialog shell for "Create New Matter".
+ * Multi-step wizard dialog for "Create New Matter".
  *
- * Layout:
- *   ┌────────────────────────────────────────────────┐
- *   │ [Sidebar ~200px │ Content area (flex: 1)]       │
- *   │  WizardStepper  │  Step 1: FileUploadZone +     │
- *   │                 │          UploadedFileList      │
- *   ├─────────────────┴──────────────────────────────┤
- *   │ [Cancel]              [Back (hidden on step 1)] │
- *   │                                     [Next]      │
- *   └────────────────────────────────────────────────┘
- *
- * Wizard state is managed by useReducer (wizardReducer).
- * Dialog is ~800px wide. Fluent v9 Dialog + semantic tokens throughout.
- * Zero hardcoded colors.
+ * Refactored to delegate all shell concerns (Dialog, navigation state,
+ * sidebar stepper, footer buttons, finish flow, success screen) to the
+ * generic WizardShell component. This file retains only:
+ *   - Domain state (files, form values, follow-on selections, email fields)
+ *   - Step configuration (canAdvance, isEarlyFinish, renderContent)
+ *   - Dynamic step sync (via shellRef imperative handle)
+ *   - handleFinish: calls MatterService and returns IWizardSuccessConfig
  *
  * Steps:
  *   0 — Add file(s)       (FileUploadZone + UploadedFileList)
@@ -22,34 +16,26 @@
  *   2 — Next Steps        (NextStepsStep — checkbox card selection)
  *   3+ — Follow-on steps  (AssignCounselStep, DraftSummaryStep, SendEmailStep)
  *        Injected dynamically based on card selections in Step 2.
- *
- * After all steps complete, SuccessConfirmation replaces the step content.
  */
 import * as React from 'react';
 import {
-  Dialog,
-  DialogSurface,
-  DialogBody,
-  DialogContent,
-  DialogActions,
   Button,
   MessageBar,
   MessageBarBody,
   Text,
-  Spinner,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { Dismiss24Regular } from '@fluentui/react-icons';
-import {
-  IWizardDialogProps,
-  IWizardState,
-  WizardAction,
-  IWizardStep,
-  IUploadedFile,
-  IFileValidationError,
-} from './wizardTypes';
-import { WizardStepper } from './WizardStepper';
+import { CheckmarkCircleFilled } from '@fluentui/react-icons';
+
+import { WizardShell } from '../Wizard/WizardShell';
+import type {
+  IWizardShellHandle,
+  IWizardStepConfig,
+  IWizardSuccessConfig,
+} from '../Wizard/wizardShellTypes';
+
+import type { IWizardDialogProps, IUploadedFile, IFileValidationError } from './wizardTypes';
 import { FileUploadZone } from './FileUploadZone';
 import { UploadedFileList } from './UploadedFileList';
 import { CreateRecordStep } from './CreateRecordStep';
@@ -66,12 +52,12 @@ import {
   buildDefaultEmailSubject,
   buildDefaultEmailBody,
 } from './SendEmailStep';
-import { SuccessConfirmation } from './SuccessConfirmation';
 import { MatterService, IFollowOnActions } from './matterService';
 import type { ICreateMatterFormState } from './formTypes';
 import type { IContact } from '../../types/entities';
 import type { IWebApi } from '../../types/xrm';
 import { getSpeContainerIdFromBusinessUnit } from '../../services/xrmProvider';
+import { navigateToEntity } from '../../utils/navigation';
 
 // ---------------------------------------------------------------------------
 // Extended props interface (exported — used by App to pass webApi)
@@ -88,180 +74,23 @@ export interface IWizardDialogPropsInternal extends IWizardDialogProps {
 }
 
 // ---------------------------------------------------------------------------
-// Styles
+// Domain file reducer (file uploads only — navigation is in WizardShell)
 // ---------------------------------------------------------------------------
 
-const useStyles = makeStyles({
-  // Override DialogSurface — landscape orientation, resizable
-  surface: {
-    width: '1100px',
-    maxWidth: '95vw',
-    maxHeight: '80vh',
-    padding: '0px',
-    resize: 'both',
-    overflow: 'auto',
-    border: `1px solid ${tokens.colorNeutralStroke1}`,
-  },
-  // DialogBody: remove default padding so we control layout entirely
-  body: {
-    padding: '0px',
-    display: 'flex',
-    flexDirection: 'column',
-    height: '70vh',
-    overflow: 'hidden',
-  },
-  // Custom title bar (replaces DialogTitle default rendering)
-  titleBar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: tokens.spacingVerticalL,
-    paddingBottom: tokens.spacingVerticalL,
-    paddingLeft: tokens.spacingHorizontalXL,
-    paddingRight: tokens.spacingHorizontalL,
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: tokens.colorNeutralStroke2,
-    flexShrink: 0,
-  },
-  titleText: {
-    color: tokens.colorNeutralForeground1,
-  },
-  closeButton: {
-    color: tokens.colorNeutralForeground3,
-  },
-  // Main body: sidebar + content side by side
-  mainArea: {
-    display: 'flex',
-    flex: '1 1 auto',
-    overflow: 'hidden',
-  },
-  // Content area (right of sidebar)
-  contentArea: {
-    flex: '1 1 auto',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    overflowY: 'auto',
-    paddingTop: tokens.spacingVerticalXL,
-    paddingBottom: tokens.spacingVerticalL,
-    paddingLeft: tokens.spacingHorizontalXL,
-    paddingRight: tokens.spacingHorizontalXL,
-  },
-  stepTitle: {
-    color: tokens.colorNeutralForeground1,
-    marginBottom: tokens.spacingVerticalXS,
-  },
-  stepSubtitle: {
-    color: tokens.colorNeutralForeground3,
-    marginBottom: tokens.spacingVerticalM,
-  },
-  // Validation error bar
-  errorBar: {
-    flexShrink: 0,
-  },
-  // Footer / dialog actions
-  footer: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalM,
-    paddingLeft: tokens.spacingHorizontalXL,
-    paddingRight: tokens.spacingHorizontalL,
-    borderTopWidth: '1px',
-    borderTopStyle: 'solid',
-    borderTopColor: tokens.colorNeutralStroke2,
-    backgroundColor: tokens.colorNeutralBackground1,
-    flexShrink: 0,
-  },
-  footerLeft: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalS,
-  },
-  footerRight: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalS,
-    alignItems: 'center',
-  },
-  // Progress indicator row
-  progressRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    color: tokens.colorNeutralForeground3,
-  },
-});
-
-// ---------------------------------------------------------------------------
-// Base wizard steps
-// ---------------------------------------------------------------------------
-
-const BASE_STEPS: IWizardStep[] = [
-  { id: 'add-files', label: 'Add file(s)', status: 'active' },
-  { id: 'create-record', label: 'Create record', status: 'pending' },
-  { id: 'next-steps', label: 'Next Steps', status: 'pending' },
-];
-
-/** Step IDs for the three base steps. */
-const BASE_STEP_IDS = new Set(['add-files', 'create-record', 'next-steps']);
-
-// ---------------------------------------------------------------------------
-// Initial reducer state
-// ---------------------------------------------------------------------------
-
-function buildInitialState(): IWizardState {
-  return {
-    currentStepIndex: 0,
-    steps: BASE_STEPS,
-    uploadedFiles: [],
-    validationErrors: [],
-  };
+interface IFileState {
+  uploadedFiles: IUploadedFile[];
+  validationErrors: IFileValidationError[];
 }
 
-// ---------------------------------------------------------------------------
-// Wizard reducer
-// ---------------------------------------------------------------------------
+type FileAction =
+  | { type: 'ADD_FILES'; files: IUploadedFile[] }
+  | { type: 'REMOVE_FILE'; fileId: string }
+  | { type: 'SET_VALIDATION_ERRORS'; errors: IFileValidationError[] }
+  | { type: 'CLEAR_VALIDATION_ERRORS' }
+  | { type: 'RESET' };
 
-function wizardReducer(state: IWizardState, action: WizardAction): IWizardState {
+function fileReducer(state: IFileState, action: FileAction): IFileState {
   switch (action.type) {
-    case 'NEXT_STEP': {
-      const nextIndex = Math.min(state.currentStepIndex + 1, state.steps.length - 1);
-      if (nextIndex === state.currentStepIndex) return state;
-
-      const updatedSteps: IWizardStep[] = state.steps.map((step, i) => {
-        if (i < nextIndex) return { ...step, status: 'completed' };
-        if (i === nextIndex) return { ...step, status: 'active' };
-        return { ...step, status: 'pending' };
-      });
-
-      return { ...state, currentStepIndex: nextIndex, steps: updatedSteps };
-    }
-
-    case 'PREV_STEP': {
-      const prevIndex = Math.max(state.currentStepIndex - 1, 0);
-      if (prevIndex === state.currentStepIndex) return state;
-
-      const updatedSteps: IWizardStep[] = state.steps.map((step, i) => {
-        if (i < prevIndex) return { ...step, status: 'completed' };
-        if (i === prevIndex) return { ...step, status: 'active' };
-        return { ...step, status: 'pending' };
-      });
-
-      return { ...state, currentStepIndex: prevIndex, steps: updatedSteps };
-    }
-
-    case 'GO_TO_STEP': {
-      const targetIndex = Math.max(0, Math.min(action.stepIndex, state.steps.length - 1));
-      const updatedSteps: IWizardStep[] = state.steps.map((step, i) => {
-        if (i < targetIndex) return { ...step, status: 'completed' };
-        if (i === targetIndex) return { ...step, status: 'active' };
-        return { ...step, status: 'pending' };
-      });
-
-      return { ...state, currentStepIndex: targetIndex, steps: updatedSteps };
-    }
-
     case 'ADD_FILES': {
       const existing = new Set(
         state.uploadedFiles.map((f) => `${f.name}::${f.sizeBytes}`)
@@ -275,117 +104,39 @@ function wizardReducer(state: IWizardState, action: WizardAction): IWizardState 
         validationErrors: [],
       };
     }
-
-    case 'REMOVE_FILE': {
+    case 'REMOVE_FILE':
       return {
         ...state,
         uploadedFiles: state.uploadedFiles.filter((f) => f.id !== action.fileId),
       };
-    }
-
-    case 'SET_VALIDATION_ERRORS': {
+    case 'SET_VALIDATION_ERRORS':
       return { ...state, validationErrors: action.errors };
-    }
-
-    case 'CLEAR_VALIDATION_ERRORS': {
+    case 'CLEAR_VALIDATION_ERRORS':
       return { ...state, validationErrors: [] };
-    }
-
-    case 'ADD_DYNAMIC_STEP': {
-      const alreadyExists = state.steps.some((s) => s.id === action.step.id);
-      if (alreadyExists) return state;
-
-      // Keep base steps at the front; insert dynamic steps in canonical order
-      const baseSteps = state.steps.filter((s) => BASE_STEP_IDS.has(s.id));
-      const dynamicSteps = state.steps.filter((s) => !BASE_STEP_IDS.has(s.id));
-
-      const canonicalOrder = [
-        'followon-assign-counsel',
-        'followon-draft-summary',
-        'followon-send-email',
-      ];
-      const merged = [...dynamicSteps, action.step].sort(
-        (a, b) => canonicalOrder.indexOf(a.id) - canonicalOrder.indexOf(b.id)
-      );
-
-      return { ...state, steps: [...baseSteps, ...merged] };
-    }
-
-    case 'REMOVE_DYNAMIC_STEP': {
-      const filtered = state.steps.filter((s) => s.id !== action.stepId);
-      if (filtered.length === state.steps.length) return state;
-
-      const clampedIndex = Math.min(state.currentStepIndex, filtered.length - 1);
-      return { ...state, steps: filtered, currentStepIndex: clampedIndex };
-    }
-
+    case 'RESET':
+      return { uploadedFiles: [], validationErrors: [] };
     default:
       return state;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Step 1 content
+// Styles (domain step content only — shell styles are in WizardShell)
 // ---------------------------------------------------------------------------
 
-interface IStep1ContentProps {
-  uploadedFiles: IUploadedFile[];
-  validationErrors: IFileValidationError[];
-  onFilesAccepted: (files: IUploadedFile[]) => void;
-  onValidationErrors: (errors: IFileValidationError[]) => void;
-  onRemoveFile: (fileId: string) => void;
-  onClearErrors: () => void;
-}
-
-const Step1Content: React.FC<IStep1ContentProps> = ({
-  uploadedFiles,
-  validationErrors,
-  onFilesAccepted,
-  onValidationErrors,
-  onRemoveFile,
-  onClearErrors,
-}) => {
-  const styles = useStyles();
-
-  return (
-    <>
-      <div>
-        <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
-          Add file(s)
-        </Text>
-        <Text size={200} className={styles.stepSubtitle}>
-          Upload documents for AI analysis. The AI will extract key information
-          to pre-fill the matter form.
-        </Text>
-      </div>
-
-      {validationErrors.length > 0 && (
-        <MessageBar
-          intent="error"
-          className={styles.errorBar}
-          onMouseEnter={onClearErrors}
-        >
-          <MessageBarBody>
-            {validationErrors.map((err, i) => (
-              <div key={i}>
-                <strong>{err.fileName}</strong>: {err.reason}
-              </div>
-            ))}
-          </MessageBarBody>
-        </MessageBar>
-      )}
-
-      <FileUploadZone
-        onFilesAccepted={onFilesAccepted}
-        onValidationErrors={onValidationErrors}
-      />
-
-      {uploadedFiles.length > 0 && (
-        <UploadedFileList files={uploadedFiles} onRemove={onRemoveFile} />
-      )}
-    </>
-  );
-};
+const useStyles = makeStyles({
+  stepTitle: {
+    color: tokens.colorNeutralForeground1,
+    marginBottom: tokens.spacingVerticalXS,
+  },
+  stepSubtitle: {
+    color: tokens.colorNeutralForeground3,
+    marginBottom: tokens.spacingVerticalM,
+  },
+  errorBar: {
+    flexShrink: 0,
+  },
+});
 
 // ---------------------------------------------------------------------------
 // Empty form state helper
@@ -405,6 +156,16 @@ const EMPTY_FORM_STATE: ICreateMatterFormState = {
 };
 
 // ---------------------------------------------------------------------------
+// Canonical order for dynamic follow-on steps
+// ---------------------------------------------------------------------------
+
+const FOLLOW_ON_CANONICAL_ORDER = [
+  'followon-assign-counsel',
+  'followon-draft-summary',
+  'followon-send-email',
+];
+
+// ---------------------------------------------------------------------------
 // WizardDialog (exported)
 // ---------------------------------------------------------------------------
 
@@ -414,33 +175,34 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
   webApi,
 }) => {
   const styles = useStyles();
+  const shellRef = React.useRef<IWizardShellHandle>(null);
 
-  const [state, dispatch] = React.useReducer(
-    wizardReducer,
-    undefined,
-    buildInitialState
-  );
+  // ── Domain file state ───────────────────────────────────────────────────
+  const [fileState, fileDispatch] = React.useReducer(fileReducer, {
+    uploadedFiles: [],
+    validationErrors: [],
+  });
 
-  // ── Step 2 state ─────────────────────────────────────────────────────────
+  // ── Step 2 state ────────────────────────────────────────────────────────
   const [step2Valid, setStep2Valid] = React.useState(false);
   const [step2FormValues, setStep2FormValues] = React.useState<ICreateMatterFormState>(EMPTY_FORM_STATE);
 
-  // ── Step 3: Next Steps selection ─────────────────────────────────────────
+  // ── Step 3: Next Steps selection ────────────────────────────────────────
   const [selectedActions, setSelectedActions] = React.useState<FollowOnActionId[]>([]);
 
-  // ── Assign Counsel state ──────────────────────────────────────────────────
+  // ── Assign Counsel state ────────────────────────────────────────────────
   const [selectedContact, setSelectedContact] = React.useState<IContact | null>(null);
 
-  // ── Draft Summary state ───────────────────────────────────────────────────
+  // ── Draft Summary state ─────────────────────────────────────────────────
   const [summaryText, setSummaryText] = React.useState('');
   const [recipientEmails, setRecipientEmails] = React.useState<string[]>([]);
 
-  // ── Send Email state ──────────────────────────────────────────────────────
+  // ── Send Email state ────────────────────────────────────────────────────
   const [emailTo, setEmailTo] = React.useState('');
   const [emailSubject, setEmailSubject] = React.useState('');
   const [emailBody, setEmailBody] = React.useState('');
 
-  // ── SPE container ID (resolved from user's Business Unit) ────────────────
+  // ── SPE container ID (resolved from user's Business Unit) ───────────────
   const [speContainerId, setSpeContainerId] = React.useState('');
 
   React.useEffect(() => {
@@ -451,19 +213,10 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
     }
   }, [open, webApi]);
 
-  // ── Creation flow state ──────────────────────────────────────────────────
-  const [isCreating, setIsCreating] = React.useState(false);
-  const [createError, setCreateError] = React.useState<string | null>(null);
-  const [successResult, setSuccessResult] = React.useState<{
-    matterId: string;
-    matterName: string;
-    warnings: string[];
-  } | null>(null);
-
-  // ── Reset on open ─────────────────────────────────────────────────────────
+  // ── Reset domain state on open ──────────────────────────────────────────
   React.useEffect(() => {
     if (open) {
-      dispatch({ type: 'GO_TO_STEP', stepIndex: 0 });
+      fileDispatch({ type: 'RESET' });
       setStep2Valid(false);
       setStep2FormValues(EMPTY_FORM_STATE);
       setSelectedActions([]);
@@ -473,13 +226,10 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
       setEmailTo('');
       setEmailSubject('');
       setEmailBody('');
-      setIsCreating(false);
-      setCreateError(null);
-      setSuccessResult(null);
     }
   }, [open]);
 
-  // ── Sync dynamic steps with selected action cards ─────────────────────────
+  // ── Sync dynamic steps with selected action cards (via shellRef) ────────
   const prevSelectedActionsRef = React.useRef<FollowOnActionId[]>([]);
 
   React.useEffect(() => {
@@ -489,29 +239,77 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
     // Add newly selected follow-on steps
     next.forEach((actionId) => {
       if (!prev.includes(actionId)) {
-        dispatch({
-          type: 'ADD_DYNAMIC_STEP',
-          step: {
-            id: FOLLOW_ON_STEP_ID_MAP[actionId],
-            label: FOLLOW_ON_STEP_LABEL_MAP[actionId],
-            status: 'pending',
+        const stepId = FOLLOW_ON_STEP_ID_MAP[actionId];
+        const stepLabel = FOLLOW_ON_STEP_LABEL_MAP[actionId];
+
+        const dynamicConfig: IWizardStepConfig = {
+          id: stepId,
+          label: stepLabel,
+          canAdvance: () => {
+            if (stepId === 'followon-assign-counsel') return selectedContact !== null;
+            if (stepId === 'followon-send-email') {
+              return emailTo.trim() !== '' && emailSubject.trim() !== '' && emailBody.trim() !== '';
+            }
+            return true; // draft-summary has no hard requirement
           },
-        });
+          renderContent: () => {
+            if (stepId === 'followon-assign-counsel') {
+              if (!webApi) {
+                return (
+                  <Text size={300} style={{ color: tokens.colorNeutralForeground3 }}>
+                    Dataverse connection not available.
+                  </Text>
+                );
+              }
+              return (
+                <AssignCounselStep
+                  webApi={webApi}
+                  selectedContact={selectedContact}
+                  onContactChange={setSelectedContact}
+                />
+              );
+            }
+            if (stepId === 'followon-draft-summary') {
+              return (
+                <DraftSummaryStep
+                  formValues={step2FormValues}
+                  summaryText={summaryText}
+                  onSummaryChange={setSummaryText}
+                  recipientEmails={recipientEmails}
+                  onRecipientsChange={setRecipientEmails}
+                />
+              );
+            }
+            if (stepId === 'followon-send-email') {
+              return (
+                <SendEmailStep
+                  formValues={step2FormValues}
+                  emailTo={emailTo}
+                  onEmailToChange={setEmailTo}
+                  emailSubject={emailSubject}
+                  onEmailSubjectChange={setEmailSubject}
+                  emailBody={emailBody}
+                  onEmailBodyChange={setEmailBody}
+                />
+              );
+            }
+            return <Text size={300}>{stepLabel}</Text>;
+          },
+        };
+
+        shellRef.current?.addDynamicStep(dynamicConfig, FOLLOW_ON_CANONICAL_ORDER);
       }
     });
 
     // Remove deselected follow-on steps
     prev.forEach((actionId) => {
       if (!next.includes(actionId)) {
-        dispatch({
-          type: 'REMOVE_DYNAMIC_STEP',
-          stepId: FOLLOW_ON_STEP_ID_MAP[actionId],
-        });
+        shellRef.current?.removeDynamicStep(FOLLOW_ON_STEP_ID_MAP[actionId]);
       }
     });
 
     prevSelectedActionsRef.current = next;
-  }, [selectedActions]);
+  }, [selectedActions, selectedContact, webApi, step2FormValues, summaryText, recipientEmails, emailTo, emailSubject, emailBody]);
 
   // ── Pre-fill email fields when send-email is selected ────────────────────
   React.useEffect(() => {
@@ -525,47 +323,34 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
     }
   }, [selectedActions, step2FormValues, emailSubject]);
 
-  // ── Event handlers ────────────────────────────────────────────────────────
-
+  // ── File handler callbacks ──────────────────────────────────────────────
   const handleFilesAccepted = React.useCallback(
-    (files: IUploadedFile[]) => dispatch({ type: 'ADD_FILES', files }),
+    (files: IUploadedFile[]) => fileDispatch({ type: 'ADD_FILES', files }),
     []
   );
 
   const handleValidationErrors = React.useCallback(
     (errors: IFileValidationError[]) =>
-      dispatch({ type: 'SET_VALIDATION_ERRORS', errors }),
+      fileDispatch({ type: 'SET_VALIDATION_ERRORS', errors }),
     []
   );
 
   const handleRemoveFile = React.useCallback(
-    (fileId: string) => dispatch({ type: 'REMOVE_FILE', fileId }),
+    (fileId: string) => fileDispatch({ type: 'REMOVE_FILE', fileId }),
     []
   );
 
   const handleClearErrors = React.useCallback(
-    () => dispatch({ type: 'CLEAR_VALIDATION_ERRORS' }),
+    () => fileDispatch({ type: 'CLEAR_VALIDATION_ERRORS' }),
     []
   );
 
-  const handleNext = React.useCallback(() => {
-    dispatch({ type: 'NEXT_STEP' });
-  }, []);
+  // ── Finish handler (returns IWizardSuccessConfig) ───────────────────────
 
-  const handleBack = React.useCallback(() => {
-    dispatch({ type: 'PREV_STEP' });
-  }, []);
-
-  // ── Finish handler ────────────────────────────────────────────────────────
-
-  const handleFinish = React.useCallback(async () => {
+  const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig> => {
     if (!webApi) {
-      setCreateError('Dataverse connection not available. Please close and retry.');
-      return;
+      throw new Error('Dataverse connection not available. Please close and retry.');
     }
-
-    setIsCreating(true);
-    setCreateError(null);
 
     const followOnActions: IFollowOnActions = {};
 
@@ -591,292 +376,178 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
     const service = new MatterService(webApi, speContainerId || undefined);
     const result = await service.createMatter(
       step2FormValues,
-      state.uploadedFiles,
+      fileState.uploadedFiles,
       followOnActions
     );
 
-    setIsCreating(false);
-
     if (result.status === 'error') {
-      setCreateError(result.errorMessage ?? 'An unknown error occurred.');
-      return;
+      throw new Error(result.errorMessage ?? 'An unknown error occurred.');
     }
 
-    setSuccessResult({
-      matterId: result.matterId!,
-      matterName: result.matterName!,
+    const matterId = result.matterId!;
+    const matterName = result.matterName!;
+    const hasWarnings = result.warnings.length > 0;
+
+    const viewMatter = () => {
+      navigateToEntity({
+        action: 'openRecord',
+        entityName: 'sprk_matter',
+        entityId: matterId,
+      });
+      onClose();
+    };
+
+    return {
+      icon: (
+        <CheckmarkCircleFilled
+          fontSize={64}
+          style={{ color: tokens.colorPaletteGreenForeground1 }}
+        />
+      ),
+      title: hasWarnings ? 'Matter created with warnings' : 'Matter created!',
+      body: (
+        <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+          <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>
+            &ldquo;{matterName}&rdquo;
+          </span>{' '}
+          has been created
+          {hasWarnings
+            ? ', though some follow-on actions could not complete. See details below.'
+            : ' and is ready to use.'}
+        </Text>
+      ),
+      actions: (
+        <>
+          <Button
+            appearance="primary"
+            onClick={viewMatter}
+            aria-label={`View matter: ${matterName}`}
+          >
+            View Matter
+          </Button>
+          <Button appearance="secondary" onClick={onClose}>
+            Close
+          </Button>
+        </>
+      ),
       warnings: result.warnings,
-    });
+    };
   }, [
     webApi,
     speContainerId,
     step2FormValues,
-    state.uploadedFiles,
+    fileState.uploadedFiles,
     selectedActions,
     selectedContact,
     recipientEmails,
     emailTo,
     emailSubject,
     emailBody,
+    onClose,
   ]);
 
-  // ── Derived values ────────────────────────────────────────────────────────
+  // ── Step configurations ─────────────────────────────────────────────────
 
-  const currentStep = state.steps[state.currentStepIndex];
-  const isFirstStep = state.currentStepIndex === 0;
-  const isLastStep = state.currentStepIndex === state.steps.length - 1;
-  const isNextStepsStep = currentStep?.id === 'next-steps';
+  const stepConfigs: IWizardStepConfig[] = React.useMemo(
+    () => [
+      {
+        id: 'add-files',
+        label: 'Add file(s)',
+        canAdvance: () => fileState.uploadedFiles.length > 0,
+        renderContent: () => (
+          <>
+            <div>
+              <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
+                Add file(s)
+              </Text>
+              <Text size={200} className={styles.stepSubtitle}>
+                Upload documents for AI analysis. The AI will extract key information
+                to pre-fill the matter form.
+              </Text>
+            </div>
 
-  // At the Next Steps step with zero cards selected → clicking Next = Finish
-  const nextStepsIsFinish = isNextStepsStep && selectedActions.length === 0;
+            {fileState.validationErrors.length > 0 && (
+              <MessageBar
+                intent="error"
+                className={styles.errorBar}
+                onMouseEnter={handleClearErrors}
+              >
+                <MessageBarBody>
+                  {fileState.validationErrors.map((err, i) => (
+                    <div key={i}>
+                      <strong>{err.fileName}</strong>: {err.reason}
+                    </div>
+                  ))}
+                </MessageBarBody>
+              </MessageBar>
+            )}
 
-  const canAdvance = React.useMemo((): boolean => {
-    if (isCreating) return false;
+            <FileUploadZone
+              onFilesAccepted={handleFilesAccepted}
+              onValidationErrors={handleValidationErrors}
+            />
 
-    switch (state.currentStepIndex) {
-      case 0:
-        return state.uploadedFiles.length > 0;
-      case 1:
-        return step2Valid;
-      case 2:
-        // Next Steps: always advance (0 selections = skip all follow-ons)
-        return true;
-      default: {
-        if (!currentStep) return true;
-        if (currentStep.id === 'followon-assign-counsel') {
-          return selectedContact !== null;
-        }
-        if (currentStep.id === 'followon-send-email') {
-          return (
-            emailTo.trim() !== '' &&
-            emailSubject.trim() !== '' &&
-            emailBody.trim() !== ''
-          );
-        }
-        // Draft summary — no hard requirement
-        return true;
-      }
-    }
-  }, [
-    state.currentStepIndex,
-    state.uploadedFiles.length,
-    step2Valid,
-    currentStep,
-    selectedContact,
-    emailTo,
-    emailSubject,
-    emailBody,
-    isCreating,
-  ]);
-
-  // ── Step content renderer ─────────────────────────────────────────────────
-
-  const renderStepContent = (): React.ReactNode => {
-    // Success screen replaces all step content
-    if (successResult) {
-      return (
-        <SuccessConfirmation
-          matterName={successResult.matterName}
-          matterId={successResult.matterId}
-          warnings={successResult.warnings}
-          onClose={onClose}
-        />
-      );
-    }
-
-    switch (state.currentStepIndex) {
-      case 0:
-        return (
-          <Step1Content
-            uploadedFiles={state.uploadedFiles}
-            validationErrors={state.validationErrors}
-            onFilesAccepted={handleFilesAccepted}
-            onValidationErrors={handleValidationErrors}
-            onRemoveFile={handleRemoveFile}
-            onClearErrors={handleClearErrors}
-          />
-        );
-
-      case 1:
-        return (
+            {fileState.uploadedFiles.length > 0 && (
+              <UploadedFileList files={fileState.uploadedFiles} onRemove={handleRemoveFile} />
+            )}
+          </>
+        ),
+      },
+      {
+        id: 'create-record',
+        label: 'Create record',
+        canAdvance: () => step2Valid,
+        renderContent: () => (
           <CreateRecordStep
             webApi={webApi!}
-            uploadedFileNames={state.uploadedFiles.map((f) => f.name)}
-            uploadedFiles={state.uploadedFiles}
+            uploadedFileNames={fileState.uploadedFiles.map((f) => f.name)}
+            uploadedFiles={fileState.uploadedFiles}
             onValidChange={setStep2Valid}
             onSubmit={(values) => setStep2FormValues(values)}
           />
-        );
-
-      case 2:
-        return (
+        ),
+      },
+      {
+        id: 'next-steps',
+        label: 'Next Steps',
+        canAdvance: () => true,
+        isEarlyFinish: () => selectedActions.length === 0,
+        renderContent: () => (
           <NextStepsStep
             selectedActions={selectedActions}
             onSelectionChange={setSelectedActions}
           />
-        );
+        ),
+      },
+    ],
+    [
+      fileState.uploadedFiles,
+      fileState.validationErrors,
+      step2Valid,
+      selectedActions,
+      webApi,
+      styles,
+      handleFilesAccepted,
+      handleValidationErrors,
+      handleRemoveFile,
+      handleClearErrors,
+    ]
+  );
 
-      default: {
-        // Follow-on steps — identified by step ID
-        if (!currentStep) return null;
-
-        if (currentStep.id === 'followon-assign-counsel') {
-          if (!webApi) {
-            return (
-              <Text size={300} style={{ color: tokens.colorNeutralForeground3 }}>
-                Dataverse connection not available.
-              </Text>
-            );
-          }
-          return (
-            <AssignCounselStep
-              webApi={webApi}
-              selectedContact={selectedContact}
-              onContactChange={setSelectedContact}
-            />
-          );
-        }
-
-        if (currentStep.id === 'followon-draft-summary') {
-          return (
-            <DraftSummaryStep
-              formValues={step2FormValues}
-              summaryText={summaryText}
-              onSummaryChange={setSummaryText}
-              recipientEmails={recipientEmails}
-              onRecipientsChange={setRecipientEmails}
-            />
-          );
-        }
-
-        if (currentStep.id === 'followon-send-email') {
-          return (
-            <SendEmailStep
-              formValues={step2FormValues}
-              emailTo={emailTo}
-              onEmailToChange={setEmailTo}
-              emailSubject={emailSubject}
-              onEmailSubjectChange={setEmailSubject}
-              emailBody={emailBody}
-              onEmailBodyChange={setEmailBody}
-            />
-          );
-        }
-
-        return (
-          <Text size={300} style={{ color: tokens.colorNeutralForeground3 }}>
-            {currentStep.label}
-          </Text>
-        );
-      }
-    }
-  };
-
-  // ── Determine primary button label and action ─────────────────────────────
-
-  const primaryButtonLabel: string = (() => {
-    if (isCreating) return 'Creating\u2026';
-    if (isLastStep || nextStepsIsFinish) return 'Finish';
-    return 'Next';
-  })();
-
-  const handlePrimaryButtonClick = React.useCallback(() => {
-    if (isLastStep || nextStepsIsFinish) {
-      void handleFinish();
-    } else {
-      handleNext();
-    }
-  }, [isLastStep, nextStepsIsFinish, handleFinish, handleNext]);
-
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Render ──────────────────────────────────────────────────────────────
 
   return (
-    <Dialog
+    <WizardShell
+      ref={shellRef}
       open={open}
-      onOpenChange={(_e, data) => {
-        if (!data.open) onClose();
-      }}
-    >
-      <DialogSurface className={styles.surface} aria-label="Create New Matter">
-        <DialogBody className={styles.body}>
-          {/* Custom title bar with close button */}
-          <div className={styles.titleBar}>
-            <Text as="h1" size={500} weight="semibold" className={styles.titleText}>
-              Create New Matter
-            </Text>
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<Dismiss24Regular />}
-              className={styles.closeButton}
-              onClick={onClose}
-              aria-label="Close dialog"
-            />
-          </div>
-
-          {/* Sidebar + content area */}
-          <div className={styles.mainArea}>
-            <WizardStepper steps={state.steps} />
-
-            <DialogContent className={styles.contentArea}>
-              {/* Creation error bar — role="alert" for assertive form validation feedback */}
-              {createError && (
-                <MessageBar intent="error" role="alert">
-                  <MessageBarBody>{createError}</MessageBarBody>
-                </MessageBar>
-              )}
-
-              {renderStepContent()}
-            </DialogContent>
-          </div>
-
-          {/* Footer — hidden after success (SuccessConfirmation has its own buttons) */}
-          {!successResult && (
-            <DialogActions className={styles.footer}>
-              <div className={styles.footerLeft}>
-                <Button
-                  appearance="secondary"
-                  onClick={onClose}
-                  disabled={isCreating}
-                >
-                  Cancel
-                </Button>
-              </div>
-
-              <div className={styles.footerRight}>
-                {/* In-progress spinner */}
-                {isCreating && (
-                  <div className={styles.progressRow}>
-                    <Spinner size="tiny" />
-                    <Text size={200}>Creating matter\u2026</Text>
-                  </div>
-                )}
-
-                {/* Back button — hidden on step 1 */}
-                {!isFirstStep && (
-                  <Button
-                    appearance="secondary"
-                    onClick={handleBack}
-                    disabled={isCreating}
-                  >
-                    Back
-                  </Button>
-                )}
-
-                {/* Next / Finish */}
-                <Button
-                  appearance="primary"
-                  onClick={handlePrimaryButtonClick}
-                  disabled={!canAdvance || isCreating}
-                >
-                  {primaryButtonLabel}
-                </Button>
-              </div>
-            </DialogActions>
-          )}
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
+      title="Create New Matter"
+      ariaLabel="Create New Matter"
+      steps={stepConfigs}
+      onClose={onClose}
+      onFinish={handleFinish}
+      finishingLabel="Creating matter\u2026"
+      finishLabel="Finish"
+    />
   );
 };
 

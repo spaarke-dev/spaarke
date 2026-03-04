@@ -1,0 +1,45 @@
+<task id="002" project="wizard-shell-extraction">
+  <metadata>
+    <title>Create WizardShell reducer</title>
+    <phase>1</phase>
+    <tags>typescript, reducer, wizard</tags>
+    <estimate>1h</estimate>
+    <dependencies>001</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create the pure reducer for WizardShell step navigation and dynamic step management.</goal>
+    <context>
+      Extract navigation-only reducer cases from CreateMatter/WizardDialog.tsx wizardReducer.
+      Remove file-upload actions (ADD_FILES, REMOVE_FILE, etc.) — those stay in the domain component.
+      The ADD_DYNAMIC_STEP action must accept optional canonicalOrder string[] for ordered insertion.
+    </context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/WizardDialog.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/wizardShellTypes.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create wizardShellReducer.ts with buildInitialShellState(steps: IWizardStepConfig[]) factory</step>
+    <step>Implement NEXT_STEP: advance currentStepIndex, mark current completed, next active</step>
+    <step>Implement PREV_STEP: decrement currentStepIndex, mark current pending, previous active</step>
+    <step>Implement GO_TO_STEP: jump to specific index</step>
+    <step>Implement ADD_DYNAMIC_STEP: insert step respecting canonicalOrder, update statuses</step>
+    <step>Implement REMOVE_DYNAMIC_STEP: remove by stepId, adjust currentStepIndex if needed</step>
+  </steps>
+
+  <outputs>
+    <file>src/solutions/LegalWorkspace/src/components/Wizard/wizardShellReducer.ts</file>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Pure function — no side effects</criterion>
+    <criterion>All 6 action types handled correctly</criterion>
+    <criterion>Dynamic step canonical ordering works</criterion>
+  </acceptance-criteria>
+</task>

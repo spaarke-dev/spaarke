@@ -63,35 +63,20 @@ export interface IFileValidationError {
 }
 
 // ---------------------------------------------------------------------------
-// Wizard state
+// Wizard reducer actions (file-upload domain only)
 // ---------------------------------------------------------------------------
 
-/** Immutable shape of the wizard's useReducer state. */
-export interface IWizardState {
-  /** Index of the currently visible step (0-based into `steps` array). */
-  currentStepIndex: number;
-  /** Ordered step descriptors — includes dynamic follow-on steps. */
-  steps: IWizardStep[];
-  /** Files accepted in Step 1. */
-  uploadedFiles: IUploadedFile[];
-  /** Latest batch of validation errors (cleared on next drop / browse). */
-  validationErrors: IFileValidationError[];
-}
-
-// ---------------------------------------------------------------------------
-// Wizard reducer actions
-// ---------------------------------------------------------------------------
-
+/**
+ * Actions for the file-upload domain reducer in WizardDialog.
+ * Navigation actions (NEXT_STEP, PREV_STEP, GO_TO_STEP, ADD_DYNAMIC_STEP,
+ * REMOVE_DYNAMIC_STEP) have been migrated to WizardShellAction in
+ * components/Wizard/wizardShellTypes.ts.
+ */
 export type WizardAction =
-  | { type: 'NEXT_STEP' }
-  | { type: 'PREV_STEP' }
-  | { type: 'GO_TO_STEP'; stepIndex: number }
   | { type: 'ADD_FILES'; files: IUploadedFile[] }
   | { type: 'REMOVE_FILE'; fileId: string }
   | { type: 'SET_VALIDATION_ERRORS'; errors: IFileValidationError[] }
-  | { type: 'CLEAR_VALIDATION_ERRORS' }
-  | { type: 'ADD_DYNAMIC_STEP'; step: IWizardStep }
-  | { type: 'REMOVE_DYNAMIC_STEP'; stepId: string };
+  | { type: 'CLEAR_VALIDATION_ERRORS' };
 
 // ---------------------------------------------------------------------------
 // Component prop interfaces

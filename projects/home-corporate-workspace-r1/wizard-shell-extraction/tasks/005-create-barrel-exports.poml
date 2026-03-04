@@ -1,0 +1,22 @@
+<task id="005" project="wizard-shell-extraction">
+  <metadata>
+    <title>Create Wizard barrel exports</title>
+    <phase>1</phase>
+    <tags>typescript, wizard</tags>
+    <estimate>10m</estimate>
+    <dependencies>001, 002, 003, 004</dependencies>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Create index.ts barrel export for the Wizard/ folder.</goal>
+  </prompt>
+
+  <steps>
+    <step>Create Wizard/index.ts exporting WizardShell, WizardSuccessScreen, and all types from wizardShellTypes.ts</step>
+  </steps>
+
+  <outputs>
+    <file>src/solutions/LegalWorkspace/src/components/Wizard/index.ts</file>
+  </outputs>
+</task>

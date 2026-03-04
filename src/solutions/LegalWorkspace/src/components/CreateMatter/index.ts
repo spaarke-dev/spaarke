@@ -27,7 +27,7 @@ export {
   buildDefaultEmailSubject,
   buildDefaultEmailBody,
 } from './SendEmailStep';
-export { SuccessConfirmation } from './SuccessConfirmation';
+// SuccessConfirmation removed — shell handles success screen via IWizardSuccessConfig
 
 // Task 024 — Service layer
 export {
@@ -40,12 +40,13 @@ export {
 } from './matterService';
 
 // Types — wizard
+// Note: IWizardState removed (navigation state is now in WizardShell/wizardShellTypes.ts).
+// WizardAction retains only file-upload domain actions; navigation actions are WizardShellAction.
 export type {
   IWizardDialogProps,
   IWizardStepperProps,
   IFileUploadZoneProps,
   IUploadedFileListProps,
-  IWizardState,
   IWizardStep,
   IUploadedFile,
   IFileValidationError,
@@ -78,7 +79,7 @@ export type {
 export type { IAssignCounselStepProps } from './AssignCounselStep';
 export type { IDraftSummaryStepProps } from './DraftSummaryStep';
 export type { ISendEmailStepProps } from './SendEmailStep';
-export type { ISuccessConfirmationProps } from './SuccessConfirmation';
+// ISuccessConfirmationProps removed — SuccessConfirmation component deleted (T012)
 export type {
   ICreateMatterResult,
   CreateMatterResultStatus,

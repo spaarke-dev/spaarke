@@ -1,0 +1,19 @@
+<task id="012" project="wizard-shell-extraction">
+  <metadata>
+    <title>Delete SuccessConfirmation.tsx</title>
+    <phase>2</phase>
+    <tags>cleanup</tags>
+    <estimate>5m</estimate>
+    <dependencies>010</dependencies>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    <goal>Delete CreateMatter/SuccessConfirmation.tsx — replaced by WizardSuccessScreen + inline config.</goal>
+  </prompt>
+
+  <steps>
+    <step>Verify no remaining imports of SuccessConfirmation in the codebase</step>
+    <step>Delete src/solutions/LegalWorkspace/src/components/CreateMatter/SuccessConfirmation.tsx</step>
+  </steps>
+</task>
