@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="012" project="jps-server-rollout">
+  <metadata>
+    <title>Extend ToolExecutionContext with AdditionalKnowledge and AdditionalSkills properties</title>
+    <phase>2</phase>
+    <tags>bff-api</tags>
+    <estimate>1h</estimate>
+    <dependencies>none</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Add two new nullable properties to ToolExecutionContext to hold dynamically resolved knowledge and skill references extracted from JPS metadata.</goal>
+    <context>
+      ToolExecutionContext is the primary data structure passed through the AI tool execution pipeline.
+      It currently holds core context like action, requester, scopes, and system prompt.
+      To support dynamic JPS ref resolution, the context needs to carry additional knowledge and skills that were resolved from JPS metadata.
+      These properties will be populated by AiAnalysisNodeExecutor after resolving refs, and consumed by handlers and renderers.
+      This is a simple data structure extension with no logic changes.
+    </context>
+    <constraints>
+      - Properties must be nullable (some contexts may not have additional refs)
+      - Use init-only setters (immutable after construction)
+      - Return IReadOnlyList for immutability
+      - No breaking changes to existing properties
+      - Follow existing naming convention (PascalCase, plural for collections)
+      - Update XML documentation if present
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/tool-execution-context.md</file>
+      <file>projects/jps-server-rollout/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read ToolExecutionContext.cs to understand the current structure and property patterns</step>
+    <step order="2">Read ResolvedKnowledgeRef and ResolvedSkillRef record types to understand the data structures</step>
+    <step order="3">Add property to ToolExecutionContext:
+      IReadOnlyList&lt;ResolvedKnowledgeRef&gt;? AdditionalKnowledge { get; init; }
+    </step>
+    <step order="4">Add property to ToolExecutionContext:
+      IReadOnlyList&lt;ResolvedSkillRef&gt;? AdditionalSkills { get; init; }
+    </step>
+    <step order="5">Add XML documentation comments explaining the purpose and lifecycle of each property</step>
+    <step order="6">Build the project: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+    <step order="7">Run unit tests: `dotnet test src/server/api/Sprk.Bff.Api.Tests/` to ensure no regressions</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/ToolExecutionContext.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AdditionalKnowledge property added as nullable IReadOnlyList&lt;ResolvedKnowledgeRef&gt; with init-only setter</criterion>
+    <criterion>AdditionalSkills property added as nullable IReadOnlyList&lt;ResolvedSkillRef&gt; with init-only setter</criterion>
+    <criterion>Properties are optional and default to null</criterion>
+    <criterion>No breaking changes to existing ToolExecutionContext properties</criterion>
+    <criterion>XML documentation is present and clear</criterion>
+    <criterion>Project builds successfully</criterion>
+    <criterion>Existing tests pass (no regressions)</criterion>
+  </acceptance-criteria>
+</task>

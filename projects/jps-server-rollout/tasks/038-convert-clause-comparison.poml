@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="038" project="jps-server-rollout">
+  <metadata>
+    <title>Convert ClauseComparisonHandler to thin JPS consumer preserving multi-doc logic</title>
+    <phase>4</phase>
+    <tags>bff-api, refactor</tags>
+    <estimate>3h</estimate>
+    <dependencies>014, 022</dependencies>
+    <parallel-group>thin-wrapper</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Convert ClauseComparisonHandler to a thin wrapper that supports both JPS and legacy paths. Preserve multi-document orchestration logic. Inject document pairs and comparison context as template parameters into JPS rendering.</goal>
+    <context>
+      ClauseComparisonHandler (Services/Ai/Tools/ClauseComparisonHandler.cs) orchestrates comparison between multiple documents or clauses.
+      Unlike simple prompt-only handlers, it manages multi-document state, extracts clause pairs, and prepares comparison contexts.
+      This task converts it to a thin wrapper:
+      1. Orchestrate multi-document logic (preserve existing)
+      2. Detect if context.ActionSystemPrompt is JPS format
+      3. If JPS: inject document pairs and comparison context as template parameters, call PromptSchemaRenderer.Render()
+      4. If legacy: use existing code path
+    </context>
+    <constraints>
+      - Keep ClauseComparisonHandler class and DI registration
+      - Preserve multi-document orchestration logic
+      - Implement dual-path logic: JPS (new) and legacy (fallback)
+      - Inject document data and clause pairs as template parameters
+      - Maintain backward compatibility
+      - Follow ADR-010 (DI minimalism)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>projects/jps-server-rollout/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read ClauseComparisonHandler.cs to understand multi-document orchestration and clause pairing logic</step>
+    <step order="2">Identify how documents/clauses are extracted, paired, and formatted</step>
+    <step order="3">Implement dual-path logic:
+      - Orchestrate multi-document logic (preserve existing)
+      - Check if context.ActionSystemPrompt is JPS format
+      - If JPS: format documents and clause pairs for template injection, call PromptSchemaRenderer.Render()
+      - If legacy: use existing orchestration and rendering
+    </step>
+    <step order="4">Create helper method to format document pairs for template parameters (structure for Handlebars iteration)</step>
+    <step order="5">Create test cases for both paths with mock document sets (single doc, pairs, multiple docs)</step>
+    <step order="6">Build the project: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+    <step order="7">Run tests including ClauseComparisonHandler tests: `dotnet test src/server/api/Sprk.Bff.Api.Tests/ --filter "*ClauseComparison*"`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/ClauseComparisonHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ClauseComparisonHandler kept as thin wrapper</criterion>
+    <criterion>Multi-document orchestration logic preserved</criterion>
+    <criterion>Dual-path logic implemented: JPS and legacy fallback</criterion>
+    <criterion>Document pairs and comparison context injected as template parameters in JPS path</criterion>
+    <criterion>Helper method formats documents for template injection</criterion>
+    <criterion>Test cases cover both paths with various document sets</criterion>
+    <criterion>Project builds successfully</criterion>
+    <criterion>All tests pass (including backward compatibility)</criterion>
+  </acceptance-criteria>
+</task>

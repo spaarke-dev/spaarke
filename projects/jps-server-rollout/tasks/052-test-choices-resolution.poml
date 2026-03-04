@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="052" project="jps-server-rollout">
+  <metadata>
+    <title>Test $choices resolution with real downstream node graph</title>
+    <phase>5</phase>
+    <tags>testing</tags>
+    <estimate>3h</estimate>
+    <dependencies>051</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Write integration tests specifically for $choices resolution, testing context-dependent branch selection in downstream node graphs. Validate that the correct choice is selected and the next node is invoked with proper state.</goal>
+    <context>
+      JPS $choices field allows conditional branching: based on the structured output from one analysis node, the framework selects which downstream node to invoke next.
+      Example: DocumentClassifier action returns { "documentType": "contract" }, framework routes to ContractAnalyzer node (not GeneralAnalyzer).
+
+      This task creates comprehensive tests for choices logic:
+      - Single choice with matching condition → correct node selected
+      - Multiple choices with only one matching → correct node selected
+      - Multiple choices with ambiguous conditions → first match wins (or error)
+      - Nested choices (choice node output drives another choice)
+      - Choice with template parameter conditions
+      - Error: no matching choice → fallback behavior
+    </context>
+    <constraints>
+      - Use real downstream node graph structure (not mocked)
+      - Mock only external calls (OpenAI, Dataverse)
+      - Test choice condition matching logic (exact match, regex, predicate)
+      - Verify state passed to selected downstream node
+      - Follow .claude/constraints/testing.md for test structure
+      - Use realistic JPS examples with choices
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>projects/jps-server-rollout/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review JPS $choices specification and implementation in PromptSchemaRenderer or AiAnalysisNodeExecutor</step>
+    <step order="2">Understand how choice conditions are evaluated (string match, regex, custom logic)</step>
+    <step order="3">Create test class ChoicesResolutionTests.cs in tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</step>
+    <step order="4">Write integration tests:
+      - Test 1: Single choice → exact match → correct downstream node invoked
+      - Test 2: Multiple choices → first match selected
+      - Test 3: Multiple choices → none match → fallback node selected (or error)
+      - Test 4: Choice with regex condition → matching value selected
+      - Test 5: Nested choices → first node choice drives second choice
+      - Test 6: Choice with template parameter substitution in condition
+      - Test 7: State propagation → output from source node → condition evaluation → state passed to target
+    </step>
+    <step order="5">For each test, set up realistic JPS with choice definitions and multiple downstream nodes</step>
+    <step order="6">Mock OpenAI to return structured output driving the choice condition</step>
+    <step order="7">Verify correct downstream node executed with correct input state</step>
+    <step order="8">Run tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "*ChoicesResolution*"`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ChoicesResolutionTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Test class created with comprehensive choice resolution tests</criterion>
+    <criterion>Tests cover single choice, multiple choices, ambiguous choices</criterion>
+    <criterion>Tests cover nested choices and template parameter conditions</criterion>
+    <criterion>Tests verify correct downstream node selection</criterion>
+    <criterion>Tests verify state propagation to selected node</criterion>
+    <criterion>Tests cover error cases (no matching choice)</criterion>
+    <criterion>Realistic JPS with choices used in tests</criterion>
+    <criterion>External calls (OpenAI, Dataverse) properly mocked</criterion>
+    <criterion>All choice resolution tests pass</criterion>
+  </acceptance-criteria>
+</task>

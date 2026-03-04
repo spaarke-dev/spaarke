@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="022" project="jps-server-rollout">
+  <metadata>
+    <title>Wire GenericAnalysisHandler to pass context.TemplateParameters</title>
+    <phase>3</phase>
+    <tags>bff-api</tags>
+    <estimate>1h</estimate>
+    <dependencies>021</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Update GenericAnalysisHandler to pass context.TemplateParameters from ToolExecutionContext to PromptSchemaRenderer when rendering JPS prompts.</goal>
+    <context>
+      GenericAnalysisHandler.Render() method (around line 247) currently calls PromptSchemaRenderer.RenderJps() without template parameters.
+      Now that ToolExecutionContext carries TemplateParameters (task 021), GenericAnalysisHandler must wire them through to the renderer.
+      This allows Handlebars substitution to use both JPS node references and template-provided values.
+    </context>
+    <constraints>
+      - Replace null templateParameters argument with context.TemplateParameters
+      - Maintain all other arguments to RenderJps() unchanged
+      - Handle null TemplateParameters gracefully (renderer should treat as empty dict)
+      - No changes to method signature or return type
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>projects/jps-server-rollout/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read GenericAnalysisHandler.cs Render() method (around line 240-257) to locate the PromptSchemaRenderer.RenderJps() call</step>
+    <step order="2">Identify the templateParameters argument (currently null or missing)</step>
+    <step order="3">Replace null/missing templateParameters with context.TemplateParameters</step>
+    <step order="4">Build the project: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+    <step order="5">Run unit tests for GenericAnalysisHandler: `dotnet test src/server/api/Sprk.Bff.Api.Tests/ --filter "*GenericAnalysisHandler*"`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PromptSchemaRenderer.RenderJps() called with context.TemplateParameters</criterion>
+    <criterion>No other arguments to RenderJps() changed</criterion>
+    <criterion>Project builds successfully</criterion>
+    <criterion>GenericAnalysisHandler tests pass</criterion>
+  </acceptance-criteria>
+</task>

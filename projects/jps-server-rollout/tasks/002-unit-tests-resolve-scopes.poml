@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="002" project="jps-server-rollout">
+  <metadata>
+    <title>Unit Tests for ScopeResolverService.ResolveScopesAsync()</title>
+    <phase>1</phase>
+    <tags>testing</tags>
+    <estimate>2.5h</estimate>
+    <dependencies>001</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Write comprehensive unit tests for the ResolveScopesAsync() method covering all edge cases: empty arrays, single IDs, multiple IDs, missing Dataverse records, and mixed found/not-found scenarios.</goal>
+    <context>
+      ResolveScopesAsync() (task 001) queries Dataverse for referenced skills, knowledge, and tools.
+      Unit tests must verify:
+      - Correct behavior with empty input arrays
+      - Correct behavior with single items
+      - Correct behavior with multiple items
+      - Graceful handling of missing records (nulls)
+      - Mixed scenarios (some found, some missing)
+      - Proper task composition and parallel execution
+
+      Tests should use NSubstitute for mocking Dataverse queries and follow the AAA (Arrange-Act-Assert) pattern.
+    </context>
+    <constraints>
+      - Use NSubstitute for mocking service dependencies (IOrganizationService, caching)
+      - Follow AAA pattern (Arrange-Act-Assert) for test structure
+      - Use test class naming: ScopeResolverServiceTests
+      - Place test file in: tests/Sprk.Bff.Api.Tests/Services/Ai/ScopeResolverServiceTests.cs
+      - One test method per scenario (fine-grained assertions)
+      - Use descriptive test method names: TestMethod_Scenario_ExpectedResult pattern
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>projects/jps-server-rollout/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing ScopeResolverService tests (if any) to understand test patterns and mocking setup in the codebase</step>
+    <step order="2">Read the NSubstitute documentation section in `.claude/patterns/testing/mocking-patterns.md` for Dataverse service mocking</step>
+    <step order="3">Create test class: `tests/Sprk.Bff.Api.Tests/Services/Ai/ScopeResolverServiceTests.cs`</step>
+    <step order="4">Write test methods (AAA pattern) for:
+      - ResolveScopesAsync_WithEmptyScopes_ReturnsEmptyLists
+      - ResolveScopesAsync_WithSingleSkillId_ReturnsResolvedSkill
+      - ResolveScopesAsync_WithSingleKnowledgeId_ReturnsResolvedKnowledge
+      - ResolveScopesAsync_WithSingleToolId_ReturnsResolvedTool
+      - ResolveScopesAsync_WithMultipleIds_ReturnsAllResolved
+      - ResolveScopesAsync_WithMissingSkill_SkippedInResults (null/not found)
+      - ResolveScopesAsync_WithMissingKnowledge_SkippedInResults
+      - ResolveScopesAsync_WithMissingTool_SkippedInResults
+      - ResolveScopesAsync_WithMixedFoundMissing_ReturnsOnlyFound
+    </step>
+    <step order="5">Mock GetSkillAsync, GetKnowledgeAsync, GetToolAsync using NSubstitute to return test data or null</step>
+    <step order="6">Run tests: `dotnet test tests/Sprk.Bff.Api.Tests/ --filter "ScopeResolverServiceTests"`</step>
+    <step order="7">Verify all tests pass with 100% coverage of ResolveScopesAsync logic paths</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/Sprk.Bff.Api.Tests/Services/Ai/ScopeResolverServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Test class created in correct location with standard naming</criterion>
+    <criterion>Minimum 7 test methods covering empty, single, multiple, and missing record scenarios</criterion>
+    <criterion>All tests use AAA pattern (Arrange-Act-Assert)</criterion>
+    <criterion>NSubstitute mocks used for all external dependencies</criterion>
+    <criterion>All tests pass</criterion>
+    <criterion>ResolveScopesAsync logic fully covered (≥95% code coverage)</criterion>
+  </acceptance-criteria>
+</task>

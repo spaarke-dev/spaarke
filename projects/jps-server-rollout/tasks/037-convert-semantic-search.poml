@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="037" project="jps-server-rollout">
+  <metadata>
+    <title>Convert SemanticSearchToolHandler to thin JPS consumer preserving search integration</title>
+    <phase>4</phase>
+    <tags>bff-api, refactor</tags>
+    <estimate>3h</estimate>
+    <dependencies>014, 022</dependencies>
+    <parallel-group>thin-wrapper</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Convert SemanticSearchToolHandler to a thin wrapper that supports both JPS and legacy paths. Preserve Azure AI Search integration and dynamic result injection. Inject search results as template parameters into JPS rendering.</goal>
+    <context>
+      SemanticSearchToolHandler (Services/Ai/Tools/SemanticSearchToolHandler.cs) integrates with Azure AI Search to retrieve context-relevant documents.
+      It executes a search query, injects results into the prompt, then sends to the LLM.
+      This task converts it to a thin wrapper:
+      1. Execute search query (preserve existing logic)
+      2. Detect if context.ActionSystemPrompt is JPS format
+      3. If JPS: inject search results as template parameters, call PromptSchemaRenderer.Render()
+      4. If legacy: use existing code path
+    </context>
+    <constraints>
+      - Keep SemanticSearchToolHandler class and DI registration
+      - Preserve Azure AI Search integration (query execution, result formatting)
+      - Implement dual-path logic: JPS (new) and legacy (fallback)
+      - Inject search results as template parameters (e.g., {{searchResults}})
+      - Maintain backward compatibility
+      - Handle search errors gracefully (empty results fallback)
+      - Follow ADR-010 (DI minimalism)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>projects/jps-server-rollout/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SemanticSearchToolHandler.cs to understand search query construction and result injection</step>
+    <step order="2">Identify Azure AI Search integration points (query API, result formatting)</step>
+    <step order="3">Implement dual-path logic:
+      - Execute search query (preserve existing)
+      - Check if context.ActionSystemPrompt is JPS format
+      - If JPS: format search results for template injection, call PromptSchemaRenderer.Render()
+      - If legacy: use existing result injection code
+    </step>
+    <step order="4">Create helper method to format search results for template parameters (JSON array or formatted string)</step>
+    <step order="5">Create test cases for both paths with mock search results and various result counts (empty, single, multiple)</step>
+    <step order="6">Build the project: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+    <step order="7">Run tests including SemanticSearchToolHandler tests: `dotnet test src/server/api/Sprk.Bff.Api.Tests/ --filter "*SemanticSearch*"`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SemanticSearchToolHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SemanticSearchToolHandler kept as thin wrapper</criterion>
+    <criterion>Azure AI Search integration preserved</criterion>
+    <criterion>Dual-path logic implemented: JPS and legacy fallback</criterion>
+    <criterion>Search results injected as template parameters in JPS path</criterion>
+    <criterion>Helper method formats results for template parameters</criterion>
+    <criterion>Test cases cover both paths with various result sets (empty, single, multiple)</criterion>
+    <criterion>Search errors handled gracefully (empty fallback)</criterion>
+    <criterion>Project builds successfully</criterion>
+    <criterion>All tests pass (including backward compatibility)</criterion>
+  </acceptance-criteria>
+</task>

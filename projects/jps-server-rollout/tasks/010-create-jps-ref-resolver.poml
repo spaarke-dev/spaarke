@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="010" project="jps-server-rollout">
+  <metadata>
+    <title>Create JpsRefResolver utility to extract $ref entries from JPS JSON</title>
+    <phase>2</phase>
+    <tags>bff-api, api</tags>
+    <estimate>2h</estimate>
+    <dependencies>none</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Create a static JpsRefResolver utility class to extract $ref entries from JPS JSON metadata. This utility parses knowledge and skill references from the JPS scopes structure and returns them as named tuples for downstream resolution.</goal>
+    <context>
+      The JPS (JSON Prompt Schema) server rollout requires the ability to extract $ref entries from JPS JSON metadata to enable dynamic knowledge and skill resolution.
+      When a JPS document is processed, it may contain references to knowledge documents and skills via the scopes.$knowledge[*].$ref and scopes.$skills[*].$ref paths.
+      These references need to be extracted, prefixed with their type (knowledge: or skill:), and used for lookup against Dataverse records.
+      JpsRefResolver is a static utility (no DI registration per ADR-010) that performs this extraction.
+    </context>
+    <constraints>
+      - Must be a static class (no DI registration per ADR-010)
+      - Parse JSON using System.Text.Json
+      - Handle missing or malformed JSON gracefully (return empty collections, no exceptions)
+      - Return IReadOnlyList for immutability
+      - Use named tuples for (Name, Label) pairs
+      - Include XML documentation comments
+      - Cover edge cases: null input, empty scopes, missing paths
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>projects/jps-server-rollout/spec.md</file>
+      <file>projects/jps-server-rollout/notes/jps-conversions/document-profiler.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the spec.md to understand JPS structure and $ref semantics</step>
+    <step order="2">Examine notes/jps-conversions/ folder for real JPS examples (document-profiler.json, etc.) to understand scopes.$knowledge[*].$ref and scopes.$skills[*].$ref structure</step>
+    <step order="3">Create new file: src/server/api/Sprk.Bff.Api/Services/Ai/JpsRefResolver.cs</step>
+    <step order="4">Implement static method ExtractKnowledgeRefs(string jpsJson) -> IReadOnlyList&lt;(string Name, string? Label)&gt; that:
+      - Parses the JPS JSON using JsonDocument
+      - Navigates to scopes.$knowledge[*].$ref
+      - Extracts name and optional label values
+      - Returns empty list if path doesn't exist or JSON is malformed
+      - Prefixes each name with "knowledge:"
+    </step>
+    <step order="5">Implement static method ExtractSkillRefs(string jpsJson) -> IReadOnlyList&lt;string&gt; that:
+      - Parses the JPS JSON using JsonDocument
+      - Navigates to scopes.$skills[*].$ref
+      - Extracts $ref values (strings)
+      - Returns empty list if path doesn't exist or JSON is malformed
+      - Prefixes each $ref with "skill:"
+    </step>
+    <step order="6">Add XML documentation comments for both methods and the class</step>
+    <step order="7">Build the project: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+    <step order="8">Verify no build errors</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Bash(dotnet build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/JpsRefResolver.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>JpsRefResolver is a static class with no dependencies</criterion>
+    <criterion>ExtractKnowledgeRefs() successfully extracts $ref entries from scopes.$knowledge[*].$ref with "knowledge:" prefix</criterion>
+    <criterion>ExtractSkillRefs() successfully extracts $ref entries from scopes.$skills[*].$ref with "skill:" prefix</criterion>
+    <criterion>Both methods return empty IReadOnlyList when JSON is null, empty, or malformed</criterion>
+    <criterion>Both methods handle missing scopes paths gracefully (no exceptions)</criterion>
+    <criterion>Methods work with real JPS examples from notes/jps-conversions/</criterion>
+    <criterion>Project builds successfully</criterion>
+    <criterion>XML documentation is present and clear</criterion>
+  </acceptance-criteria>
+</task>

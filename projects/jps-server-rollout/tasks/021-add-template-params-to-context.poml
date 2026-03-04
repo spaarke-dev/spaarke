@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="021" project="jps-server-rollout">
+  <metadata>
+    <title>Add TemplateParameters property to ToolExecutionContext</title>
+    <phase>3</phase>
+    <tags>bff-api</tags>
+    <estimate>1h</estimate>
+    <dependencies>none</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Add a TemplateParameters property to the ToolExecutionContext record to carry template substitution parameters through the tool execution pipeline.</goal>
+    <context>
+      ToolExecutionContext is a data record that flows through AiAnalysisNodeExecutor and GenericAnalysisHandler.
+      To support Handlebars substitution in JPS prompts, template parameters must be part of the execution context.
+      This task extends the record with a new property: Dictionary&lt;string, object?&gt;? TemplateParameters.
+    </context>
+    <constraints>
+      - Follow existing record structure and property naming (PascalCase, init-only)
+      - Make property nullable to allow missing template parameters
+      - Add XML documentation comment explaining purpose
+      - No changes to existing properties or constructor signature
+      - Maintain backward compatibility with existing callers
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>projects/jps-server-rollout/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read ToolExecutionContext.cs to understand the current record structure and property layout</step>
+    <step order="2">Identify the appropriate location to add TemplateParameters (near other context properties like AdditionalKnowledge, AdditionalSkills)</step>
+    <step order="3">Add new property: `Dictionary&lt;string, object?&gt;? TemplateParameters { get; init; }`</step>
+    <step order="4">Add XML documentation: `/// &lt;summary&gt;Template parameters for Handlebars substitution in JPS prompts&lt;/summary&gt;`</step>
+    <step order="5">Verify no existing callers need immediate updates (they will default to null)</step>
+    <step order="6">Build the project: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/ToolExecutionContext.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ToolExecutionContext has new TemplateParameters property</criterion>
+    <criterion>Property type is Dictionary&lt;string, object?&gt;? (nullable)</criterion>
+    <criterion>Property uses init accessor (immutable)</criterion>
+    <criterion>XML documentation added</criterion>
+    <criterion>Project builds successfully</criterion>
+  </acceptance-criteria>
+</task>
