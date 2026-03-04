@@ -30,6 +30,8 @@ import { getBffBaseUrl } from "../config/bffConfig";
 /**
  * BFF API base URL — resolved to the absolute BFF host.
  * Used for document metadata, save, and export operations.
+ * MUST NOT use a relative path like "/api" because the page origin is the
+ * Dataverse org (e.g., spaarkedev1.crm.dynamics.com), not the BFF API host.
  */
 const API_BASE_URL = getBffBaseUrl();
 
@@ -242,6 +244,9 @@ export async function fetchDocumentMetadata(
  * Get a preview/view URL for a document.
  *
  * BFF route: GET /api/documents/{documentId}/preview-url
+ *
+ * Returns a URL suitable for embedding in an iframe. For PDFs this is a
+ * direct URL; for Office documents it may be an Office Online embed URL.
  *
  * @param documentId - The GUID of the document
  * @param token - Bearer auth token
@@ -467,6 +472,9 @@ export async function executeAnalysis(params: ExecuteAnalysisParams): Promise<vo
  * Export an analysis to a downloadable document format.
  *
  * BFF route: POST /api/ai/analysis/{analysisId}/export
+ *
+ * Calls the BFF API export endpoint which generates a Word or PDF document
+ * from the analysis content. Returns the export result.
  *
  * @param analysisId - The GUID of the analysis to export
  * @param format - Export format: "docx" or "pdf"
