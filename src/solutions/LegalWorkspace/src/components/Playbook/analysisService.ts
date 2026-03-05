@@ -57,6 +57,7 @@ export async function createAnalysis(webApi: any, config: IAnalysisConfig): Prom
  * @param toolIds    - GUIDs of sprk_analysistool records to associate
  */
 export async function associateScopes(
+    webApi: any,
     analysisId: string,
     skillIds: string[],
     knowledgeIds: string[],
@@ -64,9 +65,15 @@ export async function associateScopes(
 ): Promise<void> {
     const errors: string[] = [];
 
+    // Resolve the execute function — webApi.online.execute or webApi.execute
+    const executeFn = webApi?.online?.execute ?? webApi?.execute;
+    if (!executeFn) {
+        throw new Error("Xrm.WebApi.online.execute is not available. Cannot create N:N associations.");
+    }
+
     // Helper that performs a single N:N associate call
     async function associate(entityType: string, entityId: string, relationship: string): Promise<void> {
-        await Xrm.WebApi.online.execute({
+        await executeFn.call(webApi.online ?? webApi, {
             getMetadata: () => ({
                 boundParameter: undefined,
                 parameterTypes: {},
@@ -133,6 +140,7 @@ export async function createAndAssociate(webApi: any, config: IAnalysisConfig): 
     const analysisId = await createAnalysis(webApi, config);
 
     await associateScopes(
+        webApi,
         analysisId,
         config.skillIds,
         config.knowledgeIds,
