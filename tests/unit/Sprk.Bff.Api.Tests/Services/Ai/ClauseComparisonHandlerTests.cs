@@ -22,7 +22,8 @@ public class ClauseComparisonHandlerTests
         _openAiClientMock = new Mock<IOpenAiClient>();
         _textChunkingServiceMock = new Mock<ITextChunkingService>();
         _loggerMock = new Mock<ILogger<ClauseComparisonHandler>>();
-        _handler = new ClauseComparisonHandler(_openAiClientMock.Object, _textChunkingServiceMock.Object, _loggerMock.Object);
+        var renderer = new PromptSchemaRenderer(Mock.Of<ILogger<PromptSchemaRenderer>>());
+        _handler = new ClauseComparisonHandler(_openAiClientMock.Object, _textChunkingServiceMock.Object, renderer, _loggerMock.Object);
     }
 
     #region Handler Properties Tests

@@ -20,12 +20,13 @@ public class DocumentClassifierHandlerTests
         _openAiClientMock = new Mock<IOpenAiClient>();
         _ragServiceMock = new Mock<IRagService>();
         _loggerMock = new Mock<ILogger<DocumentClassifierHandler>>();
+        var renderer = new PromptSchemaRenderer(Mock.Of<ILogger<PromptSchemaRenderer>>());
 
         // Handler without RAG
-        _handler = new DocumentClassifierHandler(_openAiClientMock.Object, _loggerMock.Object);
+        _handler = new DocumentClassifierHandler(_openAiClientMock.Object, renderer, _loggerMock.Object);
 
         // Handler with RAG
-        _handlerWithRag = new DocumentClassifierHandler(_openAiClientMock.Object, _loggerMock.Object, _ragServiceMock.Object);
+        _handlerWithRag = new DocumentClassifierHandler(_openAiClientMock.Object, renderer, _loggerMock.Object, _ragServiceMock.Object);
     }
 
     #region Handler Properties Tests

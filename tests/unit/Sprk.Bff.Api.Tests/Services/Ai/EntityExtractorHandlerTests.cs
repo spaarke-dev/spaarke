@@ -4,6 +4,8 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Xunit;
 
+#pragma warning disable CS0618 // Type or member is obsolete
+
 namespace Sprk.Bff.Api.Tests.Services.Ai;
 
 public class EntityExtractorHandlerTests
@@ -18,7 +20,11 @@ public class EntityExtractorHandlerTests
         _openAiClientMock = new Mock<IOpenAiClient>();
         _textChunkingServiceMock = new Mock<ITextChunkingService>();
         _loggerMock = new Mock<ILogger<EntityExtractorHandler>>();
-        _handler = new EntityExtractorHandler(_openAiClientMock.Object, _textChunkingServiceMock.Object, _loggerMock.Object);
+        _handler = new EntityExtractorHandler(
+            _openAiClientMock.Object,
+            _textChunkingServiceMock.Object,
+            new PromptSchemaRenderer(Mock.Of<ILogger<PromptSchemaRenderer>>()),
+            _loggerMock.Object);
     }
 
     #region Handler Properties Tests
