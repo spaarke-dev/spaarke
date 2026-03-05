@@ -221,6 +221,24 @@ User: "Create a JPS action for document classification that routes to different 
 
 ---
 
+### Step 6: Refresh Scope Index
+
+After seeding a new action to Dataverse, refresh the scope catalog so Claude Code can find it in future playbook designs:
+
+```
+RUN: powershell -ExecutionPolicy Bypass -File scripts/Refresh-ScopeModelIndex.ps1 -Environment dev
+
+REPORT: "Scope index refreshed — new action {ACT-XXX} now available for playbook design."
+
+IF called from within jps-playbook-design:
+  → SKIP commit (parent skill handles it)
+ELSE:
+  → git add docs/ai-knowledge/catalogs/scope-model-index.json
+  → git commit -m "chore(ai): refresh scope-model-index after adding {action-name}"
+```
+
+---
+
 ## Error Handling
 
 | Situation | Response |
@@ -235,6 +253,7 @@ User: "Create a JPS action for document classification that routes to different 
 ## Related Skills
 
 - `jps-playbook-design` — Design multi-node playbooks (calls this skill for each node)
+- `jps-scope-refresh` — Refresh scope index after new action is seeded (called at Step 6)
 - `jps-validate` — Validate JPS JSON against schema and render test
 - `dataverse-deploy` — Deploy seeded Actions to Dataverse
 

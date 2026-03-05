@@ -264,6 +264,21 @@ IF user confirms:
     -DefinitionFile "{path}" -Environment dev
 ```
 
+### Step 9.5: Refresh Scope Index (if new scopes were created)
+
+```
+IF any new scopes were created during this workflow (via jps-action-create in Step 4):
+  RUN: powershell -ExecutionPolicy Bypass -File scripts/Refresh-ScopeModelIndex.ps1 -Environment dev
+
+  This ensures scope-model-index.json reflects the newly created scopes
+  so future playbook designs will find them automatically.
+
+  REPORT: "Scope index refreshed — {N} new entries added."
+
+IF no new scopes were created:
+  → SKIP (index is already current)
+```
+
 ### Step 10: Verify Deployment
 
 ```
@@ -433,6 +448,7 @@ Next steps:
 ## Related Skills
 
 - `jps-action-create` — Create individual JPS definitions (called by this skill when new actions needed)
+- `jps-scope-refresh` — Refresh scope-model-index.json from Dataverse (called at Step 9.5 if new scopes created)
 - `jps-validate` — Validate JPS files after creation
 - `dataverse-deploy` — Deploy scope records and actions
 - `Deploy-Playbook.ps1` — PowerShell script for automated playbook deployment to Dataverse
