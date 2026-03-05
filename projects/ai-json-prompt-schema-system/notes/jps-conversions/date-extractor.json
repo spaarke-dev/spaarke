@@ -49,6 +49,12 @@
     "structuredOutput": true
   },
 
+  "scopes": {
+    "$skills": [
+      { "$ref": "skill:Date Extraction" }
+    ]
+  },
+
   "examples": [
     {
       "input": "MASTER SERVICES AGREEMENT\n\nThis Master Services Agreement ('Agreement') is entered into as of January 15, 2026 ('Effective Date'), by and between Alpha Technologies Inc. and Global Enterprises LLC.\n\n1. TERM: This Agreement shall commence on the Effective Date and continue for a period of three (3) years.\n2. PAYMENT: All invoices are due within 30 days of receipt.\n3. RENEWAL: Either party may provide notice of non-renewal at least 90 days prior to the expiration date.",

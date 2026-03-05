@@ -71,6 +71,14 @@
     "structuredOutput": true
   },
 
+  "scopes": {
+    "$skills": [
+      { "$ref": "skill:Contract Analysis" },
+      { "$ref": "skill:Risk Assessment" },
+      { "$ref": "skill:Defined Terms" }
+    ]
+  },
+
   "examples": [
     {
       "input": {

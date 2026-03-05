@@ -92,6 +92,14 @@
     "structuredOutput": true
   },
 
+  "scopes": {
+    "$skills": [
+      { "$ref": "skill:Contract Analysis" },
+      { "$ref": "skill:Obligation Mapping" },
+      { "$ref": "skill:Risk Assessment" }
+    ]
+  },
+
   "examples": [
     {
       "input": "LETTER OF INTENT\n\nDate: March 1, 2026\n\nDear Ms. Hargrove,\n\nAcme Solutions LLC ('Acme') is pleased to submit this Letter of Intent to acquire the SaaS product line and associated intellectual property of Meridian Software Inc. ('Meridian') on the following proposed terms:\n\n1. PURCHASE PRICE: $4,200,000 USD, payable as follows: 60% cash at closing, 40% seller note at 4% interest over 24 months.\n2. EXCLUSIVITY: Meridian agrees to a 60-day exclusive negotiation period commencing upon countersignature.\n3. DUE DILIGENCE: Acme shall have 30 days to complete financial, technical, and legal due diligence.\n4. TRANSITION: Meridian's founding team commits to a 90-day transition period post-closing at no additional cost.\n5. GOVERNING LAW: Delaware.\n\nThis LOI is non-binding except for the exclusivity and confidentiality provisions.\n\nPlease countersign and return by March 10, 2026.\n\nRegards,\nJonathan Mercer\nAcme Solutions LLC",

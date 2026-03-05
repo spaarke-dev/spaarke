@@ -104,6 +104,14 @@
     "structuredOutput": true
   },
 
+  "scopes": {
+    "$skills": [
+      { "$ref": "skill:Risk Assessment" },
+      { "$ref": "skill:Risk Flagging" },
+      { "$ref": "skill:Compliance Check" }
+    ]
+  },
+
   "examples": [
     {
       "input": "MASTER SERVICES AGREEMENT\n\nThis Master Services Agreement ('Agreement') is entered into as of January 15, 2026, by and between:\n\nAlpha Technologies Inc., a Delaware corporation ('Service Provider'), and\nGlobal Enterprises LLC, a New York limited liability company ('Client').\n\n1. SERVICES: Service Provider shall provide IT consulting and software development services.\n2. TERM: Three (3) years from the Effective Date.\n3. FEES: $250 per hour, annual cap $500,000. Payment: Net 30.\n4. CONFIDENTIALITY: Both parties shall maintain confidentiality for 5 years post-termination.\n5. LIMITATION OF LIABILITY: Service Provider's aggregate liability shall not exceed fees paid in prior 12 months. IN NO EVENT SHALL SERVICE PROVIDER BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES.\n6. INDEMNIFICATION: Client shall indemnify and hold harmless Service Provider from all claims arising from Client's use of deliverables.\n7. TERMINATION: Either party may terminate with 30 days written notice. Service Provider may terminate immediately if Client fails to pay within 60 days.\n8. GOVERNING LAW: State of New York.",

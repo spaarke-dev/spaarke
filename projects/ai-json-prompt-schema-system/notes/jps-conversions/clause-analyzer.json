@@ -54,6 +54,10 @@
     "$knowledge": [
       { "$ref": "knowledge:standard-contract-clauses", "as": "reference" },
       { "$ref": "knowledge:commercial-risk-factors", "as": "definitions" }
+    ],
+    "$skills": [
+      { "$ref": "skill:Clause Comparison" },
+      { "$ref": "skill:Risk Flagging" }
     ]
   },
 

@@ -122,6 +122,11 @@
     "$knowledge": [
       { "$ref": "knowledge:invoice-validation-rules", "as": "reference" },
       { "$ref": "knowledge:ap-fraud-indicators", "as": "definitions" }
+    ],
+    "$skills": [
+      { "$ref": "skill:Invoice Processing" },
+      { "$ref": "skill:Financial Terms" },
+      { "$ref": "skill:Compliance Check" }
     ]
   },
 

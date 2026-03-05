@@ -104,6 +104,14 @@
     "structuredOutput": true
   },
 
+  "scopes": {
+    "$skills": [
+      { "$ref": "skill:Party Identification" },
+      { "$ref": "skill:Date Extraction" },
+      { "$ref": "skill:Financial Terms" }
+    ]
+  },
+
   "examples": [
     {
       "input": "INVOICE\n\nInvoice Number: INV-2026-00847\nDate: March 5, 2026\nDue Date: April 4, 2026\n\nBill To:\nAcme Corporation\n123 Main Street\nNew York, NY 10001\nContact: Jane Doe, jane.doe@acme.com\n\nFrom:\nSupply Co Ltd\n456 Commerce Ave\nChicago, IL 60601\n\nDescription                  Qty   Unit Price   Total\nOffice Supplies Package        5     $120.00    $600.00\nPremium Stapler Set            2      $45.00     $90.00\nPaper Ream (500 sheets) x10   10      $12.00    $120.00\n\nSubtotal: $810.00\nTax (8.5%): $68.85\nTotal Due: $878.85\n\nPayment Terms: Net 30\nRemittance: Please reference invoice number on payment.",

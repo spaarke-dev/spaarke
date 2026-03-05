@@ -81,6 +81,13 @@
     "structuredOutput": true
   },
 
+  "scopes": {
+    "$skills": [
+      { "$ref": "skill:Financial Terms" },
+      { "$ref": "skill:Invoice Processing" }
+    ]
+  },
+
   "examples": [
     {
       "input": "MASTER SERVICES AGREEMENT\n\nThis Master Services Agreement is entered into as of January 15, 2026, by and between Alpha Technologies Inc. and Global Enterprises LLC.\n\n3. FEES AND PAYMENT\n3.1 Service Fees: Client shall pay Service Provider at the rate of $250 per hour for consulting services.\n3.2 Annual Cap: Total fees shall not exceed $500,000 per calendar year.\n3.3 Expense Reimbursement: Client shall reimburse reasonable travel expenses up to $25,000 per quarter.\n3.4 Payment Terms: All invoices are due within 30 days of receipt (Net 30). Late payments shall accrue interest at 1.5% per month.\n3.5 Security Deposit: Client shall provide a security deposit of $50,000 upon execution of this Agreement.",
