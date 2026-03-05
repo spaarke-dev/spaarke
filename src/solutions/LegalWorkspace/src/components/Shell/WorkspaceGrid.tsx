@@ -5,12 +5,6 @@ import {
   Text,
   Badge,
   Button,
-  Toaster,
-  Toast,
-  ToastTitle,
-  ToastBody,
-  useToastController,
-  useId,
   Spinner,
 } from "@fluentui/react-components";
 import { OpenRegular, ArrowClockwiseRegular } from "@fluentui/react-icons";
@@ -22,8 +16,7 @@ import { DocumentsTab } from "../RecordCards/DocumentsTab";
 import { useDataverseService } from "../../hooks/useDataverseService";
 import { navigateToEntityList } from "../../utils/navigation";
 import {
-  createAnalysisBuilderHandlers,
-  getAnalysisBuilderUnavailableMessage,
+  createQuickStartHandlers,
 } from "../GetStarted/ActionCardHandlers";
 import type { IWebApi } from "../../types/xrm";
 
@@ -57,6 +50,10 @@ const LazyQuickSummaryDashboardDialog = React.lazy(() =>
   import("../QuickSummary/QuickSummaryDashboardDialog").then((m) => ({
     default: m.QuickSummaryDashboardDialog,
   }))
+);
+
+const LazyQuickStartWizardDialog = React.lazy(
+  () => import("../QuickStart/QuickStartWizardDialog")
 );
 
 // ---------------------------------------------------------------------------
@@ -117,7 +114,10 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
     borderWidth: "1px",
     borderStyle: "solid",
-    borderColor: tokens.colorNeutralStroke2,
+    borderTopColor: tokens.colorNeutralStroke2,
+    borderRightColor: tokens.colorNeutralStroke2,
+    borderBottomColor: tokens.colorNeutralStroke2,
+    borderLeftColor: tokens.colorNeutralStroke2,
     borderRadius: tokens.borderRadiusMedium,
     overflow: "hidden",
     minHeight: "325px",
@@ -152,7 +152,10 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
     borderWidth: "1px",
     borderStyle: "solid",
-    borderColor: tokens.colorNeutralStroke2,
+    borderTopColor: tokens.colorNeutralStroke2,
+    borderRightColor: tokens.colorNeutralStroke2,
+    borderBottomColor: tokens.colorNeutralStroke2,
+    borderLeftColor: tokens.colorNeutralStroke2,
     borderRadius: tokens.borderRadiusMedium,
     overflow: "hidden",
     minHeight: "400px",
@@ -255,42 +258,27 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleCloseProjectWizard = React.useCallback(() => setIsProjectWizardOpen(false), []);
 
   // -------------------------------------------------------------------------
-  // Toaster for "Analysis Builder unavailable" informational messages
+  // Quick Start wizard dialog state
   // -------------------------------------------------------------------------
 
-  const toasterId = useId("workspace-toaster");
-  const { dispatchToast } = useToastController(toasterId);
-
-  const handleAnalysisBuilderUnavailable = React.useCallback(
-    (displayName: string, intent: string) => {
-      dispatchToast(
-        <Toast>
-          <ToastTitle>Feature Available in Full Workspace</ToastTitle>
-          <ToastBody>
-            {getAnalysisBuilderUnavailableMessage(displayName)}
-          </ToastBody>
-        </Toast>,
-        { intent: "info", timeout: 6000 }
-      );
-      // Log the missed intent so developers can verify which intents need
-      // to be registered in the AI Playbook platform
-      console.info(
-        `[WorkspaceGrid] Analysis Builder unavailable for intent "${intent}" (card: "${displayName}").`
-      );
-    },
-    [dispatchToast]
-  );
+  const [wizardIntent, setWizardIntent] = React.useState<string | null>(null);
+  const handleOpenQuickStartWizard = React.useCallback((intent: string) => {
+    setWizardIntent(intent);
+  }, []);
+  const handleCloseQuickStartWizard = React.useCallback(() => {
+    setWizardIntent(null);
+  }, []);
 
   // -------------------------------------------------------------------------
-  // Analysis Builder handlers for the 6 non-Create-Matter cards
+  // Quick Start handlers for the 5 non-Create-Matter/Project cards
   // -------------------------------------------------------------------------
 
-  const analysisBuilderHandlers = React.useMemo(
+  const quickStartHandlers = React.useMemo(
     () =>
-      createAnalysisBuilderHandlers({
-        onUnavailable: handleAnalysisBuilderUnavailable,
+      createQuickStartHandlers({
+        onOpenWizard: handleOpenQuickStartWizard,
       }),
-    [handleAnalysisBuilderUnavailable]
+    [handleOpenQuickStartWizard]
   );
 
   // -------------------------------------------------------------------------
@@ -333,14 +321,12 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
 
   const cardClickHandlers = React.useMemo(
     () => ({
-      // "Create New Matter" opens the 3-step wizard dialog (task 022)
+      ...quickStartHandlers,
+      // Explicit handlers AFTER spread to prevent overwrite
       "create-new-matter": handleOpenWizard,
-      // "Create New Project" opens the 1-step project wizard dialog
       "create-new-project": handleOpenProjectWizard,
-      // The remaining cards launch Analysis Builder with intent payloads
-      ...analysisBuilderHandlers,
     }),
-    [handleOpenWizard, handleOpenProjectWizard, analysisBuilderHandlers]
+    [quickStartHandlers, handleOpenWizard, handleOpenProjectWizard]
   );
 
   // -------------------------------------------------------------------------
@@ -349,9 +335,6 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
 
   return (
     <>
-      {/* Toaster for informational messages (e.g. Analysis Builder unavailable) */}
-      <Toaster toasterId={toasterId} position="bottom-end" />
-
       <div className={styles.grid}>
         {/* Row 1: Get Started (left) + Quick Summary (right) — 50/50 split */}
         <div className={styles.row1}>
@@ -506,6 +489,18 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       {isProjectWizardOpen && (
         <React.Suspense fallback={<DialogLoadingFallback />}>
           <LazyProjectWizardDialog open={isProjectWizardOpen} onClose={handleCloseProjectWizard} webApi={webApi} />
+        </React.Suspense>
+      )}
+
+      {/* Quick Start Playbook Wizard dialog — config-driven wizard for action cards.
+          Lazy-loaded: chunk only fetched on first user interaction. */}
+      {wizardIntent !== null && (
+        <React.Suspense fallback={<DialogLoadingFallback />}>
+          <LazyQuickStartWizardDialog
+            open={wizardIntent !== null}
+            onClose={handleCloseQuickStartWizard}
+            intent={wizardIntent}
+          />
         </React.Suspense>
       )}
 

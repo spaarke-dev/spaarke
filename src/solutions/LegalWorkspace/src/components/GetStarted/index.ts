@@ -11,12 +11,11 @@ export { ACTION_CARD_CONFIGS } from "./getStartedConfig";
 export type { IActionCardConfig } from "./getStartedConfig";
 
 export {
-  createAnalysisBuilderHandlers,
-  getAnalysisBuilderUnavailableMessage,
+  createQuickStartHandlers,
 } from "./ActionCardHandlers";
 export type {
-  IAnalysisBuilderHandlerOptions,
-  AnalysisBuilderHandlerMap,
+  IQuickStartHandlerOptions,
+  QuickStartHandlerMap,
 } from "./ActionCardHandlers";
 
 export { ANALYSIS_BUILDER_CONTEXTS } from "./analysisBuilderTypes";
