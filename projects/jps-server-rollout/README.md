@@ -1,9 +1,10 @@
 # JPS Server Rollout
 
-> **Status**: In Progress
+> **Status**: Complete
 > **Branch**: `work/ai-json-prompt-schema`
 > **Predecessor**: `ai-json-prompt-schema-system` (complete, 28/28 tasks)
 > **Created**: 2026-03-04
+> **Completed**: 2026-03-04
 
 ## Purpose
 
@@ -46,3 +47,32 @@ Complete the server-side JPS (JSON Prompt Schema) pipeline so that JPS becomes t
 | `Services/Ai/PromptSchemaRenderer.cs` | Rendering engine (969 lines) |
 | New: `Services/Ai/JpsRefResolver.cs` | Static $ref extraction |
 | `Services/Ai/Tools/*.cs` | 9 handler files to migrate |
+
+## Deliverables Summary
+
+All 5 phases completed (55 tasks, 217 tests passing):
+
+### Phase 1: Scope Resolution
+- `ScopeResolverService.ResolveScopesAsync()` implemented with parallel Dataverse queries
+- Resolves skills, knowledge, and tools by ID from `sprk_analysisskill`, `sprk_analysisknowledge`, and `sprk_analysistool`
+
+### Phase 2: Named $ref Resolution
+- `JpsRefResolver` (static class, no DI per ADR-010) extracts `knowledge:{name}` and `skill:{name}` references from JPS `scopes`
+- Name-based lookups via `IScopeResolverService.GetKnowledgeByNameAsync()` and `GetSkillByNameAsync()`
+- Wired into `AiAnalysisNodeExecutor` to resolve refs before rendering
+
+### Phase 3: Template Parameters
+- `{{paramName}}` substitution in instruction fields via `PromptSchemaRenderer`
+- Parameters sourced from `ConfigJson.templateParameters` on playbook nodes
+- Override merge via `PromptSchemaOverrideMerger` (static class, supports `$clear` for constraint replacement)
+
+### Phase 4: Handler Migration
+- 5 prompt-only handlers consolidated into `GenericAnalysisHandler` (clause analyzer, entity extractor, document classifier, risk assessor, key terms extractor)
+- 4 handlers retained as thin wrappers with JPS dual-path (document profiler, summarizer, comparison handler, compliance checker)
+- All 9 handlers support both JPS and legacy flat-text prompts
+
+### Phase 5: Validation and Documentation
+- Seeding script populates Action records with JPS JSON definitions
+- 217 tests passing (pipeline, choices, override merge, backward compatibility)
+- AI Architecture Guide updated with JPS section (Section 19)
+- JPS Authoring Guide created for prompt authors
