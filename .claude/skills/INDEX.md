@@ -63,6 +63,7 @@
 | [dev-cleanup](dev-cleanup/SKILL.md) | Clean up dev environment caches (Azure CLI, NuGet, npm, Git) | No | `/dev-cleanup`, "clean up dev", "fix auth issues", "clear caches" |
 | [merge-to-master](merge-to-master/SKILL.md) | Merge completed branch work into master with safety checks | No | `/merge-to-master`, "merge to master", "check unmerged branches", "reconcile branches" |
 | [jps-action-create](jps-action-create/SKILL.md) | Create a new JPS definition for an Analysis Action | No | "create JPS action", "new JPS definition", "new playbook action" |
+| [jps-playbook-audit](jps-playbook-audit/SKILL.md) | Audit existing playbooks against current scope catalog and standards | No | "audit playbooks", "review playbooks", "check playbook compliance" |
 | [jps-playbook-design](jps-playbook-design/SKILL.md) | End-to-end AI playbook: design → scope/model selection → deploy to Dataverse → verify | No | "design playbook", "create playbook", "new AI playbook" |
 | [jps-scope-refresh](jps-scope-refresh/SKILL.md) | Refresh scope-model-index.json from Dataverse state | No | "refresh scope index", "update scope catalog", "sync scopes" |
 | [jps-validate](jps-validate/SKILL.md) | Validate JPS JSON against schema and test rendering | No | "validate JPS", "check JPS", "test JPS definition" |
@@ -91,6 +92,7 @@
 
 ### 🤖 AI / JPS Playbook Authoring
 - **jps-action-create** - Component: Create a new JPS definition for an Analysis Action (Tier 1)
+- **jps-playbook-audit** - Orchestrator: Audit existing playbooks against current scope catalog and standards (Tier 2)
 - **jps-playbook-design** - Orchestrator: End-to-end playbook creation — design, scope/model selection, deploy, verify (Tier 2)
 - **jps-scope-refresh** - Operational: Refresh scope-model-index.json from Dataverse (Tier 3)
 - **jps-validate** - Component: Validate JPS JSON against schema and test rendering (Tier 1)
