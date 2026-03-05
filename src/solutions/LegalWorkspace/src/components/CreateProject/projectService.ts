@@ -207,7 +207,6 @@ export class ProjectService {
 
     // Build entity payload with scalar fields
     const entity: WebApiEntity = {
-      sprk_name: formValues.projectName.trim(),
       sprk_projectname: formValues.projectName.trim(),
     };
 
