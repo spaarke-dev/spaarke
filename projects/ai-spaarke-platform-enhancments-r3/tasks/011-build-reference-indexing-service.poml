@@ -1,0 +1,67 @@
+<task id="AIRA-011" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Build ReferenceIndexingService and Admin Endpoints</title>
+    <phase>2</phase>
+    <estimate>4h</estimate>
+    <tags>bff-api, ai-search, api</tags>
+    <dependencies>001</dependencies>
+    <parallel-group>C</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Create `ReferenceIndexingService` that chunks, embeds, and indexes knowledge source content into the `spaarke-rag-references` index. Create admin endpoints for triggering indexing.</goal>
+    <context>
+      Follow the existing `RagIndexingPipeline` pattern for chunking and embedding. The new service targets the dedicated reference index instead of the customer document index. Admin endpoints follow Minimal API + endpoint filter patterns.
+    </context>
+    <constraints>
+      - Chunk size: 512 tokens with 100-token overlap (same as knowledge-v2)
+      - Embedding model: text-embedding-3-large (3072-dim)
+      - Idempotent: delete existing chunks for source before re-indexing
+      - Admin endpoints must use endpoint filters for authorization (ADR-008)
+      - DI registration via feature module pattern (ADR-010)
+      - Follow ADR-001 Minimal API patterns
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      .claude/adr/ADR-001-minimal-api.md
+      .claude/adr/ADR-008-endpoint-filters.md
+      .claude/adr/ADR-010-di-minimalism.md
+      .claude/adr/ADR-013-ai-architecture.md
+      .claude/patterns/api/endpoint-definition.md
+      .claude/patterns/api/service-registration.md
+      .claude/constraints/api.md
+      .claude/constraints/ai.md
+      docs/guides/RAG-ARCHITECTURE.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read `Services/Ai/RagIndexingPipeline.cs` to understand the existing chunk → embed → index pattern</step>
+    <step>Read `Services/Ai/SemanticDocumentChunker.cs` for chunking implementation</step>
+    <step>Create `Services/Ai/ReferenceIndexingService.cs` with methods: IndexKnowledgeSourceAsync, IndexAllReferencesAsync, DeleteSourceChunksAsync</step>
+    <step>Create admin endpoints at `Api/Ai/AdminKnowledgeEndpoints.cs`:
+      - POST /api/admin/knowledge/index-references (index all system knowledge sources)
+      - POST /api/admin/knowledge/index-reference/{knowledgeSourceId} (index single source)
+      - DELETE /api/admin/knowledge/index-reference/{knowledgeSourceId} (remove source chunks)</step>
+    <step>Register service in DI via existing AI feature module</step>
+    <step>Write unit tests for ReferenceIndexingService</step>
+  </steps>
+
+  <tools>Bash, Read, Write, Edit, Glob, Grep</tools>
+
+  <outputs>
+    <output>`Services/Ai/ReferenceIndexingService.cs` — Core indexing service</output>
+    <output>`Api/Ai/AdminKnowledgeEndpoints.cs` — Admin endpoints</output>
+    <output>Unit tests for the service</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ReferenceIndexingService chunks content, generates 3072-dim embeddings, and uploads to spaarke-rag-references</criterion>
+    <criterion>Admin endpoints exist with endpoint filter authorization</criterion>
+    <criterion>Re-indexing is idempotent (deletes old chunks first)</criterion>
+    <criterion>Unit tests pass</criterion>
+    <criterion>dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

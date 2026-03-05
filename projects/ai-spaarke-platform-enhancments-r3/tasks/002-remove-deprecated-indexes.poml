@@ -1,0 +1,53 @@
+<task id="AIRA-002" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Remove Deprecated Azure AI Search Indexes</title>
+    <phase>1</phase>
+    <estimate>1h</estimate>
+    <tags>ai-search, infrastructure, cleanup</tags>
+    <dependencies>none</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Remove 3 deprecated Azure AI Search indexes and update configuration to reference correct active indexes.</goal>
+    <context>
+      Three legacy indexes exist with 0 documents and serve no purpose: `knowledge-index`, `spaarke-knowledge-index`, `spaarke-knowledge-shared`. The shared index name config currently points to `spaarke-knowledge-shared` but should point to `spaarke-knowledge-index-v2`.
+    </context>
+    <constraints>
+      - Archive schema files before deletion (move to infrastructure/ai-search/_archive/)
+      - Update AnalysisOptions.SharedIndexName default from "spaarke-knowledge-shared" to "spaarke-knowledge-index-v2"
+      - Verify no code references the deprecated index names before removing
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      docs/architecture/auth-AI-azure-resources.md
+      .claude/adr/ADR-013-ai-architecture.md
+      .claude/constraints/ai.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Search codebase for any references to `knowledge-index`, `spaarke-knowledge-index`, `spaarke-knowledge-shared` to confirm they are safe to remove</step>
+    <step>Archive any existing schema files to `infrastructure/ai-search/_archive/`</step>
+    <step>Delete indexes from Azure AI Search: `az search index delete --name {index} --service-name spaarke-search-dev --resource-group spe-infrastructure-westus2`</step>
+    <step>Update `AnalysisOptions.SharedIndexName` default value in code from "spaarke-knowledge-shared" to "spaarke-knowledge-index-v2"</step>
+    <step>Update any App Service configuration that references the deprecated index names</step>
+    <step>Verify remaining indexes: `az search index list --service-name spaarke-search-dev --resource-group spe-infrastructure-westus2`</step>
+  </steps>
+
+  <tools>Bash, Read, Edit, Grep, Glob</tools>
+
+  <outputs>
+    <output>3 deprecated indexes removed from Azure AI Search</output>
+    <output>Schema files archived in infrastructure/ai-search/_archive/</output>
+    <output>AnalysisOptions.SharedIndexName updated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Indexes `knowledge-index`, `spaarke-knowledge-index`, `spaarke-knowledge-shared` no longer exist</criterion>
+    <criterion>AnalysisOptions.SharedIndexName defaults to "spaarke-knowledge-index-v2"</criterion>
+    <criterion>No broken code references to removed indexes</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,64 @@
+<task id="AIRA-013" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Wire Reference Retrieval into RagService</title>
+    <phase>2</phase>
+    <estimate>3h</estimate>
+    <tags>bff-api, ai-search</tags>
+    <dependencies>011</dependencies>
+    <parallel-group>D</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Extend RagService (or create ReferenceRetrievalService) with a `SearchReferencesAsync` method that queries the dedicated golden reference index.</goal>
+    <context>
+      The existing RagService queries spaarke-knowledge-index-v2 for customer document RAG. We need a parallel query path that targets spaarke-rag-references for golden reference knowledge. The playbook's N:N knowledge source relationships provide knowledgeSourceIds for filtering.
+    </context>
+    <constraints>
+      - Must query spaarke-rag-references ONLY — never the customer document index
+      - Support filtering by knowledgeSourceIds (from playbook N:N relationships)
+      - Support filtering by domain tag
+      - Must include tenantId filter on all queries (security)
+      - Return format compatible with prompt assembly (content text + metadata)
+      - Follow ADR-009 for Redis caching of results
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      .claude/adr/ADR-009-redis-caching.md
+      .claude/adr/ADR-013-ai-architecture.md
+      .claude/patterns/caching/distributed-cache.md
+      .claude/constraints/ai.md
+      docs/guides/RAG-ARCHITECTURE.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read `Services/Ai/RagService.cs` to understand existing query patterns and response types</step>
+    <step>Add `SearchReferencesAsync` method to IRagService/RagService:
+      - Parameters: query, knowledgeSourceIds?, domain?, topK=5, cancellationToken
+      - Queries: spaarke-rag-references index only
+      - Filters: tenantId (required) + knowledgeSourceIds (optional) + domain (optional)</step>
+    <step>Create response model `ReferenceSearchResult` with: content, knowledgeSourceId, knowledgeSourceName, domain, score</step>
+    <step>Implement hybrid search (keyword + vector + semantic reranking) against the reference index</step>
+    <step>Add unit tests for SearchReferencesAsync</step>
+    <step>Verify existing RagService methods are not affected (no regression)</step>
+  </steps>
+
+  <tools>Bash, Read, Write, Edit, Glob, Grep</tools>
+
+  <outputs>
+    <output>SearchReferencesAsync method on RagService (or new ReferenceRetrievalService)</output>
+    <output>ReferenceSearchResult model</output>
+    <output>Unit tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SearchReferencesAsync queries spaarke-rag-references only</criterion>
+    <criterion>Supports filtering by knowledgeSourceIds and domain</criterion>
+    <criterion>tenantId filter always applied</criterion>
+    <criterion>Unit tests pass</criterion>
+    <criterion>Existing RagService methods unaffected</criterion>
+    <criterion>dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

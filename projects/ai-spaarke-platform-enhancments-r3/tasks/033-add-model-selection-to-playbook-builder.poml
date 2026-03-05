@@ -1,0 +1,55 @@
+<task id="AIRA-033" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Add Model Selection Dropdown to Playbook Builder</title>
+    <phase>4</phase>
+    <estimate>2h</estimate>
+    <tags>frontend, pcf</tags>
+    <dependencies>031</dependencies>
+    <parallel-group>H</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Add a model selection dropdown to the Playbook Builder action node configuration panel so users can override the default model for each action.</goal>
+    <context>
+      The model resolution chain supports node-level overrides via PlaybookNode.ModelDeploymentId. The Playbook Builder UI needs a dropdown to let users select "Auto (recommended)" or a specific model deployment.
+    </context>
+    <constraints>
+      - Default: "Auto (recommended)" — uses ModelSelector routing
+      - Options populated from ModelEndpoints configuration
+      - Stored in PlaybookNode.ModelDeploymentId field
+      - Fluent UI v9 Dropdown component (ADR-021)
+      - Dark mode compatible
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      .claude/adr/ADR-021-fluent-ui-v9.md
+      .claude/patterns/pcf/theme-management.md
+      .claude/constraints/pcf.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read Playbook Builder action node configuration component to find where to add the dropdown</step>
+    <step>Read ModelEndpoints or model configuration to determine available deployment options</step>
+    <step>Add Fluent UI v9 Dropdown to action node properties panel with "Auto (recommended)" + specific models</step>
+    <step>Wire selection to PlaybookNode.ModelDeploymentId in canvas data model</step>
+    <step>Ensure serialization in playbookNodeSync.ts saves model selection to configJson</step>
+    <step>Test: select model in Builder → execute playbook → verify correct model used</step>
+  </steps>
+
+  <tools>Bash, Read, Write, Edit, Glob, Grep</tools>
+
+  <outputs>
+    <output>Model selection dropdown in Playbook Builder action node config</output>
+    <output>PlaybookNode.ModelDeploymentId serialization</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Dropdown shows "Auto (recommended)" + available model deployments</criterion>
+    <criterion>Selection persists in PlaybookNode.ModelDeploymentId</criterion>
+    <criterion>Dropdown uses Fluent UI v9 and is dark mode compatible</criterion>
+    <criterion>Default is "Auto"</criterion>
+  </acceptance-criteria>
+</task>

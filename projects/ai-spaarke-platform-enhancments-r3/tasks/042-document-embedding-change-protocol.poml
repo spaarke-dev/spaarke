@@ -1,0 +1,49 @@
+<task id="AIRA-042" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Document Embedding Model Change Protocol</title>
+    <phase>5</phase>
+    <estimate>1h</estimate>
+    <tags>documentation</tags>
+    <dependencies>none</dependencies>
+    <parallel-group>I</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Document the process for changing embedding models in the future, including re-indexing requirements and migration steps.</goal>
+    <context>
+      Changing embedding models requires re-indexing ALL documents. This protocol ensures future model upgrades are done safely with zero-downtime migration.
+    </context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      docs/guides/RAG-ARCHITECTURE.md
+      .claude/constraints/ai.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create section in AI-EMBEDDING-STRATEGY.md (or separate doc) covering:
+      - Deploy new model
+      - Create new vector field in index
+      - Batch re-embed all documents
+      - Switch queries to new field
+      - Remove old field (if possible) or stop writes</step>
+    <step>Include estimated re-indexing times per index:
+      - spaarke-rag-references: ~100 chunks, seconds
+      - spaarke-knowledge-index-v2: 554+ docs, ~15 minutes
+      - discovery-index: mirrors knowledge-v2</step>
+    <step>Include rollback procedure</step>
+  </steps>
+
+  <tools>Read, Write, Edit</tools>
+
+  <outputs>
+    <output>Embedding model change protocol in documentation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Protocol covers full lifecycle: deploy → field → re-embed → switch → cleanup</criterion>
+    <criterion>Includes time estimates and rollback procedure</criterion>
+  </acceptance-criteria>
+</task>

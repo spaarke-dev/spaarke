@@ -1,0 +1,71 @@
+<task id="AIRA-020" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Wire L1 Knowledge Retrieval into Action Node Execution</title>
+    <phase>3</phase>
+    <estimate>4h</estimate>
+    <tags>bff-api, ai</tags>
+    <dependencies>013</dependencies>
+    <parallel-group>E</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Modify `AiAnalysisNodeExecutor` and `GenericAnalysisHandler` to retrieve L1 golden reference knowledge from the dedicated index before calling OpenAI, and inject the reference chunks into the prompt context.</goal>
+    <context>
+      This is the core integration point. Currently playbooks run as "prompt + document → LLM". After this change: "prompt + reference knowledge tokens + document → LLM". The knowledge retrieval uses the playbook's N:N knowledge source relationships to scope which references to query.
+    </context>
+    <constraints>
+      - Knowledge retrieval must not add >500ms to action execution (p95)
+      - Build semantic query from document content + action context
+      - Inject retrieved chunks as "Knowledge Context" section between system prompt and document content
+      - When no knowledge sources linked to playbook, skip retrieval (backward compatible)
+      - Do NOT log retrieved content (ADR-014)
+      - Prompt assembly order: Skill instructions → Knowledge Context → Document Content
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      .claude/adr/ADR-013-ai-architecture.md
+      .claude/adr/ADR-014-ai-caching.md
+      .claude/patterns/ai/analysis-scopes.md
+      .claude/constraints/ai.md
+      docs/guides/SPAARKE-AI-ARCHITECTURE.md
+      docs/guides/RAG-ARCHITECTURE.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read `Services/Ai/Nodes/AiAnalysisNodeExecutor.cs` to understand current execution flow</step>
+    <step>Read `Services/Ai/Handlers/GenericAnalysisHandler.cs` to understand BuildExecutionPrompt and prompt assembly</step>
+    <step>Read `Services/Ai/PlaybookOrchestrationService.cs` to understand how context flows to node executors</step>
+    <step>Modify AiAnalysisNodeExecutor.ExecuteAsync to:
+      1. After loading action's JPS prompt, resolve linked knowledge sources from playbook N:N relationships
+      2. Build semantic query from document title + content summary + action context
+      3. Call SearchReferencesAsync with knowledgeSourceIds filter
+      4. Pass reference chunks to handler</step>
+    <step>Modify GenericAnalysisHandler prompt assembly to inject knowledge context between system prompt and document:
+      - "The following reference material provides domain expertise. Use it to improve accuracy."
+      - For each chunk: "### Reference: {knowledgeSourceName}\n{content}"</step>
+    <step>Test with a playbook that has linked knowledge sources — verify reference chunks appear in prompt</step>
+    <step>Test with a playbook WITHOUT knowledge sources — verify backward compatible (no retrieval, no error)</step>
+    <step>Write unit tests for the modified execution flow</step>
+  </steps>
+
+  <tools>Bash, Read, Write, Edit, Glob, Grep</tools>
+
+  <outputs>
+    <output>Modified AiAnalysisNodeExecutor with knowledge retrieval</output>
+    <output>Modified GenericAnalysisHandler with knowledge context in prompt assembly</output>
+    <output>Unit tests for knowledge-augmented execution</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Playbook actions with linked knowledge sources retrieve reference chunks before LLM call</criterion>
+    <criterion>Reference chunks injected as Knowledge Context section in prompt</criterion>
+    <criterion>Playbooks without knowledge sources work unchanged (backward compatible)</criterion>
+    <criterion>Knowledge retrieval latency <500ms p95</criterion>
+    <criterion>No content logged (ADR-014)</criterion>
+    <criterion>Unit tests pass</criterion>
+    <criterion>dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>
