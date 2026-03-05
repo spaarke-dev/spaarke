@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using System.Text.Json.Nodes;
+using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai.Tools;
 
@@ -32,6 +34,7 @@ public sealed class SummaryHandler : IAnalysisToolHandler
     private readonly IOpenAiClient _openAiClient;
     private readonly ITextChunkingService _textChunkingService;
     private readonly ModelSelectorOptions _modelSelectorOptions;
+    private readonly PromptSchemaRenderer _promptSchemaRenderer;
     private readonly ILogger<SummaryHandler> _logger;
 
     /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
@@ -83,11 +86,13 @@ public sealed class SummaryHandler : IAnalysisToolHandler
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
         IOptions<ModelSelectorOptions> modelSelectorOptions,
+        PromptSchemaRenderer promptSchemaRenderer,
         ILogger<SummaryHandler> logger)
     {
         _openAiClient = openAiClient;
         _textChunkingService = textChunkingService;
         _modelSelectorOptions = modelSelectorOptions.Value;
+        _promptSchemaRenderer = promptSchemaRenderer;
         _logger = logger;
     }
 
@@ -157,6 +162,14 @@ public sealed class SummaryHandler : IAnalysisToolHandler
         AnalysisTool tool,
         CancellationToken cancellationToken)
     {
+        // JPS format detection: if ActionSystemPrompt is JPS, delegate to PromptSchemaRenderer
+        // and bypass legacy chunking logic entirely. Config-driven format options are injected
+        // as template parameters for Handlebars substitution.
+        if (IsJpsFormat(context.ActionSystemPrompt))
+        {
+            return await ExecuteViaJpsAsync(context, tool, cancellationToken);
+        }
+
         var stopwatch = Stopwatch.StartNew();
         var startedAt = DateTimeOffset.UtcNow;
 
@@ -272,6 +285,174 @@ public sealed class SummaryHandler : IAnalysisToolHandler
         catch (Exception ex)
         {
             _logger.LogError(ex, "Document summarization failed for analysis {AnalysisId}", context.AnalysisId);
+            return ToolResult.Error(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                $"Document summarization failed: {ex.Message}",
+                ToolErrorCodes.InternalError,
+                new ToolExecutionMetadata
+                {
+                    StartedAt = startedAt,
+                    CompletedAt = DateTimeOffset.UtcNow
+                });
+        }
+    }
+
+    /// <summary>
+    /// Detects whether a raw prompt string is JPS format.
+    /// </summary>
+    private static bool IsJpsFormat(string? rawPrompt)
+    {
+        return !string.IsNullOrWhiteSpace(rawPrompt)
+            && rawPrompt.TrimStart().StartsWith("{")
+            && rawPrompt.Contains("\"$schema\"");
+    }
+
+    /// <summary>
+    /// Executes document summarization using the JPS-rendered prompt via PromptSchemaRenderer,
+    /// following the same pattern as GenericAnalysisHandler. Config-driven format options
+    /// (maxLength, format, includeSections, usePlainLanguage, highlightTimeSensitive) are
+    /// injected as template parameters for Handlebars substitution in the JPS template.
+    /// </summary>
+    private async Task<ToolResult> ExecuteViaJpsAsync(
+        ToolExecutionContext context,
+        AnalysisTool tool,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var startedAt = DateTimeOffset.UtcNow;
+
+        try
+        {
+            _logger.LogInformation(
+                "Starting JPS-based document summarization for analysis {AnalysisId}, document {DocumentId}",
+                context.AnalysisId, context.Document.DocumentId);
+
+            // Parse configuration and inject format options as template parameters
+            var config = ParseConfiguration(tool.Configuration);
+            var templateParameters = context.TemplateParameters != null
+                ? new Dictionary<string, object?>(context.TemplateParameters)
+                : new Dictionary<string, object?>();
+
+            // Inject summary-specific config as template parameters for JPS Handlebars substitution
+            templateParameters["maxLength"] = config.MaxLength;
+            templateParameters["format"] = config.Format ?? "structured";
+            templateParameters["includeSections"] = config.IncludeSections != null
+                ? string.Join(", ", config.IncludeSections)
+                : "executive_summary, key_terms, obligations, notable_provisions";
+            templateParameters["usePlainLanguage"] = config.UsePlainLanguage;
+            templateParameters["highlightTimeSensitive"] = config.HighlightTimeSensitive;
+            templateParameters["formatInstructions"] = GetFormatInstructions(config);
+
+            var rendered = _promptSchemaRenderer.Render(
+                context.ActionSystemPrompt,
+                context.SkillContext,
+                context.KnowledgeContext,
+                context.Document?.ExtractedText,
+                templateParameters,
+                context.DownstreamNodes,
+                context.AdditionalKnowledge,
+                context.AdditionalSkills
+            );
+
+            var prompt = rendered.PromptText;
+            var inputTokens = EstimateTokens(prompt);
+            var useStructuredOutput = rendered.JsonSchema != null;
+
+            _logger.LogDebug(
+                "Executing JPS summarization, format: {Format}, structuredOutput: {StructuredOutput}, estimated tokens: {Tokens}",
+                rendered.Format, useStructuredOutput, inputTokens);
+
+            string response;
+            if (useStructuredOutput)
+            {
+                var schemaBinaryData = BinaryData.FromString(rendered.JsonSchema!.ToJsonString());
+                var schemaName = rendered.SchemaName ?? "document_summary";
+
+                response = await _openAiClient.GetStructuredCompletionRawAsync(
+                    prompt,
+                    schemaBinaryData,
+                    schemaName,
+                    cancellationToken: cancellationToken);
+            }
+            else
+            {
+                response = await _openAiClient.GetCompletionAsync(
+                    prompt,
+                    cancellationToken: cancellationToken);
+            }
+
+            var outputTokens = EstimateTokens(response);
+            stopwatch.Stop();
+
+            // Parse response as generic JSON (same approach as GenericAnalysisHandler)
+            object resultData;
+            double confidence = 0.8;
+
+            try
+            {
+                var jsonResult = JsonSerializer.Deserialize<JsonNode>(response.Trim());
+                if (jsonResult is JsonObject resultObj)
+                {
+                    if (resultObj.TryGetPropertyValue("confidence", out var confNode))
+                    {
+                        confidence = Math.Clamp(confNode?.GetValue<double>() ?? 0.8, 0.0, 1.0);
+                    }
+                    resultData = jsonResult;
+                }
+                else
+                {
+                    resultData = new { rawResponse = response };
+                }
+            }
+            catch (JsonException)
+            {
+                resultData = new { rawResponse = response, parseError = true };
+                confidence = 0.5;
+            }
+
+            var executionMetadata = new ToolExecutionMetadata
+            {
+                StartedAt = startedAt,
+                CompletedAt = DateTimeOffset.UtcNow,
+                InputTokens = inputTokens,
+                OutputTokens = outputTokens,
+                ModelCalls = 1,
+                ModelName = "gpt-4o"
+            };
+
+            _logger.LogInformation(
+                "JPS document summarization complete for {AnalysisId} in {Duration}ms",
+                context.AnalysisId, stopwatch.ElapsedMilliseconds);
+
+            return ToolResult.Ok(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                resultData,
+                response,
+                confidence,
+                executionMetadata);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("JPS document summarization cancelled for analysis {AnalysisId}", context.AnalysisId);
+            return ToolResult.Error(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                "Document summarization was cancelled.",
+                ToolErrorCodes.Cancelled,
+                new ToolExecutionMetadata
+                {
+                    StartedAt = startedAt,
+                    CompletedAt = DateTimeOffset.UtcNow
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "JPS document summarization failed for analysis {AnalysisId}", context.AnalysisId);
             return ToolResult.Error(
                 HandlerId,
                 tool.Id,

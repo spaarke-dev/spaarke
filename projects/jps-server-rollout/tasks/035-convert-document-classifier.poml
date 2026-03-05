@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="035" project="jps-server-rollout">
+  <metadata>
+    <title>Convert DocumentClassifierHandler to thin JPS consumer preserving RAG logic</title>
+    <phase>4</phase>
+    <tags>bff-api, refactor</tags>
+    <estimate>3h</estimate>
+    <dependencies>014, 022</dependencies>
+    <parallel-group>thin-wrapper</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Convert DocumentClassifierHandler to a thin wrapper that routes through GenericAnalysisHandler while preserving its RAG (Retrieval-Augmented Generation) example retrieval logic. If context.ActionSystemPrompt is JPS format, call PromptSchemaRenderer.Render() with injected RAG examples. Fallback to legacy prompt if not JPS.</goal>
+    <context>
+      DocumentClassifierHandler (Services/Ai/Tools/DocumentClassifierHandler.cs) differs from simple prompt-only handlers: it retrieves RAG examples from knowledge sources and injects them into the prompt.
+      Rather than consolidate away all custom logic, this task converts it to a thin wrapper:
+      1. Keep the handler class and RAG example retrieval
+      2. Detect if context.ActionSystemPrompt is JPS format
+      3. If JPS: call PromptSchemaRenderer.Render() with RAG examples injected as template parameters
+      4. If legacy prompt: use old code path (fallback)
+
+      This preserves the value of RAG augmentation while enabling JPS standardization.
+    </context>
+    <constraints>
+      - Keep DocumentClassifierHandler class and DI registration
+      - Preserve RAG example retrieval logic (do not remove)
+      - Implement dual-path logic: JPS path (new) and legacy path (fallback)
+      - Inject RAG examples as template parameters into JPS rendering
+      - Maintain backward compatibility with existing legacy prompts
+      - Follow .claude/patterns/ai/analysis-scopes.md for JPS structure
+      - Follow ADR-010 (DI minimalism) — no new services
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>projects/jps-server-rollout/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read DocumentClassifierHandler.cs to understand RAG example retrieval and current prompt building logic</step>
+    <step order="2">Identify where examples are injected into the prompt (typically in Render() method)</step>
+    <step order="3">Implement dual-path logic in the handler:
+      - Check if context.ActionSystemPrompt is JPS format (use existing IsJpsFormat() helper or create one)
+      - If JPS: retrieve RAG examples, add to template parameters, call PromptSchemaRenderer.Render()
+      - If legacy: use existing prompt building code
+    </step>
+    <step order="4">Extract RAG example retrieval into a separate helper method if not already isolated</step>
+    <step order="5">Create test cases for both JPS and legacy paths with RAG examples</step>
+    <step order="6">Build the project: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+    <step order="7">Run tests including DocumentClassifierHandler tests: `dotnet test src/server/api/Sprk.Bff.Api.Tests/ --filter "*DocumentClassifier*"`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/DocumentClassifierHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>DocumentClassifierHandler kept as thin wrapper</criterion>
+    <criterion>RAG example retrieval logic preserved</criterion>
+    <criterion>Dual-path logic implemented: JPS and legacy fallback</criterion>
+    <criterion>RAG examples injected as template parameters in JPS path</criterion>
+    <criterion>JPS path calls PromptSchemaRenderer.Render()</criterion>
+    <criterion>Legacy path uses original prompt building code</criterion>
+    <criterion>Test cases cover both paths with examples</criterion>
+    <criterion>Project builds successfully</criterion>
+    <criterion>All tests pass (including backward compatibility)</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="013" project="jps-server-rollout">
+  <metadata>
+    <title>Wire JPS ref resolution in AiAnalysisNodeExecutor.CreateToolExecutionContext()</title>
+    <phase>2</phase>
+    <tags>bff-api, api</tags>
+    <estimate>3h</estimate>
+    <dependencies>010, 011, 012</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Integrate JPS ref extraction and resolution into AiAnalysisNodeExecutor.CreateToolExecutionContext() so that knowledge and skill references embedded in JPS JSON are extracted, resolved to Dataverse records, and populated in the ToolExecutionContext.</goal>
+    <context>
+      AiAnalysisNodeExecutor orchestrates AI analysis node execution, building the ToolExecutionContext that flows through the execution pipeline.
+      Currently, it builds the action system prompt and creates the context with static scopes (skillIds, knowledgeIds, toolIds).
+      To support dynamic JPS ref resolution, after building the system prompt, the executor must:
+      1. Extract $ref entries from the JPS JSON using JpsRefResolver
+      2. Resolve extracted refs to Dataverse records using IScopeResolverService name-based lookups
+      3. Populate the resolved refs into context.AdditionalKnowledge and context.AdditionalSkills
+      This happens in the CreateToolExecutionContext method, lines 270-317.
+    </context>
+    <constraints>
+      - Extract refs AFTER building actionSystemPrompt (so JPS JSON is fully resolved)
+      - Use JpsRefResolver.ExtractKnowledgeRefs() and JpsRefResolver.ExtractSkillRefs()
+      - For each extracted knowledge ref name, call scopeResolver.GetKnowledgeByNameAsync(name)
+      - For each extracted skill ref, call scopeResolver.GetSkillByNameAsync(skillName)
+      - Collect results into IReadOnlyList&lt;ResolvedKnowledgeRef&gt; and IReadOnlyList&lt;ResolvedSkillRef&gt;
+      - Handle nulls gracefully (skip refs that don't resolve to records)
+      - Use Task.WhenAll for parallel resolution (match existing patterns)
+      - No breaking changes to existing context properties or method signature
+      - Follow ADR-010 (DI minimalism) — no new DI registrations
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/patterns/ai/tool-execution-context.md</file>
+      <file>projects/jps-server-rollout/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read AiAnalysisNodeExecutor.cs, focusing on CreateToolExecutionContext method (lines 270-317)</step>
+    <step order="2">Read JpsRefResolver.cs to understand ExtractKnowledgeRefs and ExtractSkillRefs methods</step>
+    <step order="3">Read ToolExecutionContext.cs to confirm AdditionalKnowledge and AdditionalSkills properties are present</step>
+    <step order="4">In CreateToolExecutionContext, after building actionSystemPrompt (around line 310), add logic to:
+      - Call JpsRefResolver.ExtractKnowledgeRefs(actionSystemPrompt.Content)
+      - Call JpsRefResolver.ExtractSkillRefs(actionSystemPrompt.Content)
+    </step>
+    <step order="5">For each extracted knowledge ref name, build a Task to call scopeResolver.GetKnowledgeByNameAsync(name)</step>
+    <step order="6">For each extracted skill ref, build a Task to call scopeResolver.GetSkillByNameAsync(skillName)</step>
+    <step order="7">Use Task.WhenAll to execute all resolution tasks in parallel</step>
+    <step order="8">Collect results into IReadOnlyList collections:
+      - Filter nulls (skip refs that don't resolve)
+      - Build new List&lt;ResolvedKnowledgeRef&gt; from non-null results
+      - Build new List&lt;ResolvedSkillRef&gt; from non-null results
+      - Convert to IReadOnlyList
+    </step>
+    <step order="9">When creating the ToolExecutionContext, populate the AdditionalKnowledge and AdditionalSkills properties with resolved lists</step>
+    <step order="10">Build the project: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+    <step order="11">Run unit tests: `dotnet test src/server/api/Sprk.Bff.Api.Tests/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/AiAnalysisNodeExecutor.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>JpsRefResolver is called to extract knowledge refs from the action system prompt</criterion>
+    <criterion>JpsRefResolver is called to extract skill refs from the action system prompt</criterion>
+    <criterion>Extracted refs are resolved to Dataverse records using GetKnowledgeByNameAsync and GetSkillByNameAsync</criterion>
+    <criterion>Parallel resolution uses Task.WhenAll to avoid sequential blocking</criterion>
+    <criterion>Results are collected into IReadOnlyList collections (non-null only)</criterion>
+    <criterion>ToolExecutionContext is created with AdditionalKnowledge and AdditionalSkills populated from resolved refs</criterion>
+    <criterion>Null refs are skipped gracefully (no exceptions)</criterion>
+    <criterion>Project builds successfully</criterion>
+    <criterion>Existing tests pass (no regressions)</criterion>
+  </acceptance-criteria>
+</task>

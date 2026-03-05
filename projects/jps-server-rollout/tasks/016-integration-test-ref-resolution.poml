@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="016" project="jps-server-rollout">
+  <metadata>
+    <title>Integration test proving JPS ref resolution end-to-end</title>
+    <phase>2</phase>
+    <tags>testing</tags>
+    <estimate>3h</estimate>
+    <dependencies>013, 014</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Write an integration test that demonstrates end-to-end JPS ref resolution: extract $refs from a sample JPS document (ACT-001.json), resolve them to mocked Dataverse records, and verify that the resolved knowledge content appears in the rendered prompt.</goal>
+    <context>
+      The JPS ref resolution workflow integrates multiple components: JpsRefResolver extracts refs, IScopeResolverService resolves them to records, AiAnalysisNodeExecutor populates them in ToolExecutionContext, and GenericAnalysisHandler passes them to PromptSchemaRenderer.
+      This integration test validates the entire pipeline by simulating a real ACT-001 analysis document, mocking Dataverse responses, and asserting that the final rendered prompt includes the resolved knowledge.
+      The test uses the existing testing infrastructure and patterns in the project.
+    </context>
+    <constraints>
+      - Use xUnit test framework matching existing test infrastructure
+      - Create test file: src/server/api/Sprk.Bff.Api.Tests/Services/Ai/JpsRefResolutionIntegrationTests.cs
+      - Use Moq to mock IScopeResolverService for name-based lookups
+      - Input: ACT-001.json or a realistic sample JPS document from notes/jps-conversions/
+      - Mocked Dataverse responses: return ResolvedKnowledgeRef and ResolvedSkillRef for known names
+      - Assertion: rendered prompt output contains resolved knowledge content (text or metadata)
+      - Follow AAA (Arrange-Act-Assert) pattern
+      - Use descriptive test names
+      - No real Dataverse access (all data is mocked)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>projects/jps-server-rollout/spec.md</file>
+      <file>projects/jps-server-rollout/notes/jps-conversions/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read AiAnalysisNodeExecutor.cs to understand the CreateToolExecutionContext flow and how AdditionalKnowledge/Skills are populated</step>
+    <step order="2">Read GenericAnalysisHandler.cs to understand how it uses the resolved refs when calling PromptSchemaRenderer.Render()</step>
+    <step order="3">Examine existing integration tests in src/server/api/Sprk.Bff.Api.Tests/ to understand mocking patterns and test setup</step>
+    <step order="4">Identify a real JPS example from notes/jps-conversions/ (e.g., ACT-001.json or document-profiler.json) to use as test input</step>
+    <step order="5">Create test file: src/server/api/Sprk.Bff.Api.Tests/Services/Ai/JpsRefResolutionIntegrationTests.cs</step>
+    <step order="6">Set up test fixtures:
+      - Create a sample JPS JSON document (inline or load from notes/jps-conversions/)
+      - Extract expected knowledge/skill refs from the JPS using JpsRefResolver (or manually identify them)
+      - Create mock Dataverse responses: ResolvedKnowledgeRef objects with content
+      - Create mock IScopeResolverService that returns the mocked refs for name-based lookups
+    </step>
+    <step order="7">Write test: RefResolution_WithValidJpsDocument_ResolvesCachedRefsAndIncludesInRenderedPrompt
+      - Arrange: Set up mock scope resolver with known refs, create AiAnalysisNodeExecutor with mocked dependencies
+      - Act: Call CreateToolExecutionContext with JPS document, then call renderer with the context
+      - Assert: Verify rendered prompt output contains resolved knowledge content (name, description, or other metadata)
+    </step>
+    <step order="8">Write additional tests for edge cases:
+      - RefResolution_WithUnresolvableRefs_SkipsNullRefsAndContinues
+      - RefResolution_WithMultipleRefsPerDocument_ResolvesAllAndIncludesAll
+    </step>
+    <step order="9">Run integration tests: `dotnet test src/server/api/Sprk.Bff.Api.Tests/`</step>
+    <step order="10">Verify all tests pass</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api.Tests/Services/Ai/JpsRefResolutionIntegrationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Integration test file created at correct location with proper class and namespace</criterion>
+    <criterion>Test uses real or realistic JPS document from notes/jps-conversions/ or inline sample</criterion>
+    <criterion>IScopeResolverService is mocked using Moq to return known refs for name-based lookups</criterion>
+    <criterion>Test populates AiAnalysisNodeExecutor.CreateToolExecutionContext with JPS document</criterion>
+    <criterion>Resolved refs from context.AdditionalKnowledge and context.AdditionalSkills are passed to PromptSchemaRenderer</criterion>
+    <criterion>Rendered prompt output is asserted to contain resolved knowledge content (text, metadata, or identifiers)</criterion>
+    <criterion>Test handles unresolvable refs gracefully (skips nulls and continues)</criterion>
+    <criterion>All tests follow AAA (Arrange-Act-Assert) structure</criterion>
+    <criterion>All tests use descriptive names</criterion>
+    <criterion>All tests pass: `dotnet test src/server/api/Sprk.Bff.Api.Tests/`</criterion>
+  </acceptance-criteria>
+</task>

@@ -122,6 +122,11 @@
     "$knowledge": [
       { "$ref": "knowledge:employment-law", "as": "reference" },
       { "$ref": "knowledge:standard-contract-terms", "as": "definitions" }
+    ],
+    "$skills": [
+      { "$ref": "skill:Employment Contract" },
+      { "$ref": "skill:Compliance Check" },
+      { "$ref": "skill:Financial Terms" }
     ]
   },
 

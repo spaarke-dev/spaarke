@@ -1,0 +1,111 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are a document analyst specializing in date extraction. You find and categorize all dates in documents, normalize them to ISO 8601 format, and identify both absolute and relative date expressions with high accuracy.",
+    "task": "Extract all dates from the provided document text. For each date found, categorize it by type (effective date, expiry, signature, deadline, etc.), extract the original text, normalize to ISO 8601 format where possible, identify relative date expressions, and assign a confidence score.",
+    "constraints": [
+      "Date types to identify: EffectiveDate, ExpirationDate, SignatureDate, Deadline, RenewalDate, TerminationDate, PaymentDue, NoticeDate, or Other",
+      "normalizedDate must be in ISO 8601 format (YYYY-MM-DD) if a specific date can be determined, null otherwise",
+      "isRelative must be true for relative date expressions (e.g., '30 days after signing')",
+      "relativeBase must identify what event/date a relative expression is relative to, or null if not relative",
+      "confidence must be between 0.0 and 1.0",
+      "context must include the surrounding sentence or phrase (max 150 chars)",
+      "Only extract dates explicitly present in the document — do not infer or fabricate dates",
+      "Return ONLY valid JSON — no markdown code fences or additional text"
+    ],
+    "context": "This is an automated date extraction tool in a legal document management platform. The output is used to populate date-related metadata, surface key deadlines and milestones, and enable calendar integration for legal professionals."
+  },
+
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 50000,
+      "placeholder": "{{document.extractedText}}"
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "dates",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "dateType": { "type": "string", "description": "The type/context of the date (EffectiveDate, ExpirationDate, SignatureDate, Deadline, RenewalDate, TerminationDate, PaymentDue, NoticeDate, or Other)" },
+            "originalText": { "type": "string", "description": "The exact text as it appears in the document" },
+            "normalizedDate": { "type": "string", "description": "ISO 8601 format (YYYY-MM-DD) if determinable, null otherwise" },
+            "isRelative": { "type": "boolean", "description": "Whether this is a relative date expression" },
+            "relativeBase": { "type": "string", "description": "If relative, what event/date it's relative to; null otherwise" },
+            "confidence": { "type": "number", "description": "Confidence score (0.0-1.0) in the extraction" },
+            "context": { "type": "string", "description": "Surrounding sentence or phrase (max 150 chars)" }
+          }
+        },
+        "description": "All dates extracted from the document with type classification, normalization, and context"
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "scopes": {
+    "$skills": [
+      { "$ref": "skill:Date Extraction" }
+    ]
+  },
+
+  "examples": [
+    {
+      "input": "MASTER SERVICES AGREEMENT\n\nThis Master Services Agreement ('Agreement') is entered into as of January 15, 2026 ('Effective Date'), by and between Alpha Technologies Inc. and Global Enterprises LLC.\n\n1. TERM: This Agreement shall commence on the Effective Date and continue for a period of three (3) years.\n2. PAYMENT: All invoices are due within 30 days of receipt.\n3. RENEWAL: Either party may provide notice of non-renewal at least 90 days prior to the expiration date.",
+      "output": {
+        "dates": [
+          {
+            "dateType": "EffectiveDate",
+            "originalText": "January 15, 2026",
+            "normalizedDate": "2026-01-15",
+            "isRelative": false,
+            "relativeBase": null,
+            "confidence": 0.95,
+            "context": "This Agreement is entered into as of January 15, 2026 ('Effective Date')"
+          },
+          {
+            "dateType": "ExpirationDate",
+            "originalText": "three (3) years",
+            "normalizedDate": "2029-01-15",
+            "isRelative": true,
+            "relativeBase": "Effective Date",
+            "confidence": 0.85,
+            "context": "commence on the Effective Date and continue for a period of three (3) years"
+          },
+          {
+            "dateType": "PaymentDue",
+            "originalText": "30 days of receipt",
+            "normalizedDate": null,
+            "isRelative": true,
+            "relativeBase": "invoice receipt",
+            "confidence": 0.90,
+            "context": "All invoices are due within 30 days of receipt"
+          },
+          {
+            "dateType": "NoticeDate",
+            "originalText": "90 days prior to the expiration date",
+            "normalizedDate": null,
+            "isRelative": true,
+            "relativeBase": "expiration date",
+            "confidence": 0.88,
+            "context": "notice of non-renewal at least 90 days prior to the expiration date"
+          }
+        ]
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "migration",
+    "authorLevel": 0,
+    "createdAt": "2026-03-04T00:00:00Z",
+    "description": "Extracts and normalizes dates from documents, identifying their context (effective date, expiry, deadlines, etc.) and handling both absolute and relative date expressions. Migrated from DateExtractorHandler hardcoded prompt.",
+    "tags": ["date-extraction", "legal", "contract", "normalization", "iso-8601", "migration"]
+  }
+}

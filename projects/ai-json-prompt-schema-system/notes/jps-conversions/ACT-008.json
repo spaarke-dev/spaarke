@@ -128,6 +128,11 @@
       { "$ref": "knowledge:risk-categories", "as": "reference" },
       { "$ref": "knowledge:defined-terms", "as": "definitions" },
       { "$ref": "knowledge:standard-contract-terms", "as": "reference" }
+    ],
+    "$skills": [
+      { "$ref": "skill:Risk Assessment" },
+      { "$ref": "skill:Party Identification" },
+      { "$ref": "skill:Defined Terms" }
     ]
   },
 

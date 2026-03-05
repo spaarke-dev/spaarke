@@ -691,6 +691,9 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | "clean up dev", "clear caches", "fix auth issues", "azure cli issues", "dev environment cleanup" | `dev-cleanup` | Load `.claude/skills/dev-cleanup/SKILL.md` and run cleanup script |
 | "merge to master", "check unmerged branches", "reconcile branches", "sync master", "audit branches" | `merge-to-master` | Load `.claude/skills/merge-to-master/SKILL.md` and follow procedure |
 | "deploy code page", "deploy web resource", "build webresource", "update code page" | `code-page-deploy` | Load `.claude/skills/code-page-deploy/SKILL.md` and follow two-step build pipeline |
+| "create JPS action", "new JPS definition", "create analysis action", "new playbook action" | `jps-action-create` | Load `.claude/skills/jps-action-create/SKILL.md` and follow procedure |
+| "design playbook", "create playbook", "new AI playbook", "playbook architecture" | `jps-playbook-design` | Load `.claude/skills/jps-playbook-design/SKILL.md` and follow procedure |
+| "validate JPS", "check JPS", "JPS validation", "verify JPS schema" | `jps-validate` | Load `.claude/skills/jps-validate/SKILL.md` and follow procedure |
 
 ### Auto-Detection Rules
 
@@ -747,6 +750,9 @@ Use these commands to explicitly invoke skills:
 | `/checkpoint` | Alias for `/context-handoff` - quick state save |
 | `/dev-cleanup` | Clean up local dev environment caches (Azure CLI, NuGet, npm, Git credentials) |
 | `/merge-to-master` | Merge completed branch work into master (audit, single merge, or full reconciliation) |
+| `/jps-action-create` | Create a new JPS definition for an Analysis Action |
+| `/jps-playbook-design` | Design a complete AI playbook with JPS nodes, scopes, and routing |
+| `/jps-validate` | Validate JPS JSON against schema and render test |
 
 ---
 

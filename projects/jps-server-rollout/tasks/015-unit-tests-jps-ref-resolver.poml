@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="015" project="jps-server-rollout">
+  <metadata>
+    <title>Unit tests for JpsRefResolver</title>
+    <phase>2</phase>
+    <tags>testing</tags>
+    <estimate>2h</estimate>
+    <dependencies>010</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Write comprehensive unit tests for JpsRefResolver.ExtractKnowledgeRefs() and JpsRefResolver.ExtractSkillRefs() methods, covering normal cases, edge cases, and real JPS examples.</goal>
+    <context>
+      JpsRefResolver is a new utility class that extracts $ref entries from JPS JSON metadata.
+      The methods must be thoroughly tested to ensure they correctly parse JPS structure, handle edge cases, and work with real data from the project.
+      Test cases should cover: extracting knowledge refs with labels, extracting skill refs, empty JSON, null input, malformed JSON, missing paths, and real JPS examples from notes/jps-conversions/ folder.
+      Tests follow xUnit conventions and existing test patterns in the project.
+    </context>
+    <constraints>
+      - Use xUnit test framework (matching existing test infrastructure)
+      - Create test file: src/server/api/Sprk.Bff.Api.Tests/Services/Ai/JpsRefResolverTests.cs
+      - Test both ExtractKnowledgeRefs and ExtractSkillRefs methods
+      - Cover edge cases: null input, empty JSON, empty arrays, missing scopes, malformed JSON
+      - Include tests with real JPS examples from notes/jps-conversions/ folder
+      - Use descriptive test names (MethodName_Scenario_ExpectedResult pattern)
+      - Arrange-Act-Assert (AAA) test structure
+      - No external dependencies or mocks required (static method, pure function)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>projects/jps-server-rollout/spec.md</file>
+      <file>projects/jps-server-rollout/notes/jps-conversions/document-profiler.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read JpsRefResolver.cs to understand both methods and their signatures</step>
+    <step order="2">Examine existing tests in src/server/api/Sprk.Bff.Api.Tests/Services/Ai/ to understand test patterns and conventions</step>
+    <step order="3">Read notes/jps-conversions/ folder to identify real JPS examples (document-profiler.json, etc.)</step>
+    <step order="4">Create test file: src/server/api/Sprk.Bff.Api.Tests/Services/Ai/JpsRefResolverTests.cs</step>
+    <step order="5">Write test class with setup and organize tests by method</step>
+    <step order="6">Write tests for ExtractKnowledgeRefs():
+      - ExtractKnowledgeRefs_WithValidKnowledgeRefs_ReturnsExtractedRefs
+      - ExtractKnowledgeRefs_WithLabels_IncludesLabelInTuple
+      - ExtractKnowledgeRefs_WithNullInput_ReturnsEmptyList
+      - ExtractKnowledgeRefs_WithEmptyJson_ReturnsEmptyList
+      - ExtractKnowledgeRefs_WithMissingScopes_ReturnsEmptyList
+      - ExtractKnowledgeRefs_WithMalformedJson_ReturnsEmptyList
+      - ExtractKnowledgeRefs_WithRealJpsExample_ExtractsCorrectRefs
+    </step>
+    <step order="7">Write tests for ExtractSkillRefs():
+      - ExtractSkillRefs_WithValidSkillRefs_ReturnsExtractedRefs
+      - ExtractSkillRefs_WithNullInput_ReturnsEmptyList
+      - ExtractSkillRefs_WithEmptyJson_ReturnsEmptyList
+      - ExtractSkillRefs_WithMissingScopes_ReturnsEmptyList
+      - ExtractSkillRefs_WithMalformedJson_ReturnsEmptyList
+      - ExtractSkillRefs_WithRealJpsExample_ExtractsCorrectRefs
+    </step>
+    <step order="8">Use real JPS data from notes/jps-conversions/document-profiler.json for integration-like test cases</step>
+    <step order="9">Verify all tests follow AAA pattern and use descriptive names</step>
+    <step order="10">Run tests: `dotnet test src/server/api/Sprk.Bff.Api.Tests/`</step>
+    <step order="11">Verify all tests pass</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api.Tests/Services/Ai/JpsRefResolverTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Test file created at correct location with proper class and namespace</criterion>
+    <criterion>Tests cover ExtractKnowledgeRefs normal case with multiple refs</criterion>
+    <criterion>Tests cover ExtractKnowledgeRefs with labels in tuples</criterion>
+    <criterion>Tests cover ExtractKnowledgeRefs edge cases: null, empty, malformed, missing scopes</criterion>
+    <criterion>Tests cover ExtractSkillRefs normal case with multiple refs</criterion>
+    <criterion>Tests cover ExtractSkillRefs edge cases: null, empty, malformed, missing scopes</criterion>
+    <criterion>Real JPS examples from notes/jps-conversions/ are used in at least one test each</criterion>
+    <criterion>All tests follow AAA (Arrange-Act-Assert) structure</criterion>
+    <criterion>All tests use descriptive names following MethodName_Scenario_ExpectedResult pattern</criterion>
+    <criterion>All tests pass: `dotnet test src/server/api/Sprk.Bff.Api.Tests/`</criterion>
+  </acceptance-criteria>
+</task>

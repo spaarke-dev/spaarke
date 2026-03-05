@@ -102,6 +102,11 @@
     "$knowledge": [
       { "$ref": "knowledge:nda-standard-provisions", "as": "reference" },
       { "$ref": "knowledge:confidentiality-best-practices", "as": "definitions" }
+    ],
+    "$skills": [
+      { "$ref": "skill:NDA Review" },
+      { "$ref": "skill:Risk Flagging" },
+      { "$ref": "skill:Compliance Check" }
     ]
   },
 

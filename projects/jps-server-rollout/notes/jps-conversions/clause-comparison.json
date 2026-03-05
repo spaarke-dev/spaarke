@@ -1,0 +1,183 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are a legal contract analyst specializing in clause comparison. You compare document clauses against standard or reference terms, identifying deviations, assessing their impact, and providing actionable recommendations.",
+    "task": "Compare the clauses in the provided document against the standard contract terms reference. For each clause type, identify any deviations from standard terms, assess their severity and business/legal impact, and provide recommendations for remediation.",
+    "constraints": [
+      "Generate ALL output fields — do not skip any field even if the document appears clean",
+      "Each deviation must include clauseType, severity, documentText, deviationDescription, impact, and confidence",
+      "severity must be one of: Minor, Moderate, Significant",
+      "confidence must be a decimal between 0.0 and 1.0",
+      "documentText must be the relevant text from the document (max 300 characters)",
+      "deviationDescription must clearly state what specifically deviates from standard terms (max 200 characters)",
+      "Also report which clause types were analyzed, even if no deviations were found for them",
+      "Only report deviations explicitly supported by the document text — do not fabricate findings"
+    ],
+    "context": "This is a clause comparison analysis that runs as part of an automated document review pipeline. The standard terms reference provides baseline expectations for each clause type. Users rely on the deviation report to prioritize contract negotiations and identify high-risk provisions."
+  },
+
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 100000,
+      "placeholder": "{{document.extractedText}}"
+    },
+    "parameters": [
+      {
+        "name": "standardTermsContext",
+        "type": "string",
+        "required": true,
+        "description": "Standard contract terms reference text including guidance for each clause type"
+      },
+      {
+        "name": "clauseTypesList",
+        "type": "string",
+        "required": true,
+        "description": "Comma-separated list of clause types to analyze (e.g., Indemnification, LimitationOfLiability, Termination)"
+      },
+      {
+        "name": "includeStandardText",
+        "type": "boolean",
+        "required": false,
+        "description": "Whether to include the standard expectation text in deviation results"
+      },
+      {
+        "name": "includeRecommendations",
+        "type": "boolean",
+        "required": false,
+        "description": "Whether to include remediation recommendations for each deviation"
+      }
+    ]
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "deviations",
+        "type": "array",
+        "description": "List of deviations from standard terms found in the document",
+        "items": {
+          "type": "object",
+          "properties": {
+            "clauseType": {
+              "type": "string",
+              "description": "The type of clause (e.g., LimitationOfLiability, Indemnification)"
+            },
+            "severity": {
+              "type": "string",
+              "enum": ["Minor", "Moderate", "Significant"],
+              "description": "Severity of the deviation"
+            },
+            "documentText": {
+              "type": "string",
+              "description": "The relevant text from the document (max 300 chars)"
+            },
+            "standardExpectation": {
+              "type": "string",
+              "description": "What standard terms would expect (max 200 chars)"
+            },
+            "deviationDescription": {
+              "type": "string",
+              "description": "What specifically deviates from standard terms (max 200 chars)"
+            },
+            "impact": {
+              "type": "string",
+              "description": "Business or legal impact of this deviation"
+            },
+            "confidence": {
+              "type": "number",
+              "description": "Confidence score between 0.0 and 1.0"
+            },
+            "recommendation": {
+              "type": "string",
+              "description": "How to address this deviation"
+            }
+          }
+        }
+      },
+      {
+        "name": "clausesAnalyzed",
+        "type": "array",
+        "description": "List of clause types that were analyzed and whether they were found",
+        "items": {
+          "type": "object",
+          "properties": {
+            "clauseType": {
+              "type": "string",
+              "description": "The clause type that was analyzed"
+            },
+            "found": {
+              "type": "boolean",
+              "description": "Whether this clause type was found in the document"
+            }
+          }
+        }
+      },
+      {
+        "name": "summary",
+        "type": "string",
+        "description": "Brief summary of comparison results including deviation counts by severity"
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "examples": [
+    {
+      "input": "MASTER SERVICES AGREEMENT\n\n5. LIMITATION OF LIABILITY. Vendor shall not be liable for any damages whatsoever, whether direct, indirect, incidental, special, or consequential, arising from or related to this Agreement. In no event shall Vendor's total aggregate liability exceed $100.\n\n6. INDEMNIFICATION. Client shall indemnify, defend, and hold harmless Vendor from and against any and all claims, damages, losses, and expenses, including attorney fees, arising from Client's use of the Services.\n\n7. TERMINATION. Either party may terminate this Agreement with 180 days written notice.",
+      "output": {
+        "deviations": [
+          {
+            "clauseType": "LimitationOfLiability",
+            "severity": "Significant",
+            "documentText": "Vendor shall not be liable for any damages whatsoever... total aggregate liability exceed $100.",
+            "standardExpectation": "Mutual liability cap of 12 months fees with reasonable carve-outs",
+            "deviationDescription": "Complete disclaimer of liability with nominal $100 cap, highly one-sided favoring vendor",
+            "impact": "Extreme financial risk — virtually no recourse if vendor causes damages",
+            "confidence": 0.97,
+            "recommendation": "Negotiate for mutual liability cap tied to fees paid, with carve-outs for IP and confidentiality"
+          },
+          {
+            "clauseType": "Indemnification",
+            "severity": "Significant",
+            "documentText": "Client shall indemnify, defend, and hold harmless Vendor from and against any and all claims...",
+            "standardExpectation": "Mutual indemnification with reasonable scope",
+            "deviationDescription": "One-sided indemnification only from Client to Vendor with unlimited scope",
+            "impact": "Client bears all indemnification risk with no reciprocal protection",
+            "confidence": 0.95,
+            "recommendation": "Add mutual indemnification and limit scope to each party's negligence and IP infringement"
+          },
+          {
+            "clauseType": "Termination",
+            "severity": "Moderate",
+            "documentText": "Either party may terminate this Agreement with 180 days written notice.",
+            "standardExpectation": "Termination for convenience with 90 days notice, termination for cause with 30-day cure",
+            "deviationDescription": "Excessive 180-day notice period and no termination for cause provision",
+            "impact": "Locked into agreement for extended period even if vendor underperforms",
+            "confidence": 0.88,
+            "recommendation": "Reduce notice to 90 days and add termination for cause with 30-day cure period"
+          }
+        ],
+        "clausesAnalyzed": [
+          { "clauseType": "LimitationOfLiability", "found": true },
+          { "clauseType": "Indemnification", "found": true },
+          { "clauseType": "Termination", "found": true },
+          { "clauseType": "Confidentiality", "found": false },
+          { "clauseType": "DisputeResolution", "found": false },
+          { "clauseType": "GoverningLaw", "found": false }
+        ],
+        "summary": "Found 3 deviations from standard terms: 2 significant (LimitationOfLiability, Indemnification), 1 moderate (Termination). 3 of 6 expected clause types were not found in the document."
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "migration",
+    "authorLevel": 0,
+    "createdAt": "2026-03-04T00:00:00Z",
+    "description": "Compares document clauses against standard/reference terms, identifying deviations with severity assessment, impact analysis, and remediation recommendations. Supports configurable clause types, deviation thresholds, and optional standard text inclusion.",
+    "tags": ["clause-comparison", "legal-analysis", "deviation-detection", "contract-review", "system-playbook"]
+  }
+}

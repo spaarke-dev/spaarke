@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="023" project="jps-server-rollout">
+  <metadata>
+    <title>Verify/implement Handlebars substitution in PromptSchemaRenderer JPS path + unit tests</title>
+    <phase>3</phase>
+    <tags>bff-api, testing</tags>
+    <estimate>3h</estimate>
+    <dependencies>020, 022</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Verify that PromptSchemaRenderer.RenderJps() correctly applies Handlebars substitution to instruction.role, task, context, and constraints using templateParameters. Implement substitution if missing. Write comprehensive unit tests.</goal>
+    <context>
+      The PromptSchemaRenderer is responsible for rendering JPS JSON to PromptSchema format.
+      With template parameters now flowing through the pipeline, the renderer must apply Handlebars substitution ({{varName}}) to key prompt fields.
+      This task ensures all JPS prompt fields support substitution and validates behavior through unit tests covering:
+      - Simple variable substitution ({{name}} → value)
+      - Missing variables ({{undefined}}) → error or pass-through
+      - Nested object references ({{obj.field}})
+      - Data type coercion (numbers, booleans)
+    </context>
+    <constraints>
+      - Use Handlebars.NET or equivalent for template processing
+      - Substitute in: instruction.role, instruction.task, instruction.context, instruction.constraints
+      - Handle missing variables gracefully (configurable: error or pass-through)
+      - Do NOT substitute in: choice names, scope keys, or metadata
+      - Maintain null safety (skip substitution if templateParameters is null)
+      - Follow ADR-010 (minimal DI) — no new service registrations
+      - Follow .claude/constraints/testing.md for test structure
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>projects/jps-server-rollout/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read PromptSchemaRenderer.cs RenderJps() method to understand current JPS rendering logic</step>
+    <step order="2">Check if Handlebars substitution is already implemented; if not, identify where to add it</step>
+    <step order="3">For each substitutable field (instruction.role, task, context, constraints):
+      - Apply Handlebars.NET substitution using templateParameters
+      - Maintain original value if templateParameters is null
+      - Log any substitution errors (unresolved variables)
+    </step>
+    <step order="4">Create comprehensive unit tests in PromptSchemaRendererTests.cs:
+      - Test simple variable substitution ({{name}} with templateParameters: { "name": "John" })
+      - Test missing variables ({{undefined}}) — verify error handling or pass-through
+      - Test nested references ({{person.name}})
+      - Test data type coercion ({{count}} with number value)
+      - Test null templateParameters (no substitution, original preserved)
+      - Test empty templateParameters
+    </step>
+    <step order="5">Write integration test covering full pipeline: JPS with templates → extracted template params → rendered output</step>
+    <step order="6">Build the project: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+    <step order="7">Run all tests: `dotnet test src/server/api/Sprk.Bff.Api.Tests/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaRenderer.cs</output>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PromptSchemaRendererTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Handlebars substitution applied to instruction.role, task, context, constraints</criterion>
+    <criterion>Simple variable substitution works ({{name}} → value)</criterion>
+    <criterion>Missing variables handled gracefully (error or pass-through configured)</criterion>
+    <criterion>Nested object references work ({{obj.field}})</criterion>
+    <criterion>Data type coercion works (numbers, booleans)</criterion>
+    <criterion>Null templateParameters skips substitution, preserves original</criterion>
+    <criterion>Unit tests cover all substitution scenarios</criterion>
+    <criterion>Integration test validates full pipeline</criterion>
+    <criterion>Project builds successfully</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

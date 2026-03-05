@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="020" project="jps-server-rollout">
+  <metadata>
+    <title>Extract templateParameters from ConfigJson in AiAnalysisNodeExecutor</title>
+    <phase>3</phase>
+    <tags>bff-api, api</tags>
+    <estimate>2h</estimate>
+    <dependencies>001</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Extract the templateParameters key from ConfigJson in AiAnalysisNodeExecutor.CreateToolExecutionContext() and deserialize it to Dictionary&lt;string, object?&gt; for later use in template substitution.</goal>
+    <context>
+      The AnalysisNode ConfigJson may contain a templateParameters property with arbitrary key-value pairs that drive Handlebars substitution in JPS prompts.
+      Currently CreateToolExecutionContext() ignores this field.
+      This task parses ConfigJson to extract templateParameters, deserialize them safely, and prepare them for wiring into ToolExecutionContext (task 021).
+      Example ConfigJson: { "promptSchemaOverride": {...}, "templateParameters": { "legalTerm": "escrow", "financialThreshold": 50000 } }
+    </context>
+    <constraints>
+      - Follow ADR-010 (DI minimalism) — no new services
+      - Follow ADR-013 (AI Architecture) — template parameters are part of execution context
+      - Handle missing or null templateParameters gracefully (default to empty dictionary)
+      - Deserialize using JsonElement or System.Text.Json
+      - Do NOT crash if templateParameters is malformed; log warning and use empty dict fallback
+      - Maintain backward compatibility with existing ConfigJson that lacks templateParameters
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>projects/jps-server-rollout/spec.md</file>
+      <file>projects/jps-server-rollout/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read AiAnalysisNodeExecutor.cs CreateToolExecutionContext() method (lines 270-317) to understand current structure and where to add template parameter extraction</step>
+    <step order="2">Locate ConfigJson deserialization in the same method to understand the JsonElement pattern used in the codebase</step>
+    <step order="3">Add code to extract templateParameters from configJsonElement (after scope resolution):
+      - Check if configJsonElement has a "templateParameters" property
+      - If present and valid, deserialize to Dictionary&lt;string, object?&gt;
+      - If missing or malformed, use empty Dictionary&lt;string, object?&gt; fallback
+      - Log warning if deserialization fails (use ILogger)
+    </step>
+    <step order="4">Store the extracted dictionary in a local variable named "templateParameters" for use in Step 5</step>
+    <step order="5">Verify backward compatibility: create a test case with ConfigJson that lacks templateParameters</step>
+    <step order="6">Build the project: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+    <step order="7">Run existing unit tests to ensure no regressions: `dotnet test src/server/api/Sprk.Bff.Api.Tests/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>templateParameters extracted from ConfigJson if present</criterion>
+    <criterion>Deserialized to Dictionary&lt;string, object?&gt; safely</criterion>
+    <criterion>Missing or null templateParameters defaults to empty dictionary (no exceptions)</criterion>
+    <criterion>Malformed JSON triggers warning log and falls back to empty dictionary</criterion>
+    <criterion>Backward compatible with existing ConfigJson (no templateParameters)</criterion>
+    <criterion>Project builds successfully</criterion>
+    <criterion>All existing tests pass</criterion>
+  </acceptance-criteria>
+</task>

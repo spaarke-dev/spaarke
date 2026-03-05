@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="003" project="jps-server-rollout">
+  <metadata>
+    <title>Verify Scope Resolution Flow Through Orchestration to Handler Context</title>
+    <phase>1</phase>
+    <tags>bff-api</tags>
+    <estimate>2h</estimate>
+    <dependencies>001</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Verify that resolved scopes from ResolveScopesAsync() flow correctly through the orchestration pipeline (AnalysisOrchestrationService → AiAnalysisNodeExecutor) and reach the handler context (ToolExecutionContext.SkillContext and KnowledgeContext) for use in GenericAnalysisHandler.</goal>
+    <context>
+      The JPS server rollout requires scopes (resolved skills, knowledge, tools) to be available when executing analysis handlers.
+      Phase 1 completes scope resolution in ScopeResolverService (task 001).
+      Phase 2+ will implement handlers that consume these scopes.
+
+      This task verifies the integration points:
+      1. AnalysisOrchestrationService calls ResolveScopesAsync() and captures resolved scopes
+      2. AiAnalysisNodeExecutor receives scopes from orchestration service
+      3. CreateToolExecutionContext() builds ToolExecutionContext with resolved scopes
+      4. BuildKnowledgeContext() and BuildSkillContext() consume resolved knowledge and skills
+      5. GenericAnalysisHandler receives fully populated ToolExecutionContext via handler executor
+
+      If integration gaps exist, this task identifies and fixes them so Phase 2 handlers can assume scopes are available.
+    </context>
+    <constraints>
+      - No new code implementation (verification + fixes only)
+      - Follow ADR-013 (AI Architecture) — scopes must flow through standard orchestration
+      - Scopes must reach handlers via ToolExecutionContext (not side channels)
+      - Maintain performance: scope resolution is already done, no redundant queries
+      - Document findings in project CLAUDE.md if gaps found
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>projects/jps-server-rollout/spec.md</file>
+      <file>projects/jps-server-rollout/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read AnalysisOrchestrationService.cs to understand:
+      - Where ResolveScopesAsync() is called
+      - How resolved scopes are stored/passed to node executors
+      - Check if scopes are properly threaded through the execution pipeline
+    </step>
+    <step order="2">Read AiAnalysisNodeExecutor.cs to understand:
+      - Where it receives scopes from orchestration
+      - Check if scopes are passed to CreateToolExecutionContext()
+      - Verify CreateToolExecutionContext signature accepts scopes parameter
+    </step>
+    <step order="3">Read CreateToolExecutionContext() implementation to verify:
+      - Scopes parameter is received and used
+      - BuildKnowledgeContext() receives resolved knowledge
+      - BuildSkillContext() receives resolved skills
+      - Both context builders use provided scopes (not null/empty)
+    </step>
+    <step order="4">Read BuildKnowledgeContext() and BuildSkillContext() to verify:
+      - They accept resolved scopes as parameters
+      - They populate ToolExecutionContext.KnowledgeContext with resolved knowledge
+      - They populate ToolExecutionContext.SkillContext with resolved skills
+      - These are passed to handler via ToolExecutionContext
+    </step>
+    <step order="5">Trace through GenericAnalysisHandler.ExecuteAsync():
+      - Verify it receives ToolExecutionContext parameter
+      - Verify it accesses handler context via ToolExecutionContext.SkillContext and KnowledgeContext
+      - Verify resolved scopes are available (not null)
+    </step>
+    <step order="6">If gaps found:
+      - Document gap in findings (e.g., "CreateToolExecutionContext() doesn't accept scopes parameter")
+      - Fix the gap (add parameter, thread scopes through pipeline)
+      - Update method signatures and call sites as needed
+    </step>
+    <step order="7">Verify all changes build: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+    <step order="8">Run tests to ensure no regressions: `dotnet test src/server/api/Sprk.Bff.Api.Tests/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Grep</tool>
+    <tool>Bash(dotnet build)</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs (if changes needed)</output>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/AiAnalysisNodeExecutor.cs (if changes needed)</output>
+    <output>Verification findings documented in current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ResolveScopesAsync() is called by AnalysisOrchestrationService and scopes are captured</criterion>
+    <criterion>Resolved scopes are passed from AnalysisOrchestrationService to AiAnalysisNodeExecutor</criterion>
+    <criterion>CreateToolExecutionContext() receives scopes parameter and uses them</criterion>
+    <criterion>BuildKnowledgeContext() and BuildSkillContext() receive resolved scopes and populate ToolExecutionContext</criterion>
+    <criterion>GenericAnalysisHandler receives fully populated ToolExecutionContext with scopes</criterion>
+    <criterion>All integration gaps identified and fixed (or documented for Phase 2)</criterion>
+    <criterion>Project builds successfully with no regressions</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

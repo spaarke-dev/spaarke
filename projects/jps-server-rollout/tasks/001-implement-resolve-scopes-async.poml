@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="001" project="jps-server-rollout">
+  <metadata>
+    <title>Implement ScopeResolverService.ResolveScopesAsync()</title>
+    <phase>1</phase>
+    <tags>bff-api, api</tags>
+    <estimate>3h</estimate>
+    <dependencies>none</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Complete the ScopeResolverService.ResolveScopesAsync() method by replacing the empty array stub with parallel Dataverse queries to resolve skill IDs, knowledge IDs, and tool IDs into populated scope objects.</goal>
+    <context>
+      The JPS (JSON Prompt Schema) server rollout requires scope resolution capabilities to look up referenced skills, knowledge documents, and tools from Dataverse.
+      The ScopeResolverService has a stub method (lines 93-106 in ScopeResolverService.cs) that currently returns empty arrays.
+      The pattern for parallel resolution already exists in the same file in the ResolvePlaybookScopesAsync() method, which uses GetSkillAsync(), GetKnowledgeAsync(), and GetToolAsync() via Task.WhenAll for parallel execution.
+      This task implements the same pattern for ResolveScopesAsync().
+    </context>
+    <constraints>
+      - Follow ADR-010 (DI minimalism) — no new service registrations, reuse existing dependencies
+      - Follow ADR-013 (AI Architecture) — scopes are part of the AI tool execution context
+      - Follow ADR-014 (AI caching) — use Redis caching for scope lookups where applicable
+      - Handle null/missing Dataverse records gracefully (return empty if record not found)
+      - Use Task.WhenAll for parallel query execution (match ResolvePlaybookScopesAsync pattern)
+      - Maintain performance: scope resolution should not block tool execution
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>projects/jps-server-rollout/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read ScopeResolverService.cs lines 93-106 to understand the current ResolveScopesAsync stub and its signature</step>
+    <step order="2">Read the ResolvePlaybookScopesAsync() method (same file) to understand the parallel resolution pattern using GetSkillAsync, GetKnowledgeAsync, and GetToolAsync</step>
+    <step order="3">Read the ResolvedScopes record structure to understand the return type and field names for skills, knowledge, and tools</step>
+    <step order="4">Implement ResolveScopesAsync() following the pattern:
+      - Accept AnalysisScopes parameter (containing skillIds, knowledgeIds, toolIds arrays)
+      - Create tasks for each resolution using Task.WhenAll:
+        - For each skillId in scopes.SkillIds: call GetSkillAsync(skillId)
+        - For each knowledgeId in scopes.KnowledgeIds: call GetKnowledgeAsync(knowledgeId)
+        - For each toolId in scopes.ToolIds: call GetToolAsync(toolId)
+      - Collect results into Lists and return new ResolvedScopes(skills, knowledge, tools)
+      - Handle null/empty input gracefully
+    </step>
+    <step order="5">Verify error handling for missing Dataverse records (null checks, empty list fallback)</step>
+    <step order="6">Build the project: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+    <step order="7">Run existing unit tests to ensure no regressions: `dotnet test src/server/api/Sprk.Bff.Api.Tests/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ResolveScopesAsync() queries Dataverse for all provided skill IDs, knowledge IDs, and tool IDs</criterion>
+    <criterion>Parallel execution via Task.WhenAll (matches ResolvePlaybookScopesAsync pattern)</criterion>
+    <criterion>Returns populated ResolvedScopes with skills, knowledge, and tools lists</criterion>
+    <criterion>Handles null/missing records gracefully (returns empty lists, no exceptions)</criterion>
+    <criterion>Project builds successfully</criterion>
+    <criterion>Existing tests pass (no regressions)</criterion>
+  </acceptance-criteria>
+</task>

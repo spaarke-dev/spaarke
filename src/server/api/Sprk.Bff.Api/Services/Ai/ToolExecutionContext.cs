@@ -1,3 +1,5 @@
+using Sprk.Bff.Api.Services.Ai.Schemas;
+
 namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
@@ -91,6 +93,21 @@ public record ToolExecutionContext
     /// Null when downstream node info is not available or not applicable.
     /// </summary>
     public IReadOnlyList<DownstreamNodeInfo>? DownstreamNodes { get; init; }
+
+    /// <summary>
+    /// Resolved knowledge references from JPS $ref entries. Populated by AiAnalysisNodeExecutor.
+    /// </summary>
+    public IReadOnlyList<ResolvedKnowledgeRef>? AdditionalKnowledge { get; init; }
+
+    /// <summary>
+    /// Resolved skill references from JPS $ref entries. Populated by AiAnalysisNodeExecutor.
+    /// </summary>
+    public IReadOnlyList<ResolvedSkillRef>? AdditionalSkills { get; init; }
+
+    /// <summary>
+    /// Template parameters extracted from node ConfigJson for Handlebars substitution.
+    /// </summary>
+    public Dictionary<string, object?>? TemplateParameters { get; init; }
 
     /// <summary>
     /// Correlation ID for distributed tracing.

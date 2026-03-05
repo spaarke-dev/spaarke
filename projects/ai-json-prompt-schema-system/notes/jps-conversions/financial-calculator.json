@@ -1,0 +1,161 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are a financial analyst specializing in contract and document analysis. You have deep expertise in identifying monetary values, payment terms, fee structures, and financial obligations across all document types including contracts, invoices, statements, and corporate agreements.",
+    "task": "Extract all monetary values and financial terms from the provided document. For each monetary value found, classify its category, identify the currency and payment frequency, and assign a confidence score. Also extract payment terms including due dates, late fees, discounts, and deposit requirements. Calculate totals by currency and category.",
+    "constraints": [
+      "Currencies to detect: USD, EUR, GBP (and any other currencies found in the document)",
+      "For each monetary value, classify into one of: Fee, Penalty, Cap, Minimum, Deposit, Payment, Expense, Other",
+      "Description for each item must be a maximum of 100 characters",
+      "Frequency must be one of: OneTime, Monthly, Quarterly, Annual, AsIncurred",
+      "Confidence scores must be between 0.0 and 1.0",
+      "For payment terms, classify type as: PaymentDue, LateFee, Discount, Deposit, Refund",
+      "Only extract information explicitly present in the document — do not infer or fabricate amounts",
+      "Return ONLY valid JSON — no markdown code fences or additional text"
+    ],
+    "context": "This is an automated financial extraction tool used in a legal document management platform. The output is used to surface financial summaries, payment obligations, and monetary commitments to business and legal professionals reviewing documents."
+  },
+
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 50000,
+      "placeholder": "{{document.extractedText}}"
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "items",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "category": { "type": "string", "enum": ["Fee", "Penalty", "Cap", "Minimum", "Deposit", "Payment", "Expense", "Other"], "description": "Category of the monetary value" },
+            "description": { "type": "string", "description": "What the amount is for (max 100 chars)" },
+            "amount": { "type": "number", "description": "The numeric monetary amount" },
+            "currency": { "type": "string", "description": "Currency code (USD, EUR, GBP, etc.)" },
+            "frequency": { "type": "string", "enum": ["OneTime", "Monthly", "Quarterly", "Annual", "AsIncurred"], "description": "Payment frequency" },
+            "isEstimate": { "type": "boolean", "description": "Whether the amount is estimated or approximate" },
+            "confidence": { "type": "number", "description": "Confidence in the extraction (0.0-1.0)" }
+          }
+        },
+        "description": "All monetary values extracted from the document with classification, currency, and frequency"
+      },
+      {
+        "name": "paymentTerms",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "termType": { "type": "string", "enum": ["PaymentDue", "LateFee", "Discount", "Deposit", "Refund"], "description": "Type of payment term" },
+            "description": { "type": "string", "description": "Details of the payment term" },
+            "daysOrPeriod": { "type": "string", "description": "Number of days or period description" },
+            "percentage": { "type": "number", "description": "Percentage if applicable, or null" }
+          }
+        },
+        "description": "Payment terms extracted from the document including due dates, late fees, discounts, and deposits"
+      },
+      {
+        "name": "totalItemsFound",
+        "type": "number",
+        "description": "Total number of financial items found in the document"
+      },
+      {
+        "name": "currenciesFound",
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "List of distinct currency codes found in the document"
+      },
+      {
+        "name": "confidence",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Overall confidence in the financial extraction quality based on document clarity and completeness"
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "scopes": {
+    "$skills": [
+      { "$ref": "skill:Financial Terms" },
+      { "$ref": "skill:Invoice Processing" }
+    ]
+  },
+
+  "examples": [
+    {
+      "input": "MASTER SERVICES AGREEMENT\n\nThis Master Services Agreement is entered into as of January 15, 2026, by and between Alpha Technologies Inc. and Global Enterprises LLC.\n\n3. FEES AND PAYMENT\n3.1 Service Fees: Client shall pay Service Provider at the rate of $250 per hour for consulting services.\n3.2 Annual Cap: Total fees shall not exceed $500,000 per calendar year.\n3.3 Expense Reimbursement: Client shall reimburse reasonable travel expenses up to $25,000 per quarter.\n3.4 Payment Terms: All invoices are due within 30 days of receipt (Net 30). Late payments shall accrue interest at 1.5% per month.\n3.5 Security Deposit: Client shall provide a security deposit of $50,000 upon execution of this Agreement.",
+      "output": {
+        "items": [
+          {
+            "category": "Fee",
+            "description": "Hourly consulting service rate",
+            "amount": 250.00,
+            "currency": "USD",
+            "frequency": "AsIncurred",
+            "isEstimate": false,
+            "confidence": 0.98
+          },
+          {
+            "category": "Cap",
+            "description": "Annual fee cap for consulting services",
+            "amount": 500000.00,
+            "currency": "USD",
+            "frequency": "Annual",
+            "isEstimate": false,
+            "confidence": 0.97
+          },
+          {
+            "category": "Expense",
+            "description": "Quarterly travel expense reimbursement limit",
+            "amount": 25000.00,
+            "currency": "USD",
+            "frequency": "Quarterly",
+            "isEstimate": true,
+            "confidence": 0.90
+          },
+          {
+            "category": "Deposit",
+            "description": "Security deposit upon agreement execution",
+            "amount": 50000.00,
+            "currency": "USD",
+            "frequency": "OneTime",
+            "isEstimate": false,
+            "confidence": 0.99
+          }
+        ],
+        "paymentTerms": [
+          {
+            "termType": "PaymentDue",
+            "description": "All invoices due within 30 days of receipt",
+            "daysOrPeriod": "30 days",
+            "percentage": null
+          },
+          {
+            "termType": "LateFee",
+            "description": "Late payment interest accrued monthly",
+            "daysOrPeriod": "Monthly",
+            "percentage": 1.5
+          }
+        ],
+        "totalItemsFound": 4,
+        "currenciesFound": ["USD"],
+        "confidence": 0.95
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "migration",
+    "authorLevel": 0,
+    "createdAt": "2026-03-04T00:00:00Z",
+    "description": "Extracts monetary values, calculates totals, identifies payment terms, and summarizes financial obligations from documents. Migrated from FinancialCalculatorHandler hardcoded prompt.",
+    "tags": ["financial", "extraction", "payment-terms", "monetary", "contract", "migration"]
+  }
+}

@@ -90,7 +90,7 @@ public class ScopeResolverService : IScopeResolverService
     }
 
     /// <inheritdoc />
-    public Task<ResolvedScopes> ResolveScopesAsync(
+    public async Task<ResolvedScopes> ResolveScopesAsync(
         Guid[] skillIds,
         Guid[] knowledgeIds,
         Guid[] toolIds,
@@ -99,10 +99,70 @@ public class ScopeResolverService : IScopeResolverService
         _logger.LogDebug("Resolving scopes: {SkillCount} skills, {KnowledgeCount} knowledge, {ToolCount} tools",
             skillIds.Length, knowledgeIds.Length, toolIds.Length);
 
-        // Phase 1: Return empty scopes (actual resolution in Task 032)
-        _logger.LogInformation("Phase 1: Returning empty scopes (Dataverse integration in Task 032)");
+        if (skillIds.Length == 0 && knowledgeIds.Length == 0 && toolIds.Length == 0)
+        {
+            _logger.LogDebug("No scope IDs provided, returning empty scopes");
+            return new ResolvedScopes([], [], []);
+        }
 
-        return Task.FromResult(new ResolvedScopes([], [], []));
+        try
+        {
+            // Resolve skills in parallel
+            var skills = Array.Empty<AnalysisSkill>();
+            if (skillIds.Length > 0)
+            {
+                _logger.LogDebug("Loading {Count} skill entities", skillIds.Length);
+                var skillTasks = skillIds.Select(id => GetSkillAsync(id, cancellationToken));
+                var skillResults = await Task.WhenAll(skillTasks);
+                skills = skillResults.Where(s => s != null).Cast<AnalysisSkill>().ToArray();
+
+                _logger.LogDebug(
+                    "Resolved {SkillCount} skills: {SkillNames}",
+                    skills.Length, string.Join(", ", skills.Select(s => s.Name)));
+            }
+
+            // Resolve knowledge sources in parallel
+            var knowledge = Array.Empty<AnalysisKnowledge>();
+            if (knowledgeIds.Length > 0)
+            {
+                _logger.LogDebug("Loading {Count} knowledge entities", knowledgeIds.Length);
+                var knowledgeTasks = knowledgeIds.Select(id => GetKnowledgeAsync(id, cancellationToken));
+                var knowledgeResults = await Task.WhenAll(knowledgeTasks);
+                knowledge = knowledgeResults.Where(k => k != null).Cast<AnalysisKnowledge>().ToArray();
+
+                _logger.LogDebug(
+                    "Resolved {KnowledgeCount} knowledge sources: {KnowledgeNames}",
+                    knowledge.Length, string.Join(", ", knowledge.Select(k => k.Name)));
+            }
+
+            // Resolve tools in parallel
+            var tools = Array.Empty<AnalysisTool>();
+            if (toolIds.Length > 0)
+            {
+                _logger.LogDebug("Loading {Count} tool entities", toolIds.Length);
+                var toolTasks = toolIds.Select(id => GetToolAsync(id, cancellationToken));
+                var toolResults = await Task.WhenAll(toolTasks);
+                tools = toolResults.Where(t => t != null).Cast<AnalysisTool>().ToArray();
+
+                _logger.LogDebug(
+                    "Resolved {ToolCount} tools: {ToolNames}",
+                    tools.Length, string.Join(", ", tools.Select(t => t.Name)));
+            }
+
+            _logger.LogInformation(
+                "Scope resolution complete: {SkillCount} skills, {KnowledgeCount} knowledge, {ToolCount} tools",
+                skills.Length, knowledge.Length, tools.Length);
+
+            return new ResolvedScopes(skills, knowledge, tools);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to resolve scopes ({SkillCount} skills, {KnowledgeCount} knowledge, {ToolCount} tools)",
+                skillIds.Length, knowledgeIds.Length, toolIds.Length);
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -891,7 +951,7 @@ public class ScopeResolverService : IScopeResolverService
 
         await EnsureAuthenticatedAsync(cancellationToken);
 
-        var url = $"sprk_promptfragments({skillId})?$expand=sprk_SkillTypeId($select=sprk_name)";
+        var url = $"sprk_analysisskills({skillId})?$expand=sprk_SkillTypeId($select=sprk_name)";
         var response = await _httpClient.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -1129,6 +1189,93 @@ public class ScopeResolverService : IScopeResolverService
             "document" => KnowledgeType.Document,
             _ => KnowledgeType.Inline
         };
+    }
+
+    /// <inheritdoc />
+    public async Task<AnalysisKnowledge?> GetKnowledgeByNameAsync(string name, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name, nameof(name));
+
+        _logger.LogDebug("[GET KNOWLEDGE BY NAME] Searching for knowledge with name '{KnowledgeName}'", name);
+
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        // Sanitize name to prevent OData injection (escape single quotes)
+        var escapedName = name.Replace("'", "''");
+        var url = $"sprk_analysisknowledges?$filter=sprk_name eq '{escapedName}'&$expand=sprk_KnowledgeTypeId($select=sprk_name)&$top=1";
+
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+        await EnsureSuccessWithDiagnosticsAsync(response, $"GetKnowledgeByNameAsync('{name}')", cancellationToken);
+
+        var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse<KnowledgeEntity>>(cancellationToken);
+        var entity = result?.Value.FirstOrDefault();
+
+        if (entity == null)
+        {
+            _logger.LogDebug("[GET KNOWLEDGE BY NAME] No knowledge found with name '{KnowledgeName}'", name);
+            return null;
+        }
+
+        var knowledgeType = MapKnowledgeTypeName(entity.KnowledgeTypeId?.Name);
+
+        var knowledge = new AnalysisKnowledge
+        {
+            Id = entity.Id,
+            Name = entity.Name ?? "Unnamed Knowledge",
+            Description = entity.Description,
+            Type = knowledgeType,
+            Content = entity.Content,
+            DeploymentId = entity.DeploymentId,
+            OwnerType = ScopeOwnerType.System,
+            IsImmutable = false
+        };
+
+        _logger.LogInformation("[GET KNOWLEDGE BY NAME] Found knowledge '{KnowledgeName}' (ID: {KnowledgeId})",
+            knowledge.Name, knowledge.Id);
+
+        return knowledge;
+    }
+
+    /// <inheritdoc />
+    public async Task<AnalysisSkill?> GetSkillByNameAsync(string name, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name, nameof(name));
+
+        _logger.LogDebug("[GET SKILL BY NAME] Searching for skill with name '{SkillName}'", name);
+
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        // Sanitize name to prevent OData injection (escape single quotes)
+        var escapedName = name.Replace("'", "''");
+        var url = $"sprk_analysisskills?$filter=sprk_name eq '{escapedName}'&$expand=sprk_SkillTypeId($select=sprk_name)&$top=1";
+
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+        await EnsureSuccessWithDiagnosticsAsync(response, $"GetSkillByNameAsync('{name}')", cancellationToken);
+
+        var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse<SkillEntity>>(cancellationToken);
+        var entity = result?.Value.FirstOrDefault();
+
+        if (entity == null)
+        {
+            _logger.LogDebug("[GET SKILL BY NAME] No skill found with name '{SkillName}'", name);
+            return null;
+        }
+
+        var skill = new AnalysisSkill
+        {
+            Id = entity.Id,
+            Name = entity.Name ?? "Unnamed Skill",
+            Description = entity.Description,
+            PromptFragment = entity.PromptFragment ?? "",
+            Category = entity.SkillTypeId?.Name ?? "General",
+            OwnerType = ScopeOwnerType.System,
+            IsImmutable = false
+        };
+
+        _logger.LogInformation("[GET SKILL BY NAME] Found skill '{SkillName}' (ID: {SkillId})",
+            skill.Name, skill.Id);
+
+        return skill;
     }
 
     /// <inheritdoc />
@@ -1964,8 +2111,8 @@ public class ScopeResolverService : IScopeResolverService
     }
 
     /// <summary>
-    /// DTO for deserializing sprk_promptfragment entity from Dataverse Web API (Skills).
-    /// Skills are stored in the sprk_promptfragments entity set in Dataverse.
+    /// DTO for deserializing sprk_analysisskill entity from Dataverse Web API (Skills).
+    /// Skills are stored in the sprk_analysisskills entity set in Dataverse.
     /// </summary>
     private class SkillEntity
     {

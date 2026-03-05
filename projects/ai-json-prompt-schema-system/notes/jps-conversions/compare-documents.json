@@ -1,0 +1,257 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are an expert document comparison analyst with deep experience in version control, redline analysis, and document change management. You systematically identify differences, similarities, additions, deletions, and modifications between documents and produce structured, actionable comparison reports.",
+    "task": "Compare the two documents provided in the input and produce a comprehensive structured analysis of all differences and similarities. Identify additions, deletions, and modifications at the section and content level. Assess the significance of each change and evaluate the overall risk impact of the differences.",
+    "constraints": [
+      "Both documents are provided in a single input field, separated by the delimiter '--- DOCUMENT SEPARATOR ---'",
+      "Treat the content before the delimiter as Document A (original or first document) and content after as Document B (revised or second document)",
+      "Every addition, deletion, and modification must include the affected section and a significance rating of 'minor', 'moderate', or 'significant'",
+      "overallSimilarity must be a decimal between 0.0 (completely different) and 1.0 (identical)",
+      "confidence must be a decimal between 0.0 and 1.0 reflecting analysis quality and document clarity",
+      "riskImpact must reflect whether the changes between the documents introduce legal, operational, or financial risk",
+      "Only report findings explicitly supported by the document content — do not infer or fabricate changes",
+      "Generate ALL output fields — do not skip any field even if no changes are found in a given category"
+    ],
+    "context": "This is a general-purpose document comparison action used for version comparison, redline analysis, or comparing two related documents. Unlike clause-specific comparison, this action works at the document level and handles any document type. Users rely on the output to understand what changed between document versions or to identify differences between related documents."
+  },
+
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 100000,
+      "placeholder": "{{document.extractedText}}"
+    },
+    "parameters": [
+      {
+        "name": "comparisonType",
+        "type": "string",
+        "required": false,
+        "description": "Type of comparison to perform: 'version' for document version comparison, 'redline' for tracked-changes style analysis, 'side-by-side' for parallel section-by-section comparison"
+      }
+    ]
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "comparisonType",
+        "type": "string",
+        "description": "The type of comparison performed (version, redline, or side-by-side)"
+      },
+      {
+        "name": "summary",
+        "type": "string",
+        "description": "Executive summary of the comparison results including overall nature and volume of changes, significance, and any notable risk shifts"
+      },
+      {
+        "name": "overallSimilarity",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Similarity score between 0.0 (completely different) and 1.0 (identical) based on shared content, structure, and language"
+      },
+      {
+        "name": "additions",
+        "type": "array",
+        "description": "Content present in Document B that does not appear in Document A",
+        "items": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "type": "string",
+              "description": "The added text or description of the added content"
+            },
+            "section": {
+              "type": "string",
+              "description": "The section or location in Document B where the addition appears"
+            },
+            "significance": {
+              "type": "string",
+              "enum": ["minor", "moderate", "significant"],
+              "description": "Significance of this addition to the overall document meaning or risk"
+            }
+          }
+        }
+      },
+      {
+        "name": "deletions",
+        "type": "array",
+        "description": "Content present in Document A that does not appear in Document B",
+        "items": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "type": "string",
+              "description": "The deleted text or description of the removed content"
+            },
+            "section": {
+              "type": "string",
+              "description": "The section or location in Document A where the deletion occurred"
+            },
+            "significance": {
+              "type": "string",
+              "enum": ["minor", "moderate", "significant"],
+              "description": "Significance of this deletion to the overall document meaning or risk"
+            }
+          }
+        }
+      },
+      {
+        "name": "modifications",
+        "type": "array",
+        "description": "Content that exists in both documents but has been changed between Document A and Document B",
+        "items": {
+          "type": "object",
+          "properties": {
+            "original": {
+              "type": "string",
+              "description": "The original text from Document A"
+            },
+            "modified": {
+              "type": "string",
+              "description": "The revised text from Document B"
+            },
+            "section": {
+              "type": "string",
+              "description": "The section where the modification appears"
+            },
+            "significance": {
+              "type": "string",
+              "enum": ["minor", "moderate", "significant"],
+              "description": "Significance of this modification to the overall document meaning or risk"
+            }
+          }
+        }
+      },
+      {
+        "name": "unchanged",
+        "type": "array",
+        "description": "Key sections or provisions that are identical between Document A and Document B",
+        "items": {
+          "type": "string"
+        }
+      },
+      {
+        "name": "riskImpact",
+        "type": "string",
+        "enum": ["none", "low", "medium", "high"],
+        "description": "Whether the changes between the documents introduce or increase legal, operational, or financial risk"
+      },
+      {
+        "name": "recommendations",
+        "type": "array",
+        "description": "Actionable recommendations based on the comparison findings",
+        "items": {
+          "type": "string"
+        }
+      },
+      {
+        "name": "confidence",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Confidence in the analysis quality based on document completeness, clarity, and the ability to identify the separator and document boundaries"
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "scopes": {
+    "$skills": [
+      { "$ref": "skill:Clause Comparison" },
+      { "$ref": "skill:Risk Assessment" },
+      { "$ref": "skill:Risk Flagging" }
+    ]
+  },
+
+  "examples": [
+    {
+      "input": "SERVICE AGREEMENT v1.0\n\n1. SERVICES: Vendor shall provide software development services as described in applicable Statements of Work.\n\n2. TERM: This Agreement commences on February 1, 2026 and continues for one (1) year.\n\n3. FEES: Client shall pay $10,000 per month. Payment is due within 30 days of invoice.\n\n4. LIMITATION OF LIABILITY: Neither party shall be liable for indirect or consequential damages. Aggregate liability shall not exceed fees paid in the prior six (6) months.\n\n5. GOVERNING LAW: This Agreement shall be governed by the laws of the State of California.\n--- DOCUMENT SEPARATOR ---\nSERVICE AGREEMENT v2.0\n\n1. SERVICES: Vendor shall provide software development and consulting services as described in applicable Statements of Work. Vendor shall assign a dedicated project manager for engagements exceeding $50,000.\n\n2. TERM: This Agreement commences on February 1, 2026 and continues for two (2) years, with automatic renewal for successive one-year terms unless either party provides 60 days written notice of non-renewal.\n\n3. FEES: Client shall pay $12,000 per month. Payment is due within 45 days of invoice. Late payments accrue interest at 1.5% per month.\n\n4. LIMITATION OF LIABILITY: Neither party shall be liable for indirect or consequential damages. Aggregate liability shall not exceed fees paid in the prior twelve (12) months.\n\n5. GOVERNING LAW: This Agreement shall be governed by the laws of the State of Delaware.\n\n6. DISPUTE RESOLUTION: Any dispute shall first be subject to good-faith negotiation for 30 days before either party may pursue litigation or arbitration.",
+      "output": {
+        "comparisonType": "version",
+        "summary": "Document B (v2.0) introduces moderate-to-significant changes across five of five existing sections and adds one new section. Key changes include an expanded scope of services, a doubled contract term with auto-renewal, a 20% fee increase with extended payment terms and late-payment interest, a doubled liability cap period, a governing law change from California to Delaware, and a new dispute resolution clause. Overall risk impact is medium — the expanded liability cap and new dispute resolution clause favor the Client, while the auto-renewal and late-payment interest terms require attention.",
+        "overallSimilarity": 0.61,
+        "additions": [
+          {
+            "content": "Vendor shall assign a dedicated project manager for engagements exceeding $50,000.",
+            "section": "Section 1 - Services",
+            "significance": "moderate"
+          },
+          {
+            "content": "Automatic renewal for successive one-year terms unless either party provides 60 days written notice of non-renewal.",
+            "section": "Section 2 - Term",
+            "significance": "significant"
+          },
+          {
+            "content": "Late payments accrue interest at 1.5% per month.",
+            "section": "Section 3 - Fees",
+            "significance": "moderate"
+          },
+          {
+            "content": "Section 6 - DISPUTE RESOLUTION: Any dispute shall first be subject to good-faith negotiation for 30 days before either party may pursue litigation or arbitration.",
+            "section": "Section 6 - Dispute Resolution",
+            "significance": "moderate"
+          }
+        ],
+        "deletions": [],
+        "modifications": [
+          {
+            "original": "software development services",
+            "modified": "software development and consulting services",
+            "section": "Section 1 - Services",
+            "significance": "minor"
+          },
+          {
+            "original": "continues for one (1) year",
+            "modified": "continues for two (2) years",
+            "section": "Section 2 - Term",
+            "significance": "significant"
+          },
+          {
+            "original": "$10,000 per month. Payment is due within 30 days of invoice.",
+            "modified": "$12,000 per month. Payment is due within 45 days of invoice.",
+            "section": "Section 3 - Fees",
+            "significance": "significant"
+          },
+          {
+            "original": "fees paid in the prior six (6) months",
+            "modified": "fees paid in the prior twelve (12) months",
+            "section": "Section 4 - Limitation of Liability",
+            "significance": "moderate"
+          },
+          {
+            "original": "laws of the State of California",
+            "modified": "laws of the State of Delaware",
+            "section": "Section 5 - Governing Law",
+            "significance": "moderate"
+          }
+        ],
+        "unchanged": [
+          "Section 1 - Services: Core obligation for software development via Statements of Work",
+          "Section 2 - Term: Commencement date of February 1, 2026",
+          "Section 4 - Limitation of Liability: Mutual exclusion of indirect and consequential damages"
+        ],
+        "riskImpact": "medium",
+        "recommendations": [
+          "Review the auto-renewal clause in Section 2 and add a calendar reminder 90 days before the renewal deadline to ensure timely notice if non-renewal is desired.",
+          "Assess the 20% fee increase ($10,000 to $12,000/month) against budget projections for the extended two-year term.",
+          "Evaluate the extended payment terms (30 to 45 days) for cash flow impact and confirm the 1.5% monthly late interest rate is acceptable.",
+          "Confirm that Delaware governing law is acceptable to legal counsel, as this changes jurisdictional exposure from California.",
+          "The doubled liability cap (6 to 12 months of fees) is a Client-favorable change — verify this is intentional."
+        ],
+        "confidence": 0.94
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "migration",
+    "authorLevel": 0,
+    "createdAt": "2026-03-05T00:00:00Z",
+    "description": "General-purpose document comparison action that identifies additions, deletions, and modifications between two document versions or related documents. Supports version comparison, redline analysis, and side-by-side comparison with significance rating and risk impact assessment.",
+    "tags": ["document-comparison", "redline", "version-analysis", "change-detection", "diff"]
+  }
+}
