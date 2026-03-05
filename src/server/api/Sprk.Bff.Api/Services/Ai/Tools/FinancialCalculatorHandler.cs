@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 
 namespace Sprk.Bff.Api.Services.Ai.Tools;
 
@@ -29,6 +30,7 @@ public sealed class FinancialCalculatorHandler : IAnalysisToolHandler
 
     private readonly IOpenAiClient _openAiClient;
     private readonly ITextChunkingService _textChunkingService;
+    private readonly ModelSelectorOptions _modelSelectorOptions;
     private readonly ILogger<FinancialCalculatorHandler> _logger;
 
     /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
@@ -72,10 +74,12 @@ public sealed class FinancialCalculatorHandler : IAnalysisToolHandler
     public FinancialCalculatorHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
+        IOptions<ModelSelectorOptions> modelSelectorOptions,
         ILogger<FinancialCalculatorHandler> logger)
     {
         _openAiClient = openAiClient;
         _textChunkingService = textChunkingService;
+        _modelSelectorOptions = modelSelectorOptions.Value;
         _logger = logger;
     }
 
@@ -204,7 +208,7 @@ public sealed class FinancialCalculatorHandler : IAnalysisToolHandler
                 InputTokens = totalInputTokens,
                 OutputTokens = totalOutputTokens,
                 ModelCalls = chunks.Count,
-                ModelName = "gpt-4o-mini"
+                ModelName = _modelSelectorOptions.ToolHandlerModel
             };
 
             var resultData = new FinancialAnalysisResult

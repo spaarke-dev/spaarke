@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Options;
 
 namespace Sprk.Bff.Api.Services.Ai.Tools;
 
@@ -31,6 +32,7 @@ public sealed class ClauseAnalyzerHandler : IAnalysisToolHandler
 
     private readonly IOpenAiClient _openAiClient;
     private readonly ITextChunkingService _textChunkingService;
+    private readonly ModelSelectorOptions _modelSelectorOptions;
     private readonly ILogger<ClauseAnalyzerHandler> _logger;
 
     /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
@@ -80,10 +82,12 @@ public sealed class ClauseAnalyzerHandler : IAnalysisToolHandler
     public ClauseAnalyzerHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
+        IOptions<ModelSelectorOptions> modelSelectorOptions,
         ILogger<ClauseAnalyzerHandler> logger)
     {
         _openAiClient = openAiClient;
         _textChunkingService = textChunkingService;
+        _modelSelectorOptions = modelSelectorOptions.Value;
         _logger = logger;
     }
 
@@ -221,7 +225,7 @@ public sealed class ClauseAnalyzerHandler : IAnalysisToolHandler
                 InputTokens = totalInputTokens,
                 OutputTokens = totalOutputTokens,
                 ModelCalls = chunks.Count,
-                ModelName = "gpt-4o-mini"
+                ModelName = _modelSelectorOptions.ToolHandlerModel
             };
 
             // Build result

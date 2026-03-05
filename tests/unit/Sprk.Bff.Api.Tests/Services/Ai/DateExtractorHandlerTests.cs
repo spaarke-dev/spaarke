@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Tools;
@@ -30,7 +31,7 @@ public sealed class DateExtractorHandlerTests
                     ? Array.Empty<TextChunk>()
                     : new List<TextChunk> { new() { Content = text, Index = 0, StartPosition = 0, EndPosition = text.Length } });
 
-        _handler = new DateExtractorHandler(_openAiClientMock.Object, _textChunkingServiceMock.Object, _loggerMock.Object);
+        _handler = new DateExtractorHandler(_openAiClientMock.Object, _textChunkingServiceMock.Object, Options.Create(new ModelSelectorOptions()), _loggerMock.Object);
     }
 
     #region Handler Properties Tests

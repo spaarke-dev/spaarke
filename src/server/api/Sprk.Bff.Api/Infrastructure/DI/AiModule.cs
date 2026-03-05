@@ -129,6 +129,14 @@ public static class AiModule
         //           IOpenAiClient, IOptions<AiSearchOptions>.
         services.AddSingleton<RagIndexingPipeline>();
 
+        // ReferenceIndexingService — concrete singleton per ADR-010 (AIRA-011).
+        // Indexes golden reference knowledge sources into spaarke-rag-references index.
+        // 512-token chunks, 100-token overlap, 3072-dim embeddings.
+        // Called by AdminKnowledgeEndpoints (admin-only, not Service Bus).
+        // Requires: ITextChunkingService, SearchIndexClient, IOpenAiClient,
+        //           IScopeResolverService, IOptions<AiSearchOptions>.
+        services.AddSingleton<ReferenceIndexingService>();
+
         // SprkChatAgentFactory — singleton per ADR-010 (AIPL-051).
         // Creates SprkChatAgent instances per session.  Singleton is safe because
         // IChatClient is thread-safe and IChatContextProvider is resolved from a

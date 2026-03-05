@@ -16,7 +16,7 @@ namespace Spe.Integration.Tests;
 /// Task 006: Test Shared Deployment Model
 ///
 /// Prerequisites:
-/// - Azure AI Search index "spaarke-knowledge-index" deployed
+/// - Azure AI Search index "spaarke-knowledge-index-v2" deployed
 /// - Azure OpenAI text-embedding-3-small model available
 /// - Redis cache running (for embedding cache)
 /// - appsettings.json configured with credentials

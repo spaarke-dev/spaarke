@@ -88,6 +88,13 @@ public class ModelSelectorOptions
     /// Default model when operation type is unknown. Default: gpt-4o
     /// </summary>
     public string DefaultModel { get; set; } = "gpt-4o";
+
+    /// <summary>
+    /// Model for built-in tool handlers (summary, clause analysis, entity extraction, etc.).
+    /// These handlers perform focused extraction/classification tasks suited for a fast model.
+    /// Default: gpt-4o-mini
+    /// </summary>
+    public string ToolHandlerModel { get; set; } = "gpt-4o-mini";
 }
 
 /// <summary>

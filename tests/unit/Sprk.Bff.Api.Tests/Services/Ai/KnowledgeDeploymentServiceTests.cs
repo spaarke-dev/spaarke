@@ -28,7 +28,7 @@ public class KnowledgeDeploymentServiceTests
         _options = Options.Create(new AnalysisOptions
         {
             DefaultRagModel = RagDeploymentModel.Shared,
-            SharedIndexName = "spaarke-knowledge-index"
+            SharedIndexName = "spaarke-knowledge-index-v2"
         });
     }
 
@@ -57,7 +57,7 @@ public class KnowledgeDeploymentServiceTests
         result.Should().NotBeNull();
         result.TenantId.Should().Be(tenantId);
         result.Model.Should().Be(RagDeploymentModel.Shared);
-        result.IndexName.Should().Be("spaarke-knowledge-index");
+        result.IndexName.Should().Be("spaarke-knowledge-index-v2");
         result.IsActive.Should().BeTrue();
         result.Id.Should().NotBeNull();
     }
@@ -387,7 +387,7 @@ public class KnowledgeDeploymentConfigTests
 
         // Assert
         config.Model.Should().Be(RagDeploymentModel.Shared);
-        config.IndexName.Should().Be("spaarke-knowledge-index");
+        config.IndexName.Should().Be("spaarke-knowledge-index-v2");
         config.IsActive.Should().BeTrue();
         config.TenantId.Should().BeEmpty();
     }

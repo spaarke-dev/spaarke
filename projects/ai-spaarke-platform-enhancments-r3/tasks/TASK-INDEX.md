@@ -10,8 +10,8 @@
 
 | # | Task | Est. | Status | Deps | Parallel Group |
 |---|------|------|--------|------|----------------|
-| 001 | Create Golden Reference Index (`spaarke-rag-references`) | 3h | 🔲 | none | A |
-| 002 | Remove Deprecated Indexes | 1h | 🔲 | none | A |
+| 001 | Create Golden Reference Index (`spaarke-rag-references`) | 3h | ✅ | none | A |
+| 002 | Remove Deprecated Indexes | 1h | ✅ | none | A |
 | 003 | Populate Records Index + tenantId Field | 3h | 🔲 | none | A |
 | 004 | Validate Discovery-Index Dual-Write | 2h | 🔲 | none | B |
 | 005 | Validate Invoice Index | 1h | 🔲 | none | B |
@@ -20,8 +20,8 @@
 
 | # | Task | Est. | Status | Deps | Parallel Group |
 |---|------|------|--------|------|----------------|
-| 010 | Deploy Knowledge Source Records to Dataverse | 2h | 🔲 | none | C |
-| 011 | Build ReferenceIndexingService + Admin Endpoints | 4h | 🔲 | 001 | C |
+| 010 | Deploy Knowledge Source Records to Dataverse | 2h | ✅ | none | C |
+| 011 | Build ReferenceIndexingService + Admin Endpoints | 4h | ✅ | 001 | C |
 | 012 | Index All 10 Knowledge Sources | 2h | 🔲 | 010, 011 | D |
 | 013 | Wire Reference Retrieval into RagService | 3h | 🔲 | 011 | D |
 
@@ -39,8 +39,8 @@
 
 | # | Task | Est. | Status | Deps | Parallel Group |
 |---|------|------|--------|------|----------------|
-| 030 | Verify/Deploy Azure OpenAI Models | 2h | 🔲 | none | G |
-| 031 | Fix Hardcoded Model Selection | 3h | 🔲 | none | G |
+| 030 | Verify/Deploy Azure OpenAI Models | 2h | ✅ | none | G |
+| 031 | Fix Hardcoded Model Selection | 3h | ✅ | none | G |
 | 032 | Document Model Selection Guidelines | 1h | 🔲 | 031 | H |
 | 033 | Add Model Selection to Playbook Builder | 2h | 🔲 | 031 | H |
 
@@ -48,9 +48,9 @@
 
 | # | Task | Est. | Status | Deps | Parallel Group |
 |---|------|------|--------|------|----------------|
-| 040 | Document Embedding Strategy | 1h | 🔲 | none | I |
-| 041 | Clean Up Legacy Vector Field Writes | 1h | 🔲 | none | I |
-| 042 | Document Embedding Change Protocol | 1h | 🔲 | none | I |
+| 040 | Document Embedding Strategy | 1h | ✅ | none | I |
+| 041 | Clean Up Legacy Vector Field Writes | 1h | ✅ | none | I |
+| 042 | Document Embedding Change Protocol | 1h | ✅ | none | I |
 
 ## Deployment
 

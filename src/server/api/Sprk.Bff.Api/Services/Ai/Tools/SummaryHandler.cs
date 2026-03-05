@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 
 namespace Sprk.Bff.Api.Services.Ai.Tools;
 
@@ -30,6 +31,7 @@ public sealed class SummaryHandler : IAnalysisToolHandler
 
     private readonly IOpenAiClient _openAiClient;
     private readonly ITextChunkingService _textChunkingService;
+    private readonly ModelSelectorOptions _modelSelectorOptions;
     private readonly ILogger<SummaryHandler> _logger;
 
     /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
@@ -80,10 +82,12 @@ public sealed class SummaryHandler : IAnalysisToolHandler
     public SummaryHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
+        IOptions<ModelSelectorOptions> modelSelectorOptions,
         ILogger<SummaryHandler> logger)
     {
         _openAiClient = openAiClient;
         _textChunkingService = textChunkingService;
+        _modelSelectorOptions = modelSelectorOptions.Value;
         _logger = logger;
     }
 
@@ -231,7 +235,7 @@ public sealed class SummaryHandler : IAnalysisToolHandler
                 InputTokens = totalInputTokens,
                 OutputTokens = totalOutputTokens,
                 ModelCalls = chunks.Count == 1 ? 1 : chunks.Count + 1,
-                ModelName = "gpt-4o-mini"
+                ModelName = _modelSelectorOptions.ToolHandlerModel
             };
 
             // Parse structured summary if format is structured

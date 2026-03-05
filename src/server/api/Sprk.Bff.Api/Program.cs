@@ -1798,6 +1798,10 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:RecordMatchingEnabled
     app.MapRecordMatchingAdminEndpoints();
 }
 
+// Admin Knowledge endpoints (AIRA-011 — reference knowledge source indexing)
+// Provides: POST /api/admin/knowledge/index-references, POST /index-reference/{id}, DELETE /index-reference/{id}
+app.MapAdminKnowledgeEndpoints();
+
 // Builder Scope Admin endpoints (ai-playbook-node-builder-r2 Phase 4)
 // Allows importing builder scope JSON files into Dataverse
 app.MapBuilderScopeAdminEndpoints();
