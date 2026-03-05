@@ -1,8 +1,12 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Azure;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Models;
 using Azure.Search.Documents.Indexes;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
@@ -17,11 +21,12 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// <para>
 /// Hybrid search pipeline (mirrors RagService patterns):
 /// <list type="ordered">
-///   <item>Generate embedding for query (with caching via <see cref="IEmbeddingCache"/>).</item>
+///   <item>Check Redis result cache (key: rag-ref:{tenantId}:{queryHash}:{sourceIdsHash}:{topK}).</item>
+///   <item>On cache miss: generate embedding for query (with caching via <see cref="IEmbeddingCache"/>).</item>
 ///   <item>Build hybrid query: full-text keyword search + vector search (3072-dim cosine).</item>
 ///   <item>Apply semantic ranking for result re-ordering.</item>
 ///   <item>Filter by tenantId (required) + optional knowledgeSourceIds + optional domain.</item>
-///   <item>Return ranked results with telemetry.</item>
+///   <item>Cache results in Redis (10-minute TTL) and return ranked results with telemetry.</item>
 /// </list>
 /// </para>
 /// <para>
@@ -30,7 +35,7 @@ namespace Sprk.Bff.Api.Services.Ai;
 ///   <item>MUST query spaarke-rag-references ONLY — never the customer document index.</item>
 ///   <item>MUST include tenantId filter on all queries (security).</item>
 ///   <item>ADR-010: Registered as concrete singleton in AiModule.cs.</item>
-///   <item>ADR-009: Redis caching deferred to Task 024.</item>
+///   <item>ADR-009: Redis result caching with 10-minute TTL (session-scoped).</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -39,6 +44,7 @@ public sealed partial class ReferenceRetrievalService
     private readonly SearchIndexClient _searchIndexClient;
     private readonly IOpenAiClient _openAiClient;
     private readonly IEmbeddingCache _embeddingCache;
+    private readonly IDistributedCache _cache;
     private readonly AiSearchOptions _aiSearchOptions;
     private readonly ILogger<ReferenceRetrievalService> _logger;
 
@@ -55,6 +61,19 @@ public sealed partial class ReferenceRetrievalService
     // Maximum query text length for structured logging (PII/compliance)
     private const int MaxQueryTextLength = 200;
 
+    // Result cache TTL: 10 minutes (session-scoped). Prevents duplicate embedding + search
+    // calls when multiple action nodes in a playbook query the same knowledge sources.
+    private static readonly TimeSpan ResultCacheTtl = TimeSpan.FromMinutes(10);
+
+    // Cache key prefix following SDAP naming convention
+    private const string ResultCacheKeyPrefix = "sdap:rag-ref:";
+
+    // JSON serializer options for cache serialization (camelCase to match API conventions)
+    private static readonly JsonSerializerOptions CacheJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     /// <summary>
     /// Initialises a new <see cref="ReferenceRetrievalService"/>.
     /// </summary>
@@ -62,12 +81,14 @@ public sealed partial class ReferenceRetrievalService
         SearchIndexClient searchIndexClient,
         IOpenAiClient openAiClient,
         IEmbeddingCache embeddingCache,
+        IDistributedCache cache,
         IOptions<AiSearchOptions> aiSearchOptions,
         ILogger<ReferenceRetrievalService> logger)
     {
         _searchIndexClient = searchIndexClient ?? throw new ArgumentNullException(nameof(searchIndexClient));
         _openAiClient = openAiClient ?? throw new ArgumentNullException(nameof(openAiClient));
         _embeddingCache = embeddingCache ?? throw new ArgumentNullException(nameof(embeddingCache));
+        _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _aiSearchOptions = aiSearchOptions?.Value ?? throw new ArgumentNullException(nameof(aiSearchOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -91,6 +112,19 @@ public sealed partial class ReferenceRetrievalService
         ArgumentException.ThrowIfNullOrEmpty(options.TenantId);
 
         var totalStopwatch = Stopwatch.StartNew();
+
+        // Step 0: Check Redis result cache (prevents duplicate embedding + search calls)
+        var cacheKey = BuildResultCacheKey(query, options);
+        var cachedResponse = await TryGetCachedResultAsync(cacheKey, cancellationToken);
+        if (cachedResponse != null)
+        {
+            totalStopwatch.Stop();
+            LogReferenceResultCacheHit(options.TenantId, totalStopwatch.ElapsedMilliseconds);
+            return cachedResponse;
+        }
+
+        LogReferenceResultCacheMiss(options.TenantId);
+
         var embeddingStopwatch = new Stopwatch();
         var searchStopwatch = new Stopwatch();
         var embeddingCacheHit = false;
@@ -136,9 +170,9 @@ public sealed partial class ReferenceRetrievalService
                 queryText: query.Length > MaxQueryTextLength ? query[..MaxQueryTextLength] : query,
                 topK: options.TopK);
 
-            var response = await searchClient.SearchAsync<KnowledgeDocument>(
+            var searchResponse = await searchClient.SearchAsync<KnowledgeDocument>(
                 query, searchOptions, cancellationToken);
-            var searchResults = response.Value;
+            var searchResults = searchResponse.Value;
             searchStopwatch.Stop();
 
             // Step 5: Process results
@@ -186,15 +220,21 @@ public sealed partial class ReferenceRetrievalService
                 options.TenantId, results.Count, totalStopwatch.ElapsedMilliseconds,
                 embeddingStopwatch.ElapsedMilliseconds, searchStopwatch.ElapsedMilliseconds);
 
-            return new ReferenceSearchResponse
+            var response = new ReferenceSearchResponse
             {
                 Query = query,
                 Results = results,
                 TotalCount = totalCount,
                 SearchDurationMs = searchStopwatch.ElapsedMilliseconds,
                 EmbeddingDurationMs = embeddingStopwatch.ElapsedMilliseconds,
-                EmbeddingCacheHit = embeddingCacheHit
+                EmbeddingCacheHit = embeddingCacheHit,
+                ResultCacheHit = false
             };
+
+            // Cache the response for subsequent action nodes that query the same knowledge
+            await TryCacheResultAsync(cacheKey, response, cancellationToken);
+
+            return response;
         }
         catch (RequestFailedException ex)
         {
@@ -307,6 +347,104 @@ public sealed partial class ReferenceRetrievalService
         return value.Replace("'", "''");
     }
 
+    /// <summary>
+    /// Builds a tenant-scoped cache key for a reference search query.
+    /// Format: sdap:rag-ref:{tenantId}:{queryHash}:{sourceIdsHash}:{topK}
+    /// </summary>
+    private static string BuildResultCacheKey(string query, ReferenceSearchOptions options)
+    {
+        // Hash the query text for a fixed-length, safe cache key component
+        var queryHash = ComputeShortHash(query);
+
+        // Hash the sorted source IDs (or "none" if no filter)
+        var sourceIdsInput = options.KnowledgeSourceIds is { Count: > 0 }
+            ? string.Join(",", options.KnowledgeSourceIds.OrderBy(id => id, StringComparer.Ordinal))
+            : "none";
+        var sourceIdsHash = ComputeShortHash(sourceIdsInput);
+
+        return $"{ResultCacheKeyPrefix}{options.TenantId}:{queryHash}:{sourceIdsHash}:{options.TopK}";
+    }
+
+    /// <summary>
+    /// Computes a URL-safe Base64-encoded SHA256 hash (truncated to 16 chars for compact keys).
+    /// </summary>
+    private static string ComputeShortHash(string input)
+    {
+        var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));
+        // Use first 12 bytes (96 bits) → 16 Base64 chars. Collision risk is negligible for this use case.
+        return Convert.ToBase64String(hashBytes, 0, 12)
+            .Replace('+', '-')
+            .Replace('/', '_');
+    }
+
+    /// <summary>
+    /// Attempts to retrieve a cached <see cref="ReferenceSearchResponse"/> from Redis.
+    /// Returns null on cache miss or any error (fail-open).
+    /// </summary>
+    private async Task<ReferenceSearchResponse?> TryGetCachedResultAsync(
+        string cacheKey,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var cachedData = await _cache.GetAsync(cacheKey, cancellationToken);
+            if (cachedData == null)
+            {
+                return null;
+            }
+
+            var response = JsonSerializer.Deserialize<ReferenceSearchResponse>(cachedData, CacheJsonOptions);
+            if (response == null)
+            {
+                return null;
+            }
+
+            // Return a copy with ResultCacheHit = true (original was cached with false)
+            return response with { ResultCacheHit = true };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Error retrieving reference search result from cache (key={CacheKey}), proceeding with live search",
+                cacheKey);
+            return null; // Fail-open: cache errors should never block search
+        }
+    }
+
+    /// <summary>
+    /// Caches a <see cref="ReferenceSearchResponse"/> in Redis with the configured TTL.
+    /// Errors are logged and swallowed (caching is an optimisation, not a requirement).
+    /// </summary>
+    private async Task TryCacheResultAsync(
+        string cacheKey,
+        ReferenceSearchResponse response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var serialized = JsonSerializer.SerializeToUtf8Bytes(response, CacheJsonOptions);
+            await _cache.SetAsync(
+                cacheKey,
+                serialized,
+                new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = ResultCacheTtl
+                },
+                cancellationToken);
+
+            _logger.LogDebug(
+                "Cached reference search result (key={CacheKey}, results={ResultCount}, TTL={TtlMinutes}min)",
+                cacheKey, response.Results.Count, ResultCacheTtl.TotalMinutes);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Error caching reference search result (key={CacheKey}), result will not be cached",
+                cacheKey);
+            // Don't throw — caching is an optimisation
+        }
+    }
+
     #endregion
 
     #region High-Performance Structured Log Events
@@ -328,6 +466,25 @@ public sealed partial class ReferenceRetrievalService
         Level = LogLevel.Information,
         Message = "ReferenceRetrievalResults tenant={TenantId} resultCount={ResultCount} knowledgeSourceIds={KnowledgeSourceIds} scores={Scores} elapsedMs={ElapsedMs}")]
     private partial void LogReferenceRetrievalResults(string tenantId, int resultCount, string knowledgeSourceIds, string scores, long elapsedMs);
+
+    /// <summary>
+    /// Logged when a reference search result is served from Redis cache.
+    /// Content is NOT logged per ADR-014.
+    /// </summary>
+    [LoggerMessage(
+        EventId = 5312,
+        Level = LogLevel.Information,
+        Message = "ReferenceResultCacheHit tenant={TenantId} elapsedMs={ElapsedMs}")]
+    private partial void LogReferenceResultCacheHit(string tenantId, long elapsedMs);
+
+    /// <summary>
+    /// Logged when a reference search result is not found in Redis cache (cache miss).
+    /// </summary>
+    [LoggerMessage(
+        EventId = 5313,
+        Level = LogLevel.Information,
+        Message = "ReferenceResultCacheMiss tenant={TenantId}")]
+    private partial void LogReferenceResultCacheMiss(string tenantId);
 
     #endregion
 }

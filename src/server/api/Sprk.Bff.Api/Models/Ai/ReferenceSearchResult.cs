@@ -93,6 +93,12 @@ public record ReferenceSearchResponse
     /// Whether the query embedding was retrieved from cache.
     /// </summary>
     public bool EmbeddingCacheHit { get; init; }
+
+    /// <summary>
+    /// Whether the entire search response was retrieved from the Redis result cache.
+    /// When true, no embedding generation or search call was performed.
+    /// </summary>
+    public bool ResultCacheHit { get; init; }
 }
 
 /// <summary>

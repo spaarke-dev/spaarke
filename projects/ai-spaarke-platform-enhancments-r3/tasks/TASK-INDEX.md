@@ -29,11 +29,11 @@
 
 | # | Task | Est. | Status | Deps | Parallel Group |
 |---|------|------|--------|------|----------------|
-| 020 | Wire L1 Knowledge Retrieval into Execution | 4h | 🔲 | 013 | E |
-| 021 | Configurable Knowledge Retrieval per Action | 3h | 🔲 | 020 | E |
-| 022 | Wire Optional L2 Customer Document Context | 3h | 🔲 | 020 | F |
-| 023 | Wire Optional L3 Entity Context | 2h | 🔲 | 020 | F |
-| 024 | Knowledge Retrieval Result Caching | 2h | 🔲 | 020 | F |
+| 020 | Wire L1 Knowledge Retrieval into Execution | 4h | ✅ | 013 | E |
+| 021 | Configurable Knowledge Retrieval per Action | 3h | ✅ | 020 | E |
+| 022 | Wire Optional L2 Customer Document Context | 3h | ✅ | 020 | F |
+| 023 | Wire Optional L3 Entity Context | 2h | ✅ | 020 | F |
+| 024 | Knowledge Retrieval Result Caching | 2h | ✅ | 020 | F |
 
 ## Phase 4: Model Selection Integration (8h)
 
