@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
+using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Integration;
@@ -49,6 +50,9 @@ public class PlaybookExecutionTests
         {
             new AiAnalysisNodeExecutor(
                 mockServiceProvider.Object,
+                null!, // ReferenceRetrievalService — not exercised in integration tests
+                Mock.Of<IRagService>(),
+                Mock.Of<IRecordSearchService>(),
                 Mock.Of<ILogger<AiAnalysisNodeExecutor>>()),
             new CreateTaskNodeExecutor(
                 mockTemplateEngine.Object,
@@ -123,6 +127,9 @@ public class PlaybookExecutionTests
         {
             new AiAnalysisNodeExecutor(
                 mockServiceProvider2.Object,
+                null!, // ReferenceRetrievalService — not exercised in integration tests
+                Mock.Of<IRagService>(),
+                Mock.Of<IRecordSearchService>(),
                 Mock.Of<ILogger<AiAnalysisNodeExecutor>>()),
             new CreateTaskNodeExecutor(
                 mockTemplateEngine.Object,

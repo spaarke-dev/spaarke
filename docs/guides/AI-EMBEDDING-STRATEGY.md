@@ -1,8 +1,8 @@
 # AI Embedding Strategy
 
-> **Version**: 1.0
+> **Version**: 1.1
 > **Created**: 2026-03-04
-> **Updated**: 2026-03-04
+> **Updated**: 2026-03-05
 > **Project**: AI Spaarke Platform Enhancements R3
 
 ---
@@ -62,7 +62,7 @@ The platform maintains several Azure AI Search indexes, each using the same embe
 |------------|---------|----------------|------------|------------------|------------|-----------------|
 | `spaarke-knowledge-index-v2` | Customer document knowledge (shared tenant) | text-embedding-3-large | 3072 | `contentVector3072`, `documentVector3072` | 512 tokens (2048 chars) | 554+ documents, thousands of chunks |
 | `discovery-index` | Auto-populated discovery chunks for broader context | text-embedding-3-large | 3072 | `contentVector3072`, `documentVector3072` | 1024 tokens (4096 chars) | Mirrors knowledge-v2 document count |
-| `spaarke-rag-references` | Golden reference knowledge (domain terminology, clause libraries) | text-embedding-3-large | 3072 | `contentVector3072` | 512 tokens | ~100 chunks from ~10 knowledge sources |
+| `spaarke-rag-references` | Golden reference knowledge (domain terminology, clause libraries) | text-embedding-3-large | 3072 | `contentVector3072` | 512 tokens (100-token overlap) | ~100 chunks from ~10 knowledge sources |
 | `spaarke-invoices-dev` | Invoice semantic search for financial intelligence | text-embedding-3-large | 3072 | `contentVector` (3072-dim) | Full invoice text | Grows with invoice volume |
 | `{tenant}-knowledge` | Dedicated per-tenant indexes (enterprise customers) | text-embedding-3-large | 3072 | Same as knowledge-v2 | 512 tokens | Varies by customer |
 
@@ -133,6 +133,28 @@ Check Redis: sdap:embedding:{hash}
 | Search query embeddings | Yes | Repeated queries benefit from cache hits |
 | Indexing pipeline embeddings | No | Each chunk is unique; caching adds overhead with no reuse (ADR-009) |
 | Invoice indexing embeddings | No | Same as above -- unique content per document |
+| Reference retrieval results | Yes (10min) | Multiple playbook nodes querying same references within a session |
+
+### Reference Retrieval Result Cache (R3)
+
+In addition to embedding caching, reference retrieval results are cached in Redis to prevent duplicate searches when multiple playbook action nodes query the same knowledge sources.
+
+| Property | Value |
+|----------|-------|
+| **Cache Service** | `ReferenceRetrievalService` (inline cache logic) |
+| **Backend** | Redis (`IDistributedCache`) |
+| **Key Format** | `sdap:rag-ref:{tenantId}:{queryHash}:{sourceIdsHash}:{topK}` |
+| **TTL** | 10 minutes (playbook session scope) |
+| **Hashing** | SHA256 of query text and source ID list |
+| **Serialization** | JSON (`ReferenceSearchResponse`) |
+
+**Cache scope**: Only applies to `ReferenceRetrievalService.SearchReferencesAsync()` (L1 golden reference queries). Customer document queries (L2) and entity context queries (L3) are not cached at the result level.
+
+**Cache key components**:
+- `tenantId`: Security isolation (prevents cross-tenant cache hits)
+- `queryHash`: SHA256 of the semantic query text
+- `sourceIdsHash`: SHA256 of sorted knowledge source ID list
+- `topK`: Result count (different topK = different cache entry)
 
 ### Error Handling
 
@@ -396,8 +418,13 @@ After completing migration:
 | `src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs` | Document schema with vector field annotations |
 | `src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs` | Index name configuration |
 | `infrastructure/ai-search/spaarke-knowledge-index-v2.json` | Knowledge index schema definition |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs` | Golden reference knowledge indexing |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceRetrievalService.cs` | Golden reference knowledge retrieval + result caching |
+| `src/server/api/Sprk.Bff.Api/Models/Ai/ReferenceSearchResult.cs` | Reference search response models |
+| `src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeRetrievalConfig.cs` | Per-action knowledge retrieval settings |
+| `infrastructure/ai-search/spaarke-rag-references.json` | Golden reference index schema |
 
 ---
 
 *Document created: 2026-03-04*
-*AI Spaarke Platform Enhancements R3 - Tasks AIRA-040, AIRA-042*
+*Updated: 2026-03-05 - Reference retrieval result caching, new source files (AI Resource Activation R3)*

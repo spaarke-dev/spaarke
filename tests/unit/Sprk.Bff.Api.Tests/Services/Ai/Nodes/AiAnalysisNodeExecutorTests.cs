@@ -5,6 +5,7 @@ using Moq;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
+using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Nodes;
@@ -29,7 +30,12 @@ public class AiAnalysisNodeExecutorTests
         serviceProviderMock
             .Setup(sp => sp.GetService(typeof(IToolHandlerRegistry)))
             .Returns(_toolHandlerRegistryMock.Object);
-        _executor = new AiAnalysisNodeExecutor(serviceProviderMock.Object, _loggerMock.Object);
+        _executor = new AiAnalysisNodeExecutor(
+            serviceProviderMock.Object,
+            null!, // ReferenceRetrievalService — not exercised in these unit tests
+            Mock.Of<IRagService>(),
+            Mock.Of<IRecordSearchService>(),
+            _loggerMock.Object);
     }
 
     #region SupportedActionTypes Tests

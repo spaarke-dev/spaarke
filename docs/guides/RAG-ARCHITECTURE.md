@@ -1,10 +1,9 @@
 # RAG Architecture Guide
 
-> **Version**: 1.4
-> **Created**: 2025-12-29
-> **Updated**: 2026-01-20
-> **Project**: AI Document Intelligence R3 + RAG Pipeline R1 + Semantic Search Foundation R1
-> **Status**: R3 Phases 1-5 Complete, RAG Pipeline Phase 1 Complete, Semantic Search R1 Complete
+> **Version**: 1.5
+> **Updated**: 2026-03-05
+> **Project**: AI Document Intelligence R3 + RAG Pipeline R1 + Semantic Search Foundation R1 + AI Resource Activation R3
+> **Status**: R3 Phases 1-5 Complete, RAG Pipeline Phase 1 Complete, Semantic Search R1 Complete, Resource Activation R3 Code Complete
 
 ---
 
@@ -87,6 +86,14 @@ The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retri
 │  IEmbeddingCache (EmbeddingCache.cs)                           │
 │  ├── GetEmbeddingAsync()        → Retrieve cached embedding     │
 │  └── SetEmbeddingAsync()        → Store embedding with TTL      │
+│                                                                 │
+│  ReferenceIndexingService (ReferenceIndexingService.cs)            │
+│  ├── IndexKnowledgeSourceAsync()   → Index single knowledge source │
+│  ├── DeleteKnowledgeSourceAsync()  → Delete source chunks          │
+│  └── IndexAllReferencesAsync()     → Batch index all sources       │
+│                                                                    │
+│  ReferenceRetrievalService (ReferenceRetrievalService.cs)          │
+│  └── SearchReferencesAsync()  → Hybrid search against references   │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -95,7 +102,8 @@ The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retri
 ├─────────────────────────────────────────────────────────────────┤
 │  Azure AI Search                Azure OpenAI                    │
 │  ├── spaarke-knowledge-index-v2 ├── text-embedding-3-large      │
-│  ├── {tenant}-knowledge         └── 3072 dimensions             │
+│  ├── spaarke-rag-references    └── 3072 dimensions              │
+│  ├── {tenant}-knowledge                                         │
 │  └── Customer indexes                                           │
 │                                                                 │
 │  Redis Cache                    Key Vault                       │
@@ -117,6 +125,8 @@ The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retri
 | `IOpenAiClient` | Azure OpenAI API calls (embeddings + chat) | Singleton |
 | `RagIndexingJobHandler` | Async job processing with idempotency | Scoped |
 | `IIdempotencyService` | Duplicate detection and processing locks | Singleton |
+| `ReferenceIndexingService` | Index knowledge sources into golden reference index | Singleton |
+| `ReferenceRetrievalService` | Query golden reference index (L1 knowledge) | Singleton |
 
 ---
 
@@ -328,6 +338,67 @@ new KnowledgeDeploymentConfig
 | Setup Complexity | None | Low | Medium |
 | Data Sovereignty | No | Partial | Full |
 | Compliance (SOC2, etc.) | Shared | Dedicated | Customer-managed |
+
+---
+
+## Golden Reference Index (R3)
+
+The `spaarke-rag-references` index stores curated domain knowledge separate from customer documents.
+
+### Purpose
+
+| Index | Content | Scale | Access |
+|-------|---------|-------|--------|
+| `spaarke-knowledge-index-v2` | Customer documents (tenant-scoped) | 100K+ chunks | Per-tenant filter |
+| `spaarke-rag-references` | Curated domain knowledge (KNW-001–010) | ~100 chunks | Shared across tenants |
+
+Separating references from customer documents ensures:
+- **Guaranteed retrieval**: Small index = high recall for domain terms
+- **No noise**: Customer documents can't dilute reference quality
+- **Fast queries**: ~100 chunks vs 100K+ in customer index
+
+### Schema
+
+Key fields beyond standard `KnowledgeDocument`:
+
+| Field | Purpose |
+|-------|---------|
+| `knowledgeSourceId` | Links chunk to Dataverse `sprk_analysisknowledge` record |
+| `knowledgeSourceName` | Human-readable source name (e.g., "Contract Clause Library") |
+| `documentType` | Domain tag (e.g., "contract-law", "financial-analysis") |
+
+### Admin Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/admin/knowledge/index-references` | Bulk-index all knowledge sources |
+| POST | `/api/admin/knowledge/index-reference/{id}` | Index single source |
+| DELETE | `/api/admin/knowledge/index-reference/{id}` | Delete source chunks |
+
+### Knowledge-Augmented Execution
+
+When a playbook executes an AI node, `AiAnalysisNodeExecutor` retrieves knowledge in three tiers:
+
+```
+Prompt Assembly Order:
+  1. Skill instructions (JPS or flat text)
+  2. L1: Golden reference knowledge (spaarke-rag-references)
+  3. L2: Similar customer documents (spaarke-knowledge-index-v2) [optional]
+  4. L3: Business entity context (spaarke-records-index) [optional]
+  5. Document content
+```
+
+Controlled per-action via `KnowledgeRetrievalConfig` in ConfigJson:
+```json
+{
+  "knowledgeRetrieval": {
+    "mode": "auto",
+    "topK": 5,
+    "includeDocumentContext": false,
+    "includeEntityContext": false
+  }
+}
+```
 
 ---
 
@@ -981,19 +1052,22 @@ Document Upload → Document Intelligence (parsing)
 ### Analysis Pipeline
 
 ```
-User Query in Analysis Workspace
+Playbook Execution (AiAnalysisNodeExecutor)
               │
-              ▼
-    POST /api/ai/rag/search
+              ├── L1: ReferenceRetrievalService.SearchReferencesAsync()
+              │       └── spaarke-rag-references (golden domain knowledge)
               │
-              ▼
-    Retrieve Relevant Context
+              ├── L2: IRagService.SearchAsync() [optional]
+              │       └── spaarke-knowledge-index-v2 (similar customer docs)
               │
-              ▼
-    Augment LLM Prompt
+              ├── L3: IRecordSearchService [optional]
+              │       └── spaarke-records-index (business entity metadata)
               │
-              ▼
-    Generate Analysis Response
+              ├── Merge L1 + L2 + L3 → KnowledgeContext
+              │
+              ├── Build prompt: Skills + Knowledge + Document
+              │
+              └── IOpenAiClient → Azure OpenAI → Analysis Response
 ```
 
 ### Completed Integrations (R3)
@@ -1005,6 +1079,9 @@ User Query in Analysis Workspace
 | Export Services | Include sources in DOCX/PDF/Email/Teams exports | Phase 3 | ✅ Complete |
 | Circuit Breaker | Polly resilience for AI Search | Phase 4 | ✅ Complete |
 | Tenant Authorization | `TenantAuthorizationFilter` for isolation | Phase 5 | ✅ Complete |
+| Knowledge-Augmented Execution | L1/L2/L3 tiered knowledge retrieval in playbook nodes | R3 | ✅ Complete |
+| Reference Index Admin | Admin endpoints for golden reference indexing | R3 | ✅ Complete |
+| Result Caching | Redis caching for reference retrieval results | R3 | ✅ Complete |
 
 ### Resilience (R3 Phase 4)
 
@@ -1042,3 +1119,4 @@ When the circuit is open, returns `503 Service Unavailable` with error code `ai_
 *AI Document Intelligence R3 - Phases 1-5 Complete*
 *RAG Pipeline R1 - Phase 1 Complete*
 *Semantic Search Foundation R1 - Complete (hybrid search API, entity scoping, AI Tool integration)*
+*Updated: 2026-03-05 - Knowledge-Augmented Execution, Golden Reference Index, Model Selection (AI Resource Activation R3)*
