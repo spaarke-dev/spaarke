@@ -951,7 +951,7 @@ public class ScopeResolverService : IScopeResolverService
 
         await EnsureAuthenticatedAsync(cancellationToken);
 
-        var url = $"sprk_promptfragments({skillId})?$expand=sprk_SkillTypeId($select=sprk_name)";
+        var url = $"sprk_analysisskills({skillId})?$expand=sprk_SkillTypeId($select=sprk_name)";
         var response = await _httpClient.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -1247,7 +1247,7 @@ public class ScopeResolverService : IScopeResolverService
 
         // Sanitize name to prevent OData injection (escape single quotes)
         var escapedName = name.Replace("'", "''");
-        var url = $"sprk_promptfragments?$filter=sprk_name eq '{escapedName}'&$expand=sprk_SkillTypeId($select=sprk_name)&$top=1";
+        var url = $"sprk_analysisskills?$filter=sprk_name eq '{escapedName}'&$expand=sprk_SkillTypeId($select=sprk_name)&$top=1";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);
         await EnsureSuccessWithDiagnosticsAsync(response, $"GetSkillByNameAsync('{name}')", cancellationToken);
@@ -2111,8 +2111,8 @@ public class ScopeResolverService : IScopeResolverService
     }
 
     /// <summary>
-    /// DTO for deserializing sprk_promptfragment entity from Dataverse Web API (Skills).
-    /// Skills are stored in the sprk_promptfragments entity set in Dataverse.
+    /// DTO for deserializing sprk_analysisskill entity from Dataverse Web API (Skills).
+    /// Skills are stored in the sprk_analysisskills entity set in Dataverse.
     /// </summary>
     private class SkillEntity
     {
