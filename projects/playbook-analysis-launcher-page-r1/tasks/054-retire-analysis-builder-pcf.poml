@@ -1,0 +1,61 @@
+<task id="054" project="playbook-analysis-launcher-page-r1">
+  <metadata>
+    <title>Retire AnalysisBuilder PCF Control</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>050, 051</dependencies>
+    <blocks>090</blocks>
+    <tags>refactoring, dataverse, pcf</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Removing deployed PCF and Custom Page — destructive, needs verification</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Retire the AnalysisBuilder PCF control: delete source code, remove from Dataverse solution,
+    delete the Custom Page sprk_analysisbuilder_40af8. Verify the new code page still works.
+  </prompt>
+
+  <role>SPAARKE platform developer. Careful with destructive operations.</role>
+
+  <goal>AnalysisBuilder PCF removed from codebase and Dataverse. New code page confirmed working.</goal>
+
+  <context>
+    <background>
+      After deploying the new code page and verifying it works, the old PCF control and
+      its Custom Page wrapper are no longer needed. This task removes them.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/AnalysisBuilder/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Only retire AFTER new code page and command bar are verified working</constraint>
+    <constraint source="project">Verify no other code references the old Custom Page name</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Verify new Analysis Builder code page is working in Dataverse (double-check)</step>
+    <step order="2">Grep codebase for references to "sprk_analysisbuilder_40af8" (old Custom Page)</step>
+    <step order="3">Grep for references to "AnalysisBuilder" PCF control name</step>
+    <step order="4">Delete src/client/pcf/AnalysisBuilder/ directory</step>
+    <step order="5">Remove PCF from Dataverse solution (if applicable)</step>
+    <step order="6">Delete Custom Page sprk_analysisbuilder_40af8 from Dataverse</step>
+    <step order="7">Verify "+New Analysis" still works with code page (regression check)</step>
+    <step order="8">Update any documentation referencing the old PCF</step>
+  </steps>
+
+  <outputs>
+    <output type="code">DELETED: src/client/pcf/AnalysisBuilder/ (entire directory)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">src/client/pcf/AnalysisBuilder/ directory deleted</criterion>
+    <criterion testable="true">No remaining references to old Custom Page name</criterion>
+    <criterion testable="true">"+New Analysis" still opens new code page after retirement</criterion>
+    <criterion testable="true">No console errors or broken references</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,79 @@
+<task id="006" project="playbook-analysis-launcher-page-r1">
+  <metadata>
+    <title>Create ScopeConfigurator Component</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001, 005</dependencies>
+    <blocks>020, 021</blocks>
+    <tags>typescript, react, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>React UI component composing ScopeList into tabbed interface</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the ScopeConfigurator component — a tabbed interface for configuring analysis scope
+    (Action, Skills, Knowledge, Tools). Uses ScopeList internally for each tab.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9 TabList and composition patterns.
+  </role>
+
+  <goal>
+    Create `src/solutions/LegalWorkspace/src/components/Playbook/ScopeConfigurator.tsx` — a
+    4-tab scope configuration UI with badge counts on each tab.
+  </goal>
+
+  <context>
+    <background>
+      The existing PCF ScopeTabs.tsx (96 lines) renders tab navigation with badge counts.
+      This component combines that with ScopeList to create a complete scope configuration UI.
+      Used by Analysis Builder Tab 2 (Custom Scope).
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/Playbook/ScopeConfigurator.tsx</file>
+      <file>src/client/pcf/AnalysisBuilder/control/components/ScopeTabs.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Playbook/ScopeList.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Playbook/types.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9 TabList component</constraint>
+    <constraint source="ADR-021">Badge counts use Fluent Badge component</constraint>
+    <constraint source="project">Action tab = single-select (radio), others = multi-select (checkbox)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/fluent-ui-theming.md</file>
+      <file>projects/playbook-analysis-launcher-page-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing PCF ScopeTabs.tsx</step>
+    <step order="2">Create ScopeConfigurator.tsx with props: actions, skills, knowledge, tools, selectedIds, onChange</step>
+    <step order="3">Use Fluent v9 TabList with 4 tabs: Action, Skills, Knowledge, Tools</step>
+    <step order="4">Add Badge with selection count on each tab</step>
+    <step order="5">Render ScopeList for each tab with appropriate multiSelect mode</step>
+    <step order="6">Add readOnly mode (for when playbook is selected — scopes locked)</step>
+    <step order="7">Verify TypeScript compiles</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/src/components/Playbook/ScopeConfigurator.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">4 tabs render with correct labels</criterion>
+    <criterion testable="true">Action tab uses single-select, others use multi-select</criterion>
+    <criterion testable="true">Badge shows selection count per tab</criterion>
+    <criterion testable="true">readOnly mode disables all selections</criterion>
+    <criterion testable="true">TypeScript compiles without errors</criterion>
+  </acceptance-criteria>
+</task>

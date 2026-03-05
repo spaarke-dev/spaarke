@@ -1,0 +1,83 @@
+<task id="024" project="playbook-analysis-launcher-page-r1">
+  <metadata>
+    <title>Update Command Bar Script for Code Page Launch</title>
+    <phase>2</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>009</dependencies>
+    <blocks>050</blocks>
+    <tags>javascript, dataverse, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifying deployed command bar script — breaking change if wrong</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Update the openAnalysisBuilderDialog() function in sprk_analysis_commands.js to launch
+    the new code page web resource instead of the Custom Page. Change pageType from "custom"
+    to "webresource" and pass params as URL query string.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse command bar scripts and Xrm.Navigation.
+  </role>
+
+  <goal>
+    Update `src/client/webresources/js/sprk_analysis_commands.js` — only the
+    `openAnalysisBuilderDialog()` function. All other functions remain unchanged.
+  </goal>
+
+  <context>
+    <background>
+      The command bar script is already deployed to Dataverse. Only the dialog launch target
+      needs updating: from Custom Page (sprk_analysisbuilder_40af8) to web resource
+      (sprk_analysisbuilder). See spec.md Section 5.1 and 10.2 for the exact change.
+    </background>
+    <relevant-files>
+      <file>src/client/webresources/js/sprk_analysis_commands.js</file>
+      <file>src/client/code-pages/AnalysisWorkspace/launcher/sprk_AnalysisWorkspaceLauncher.js</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Only modify openAnalysisBuilderDialog() — all other functions unchanged</constraint>
+    <constraint source="project">pageType changes from "custom" to "webresource"</constraint>
+    <constraint source="project">Params passed as URL query string, not JSON recordId</constraint>
+    <constraint source="project">Follow sprk_AnalysisWorkspaceLauncher.js pattern for reference</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/playbook-analysis-launcher-page-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Code page launcher" location="src/client/code-pages/AnalysisWorkspace/launcher/sprk_AnalysisWorkspaceLauncher.js">
+        pageType: "webresource", webresourceName, data as URL query string
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current sprk_analysis_commands.js, focus on openAnalysisBuilderDialog()</step>
+    <step order="2">Read sprk_AnalysisWorkspaceLauncher.js for code page launch pattern</step>
+    <step order="3">Update openAnalysisBuilderDialog(): change pageType to "webresource"</step>
+    <step order="4">Change webresourceName to "sprk_analysisbuilder"</step>
+    <step order="5">Build URL query string from params (documentId, documentName, containerId, fileId, apiBaseUrl)</step>
+    <step order="6">Pass query string as data parameter instead of JSON recordId</step>
+    <step order="7">Keep sessionStorage backup behavior</step>
+    <step order="8">Verify no other functions were modified</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/webresources/js/sprk_analysis_commands.js</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">openAnalysisBuilderDialog uses pageType: "webresource"</criterion>
+    <criterion testable="true">webresourceName is "sprk_analysisbuilder"</criterion>
+    <criterion testable="true">Params passed as URL-encoded query string</criterion>
+    <criterion testable="true">All other functions (Spaarke_NewAnalysis, Spaarke_EnableNewAnalysis, etc.) unchanged</criterion>
+    <criterion testable="true">sessionStorage backup retained</criterion>
+  </acceptance-criteria>
+</task>

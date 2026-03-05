@@ -1,0 +1,52 @@
+<task id="022" project="playbook-analysis-launcher-page-r1">
+  <metadata>
+    <title>Verify Analysis Builder Build Pipeline</title>
+    <phase>2</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>050</blocks>
+    <tags>typescript, frontend, code-page, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Build verification — no new code, testing existing pipeline</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Verify the full Analysis Builder build pipeline: npm run build produces a working
+    single-file HTML. Check file size, verify all imports resolved, no runtime errors.
+  </prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>
+    Confirm `dist/analysisbuilder.html` builds successfully, is self-contained, and the
+    shared Playbook component imports are correctly bundled.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>src/solutions/AnalysisBuilder/dist/analysisbuilder.html</file>
+      <file>src/solutions/AnalysisBuilder/vite.config.ts</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step order="1">Run npm run build in src/solutions/AnalysisBuilder/</step>
+    <step order="2">Check dist/analysisbuilder.html exists and file size is reasonable (500KB-2MB)</step>
+    <step order="3">Verify the HTML is self-contained (no external script/link references)</step>
+    <step order="4">Check for build warnings about unresolved imports</step>
+    <step order="5">Verify shared Playbook imports resolved via path alias</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">Build verification report in notes/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds with zero errors</criterion>
+    <criterion testable="true">dist/analysisbuilder.html is self-contained (no external refs)</criterion>
+    <criterion testable="true">File size between 500KB and 2MB</criterion>
+  </acceptance-criteria>
+</task>

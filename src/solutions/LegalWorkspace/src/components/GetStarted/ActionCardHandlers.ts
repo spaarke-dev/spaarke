@@ -1,7 +1,7 @@
 /**
  * ActionCardHandlers.ts
  *
- * Click handler functions for the 6 non-Create-Matter action cards in the
+ * Click handler functions for the 5 Analysis Builder action cards in the
  * Legal Operations Workspace Get Started row.
  *
  * Each handler launches the AI Playbook Analysis Builder (AiToolAgent PCF)
@@ -146,7 +146,7 @@ export type AnalysisBuilderHandlerMap = Readonly<
 // ---------------------------------------------------------------------------
 
 /**
- * Creates click handlers for the 6 non-Create-Matter action cards.
+ * Creates click handlers for the 5 Analysis Builder action cards.
  *
  * Each handler:
  *   1. Looks up the pre-defined context payload from ANALYSIS_BUILDER_CONTEXTS
@@ -204,7 +204,8 @@ export function createAnalysisBuilderHandlers(
   }
 
   return {
-    "create-new-project": buildHandler("create-new-project"),
+    // Note: "create-new-project" is NOT here — it opens the ProjectWizardDialog
+    // directly (wired in WorkspaceGrid.tsx), not the Analysis Builder.
     "assign-to-counsel": buildHandler("assign-to-counsel"),
     "analyze-new-document": buildHandler("analyze-new-document"),
     "search-document-files": buildHandler("search-document-files"),

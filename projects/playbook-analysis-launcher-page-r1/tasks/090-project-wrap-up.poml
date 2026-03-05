@@ -1,0 +1,41 @@
+<task id="090" project="playbook-analysis-launcher-page-r1">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>054</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation and cleanup — no code changes</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Complete project wrap-up: update README status, create lessons-learned, archive artifacts,
+    prepare for branch merge.
+  </prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>Project marked complete, README updated, lessons documented, ready for merge.</goal>
+
+  <steps>
+    <step order="1">Update README.md status to "Complete"</step>
+    <step order="2">Check all graduation criteria in README.md</step>
+    <step order="3">Create notes/lessons-learned.md with key decisions and outcomes</step>
+    <step order="4">Update TASK-INDEX.md — all tasks marked ✅</step>
+    <step order="5">Clean up any temporary files in notes/</step>
+    <step order="6">Final git commit with all changes</step>
+    <step order="7">Prompt user to run /merge-to-master</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">README status is "Complete"</criterion>
+    <criterion testable="true">All graduation criteria checked</criterion>
+    <criterion testable="true">lessons-learned.md created</criterion>
+    <criterion testable="true">All tasks in TASK-INDEX.md marked ✅</criterion>
+  </acceptance-criteria>
+</task>

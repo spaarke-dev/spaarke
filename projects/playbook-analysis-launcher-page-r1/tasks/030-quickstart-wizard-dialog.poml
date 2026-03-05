@@ -1,0 +1,91 @@
+<task id="030" project="playbook-analysis-launcher-page-r1">
+  <metadata>
+    <title>Create QuickStartWizardDialog Component</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>009</dependencies>
+    <blocks>032, 033</blocks>
+    <tags>typescript, react, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core wizard component with multi-step state, portable design</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the QuickStartWizardDialog — a generic, config-driven wizard dialog for all 5
+    Quick Start action cards. Uses WizardShell + shared Playbook components. Must be portable
+    (no workspace-specific imports).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in WizardShell composition and config-driven UI.
+  </role>
+
+  <goal>
+    Create `src/solutions/LegalWorkspace/src/components/QuickStart/QuickStartWizardDialog.tsx`
+    that accepts an intent string and renders a 3-step wizard: Upload → Analyze → Follow-up.
+  </goal>
+
+  <context>
+    <background>
+      See spec.md Section 6.4 for the implementation pattern. The wizard is config-driven:
+      each intent maps to step configurations via quickStartConfig.ts. Uses existing
+      WizardShell for the dialog chrome.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/QuickStart/QuickStartWizardDialog.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/WizardShell.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Playbook/DocumentUploadStep.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Playbook/FollowUpActionsStep.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Playbook/index.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Portable — NO imports from GetStarted/, Shell/, or workspace-specific modules</constraint>
+    <constraint source="project">Config-driven — intent string → step config lookup</constraint>
+    <constraint source="project">Uses WizardShell for dialog chrome</constraint>
+    <constraint source="ADR-021">Dark mode compliant — inherits workspace FluentProvider</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>projects/playbook-analysis-launcher-page-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="WizardShell usage" location="src/solutions/LegalWorkspace/src/components/CreateProject/ProjectWizardDialog.tsx">
+        Existing wizard dialog using WizardShell
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read WizardShell.tsx for API and step configuration interface</step>
+    <step order="2">Read ProjectWizardDialog.tsx for existing WizardShell usage pattern</step>
+    <step order="3">Create QuickStart/ directory</step>
+    <step order="4">Create QuickStartWizardDialog.tsx with props: open, onClose, intent, webApi</step>
+    <step order="5">Look up step config from QUICKSTART_CONFIGS[intent]</step>
+    <step order="6">Build 3-step array: DocumentUploadStep → PlaybookExecutionStep → FollowUpActionsStep</step>
+    <step order="7">Wire wizard state: uploadedDocIds, analysisResult, canAdvance per step</step>
+    <step order="8">Render via WizardShell with dynamic step configs</step>
+    <step order="9">Verify no workspace-specific imports (portability check)</step>
+    <step order="10">Verify TypeScript compiles</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/src/components/QuickStart/QuickStartWizardDialog.tsx</output>
+    <output type="code">src/solutions/LegalWorkspace/src/components/QuickStart/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Accepts intent string and renders appropriate 3-step wizard</criterion>
+    <criterion testable="true">Uses WizardShell for dialog chrome</criterion>
+    <criterion testable="true">Uses shared Playbook components for each step</criterion>
+    <criterion testable="true">Zero imports from GetStarted/, Shell/, or workspace-specific modules</criterion>
+    <criterion testable="true">TypeScript compiles without errors</criterion>
+  </acceptance-criteria>
+</task>
