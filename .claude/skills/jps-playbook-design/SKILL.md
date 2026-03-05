@@ -235,7 +235,7 @@ AUTO-LAYOUT positions:
 ### Step 8: Validate Definition
 
 ```
-VALIDATE:
+VALIDATE (offline — index check):
   1. All scope codes exist in scope-model-index.json
   2. No circular dependencies in node graph
   3. All dependsOn references match existing node names
@@ -243,7 +243,46 @@ VALIDATE:
   5. All required fields present per node
   6. outputVariable names are unique
 
-IF validation fails:
+VALIDATE (live — Dataverse cross-check):
+  7. Run Deploy-Playbook.ps1 with -DryRun first (Step 9 does this)
+     BUT ALSO run a lightweight scope check BEFORE DryRun:
+
+  FOR each unique scope code in the definition (actions, skills, knowledge, tools):
+    QUERY Dataverse to verify the record exists:
+      - Actions:   sprk_analysisactions?$filter=sprk_actioncode eq '{code}'&$top=1
+      - Skills:    sprk_analysisskills?$filter=sprk_skillcode eq '{code}'&$top=1
+      - Knowledge: sprk_analysisknowledges?$filter=sprk_externalid eq '{code}'&$top=1
+      - Tools:     sprk_analysistools?$filter=sprk_toolcode eq '{code}'&$top=1
+
+    IF record not found:
+      ADD to missing_scopes list
+
+  FOR each unique model name in the definition:
+    QUERY Dataverse: sprk_aimodeldeployments?$filter=sprk_name eq '{name}'&$top=1
+
+    IF not found:
+      ADD to missing_models list
+
+  IF missing_scopes or missing_models:
+    REPORT all missing items to user:
+      "⚠️ The following references are in scope-model-index.json but NOT in Dataverse:
+       Missing scopes: KNW-001 (Common Contract Terms Glossary)
+       Missing models: (none)
+
+       Options:
+       1. Remove missing references from definition and deploy
+       2. Seed missing records first (run Seed-JpsActions.ps1 or create manually)
+       3. Abort deployment"
+
+    USE AskUserQuestion to let user decide
+    IF user chooses option 1 → remove codes from definition JSON and continue
+    IF user chooses option 2 → STOP and let user seed records
+    IF user chooses option 3 → STOP
+
+  IF all references resolve:
+    → "✅ All scope codes and models verified in Dataverse. Ready to deploy."
+
+IF offline validation fails:
   -> Report issues
   -> Offer to fix automatically or return to Step 4
 ```
@@ -435,11 +474,14 @@ Next steps:
 | Scope referenced but not defined | Prompt user to define scope content |
 | Too many nodes (>10) | Suggest splitting into sub-playbooks |
 | Scope code not found in index | Flag for new scope creation via `jps-action-create` |
+| Scope code in index but NOT in Dataverse | Step 8 Dataverse cross-check catches this. Offer: remove from definition, seed record, or abort |
+| Model deployment not in Dataverse | Step 8 cross-check catches this. Check `sprk_aimodeldeployments` table |
 | Model rule missing for task type | Default to gpt-4o and warn user |
 | scope-model-index.json not found | STOP — file is required, inform user to create it |
 | Definition validation fails | Report specific issues, offer auto-fix or return to Step 4 |
 | DryRun fails | Show error output, do NOT proceed to actual deploy |
 | Deploy-Playbook.ps1 not found | STOP — script is required for deployment |
+| Deploy-Playbook.ps1 pre-flight fails | Script reports ALL missing scopes + models together before creating anything. Fix missing records and re-run |
 | Dataverse connection fails | Check auth, suggest `dev-cleanup` skill for credential refresh |
 | Node count mismatch after deploy | Warn user, suggest re-deploy or manual verification |
 
@@ -465,7 +507,10 @@ Next steps:
 - Keep playbooks under 8 nodes — larger workflows should be split into sub-playbooks
 - When selecting scopes (Step 4), prefer exact `documentTypes` matches over broad tag matches
 - Do not overload nodes with skills — 2-4 skills per node is the sweet spot
+- Always run the Dataverse cross-check in Step 8 before deployment — scope-model-index.json can be out of sync with actual Dataverse records
 - Always run DryRun before actual deployment — never skip Step 9's dry run phase
+- Deploy-Playbook.ps1 has a pre-flight check that reports ALL missing scopes + models before creating any records — no orphaned records on failure
 - If a scope code is missing from the index, offer to create it via `jps-action-create` rather than inventing codes
+- If a scope code is in the index but missing from Dataverse, offer to remove it from the definition or seed the record first
 - Model selection should optimize for cost — use gpt-4o-mini for classification and simple summarization, reserve gpt-4o for deep analysis and legal reasoning
 - Canvas auto-layout: keep 300px horizontal spacing and 150px vertical spacing to avoid overlap

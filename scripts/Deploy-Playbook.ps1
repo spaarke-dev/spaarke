@@ -128,14 +128,26 @@ function Invoke-DataversePost {
     )
     $uri = "$ApiBase/$Endpoint"
     $jsonBody = $Body | ConvertTo-Json -Depth 20 -Compress
-    $response = Invoke-RestMethod -Uri $uri -Headers $Headers -Method Post `
-        -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) `
-        -ResponseHeadersVariable 'responseHeaders'
+    Write-Verbose "POST $uri`n$jsonBody"
+    try {
+        $response = Invoke-WebRequest -Uri $uri -Headers $Headers -Method Post `
+            -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody))
+    } catch {
+        $errMsg = $_.ErrorDetails.Message
+        if (-not $errMsg -and $_.Exception.Response) {
+            try {
+                $errMsg = $_.Exception.Response.Content.ReadAsStringAsync().Result
+            } catch { $errMsg = $_.Exception.Message }
+        }
+        if (-not $errMsg) { $errMsg = $_.Exception.Message }
+        throw "POST $Endpoint failed: $errMsg"
+    }
     # Extract the created record ID from the OData-EntityId header
     $entityId = $null
-    if ($responseHeaders -and $responseHeaders['OData-EntityId']) {
-        $entityIdHeader = $responseHeaders['OData-EntityId']
-        if ($entityIdHeader -match '\(([0-9a-fA-F\-]{36})\)') {
+    $entityIdHeader = $response.Headers['OData-EntityId']
+    if ($entityIdHeader) {
+        $headerValue = if ($entityIdHeader -is [array]) { $entityIdHeader[0] } else { $entityIdHeader }
+        if ($headerValue -match '\(([0-9a-fA-F\-]{36})\)') {
             $entityId = $Matches[1]
         }
     }
@@ -295,19 +307,21 @@ $allKnowledgeCodes = @()
 $allToolCodes      = @()
 $allModelNames     = @()
 
-# Playbook-level scopes
-if ($definition.playbook.actions)   { $allActionCodes    += $definition.playbook.actions }
-if ($definition.playbook.skills)    { $allSkillCodes     += $definition.playbook.skills }
-if ($definition.playbook.knowledge) { $allKnowledgeCodes += $definition.playbook.knowledge }
-if ($definition.playbook.tools)     { $allToolCodes      += $definition.playbook.tools }
+# Playbook-level scopes (support both flat and nested .scopes format)
+$pbScopesSrc = if ($definition.playbook.scopes) { $definition.playbook.scopes } else { $definition.playbook }
+if ($pbScopesSrc.actions)   { $allActionCodes    += $pbScopesSrc.actions }
+if ($pbScopesSrc.skills)    { $allSkillCodes     += $pbScopesSrc.skills }
+if ($pbScopesSrc.knowledge) { $allKnowledgeCodes += $pbScopesSrc.knowledge }
+if ($pbScopesSrc.tools)     { $allToolCodes      += $pbScopesSrc.tools }
 
-# Node-level scopes and models
+# Node-level scopes and models (support both flat and nested .scopes format)
 foreach ($node in $definition.nodes) {
     if ($node.actionCode) { $allActionCodes += $node.actionCode }
-    if ($node.skills)     { $allSkillCodes += $node.skills }
-    if ($node.knowledge)  { $allKnowledgeCodes += $node.knowledge }
-    if ($node.tools)      { $allToolCodes += $node.tools }
-    if ($node.model)      { $allModelNames += $node.model }
+    $nodeScopesSrc = if ($node.scopes) { $node.scopes } else { $node }
+    if ($nodeScopesSrc.skills)     { $allSkillCodes += $nodeScopesSrc.skills }
+    if ($nodeScopesSrc.knowledge)  { $allKnowledgeCodes += $nodeScopesSrc.knowledge }
+    if ($nodeScopesSrc.tools)      { $allToolCodes += $nodeScopesSrc.tools }
+    if ($node.model)               { $allModelNames += $node.model }
 }
 
 $allActionCodes    = $allActionCodes    | Select-Object -Unique
@@ -389,11 +403,10 @@ if ($DryRun) {
 
     if ($resolutionErrors.Count -gt 0) {
         Write-Host ''
-        Write-Host "  $($resolutionErrors.Count) scope code(s) could not be resolved:" -ForegroundColor Red
+        Write-Host "  $($resolutionErrors.Count) scope code(s) could not be resolved (will check models before stopping):" -ForegroundColor Yellow
         foreach ($err in $resolutionErrors) {
             Write-Host "    - $err" -ForegroundColor Red
         }
-        throw "Cannot proceed: unresolved scope codes. Ensure all referenced scope records exist in Dataverse."
     }
 }
 
@@ -404,6 +417,7 @@ Write-Host ''
 Write-Host '[4/12] Resolving model deployments...' -ForegroundColor Yellow
 
 $resolvedModels = @{}
+$modelErrors = @()
 
 if ($DryRun) {
     Write-Host '  Skipped (dry run) — would resolve:' -ForegroundColor Gray
@@ -411,16 +425,46 @@ if ($DryRun) {
 } else {
     foreach ($modelName in $allModelNames) {
         $encodedName = [Uri]::EscapeDataString($modelName)
-        $endpoint = "sprk_aimodeldeployments?`$filter=sprk_name eq '$encodedName'&`$select=sprk_aimodeldeploymentid"
+        $filter = "`$filter=sprk_name eq '$encodedName'"
+        $select = "`$select=sprk_aimodeldeploymentid"
+        $endpoint = $filter, $select -join '&'
+        $endpoint = "sprk_aimodeldeployments?$endpoint"
         $result = Invoke-DataverseGet -Endpoint $endpoint -Headers $headers
 
         if ($result -and $result.value -and $result.value.Count -gt 0) {
             $resolvedModels[$modelName] = $result.value[0].sprk_aimodeldeploymentid
             Write-Host "  $modelName -> $($result.value[0].sprk_aimodeldeploymentid)" -ForegroundColor Green
         } else {
-            throw "Model deployment '$modelName' not found in Dataverse."
+            $modelErrors += "Model deployment '$modelName' not found"
+            Write-Host "  $modelName -> NOT FOUND" -ForegroundColor Red
         }
     }
+
+    if ($modelErrors.Count -gt 0) {
+        Write-Host ''
+        Write-Host "  $($modelErrors.Count) model deployment(s) could not be resolved:" -ForegroundColor Red
+        foreach ($err in $modelErrors) {
+            Write-Host "    - $err" -ForegroundColor Red
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Pre-flight check: report ALL resolution failures before creating anything
+# ---------------------------------------------------------------------------
+$totalErrors = $resolutionErrors.Count + $modelErrors.Count
+if ($totalErrors -gt 0 -and -not $DryRun) {
+    Write-Host ''
+    Write-Host "=== PRE-FLIGHT FAILED ===" -ForegroundColor Red
+    Write-Host "  $totalErrors unresolved reference(s) detected." -ForegroundColor Red
+    Write-Host "  No records were created — Dataverse is unchanged." -ForegroundColor Red
+    Write-Host ''
+    Write-Host "  Missing scope records:" -ForegroundColor Red
+    foreach ($err in $resolutionErrors) { Write-Host "    - $err" -ForegroundColor Red }
+    foreach ($err in $modelErrors)      { Write-Host "    - $err" -ForegroundColor Red }
+    Write-Host ''
+    Write-Host "  Fix: Seed the missing records to Dataverse, then re-run this script." -ForegroundColor Yellow
+    throw "Pre-flight failed: $totalErrors unresolved reference(s). No records created."
 }
 
 # ===========================================================================
@@ -433,7 +477,10 @@ $existingPlaybookId = $null
 
 if (-not $DryRun) {
     $encodedName = [Uri]::EscapeDataString($playbookName)
-    $endpoint = "sprk_analysisplaybooks?`$filter=sprk_name eq '$encodedName'&`$select=sprk_analysisplaybookid,sprk_name"
+    $filter = "`$filter=sprk_name eq '$encodedName'"
+    $select = "`$select=sprk_analysisplaybookid,sprk_name"
+    $endpoint = $filter, $select -join '&'
+    $endpoint = "sprk_analysisplaybooks?$endpoint"
     $result = Invoke-DataverseGet -Endpoint $endpoint -Headers $headers
 
     if ($result -and $result.value -and $result.value.Count -gt 0) {
@@ -443,7 +490,10 @@ if (-not $DryRun) {
             Write-Host "  FOUND: $existingPlaybookId — will delete and recreate (-Force)" -ForegroundColor Yellow
 
             # Delete existing nodes first
-            $nodesEndpoint = "sprk_playbooknodes?`$filter=_sprk_playbookid_value eq '$existingPlaybookId'&`$select=sprk_playbooknodeid"
+            $nodesFilter = "`$filter=_sprk_playbookid_value eq '$existingPlaybookId'"
+            $nodesSelect = "`$select=sprk_playbooknodeid"
+            $nodesEndpoint = $nodesFilter, $nodesSelect -join '&'
+            $nodesEndpoint = "sprk_playbooknodes?$nodesEndpoint"
             $existingNodes = Invoke-DataverseGet -Endpoint $nodesEndpoint -Headers $headers
             if ($existingNodes -and $existingNodes.value) {
                 foreach ($existingNode in $existingNodes.value) {
@@ -495,7 +545,6 @@ if ($DryRun) {
         sprk_name        = $playbookName
         sprk_description = $playbookDescription
         sprk_ispublic    = $playbookIsPublic
-        sprk_isactive    = $true
     }
 
     try {
@@ -505,7 +554,9 @@ if ($DryRun) {
         }
         Write-Host "  Created: $playbookId" -ForegroundColor Green
     } catch {
-        throw "Failed to create playbook: $($_.Exception.Message)"
+        $errDetail = $_.ErrorDetails.Message
+        if (-not $errDetail) { $errDetail = $_.Exception.Message }
+        throw "Failed to create playbook: $errDetail"
     }
 }
 
@@ -517,23 +568,26 @@ Write-Host '[7/12] Associating playbook scopes...' -ForegroundColor Yellow
 
 $scopeAssociationCount = 0
 
+# Support both flat (playbook.actions) and nested (playbook.scopes.actions) formats
+$pbScopes = if ($definition.playbook.scopes) { $definition.playbook.scopes } else { $definition.playbook }
+
 if ($DryRun) {
-    if ($definition.playbook.actions) {
-        foreach ($code in $definition.playbook.actions) { Write-Host "  WOULD LINK Action $code" -ForegroundColor Gray; $scopeAssociationCount++ }
+    if ($pbScopes.actions) {
+        foreach ($code in $pbScopes.actions) { Write-Host "  WOULD LINK Action $code" -ForegroundColor Gray; $scopeAssociationCount++ }
     }
-    if ($definition.playbook.skills) {
-        foreach ($code in $definition.playbook.skills) { Write-Host "  WOULD LINK Skill $code" -ForegroundColor Gray; $scopeAssociationCount++ }
+    if ($pbScopes.skills) {
+        foreach ($code in $pbScopes.skills) { Write-Host "  WOULD LINK Skill $code" -ForegroundColor Gray; $scopeAssociationCount++ }
     }
-    if ($definition.playbook.knowledge) {
-        foreach ($code in $definition.playbook.knowledge) { Write-Host "  WOULD LINK Knowledge $code" -ForegroundColor Gray; $scopeAssociationCount++ }
+    if ($pbScopes.knowledge) {
+        foreach ($code in $pbScopes.knowledge) { Write-Host "  WOULD LINK Knowledge $code" -ForegroundColor Gray; $scopeAssociationCount++ }
     }
-    if ($definition.playbook.tools) {
-        foreach ($code in $definition.playbook.tools) { Write-Host "  WOULD LINK Tool $code" -ForegroundColor Gray; $scopeAssociationCount++ }
+    if ($pbScopes.tools) {
+        foreach ($code in $pbScopes.tools) { Write-Host "  WOULD LINK Tool $code" -ForegroundColor Gray; $scopeAssociationCount++ }
     }
 } else {
     # Associate actions
-    if ($definition.playbook.actions) {
-        foreach ($code in $definition.playbook.actions) {
+    if ($pbScopes.actions) {
+        foreach ($code in $pbScopes.actions) {
             $targetId = [guid]$resolvedActions[$code].Id
             $success = Associate-NtoN -SourceEntitySet 'sprk_analysisplaybooks' -SourceId ([guid]$playbookId) `
                 -RelationshipName 'sprk_analysisplaybook_action' -TargetEntitySet 'sprk_analysisactions' `
@@ -546,8 +600,8 @@ if ($DryRun) {
     }
 
     # Associate skills
-    if ($definition.playbook.skills) {
-        foreach ($code in $definition.playbook.skills) {
+    if ($pbScopes.skills) {
+        foreach ($code in $pbScopes.skills) {
             $targetId = [guid]$resolvedSkills[$code].Id
             $success = Associate-NtoN -SourceEntitySet 'sprk_analysisplaybooks' -SourceId ([guid]$playbookId) `
                 -RelationshipName 'sprk_playbook_skill' -TargetEntitySet 'sprk_analysisskills' `
@@ -560,8 +614,8 @@ if ($DryRun) {
     }
 
     # Associate knowledge
-    if ($definition.playbook.knowledge) {
-        foreach ($code in $definition.playbook.knowledge) {
+    if ($pbScopes.knowledge) {
+        foreach ($code in $pbScopes.knowledge) {
             $targetId = [guid]$resolvedKnowledge[$code].Id
             $success = Associate-NtoN -SourceEntitySet 'sprk_analysisplaybooks' -SourceId ([guid]$playbookId) `
                 -RelationshipName 'sprk_playbook_knowledge' -TargetEntitySet 'sprk_analysisknowledges' `
@@ -574,8 +628,8 @@ if ($DryRun) {
     }
 
     # Associate tools
-    if ($definition.playbook.tools) {
-        foreach ($code in $definition.playbook.tools) {
+    if ($pbScopes.tools) {
+        foreach ($code in $pbScopes.tools) {
             $targetId = [guid]$resolvedTools[$code].Id
             $success = Associate-NtoN -SourceEntitySet 'sprk_analysisplaybooks' -SourceId ([guid]$playbookId) `
                 -RelationshipName 'sprk_playbook_tool' -TargetEntitySet 'sprk_analysistools' `
@@ -625,18 +679,11 @@ foreach ($node in $definition.nodes) {
             sprk_name           = $nodeName
             sprk_nodetype       = $nodeTypeValue
             sprk_executionorder = $nodeIndex
-            sprk_isactive       = $true
             'sprk_playbookid@odata.bind' = "sprk_analysisplaybooks($playbookId)"
         }
 
         if ($outputVariable) {
             $nodeBody['sprk_outputvariable'] = $outputVariable
-        }
-        if ($null -ne $posX) {
-            $nodeBody['sprk_positionx'] = $posX
-        }
-        if ($null -ne $posY) {
-            $nodeBody['sprk_positiony'] = $posY
         }
         if ($configJson) {
             $nodeBody['sprk_configjson'] = $configJson
@@ -723,18 +770,21 @@ foreach ($node in $definition.nodes) {
     $nodeName = $node.name
     $nodeId   = $nodeIdMap[$nodeName]
 
+    # Support both flat (node.skills) and nested (node.scopes.skills) formats
+    $nodeScopes = if ($node.scopes) { $node.scopes } else { $node }
+
     $skillCount     = 0
     $knowledgeCount = 0
     $toolCount      = 0
 
     if ($DryRun) {
-        if ($node.skills)    { $skillCount     = $node.skills.Count }
-        if ($node.knowledge) { $knowledgeCount = $node.knowledge.Count }
-        if ($node.tools)     { $toolCount      = $node.tools.Count }
+        if ($nodeScopes.skills)    { $skillCount     = $nodeScopes.skills.Count }
+        if ($nodeScopes.knowledge) { $knowledgeCount = $nodeScopes.knowledge.Count }
+        if ($nodeScopes.tools)     { $toolCount      = $nodeScopes.tools.Count }
     } else {
         # Associate skills
-        if ($node.skills) {
-            foreach ($code in $node.skills) {
+        if ($nodeScopes.skills) {
+            foreach ($code in $nodeScopes.skills) {
                 if ($resolvedSkills.ContainsKey($code)) {
                     $targetId = [guid]$resolvedSkills[$code].Id
                     $success = Associate-NtoN -SourceEntitySet 'sprk_playbooknodes' -SourceId ([guid]$nodeId) `
@@ -746,8 +796,8 @@ foreach ($node in $definition.nodes) {
         }
 
         # Associate knowledge
-        if ($node.knowledge) {
-            foreach ($code in $node.knowledge) {
+        if ($nodeScopes.knowledge) {
+            foreach ($code in $nodeScopes.knowledge) {
                 if ($resolvedKnowledge.ContainsKey($code)) {
                     $targetId = [guid]$resolvedKnowledge[$code].Id
                     $success = Associate-NtoN -SourceEntitySet 'sprk_playbooknodes' -SourceId ([guid]$nodeId) `
@@ -759,8 +809,8 @@ foreach ($node in $definition.nodes) {
         }
 
         # Associate tools
-        if ($node.tools) {
-            foreach ($code in $node.tools) {
+        if ($nodeScopes.tools) {
+            foreach ($code in $nodeScopes.tools) {
                 if ($resolvedTools.ContainsKey($code)) {
                     $targetId = [guid]$resolvedTools[$code].Id
                     $success = Associate-NtoN -SourceEntitySet 'sprk_playbooknodes' -SourceId ([guid]$nodeId) `
