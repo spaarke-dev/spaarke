@@ -205,7 +205,7 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
             value={emailBody}
             onChange={(e) => onEmailBodyChange(e.target.value)}
             placeholder="Compose your message\u2026"
-            rows={10}
+            rows={15}
             resize="vertical"
             aria-label="Message body"
           />

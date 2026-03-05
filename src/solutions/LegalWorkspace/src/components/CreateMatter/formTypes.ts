@@ -38,6 +38,10 @@ export interface ICreateMatterFormState {
   assignedParalegalId: string;
   /** Display name of the assigned paralegal. */
   assignedParalegalName: string;
+  /** Assigned Outside Counsel — sprk_organization GUID. */
+  assignedOutsideCounselId: string;
+  /** Display name of the assigned outside counsel organization. */
+  assignedOutsideCounselName: string;
   /** Summary / Description — free text, multi-line. Maps to sprk_description. */
   summary: string;
 }
@@ -64,6 +68,12 @@ export interface IAiPrefillFields {
   practiceAreaId?: string;
   practiceAreaName?: string;
   matterName?: string;
+  assignedAttorneyId?: string;
+  assignedAttorneyName?: string;
+  assignedParalegalId?: string;
+  assignedParalegalName?: string;
+  assignedOutsideCounselId?: string;
+  assignedOutsideCounselName?: string;
   summary?: string;
 }
 

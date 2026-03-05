@@ -9,36 +9,30 @@ using Sprk.Bff.Api.Services.Ai;
 namespace Sprk.Bff.Api.Services.Workspace;
 
 /// <summary>
-/// Service that orchestrates matter AI pre-fill: stores uploaded files temporarily via SpeFileStore,
-/// extracts text, invokes the AI Playbook platform for structured matter field extraction, and
-/// returns a PreFillResponse.
+/// Service that orchestrates project AI pre-fill: stores uploaded files temporarily via SpeFileStore,
+/// extracts text, invokes the AI Playbook platform for structured project field extraction, and
+/// returns a ProjectPreFillResponse.
 /// </summary>
 /// <remarks>
-/// Follows ADR-007: File uploads routed through SpeFileStore facade — no direct SPE access.
-/// Follows ADR-013: AI analysis via IPlaybookOrchestrationService — no hardcoded prompts or
-/// direct IOpenAiClient calls. Extraction prompts are configured as playbook Skills in Dataverse.
-///
-/// File storage lifecycle:
-/// Files uploaded here are stored under a per-request staging prefix (ai-prefill/{requestId}/...).
-/// They are available for later association when the matter record is created.
-/// Cleanup of orphaned staging files is a separate concern (background job).
+/// Follows the same pattern as MatterPreFillService but uses a project-specific playbook
+/// and returns ProjectPreFillResponse with project field names.
 /// </remarks>
-public class MatterPreFillService
+public class ProjectPreFillService
 {
     private readonly SpeFileStore _speFileStore;
     private readonly ITextExtractor _textExtractor;
     private readonly IPlaybookOrchestrationService _playbookService;
     private readonly IConfiguration _configuration;
-    private readonly ILogger<MatterPreFillService> _logger;
+    private readonly ILogger<ProjectPreFillService> _logger;
 
     // Playbook configuration key — overridable via appsettings
-    private const string PlaybookIdConfigKey = "Workspace:PreFillPlaybookId";
+    private const string PlaybookIdConfigKey = "Workspace:ProjectPreFillPlaybookId";
 
-    // Default: "Create New Matter Pre-Fill" playbook (Extract Matter Fields — ACT-008, gpt-4o)
+    // Default: "Create New Project Pre-Fill" playbook (Extract Project Fields — ACT-008, gpt-4o)
     private static readonly Guid DefaultPreFillPlaybookId =
-        Guid.Parse("59ea4320-bd18-f111-8343-7ced8d1dc988");
+        Guid.Parse("54cf6bb4-c018-f111-8343-7ced8d1dc988");
 
-    // Supported MIME types for the pre-fill endpoint
+    // Reuse same file constraints as MatterPreFillService
     private static readonly HashSet<string> AllowedExtensions =
         new(StringComparer.OrdinalIgnoreCase) { ".pdf", ".docx", ".xlsx" };
 
@@ -52,19 +46,18 @@ public class MatterPreFillService
 
     private const long MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
 
-    // JSON options for parsing the AI structured output
     private static readonly JsonSerializerOptions AiJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    public MatterPreFillService(
+    public ProjectPreFillService(
         SpeFileStore speFileStore,
         ITextExtractor textExtractor,
         IPlaybookOrchestrationService playbookService,
         IConfiguration configuration,
-        ILogger<MatterPreFillService> logger)
+        ILogger<ProjectPreFillService> logger)
     {
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
@@ -75,7 +68,6 @@ public class MatterPreFillService
 
     /// <summary>
     /// Validates the uploaded files against size and type constraints.
-    /// Returns a list of validation errors (one per offending file). Empty list means all files are valid.
     /// </summary>
     public static List<string> ValidateFiles(IFormFileCollection files)
     {
@@ -109,7 +101,6 @@ public class MatterPreFillService
                 continue;
             }
 
-            // Also validate by Content-Type header (defence-in-depth)
             if (!string.IsNullOrEmpty(file.ContentType) &&
                 !AllowedContentTypes.Contains(file.ContentType))
             {
@@ -121,14 +112,10 @@ public class MatterPreFillService
     }
 
     /// <summary>
-    /// Stores uploaded files temporarily via SpeFileStore (when staging container is configured),
-    /// extracts text from the documents, invokes the AI Playbook platform for structured matter
-    /// field extraction, and returns a PreFillResponse.
-    ///
-    /// On AI timeout or service unavailability, returns an empty PreFillResponse with confidence=0
-    /// rather than propagating an error (graceful degradation as per spec).
+    /// Extracts text from uploaded files, invokes the AI Playbook for structured project
+    /// field extraction, and returns a ProjectPreFillResponse.
     /// </summary>
-    public async Task<PreFillResponse> AnalyzeFilesAsync(
+    public async Task<ProjectPreFillResponse> AnalyzeFilesAsync(
         IFormFileCollection files,
         string userId,
         HttpContext httpContext,
@@ -137,10 +124,9 @@ public class MatterPreFillService
         var requestId = Guid.NewGuid();
 
         _logger.LogInformation(
-            "Matter AI pre-fill started. UserId={UserId}, FileCount={FileCount}, RequestId={RequestId}",
+            "Project AI pre-fill started. UserId={UserId}, FileCount={FileCount}, RequestId={RequestId}",
             userId, files.Count, requestId);
 
-        // --- Step 1: Store files temporarily via SpeFileStore and extract text ---
         var combinedText = await ExtractTextFromFilesAsync(files, requestId, httpContext, cancellationToken);
 
         if (string.IsNullOrWhiteSpace(combinedText))
@@ -149,20 +135,16 @@ public class MatterPreFillService
                 "No text could be extracted from any uploaded files. Returning empty pre-fill. " +
                 "RequestId={RequestId}",
                 requestId);
-            return PreFillResponse.Empty();
+            return ProjectPreFillResponse.Empty();
         }
 
         _logger.LogInformation(
             "Text extraction complete. TotalChars={TotalChars}. RequestId={RequestId}",
             combinedText.Length, requestId);
 
-        // --- Step 2: Invoke playbook for structured extraction ---
         return await ExtractFieldsViaPlaybookAsync(combinedText, requestId, httpContext, cancellationToken);
     }
 
-    /// <summary>
-    /// Extracts text from uploaded files, optionally staging them in SPE.
-    /// </summary>
     private async Task<string> ExtractTextFromFilesAsync(
         IFormFileCollection files,
         Guid requestId,
@@ -231,10 +213,6 @@ public class MatterPreFillService
             }
             else
             {
-                _logger.LogDebug(
-                    "No staging container configured. Extracting text from '{FileName}' in-memory. " +
-                    "RequestId={RequestId}",
-                    fileName, requestId);
                 extractionResult = await _textExtractor.ExtractAsync(fileStream, fileName, cancellationToken);
             }
 
@@ -243,10 +221,6 @@ public class MatterPreFillService
                 allExtractedText.AppendLine($"===== Document: {fileName} =====");
                 allExtractedText.AppendLine(extractionResult.Text);
                 allExtractedText.AppendLine();
-
-                _logger.LogDebug(
-                    "Extracted {CharCount} characters from '{FileName}'. RequestId={RequestId}",
-                    extractionResult.CharacterCount, fileName, requestId);
             }
             else
             {
@@ -259,38 +233,25 @@ public class MatterPreFillService
         return allExtractedText.ToString();
     }
 
-    /// <summary>
-    /// Invokes the AI Playbook platform for structured matter field extraction.
-    /// The playbook's extraction node (configured with a Skill prompt in Dataverse) handles
-    /// the AI prompt and JSON schema — no hardcoded prompts in this code.
-    ///
-    /// Extracted text is passed via UserContext since files haven't been registered as
-    /// sprk_document records yet (pre-fill happens before matter creation).
-    /// </summary>
-    private async Task<PreFillResponse> ExtractFieldsViaPlaybookAsync(
+    private async Task<ProjectPreFillResponse> ExtractFieldsViaPlaybookAsync(
         string documentText,
         Guid requestId,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        // Truncate to ~80KB to avoid excessive token usage (roughly 20K tokens)
         const int maxTextChars = 80_000;
         if (documentText.Length > maxTextChars)
         {
-            _logger.LogDebug(
-                "Truncating combined text from {Original} to {Truncated} chars. RequestId={RequestId}",
-                documentText.Length, maxTextChars, requestId);
             documentText = documentText[..maxTextChars] + "\n\n[... content truncated ...]";
         }
 
-        // Resolve playbook ID from configuration (allows per-environment override)
         var playbookIdStr = _configuration[PlaybookIdConfigKey];
         var playbookId = !string.IsNullOrEmpty(playbookIdStr) && Guid.TryParse(playbookIdStr, out var parsed)
             ? parsed
             : DefaultPreFillPlaybookId;
 
         _logger.LogInformation(
-            "Invoking playbook for matter field extraction. PlaybookId={PlaybookId}, " +
+            "Invoking playbook for project field extraction. PlaybookId={PlaybookId}, " +
             "TextLength={TextLength}, RequestId={RequestId}",
             playbookId, documentText.Length, requestId);
 
@@ -306,32 +267,23 @@ public class MatterPreFillService
                 UserContext = documentText,
                 Parameters = new Dictionary<string, string>
                 {
-                    ["entity_type"] = "matter",
+                    ["entity_type"] = "project",
                     ["extraction_mode"] = "pre-fill"
                 }
             };
 
-            // Consume the playbook SSE stream and collect the final node outputs
             string? preFillJson = null;
             double confidence = 0;
 
             await foreach (var evt in _playbookService.ExecuteAsync(request, httpContext, timeoutCts.Token))
             {
-                // Look for the completed node output that contains pre-fill data
                 if (evt.Type == PlaybookEventType.NodeCompleted && evt.NodeOutput != null)
                 {
-                    // Check if this node's output contains structured pre-fill data
                     if (evt.NodeOutput.StructuredData.HasValue)
                     {
                         preFillJson = evt.NodeOutput.StructuredData.Value.GetRawText();
                         confidence = evt.NodeOutput.Confidence ?? 0;
-
-                        _logger.LogDebug(
-                            "Received pre-fill data from node '{NodeName}'. Confidence={Confidence}. " +
-                            "RequestId={RequestId}",
-                            evt.NodeName, confidence, requestId);
                     }
-                    // Fall back to text content if no structured data
                     else if (!string.IsNullOrWhiteSpace(evt.NodeOutput.TextContent))
                     {
                         preFillJson = evt.NodeOutput.TextContent;
@@ -342,9 +294,9 @@ public class MatterPreFillService
                 if (evt.Type == PlaybookEventType.RunFailed)
                 {
                     _logger.LogWarning(
-                        "Playbook execution failed for pre-fill. Error={Error}. RequestId={RequestId}",
+                        "Playbook execution failed for project pre-fill. Error={Error}. RequestId={RequestId}",
                         evt.Error, requestId);
-                    return PreFillResponse.Empty();
+                    return ProjectPreFillResponse.Empty();
                 }
             }
 
@@ -353,13 +305,8 @@ public class MatterPreFillService
                 _logger.LogWarning(
                     "Playbook completed but no pre-fill data was produced. RequestId={RequestId}",
                     requestId);
-                return PreFillResponse.Empty();
+                return ProjectPreFillResponse.Empty();
             }
-
-            _logger.LogInformation(
-                "Playbook extraction complete. ResponseLength={Length}, Confidence={Confidence}. " +
-                "RequestId={RequestId}",
-                preFillJson.Length, confidence, requestId);
 
             return ParseAiResponse(preFillJson, confidence, requestId);
         }
@@ -368,57 +315,50 @@ public class MatterPreFillService
             _logger.LogWarning(
                 "Playbook pre-fill request timed out after 45s. Returning empty response. RequestId={RequestId}",
                 requestId);
-            return PreFillResponse.Empty();
+            return ProjectPreFillResponse.Empty();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
                 "Playbook pre-fill call failed. Returning empty response. RequestId={RequestId}",
                 requestId);
-            return PreFillResponse.Empty();
+            return ProjectPreFillResponse.Empty();
         }
     }
 
-    /// <summary>
-    /// Parses the AI JSON response into a PreFillResponse.
-    /// Handles partial JSON, malformed responses, and builds the PreFilledFields array.
-    /// </summary>
-    private PreFillResponse ParseAiResponse(string aiResponse, double overallConfidence, Guid requestId)
+    private ProjectPreFillResponse ParseAiResponse(string aiResponse, double overallConfidence, Guid requestId)
     {
-        // Strip markdown code fences if the model included them
         var json = StripMarkdownCodeFences(aiResponse.Trim());
 
         try
         {
-            var parsed = JsonSerializer.Deserialize<AiPreFillResult>(json, AiJsonOptions);
+            var parsed = JsonSerializer.Deserialize<AiProjectPreFillResult>(json, AiJsonOptions);
             if (parsed == null)
             {
                 _logger.LogWarning(
                     "AI response deserialized to null. RequestId={RequestId}", requestId);
-                return PreFillResponse.Empty();
+                return ProjectPreFillResponse.Empty();
             }
 
-            // Build the list of successfully extracted (non-null) field names
+            // Coalesce: playbook may emit "projectDescription" or "description"
+            var description = parsed.ProjectDescription ?? parsed.Description;
+
             var preFilledFields = new List<string>();
-            if (!string.IsNullOrWhiteSpace(parsed.MatterTypeName)) preFilledFields.Add("matterTypeName");
+            if (!string.IsNullOrWhiteSpace(parsed.ProjectTypeName)) preFilledFields.Add("projectTypeName");
             if (!string.IsNullOrWhiteSpace(parsed.PracticeAreaName)) preFilledFields.Add("practiceAreaName");
-            if (!string.IsNullOrWhiteSpace(parsed.MatterName)) preFilledFields.Add("matterName");
-            if (!string.IsNullOrWhiteSpace(parsed.Summary)) preFilledFields.Add("summary");
+            if (!string.IsNullOrWhiteSpace(parsed.ProjectName)) preFilledFields.Add("projectName");
+            if (!string.IsNullOrWhiteSpace(description)) preFilledFields.Add("description");
             if (!string.IsNullOrWhiteSpace(parsed.AssignedAttorneyName)) preFilledFields.Add("assignedAttorneyName");
             if (!string.IsNullOrWhiteSpace(parsed.AssignedParalegalName)) preFilledFields.Add("assignedParalegalName");
             if (!string.IsNullOrWhiteSpace(parsed.AssignedOutsideCounselName)) preFilledFields.Add("assignedOutsideCounselName");
 
             var confidence = Math.Clamp(parsed.Confidence ?? overallConfidence, 0.0, 1.0);
 
-            _logger.LogInformation(
-                "AI extraction complete. FieldsExtracted={Fields}, Confidence={Confidence}. RequestId={RequestId}",
-                preFilledFields.Count, confidence, requestId);
-
-            return new PreFillResponse(
-                MatterTypeName: NormalizeNullableString(parsed.MatterTypeName),
+            return new ProjectPreFillResponse(
+                ProjectTypeName: NormalizeNullableString(parsed.ProjectTypeName),
                 PracticeAreaName: NormalizeNullableString(parsed.PracticeAreaName),
-                MatterName: NormalizeNullableString(parsed.MatterName),
-                Summary: NormalizeNullableString(parsed.Summary),
+                ProjectName: NormalizeNullableString(parsed.ProjectName),
+                Description: NormalizeNullableString(description),
                 AssignedAttorneyName: NormalizeNullableString(parsed.AssignedAttorneyName),
                 AssignedParalegalName: NormalizeNullableString(parsed.AssignedParalegalName),
                 AssignedOutsideCounselName: NormalizeNullableString(parsed.AssignedOutsideCounselName),
@@ -431,7 +371,7 @@ public class MatterPreFillService
                 "Failed to parse AI JSON response. Raw response (first 500 chars): '{Response}'. RequestId={RequestId}",
                 aiResponse.Length > 500 ? aiResponse[..500] : aiResponse,
                 requestId);
-            return PreFillResponse.Empty();
+            return ProjectPreFillResponse.Empty();
         }
     }
 
@@ -441,41 +381,32 @@ public class MatterPreFillService
     private static string StripMarkdownCodeFences(string text)
     {
         if (text.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
-        {
             text = text[7..].TrimStart();
-        }
         else if (text.StartsWith("```"))
-        {
             text = text[3..].TrimStart();
-        }
 
         if (text.EndsWith("```"))
-        {
             text = text[..^3].TrimEnd();
-        }
 
         return text;
     }
 
-    // ─── Internal AI response model ───────────────────────────────────────────
-
-    /// <summary>
-    /// Internal DTO for deserializing the AI's structured JSON extraction response.
-    /// Field names match the front-end IAiPrefillFields interface.
-    /// </summary>
-    private sealed class AiPreFillResult
+    private sealed class AiProjectPreFillResult
     {
-        [JsonPropertyName("matterTypeName")]
-        public string? MatterTypeName { get; init; }
+        [JsonPropertyName("projectTypeName")]
+        public string? ProjectTypeName { get; init; }
 
         [JsonPropertyName("practiceAreaName")]
         public string? PracticeAreaName { get; init; }
 
-        [JsonPropertyName("matterName")]
-        public string? MatterName { get; init; }
+        [JsonPropertyName("projectName")]
+        public string? ProjectName { get; init; }
 
-        [JsonPropertyName("summary")]
-        public string? Summary { get; init; }
+        [JsonPropertyName("projectDescription")]
+        public string? ProjectDescription { get; init; }
+
+        [JsonPropertyName("description")]
+        public string? Description { get; init; }
 
         [JsonPropertyName("assignedAttorneyName")]
         public string? AssignedAttorneyName { get; init; }

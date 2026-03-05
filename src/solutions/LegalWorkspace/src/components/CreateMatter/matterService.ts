@@ -183,7 +183,7 @@ export class MatterService {
       sprk_mattername: form.matterName.trim(),
     };
     if (form.summary && form.summary.trim() !== '') {
-      entity['sprk_matterdescription'] = form.summary.trim();
+      entity['sprk_description'] = form.summary.trim();
     }
     // Store the SPE container ID on the matter record
     if (this._containerId) {
@@ -216,6 +216,7 @@ export class MatterService {
     if (form.practiceAreaId) lookups.push({ col: 'sprk_practicearea', entitySet: 'sprk_practicearea_refs', guid: form.practiceAreaId });
     if (form.assignedAttorneyId) lookups.push({ col: 'sprk_assignedattorney', entitySet: 'contacts', guid: form.assignedAttorneyId });
     if (form.assignedParalegalId) lookups.push({ col: 'sprk_assignedparalegal', entitySet: 'contacts', guid: form.assignedParalegalId });
+    if (form.assignedOutsideCounselId) lookups.push({ col: 'sprk_assignedoutsidecounsel', entitySet: 'sprk_organizations', guid: form.assignedOutsideCounselId });
 
     for (const lk of lookups) {
       const navProp = navPropMap[lk.col] ?? lk.col;
@@ -612,6 +613,43 @@ export async function fetchAiDraftSummary(
     return data;
   } catch {
     return buildFallbackSummary(matterName, matterType, practiceArea);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Organization search helper (for Outside Counsel lookup)
+// ---------------------------------------------------------------------------
+
+/**
+ * Search sprk_organization records by name fragment.
+ * Returns up to 10 matching organizations as ILookupItem.
+ */
+export async function searchOrganizationsAsLookup(
+  webApi: IWebApi,
+  nameFilter: string
+): Promise<ILookupItem[]> {
+  if (!nameFilter || nameFilter.trim().length < 2) {
+    return [];
+  }
+
+  const safeFilter = nameFilter.trim().replace(/'/g, "''");
+  const query =
+    `?$select=sprk_organizationid,sprk_name` +
+    `&$filter=contains(sprk_name,'${safeFilter}')` +
+    `&$orderby=sprk_name asc` +
+    `&$top=10`;
+
+  console.info('[MatterService] searchOrganizations query:', 'sprk_organization', query);
+  try {
+    const result = await webApi.retrieveMultipleRecords('sprk_organization', query, 10);
+    console.info('[MatterService] searchOrganizations results:', result.entities.length);
+    return result.entities.map((e) => ({
+      id: e['sprk_organizationid'] as string,
+      name: e['sprk_name'] as string,
+    }));
+  } catch (err) {
+    console.error('[MatterService] searchOrganizations error:', err);
+    throw err;
   }
 }
 

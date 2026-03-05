@@ -137,9 +137,9 @@ export class ProjectService {
 
     const safeFilter = nameFilter.trim().replace(/'/g, "''");
     const query =
-      `?$select=sprk_practicearea_refid,sprk_name` +
-      `&$filter=contains(sprk_name,'${safeFilter}')` +
-      `&$orderby=sprk_name asc` +
+      `?$select=sprk_practicearea_refid,sprk_practiceareaname` +
+      `&$filter=contains(sprk_practiceareaname,'${safeFilter}')` +
+      `&$orderby=sprk_practiceareaname asc` +
       `&$top=10`;
 
     console.info('[ProjectService] searchPracticeAreas query:', 'sprk_practicearea_ref', query);
@@ -148,7 +148,7 @@ export class ProjectService {
       console.info('[ProjectService] searchPracticeAreas results:', result.entities.length);
       return result.entities.map((e) => ({
         id: e['sprk_practicearea_refid'] as string,
-        name: e['sprk_name'] as string,
+        name: e['sprk_practiceareaname'] as string,
       }));
     } catch (err) {
       console.error('[ProjectService] searchPracticeAreas error:', err);
@@ -191,6 +191,36 @@ export class ProjectService {
     }
   }
 
+  /**
+   * Search sprk_organization records by name fragment.
+   * Returns up to 10 matching organizations as ILookupItem.
+   */
+  async searchOrganizations(nameFilter: string): Promise<ILookupItem[]> {
+    if (!nameFilter || nameFilter.trim().length < 2) {
+      return [];
+    }
+
+    const safeFilter = nameFilter.trim().replace(/'/g, "''");
+    const query =
+      `?$select=sprk_organizationid,sprk_name` +
+      `&$filter=contains(sprk_name,'${safeFilter}')` +
+      `&$orderby=sprk_name asc` +
+      `&$top=10`;
+
+    console.info('[ProjectService] searchOrganizations query:', 'sprk_organization', query);
+    try {
+      const result = await this._webApi.retrieveMultipleRecords('sprk_organization', query, 10);
+      console.info('[ProjectService] searchOrganizations results:', result.entities.length);
+      return result.entities.map((e) => ({
+        id: e['sprk_organizationid'] as string,
+        name: e['sprk_name'] as string,
+      }));
+    } catch (err) {
+      console.error('[ProjectService] searchOrganizations error:', err);
+      throw err;
+    }
+  }
+
   // ── Record creation ───────────────────────────────────────────────────
 
   /**
@@ -227,6 +257,9 @@ export class ProjectService {
     }
     if (formValues.assignedParalegalId) {
       lookups.push({ col: 'sprk_assignedparalegal', entitySet: 'contacts', guid: formValues.assignedParalegalId });
+    }
+    if (formValues.assignedOutsideCounselId) {
+      lookups.push({ col: 'sprk_assignedoutsidecounsel', entitySet: 'sprk_organizations', guid: formValues.assignedOutsideCounselId });
     }
 
     for (const lk of lookups) {

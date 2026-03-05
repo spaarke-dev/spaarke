@@ -152,6 +152,8 @@ const EMPTY_FORM_STATE: ICreateMatterFormState = {
   assignedAttorneyName: '',
   assignedParalegalId: '',
   assignedParalegalName: '',
+  assignedOutsideCounselId: '',
+  assignedOutsideCounselName: '',
   summary: '',
 };
 
@@ -229,6 +231,25 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
     }
   }, [open]);
 
+  // ── Refs for dynamic step closures (prevents stale closure bug) ─────────
+  // Dynamic step configs are created once via addDynamicStep and their
+  // canAdvance / renderContent closures would capture state values at
+  // creation time. Using refs ensures they always read the latest values.
+  const selectedContactRef = React.useRef(selectedContact);
+  selectedContactRef.current = selectedContact;
+  const step2FormValuesRef = React.useRef(step2FormValues);
+  step2FormValuesRef.current = step2FormValues;
+  const summaryTextRef = React.useRef(summaryText);
+  summaryTextRef.current = summaryText;
+  const recipientEmailsRef = React.useRef(recipientEmails);
+  recipientEmailsRef.current = recipientEmails;
+  const emailToRef = React.useRef(emailTo);
+  emailToRef.current = emailTo;
+  const emailSubjectRef = React.useRef(emailSubject);
+  emailSubjectRef.current = emailSubject;
+  const emailBodyRef = React.useRef(emailBody);
+  emailBodyRef.current = emailBody;
+
   // ── Sync dynamic steps with selected action cards (via shellRef) ────────
   const prevSelectedActionsRef = React.useRef<FollowOnActionId[]>([]);
 
@@ -246,9 +267,9 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
           id: stepId,
           label: stepLabel,
           canAdvance: () => {
-            if (stepId === 'followon-assign-counsel') return selectedContact !== null;
+            if (stepId === 'followon-assign-counsel') return selectedContactRef.current !== null;
             if (stepId === 'followon-send-email') {
-              return emailTo.trim() !== '' && emailSubject.trim() !== '' && emailBody.trim() !== '';
+              return emailToRef.current.trim() !== '' && emailSubjectRef.current.trim() !== '' && emailBodyRef.current.trim() !== '';
             }
             return true; // draft-summary has no hard requirement
           },
@@ -264,7 +285,7 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
               return (
                 <AssignCounselStep
                   webApi={webApi}
-                  selectedContact={selectedContact}
+                  selectedContact={selectedContactRef.current}
                   onContactChange={setSelectedContact}
                 />
               );
@@ -272,10 +293,10 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
             if (stepId === 'followon-draft-summary') {
               return (
                 <DraftSummaryStep
-                  formValues={step2FormValues}
-                  summaryText={summaryText}
+                  formValues={step2FormValuesRef.current}
+                  summaryText={summaryTextRef.current}
                   onSummaryChange={setSummaryText}
-                  recipientEmails={recipientEmails}
+                  recipientEmails={recipientEmailsRef.current}
                   onRecipientsChange={setRecipientEmails}
                 />
               );
@@ -283,12 +304,12 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
             if (stepId === 'followon-send-email') {
               return (
                 <SendEmailStep
-                  formValues={step2FormValues}
-                  emailTo={emailTo}
+                  formValues={step2FormValuesRef.current}
+                  emailTo={emailToRef.current}
                   onEmailToChange={setEmailTo}
-                  emailSubject={emailSubject}
+                  emailSubject={emailSubjectRef.current}
                   onEmailSubjectChange={setEmailSubject}
-                  emailBody={emailBody}
+                  emailBody={emailBodyRef.current}
                   onEmailBodyChange={setEmailBody}
                 />
               );
@@ -309,7 +330,7 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
     });
 
     prevSelectedActionsRef.current = next;
-  }, [selectedActions, selectedContact, webApi, step2FormValues, summaryText, recipientEmails, emailTo, emailSubject, emailBody]);
+  }, [selectedActions, webApi]);
 
   // ── Pre-fill email fields when send-email is selected ────────────────────
   React.useEffect(() => {
