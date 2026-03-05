@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai.Tools;
 
@@ -21,6 +22,7 @@ namespace Sprk.Bff.Api.Services.Ai.Tools;
 /// - includeContext: Include surrounding text context (default: true)
 /// </para>
 /// </remarks>
+[Obsolete("Use GenericAnalysisHandler with JPS configuration. See jps-conversions/date-extractor.json.")]
 public sealed class DateExtractorHandler : IAnalysisToolHandler
 {
     private const string HandlerIdValue = "DateExtractorHandler";
@@ -30,6 +32,7 @@ public sealed class DateExtractorHandler : IAnalysisToolHandler
 
     private readonly IOpenAiClient _openAiClient;
     private readonly ITextChunkingService _textChunkingService;
+    private readonly PromptSchemaRenderer _promptSchemaRenderer;
     private readonly ILogger<DateExtractorHandler> _logger;
 
     /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
@@ -73,10 +76,12 @@ public sealed class DateExtractorHandler : IAnalysisToolHandler
     public DateExtractorHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
+        PromptSchemaRenderer promptSchemaRenderer,
         ILogger<DateExtractorHandler> logger)
     {
         _openAiClient = openAiClient;
         _textChunkingService = textChunkingService;
+        _promptSchemaRenderer = promptSchemaRenderer;
         _logger = logger;
     }
 
@@ -143,6 +148,13 @@ public sealed class DateExtractorHandler : IAnalysisToolHandler
         AnalysisTool tool,
         CancellationToken cancellationToken)
     {
+        // JPS format detection: if ActionSystemPrompt is JPS, delegate to PromptSchemaRenderer
+        // and bypass legacy chunking logic entirely.
+        if (IsJpsFormat(context.ActionSystemPrompt))
+        {
+            return await ExecuteViaJpsAsync(context, tool, cancellationToken);
+        }
+
         var stopwatch = Stopwatch.StartNew();
         var startedAt = DateTimeOffset.UtcNow;
 
@@ -501,6 +513,156 @@ public sealed class DateExtractorHandler : IAnalysisToolHandler
     private static int EstimateTokens(string text)
     {
         return (int)Math.Ceiling(text.Length / 4.0);
+    }
+
+    /// <summary>
+    /// Detects whether a raw prompt string is JPS format.
+    /// </summary>
+    private static bool IsJpsFormat(string? rawPrompt)
+    {
+        return !string.IsNullOrWhiteSpace(rawPrompt)
+            && rawPrompt.TrimStart().StartsWith("{")
+            && rawPrompt.Contains("\"$schema\"");
+    }
+
+    /// <summary>
+    /// Executes date extraction using the JPS-rendered prompt via PromptSchemaRenderer,
+    /// following the same pattern as GenericAnalysisHandler.
+    /// </summary>
+    private async Task<ToolResult> ExecuteViaJpsAsync(
+        ToolExecutionContext context,
+        AnalysisTool tool,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var startedAt = DateTimeOffset.UtcNow;
+
+        try
+        {
+            _logger.LogInformation(
+                "Starting JPS-based date extraction for analysis {AnalysisId}, document {DocumentId}",
+                context.AnalysisId, context.Document.DocumentId);
+
+            var rendered = _promptSchemaRenderer.Render(
+                context.ActionSystemPrompt,
+                context.SkillContext,
+                context.KnowledgeContext,
+                context.Document?.ExtractedText,
+                context.TemplateParameters,
+                context.DownstreamNodes,
+                context.AdditionalKnowledge,
+                context.AdditionalSkills
+            );
+
+            var prompt = rendered.PromptText;
+            var inputTokens = EstimateTokens(prompt);
+            var useStructuredOutput = rendered.JsonSchema != null;
+
+            _logger.LogDebug(
+                "Executing JPS date extraction, format: {Format}, structuredOutput: {StructuredOutput}, estimated tokens: {Tokens}",
+                rendered.Format, useStructuredOutput, inputTokens);
+
+            string response;
+            if (useStructuredOutput)
+            {
+                var schemaBinaryData = BinaryData.FromString(rendered.JsonSchema!.ToJsonString());
+                var schemaName = rendered.SchemaName ?? "date_extraction";
+
+                response = await _openAiClient.GetStructuredCompletionRawAsync(
+                    prompt,
+                    schemaBinaryData,
+                    schemaName,
+                    cancellationToken: cancellationToken);
+            }
+            else
+            {
+                response = await _openAiClient.GetCompletionAsync(
+                    prompt,
+                    cancellationToken: cancellationToken);
+            }
+
+            var outputTokens = EstimateTokens(response);
+            stopwatch.Stop();
+
+            // Parse response as generic JSON (same approach as GenericAnalysisHandler)
+            object resultData;
+            double confidence = 0.8;
+
+            try
+            {
+                var jsonResult = JsonSerializer.Deserialize<System.Text.Json.Nodes.JsonNode>(response.Trim());
+                if (jsonResult is System.Text.Json.Nodes.JsonObject resultObj)
+                {
+                    if (resultObj.TryGetPropertyValue("confidence", out var confNode))
+                    {
+                        confidence = Math.Clamp(confNode?.GetValue<double>() ?? 0.8, 0.0, 1.0);
+                    }
+                    resultData = jsonResult;
+                }
+                else
+                {
+                    resultData = new { rawResponse = response };
+                }
+            }
+            catch (JsonException)
+            {
+                resultData = new { rawResponse = response, parseError = true };
+                confidence = 0.5;
+            }
+
+            var executionMetadata = new ToolExecutionMetadata
+            {
+                StartedAt = startedAt,
+                CompletedAt = DateTimeOffset.UtcNow,
+                InputTokens = inputTokens,
+                OutputTokens = outputTokens,
+                ModelCalls = 1,
+                ModelName = "gpt-4o"
+            };
+
+            _logger.LogInformation(
+                "JPS date extraction complete for {AnalysisId} in {Duration}ms",
+                context.AnalysisId, stopwatch.ElapsedMilliseconds);
+
+            return ToolResult.Ok(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                resultData,
+                response,
+                confidence,
+                executionMetadata);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("JPS date extraction cancelled for analysis {AnalysisId}", context.AnalysisId);
+            return ToolResult.Error(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                "Date extraction was cancelled.",
+                ToolErrorCodes.Cancelled,
+                new ToolExecutionMetadata
+                {
+                    StartedAt = startedAt,
+                    CompletedAt = DateTimeOffset.UtcNow
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "JPS date extraction failed for analysis {AnalysisId}", context.AnalysisId);
+            return ToolResult.Error(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                $"Date extraction failed: {ex.Message}",
+                ToolErrorCodes.InternalError,
+                new ToolExecutionMetadata
+                {
+                    StartedAt = startedAt,
+                    CompletedAt = DateTimeOffset.UtcNow
+                });
+        }
     }
 }
 

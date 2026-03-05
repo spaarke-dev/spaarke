@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Sprk.Bff.Api.Services.Ai.Tools;
 
@@ -32,6 +33,7 @@ public sealed class ClauseComparisonHandler : IAnalysisToolHandler
 
     private readonly IOpenAiClient _openAiClient;
     private readonly ITextChunkingService _textChunkingService;
+    private readonly PromptSchemaRenderer _promptSchemaRenderer;
     private readonly ILogger<ClauseComparisonHandler> _logger;
 
     /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
@@ -82,10 +84,12 @@ public sealed class ClauseComparisonHandler : IAnalysisToolHandler
     public ClauseComparisonHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
+        PromptSchemaRenderer promptSchemaRenderer,
         ILogger<ClauseComparisonHandler> logger)
     {
         _openAiClient = openAiClient;
         _textChunkingService = textChunkingService;
+        _promptSchemaRenderer = promptSchemaRenderer;
         _logger = logger;
     }
 
@@ -163,6 +167,15 @@ public sealed class ClauseComparisonHandler : IAnalysisToolHandler
             _logger.LogInformation(
                 "Starting clause comparison for analysis {AnalysisId}, document {DocumentId}",
                 context.AnalysisId, context.Document.DocumentId);
+
+            // JPS format check: if ActionSystemPrompt is JPS, perform multi-doc comparison setup
+            // (custom logic) then delegate prompt rendering to PromptSchemaRenderer.
+            if (IsJpsFormat(context.ActionSystemPrompt))
+            {
+                return await ExecuteViaJpsAsync(context, tool, stopwatch, startedAt, cancellationToken);
+            }
+
+            // Legacy path: fall through to existing prompt-building logic
 
             // Parse configuration
             var config = ParseConfiguration(tool.Configuration);
@@ -278,6 +291,193 @@ public sealed class ClauseComparisonHandler : IAnalysisToolHandler
                     CompletedAt = DateTimeOffset.UtcNow
                 });
         }
+    }
+
+    /// <summary>
+    /// Detects whether a raw prompt string is in JPS format.
+    /// Matches the same detection logic as <see cref="PromptSchemaRenderer"/>.
+    /// </summary>
+    private static bool IsJpsFormat(string? rawPrompt)
+    {
+        return !string.IsNullOrWhiteSpace(rawPrompt)
+            && rawPrompt.TrimStart().StartsWith("{")
+            && rawPrompt.Contains("\"$schema\"");
+    }
+
+    /// <summary>
+    /// Executes clause comparison using the JPS-rendered prompt via PromptSchemaRenderer.
+    /// Preserves multi-document comparison orchestration: builds standard terms context
+    /// and injects it as template parameters for Handlebars rendering.
+    /// </summary>
+    private async Task<ToolResult> ExecuteViaJpsAsync(
+        ToolExecutionContext context,
+        AnalysisTool tool,
+        Stopwatch stopwatch,
+        DateTimeOffset startedAt,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation(
+                "ActionSystemPrompt is JPS format for analysis {AnalysisId} — delegating to PromptSchemaRenderer",
+                context.AnalysisId);
+
+            // Preserve multi-document comparison orchestration: parse config and build
+            // standard terms context exactly as the legacy path does.
+            var config = ParseConfiguration(tool.Configuration);
+            var standardTermsContext = BuildStandardTermsContext(context.KnowledgeContext, config);
+            var clauseTypes = config.ClauseTypes ?? ClauseTypes.StandardTypes;
+
+            // Build template parameters with comparison-specific context
+            var templateParameters = BuildComparisonTemplateParameters(
+                context.TemplateParameters,
+                standardTermsContext,
+                clauseTypes,
+                config);
+
+            // Render prompt via JPS schema with injected template parameters
+            var rendered = _promptSchemaRenderer.Render(
+                context.ActionSystemPrompt,
+                context.SkillContext,
+                context.KnowledgeContext,
+                context.Document?.ExtractedText,
+                templateParameters,
+                context.DownstreamNodes,
+                context.AdditionalKnowledge,
+                context.AdditionalSkills
+            );
+
+            var prompt = rendered.PromptText;
+            var inputTokens = EstimateTokens(prompt);
+            var useStructuredOutput = rendered.JsonSchema != null;
+
+            _logger.LogDebug(
+                "Executing JPS clause comparison, format: {Format}, structuredOutput: {StructuredOutput}, estimated tokens: {Tokens}",
+                rendered.Format, useStructuredOutput, inputTokens);
+
+            string response;
+            if (useStructuredOutput)
+            {
+                var schemaBinaryData = BinaryData.FromString(rendered.JsonSchema!.ToJsonString());
+                var schemaName = rendered.SchemaName ?? "clause_comparison";
+
+                response = await _openAiClient.GetStructuredCompletionRawAsync(
+                    prompt,
+                    schemaBinaryData,
+                    schemaName,
+                    cancellationToken: cancellationToken);
+            }
+            else
+            {
+                response = await _openAiClient.GetCompletionAsync(
+                    prompt,
+                    cancellationToken: cancellationToken);
+            }
+
+            var outputTokens = EstimateTokens(response);
+            stopwatch.Stop();
+
+            // Parse response as generic JSON (same approach as GenericAnalysisHandler)
+            object resultData;
+            double confidence = 0.8;
+
+            try
+            {
+                var jsonResult = JsonSerializer.Deserialize<JsonNode>(response.Trim());
+                if (jsonResult is JsonObject resultObj)
+                {
+                    if (resultObj.TryGetPropertyValue("confidence", out var confNode))
+                    {
+                        confidence = Math.Clamp(confNode?.GetValue<double>() ?? 0.8, 0.0, 1.0);
+                    }
+                    resultData = jsonResult;
+                }
+                else
+                {
+                    resultData = new { rawResponse = response };
+                }
+            }
+            catch (JsonException)
+            {
+                resultData = new { rawResponse = response, parseError = true };
+                confidence = 0.5;
+            }
+
+            var executionMetadata = new ToolExecutionMetadata
+            {
+                StartedAt = startedAt,
+                CompletedAt = DateTimeOffset.UtcNow,
+                InputTokens = inputTokens,
+                OutputTokens = outputTokens,
+                ModelCalls = 1,
+                ModelName = "gpt-4o"
+            };
+
+            _logger.LogInformation(
+                "JPS clause comparison complete for {AnalysisId} in {Duration}ms",
+                context.AnalysisId, stopwatch.ElapsedMilliseconds);
+
+            return ToolResult.Ok(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                resultData,
+                response,
+                confidence,
+                executionMetadata);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("JPS clause comparison cancelled for analysis {AnalysisId}", context.AnalysisId);
+            return ToolResult.Error(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                "Clause comparison was cancelled.",
+                ToolErrorCodes.Cancelled,
+                new ToolExecutionMetadata
+                {
+                    StartedAt = startedAt,
+                    CompletedAt = DateTimeOffset.UtcNow
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "JPS clause comparison failed for analysis {AnalysisId}", context.AnalysisId);
+            return ToolResult.Error(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                $"Clause comparison failed: {ex.Message}",
+                ToolErrorCodes.InternalError,
+                new ToolExecutionMetadata
+                {
+                    StartedAt = startedAt,
+                    CompletedAt = DateTimeOffset.UtcNow
+                });
+        }
+    }
+
+    /// <summary>
+    /// Builds template parameters for JPS rendering by merging comparison-specific context
+    /// (standard terms, clause types, config flags) into the existing template parameters.
+    /// </summary>
+    private static Dictionary<string, object?> BuildComparisonTemplateParameters(
+        Dictionary<string, object?>? existingParameters,
+        string standardTermsContext,
+        string[] clauseTypes,
+        ClauseComparisonConfig config)
+    {
+        var parameters = existingParameters != null
+            ? new Dictionary<string, object?>(existingParameters)
+            : new Dictionary<string, object?>();
+
+        parameters["standardTermsContext"] = standardTermsContext;
+        parameters["clauseTypesList"] = string.Join(", ", clauseTypes);
+        parameters["includeStandardText"] = config.IncludeStandardText;
+        parameters["includeRecommendations"] = config.IncludeRecommendations;
+
+        return parameters;
     }
 
     /// <summary>

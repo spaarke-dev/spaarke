@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai.Tools;
 
@@ -32,6 +34,7 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
 
     private readonly IOpenAiClient _openAiClient;
     private readonly IRagService? _ragService;
+    private readonly PromptSchemaRenderer _promptSchemaRenderer;
     private readonly ILogger<DocumentClassifierHandler> _logger;
 
     /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
@@ -82,10 +85,12 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
 
     public DocumentClassifierHandler(
         IOpenAiClient openAiClient,
+        PromptSchemaRenderer promptSchemaRenderer,
         ILogger<DocumentClassifierHandler> logger,
         IRagService? ragService = null)
     {
         _openAiClient = openAiClient;
+        _promptSchemaRenderer = promptSchemaRenderer;
         _logger = logger;
         _ragService = ragService;
     }
@@ -164,6 +169,13 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
         AnalysisTool tool,
         CancellationToken cancellationToken)
     {
+        // JPS format detection: if ActionSystemPrompt is JPS, render via PromptSchemaRenderer
+        // while preserving RAG example retrieval (the custom logic unique to this handler).
+        if (IsJpsFormat(context.ActionSystemPrompt))
+        {
+            return await ExecuteViaJpsAsync(context, tool, cancellationToken);
+        }
+
         var stopwatch = Stopwatch.StartNew();
         var startedAt = DateTimeOffset.UtcNow;
 
@@ -263,6 +275,214 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
         catch (Exception ex)
         {
             _logger.LogError(ex, "Document classification failed for analysis {AnalysisId}", context.AnalysisId);
+            return ToolResult.Error(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                $"Document classification failed: {ex.Message}",
+                ToolErrorCodes.InternalError,
+                new ToolExecutionMetadata
+                {
+                    StartedAt = startedAt,
+                    CompletedAt = DateTimeOffset.UtcNow
+                });
+        }
+    }
+
+    /// <summary>
+    /// Detects whether the raw prompt is JPS format by checking for opening brace
+    /// and the presence of a "$schema" key.
+    /// </summary>
+    private static bool IsJpsFormat(string? rawPrompt)
+    {
+        return !string.IsNullOrWhiteSpace(rawPrompt)
+            && rawPrompt.TrimStart().StartsWith("{")
+            && rawPrompt.Contains("\"$schema\"");
+    }
+
+    /// <summary>
+    /// Executes document classification via JPS-rendered prompt while preserving
+    /// RAG example retrieval logic. RAG examples are formatted and injected as
+    /// additional knowledge context so the JPS-rendered prompt benefits from
+    /// few-shot classification examples.
+    /// </summary>
+    private async Task<ToolResult> ExecuteViaJpsAsync(
+        ToolExecutionContext context,
+        AnalysisTool tool,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var startedAt = DateTimeOffset.UtcNow;
+
+        try
+        {
+            _logger.LogInformation(
+                "Starting JPS-based document classification for analysis {AnalysisId}, document {DocumentId}",
+                context.AnalysisId, context.Document.DocumentId);
+
+            // Parse configuration (still needed for RAG settings)
+            var config = ParseConfiguration(tool.Configuration);
+
+            // Prepare document text (truncate if too long for classification)
+            var documentText = TruncateForClassification(context.Document.ExtractedText);
+
+            // --- RAG example retrieval (custom logic preserved from legacy path) ---
+            var ragExamples = new List<RagExample>();
+            var ragTokens = 0;
+            if (config.UseRagExamples && _ragService != null)
+            {
+                var ragResult = await GetRagExamplesAsync(
+                    documentText,
+                    context.TenantId,
+                    config.RagExampleCount,
+                    cancellationToken);
+                ragExamples = ragResult.Examples;
+                ragTokens = ragResult.Tokens;
+            }
+
+            // Build RAG examples as additional knowledge context for the JPS prompt.
+            // This injects the retrieved examples into the rendered prompt so the AI
+            // benefits from few-shot classification even under JPS.
+            string? ragKnowledgeContext = null;
+            if (ragExamples.Count > 0)
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine("## RAG Classification Examples");
+                sb.AppendLine("The following are similar documents and their known categories for reference:");
+                foreach (var (example, index) in ragExamples.Select((e, i) => (e, i)))
+                {
+                    sb.AppendLine($"\n### Example {index + 1} (Category: {example.Category}, Relevance: {example.RelevanceScore:F2})");
+                    sb.AppendLine(example.Content.Length > 300
+                        ? example.Content.Substring(0, 300) + "..."
+                        : example.Content);
+                }
+                ragKnowledgeContext = sb.ToString();
+            }
+
+            // Merge RAG knowledge with existing knowledge context
+            var mergedKnowledge = string.IsNullOrWhiteSpace(context.KnowledgeContext)
+                ? ragKnowledgeContext
+                : ragKnowledgeContext != null
+                    ? $"{context.KnowledgeContext}\n\n{ragKnowledgeContext}"
+                    : context.KnowledgeContext;
+
+            // Build template parameters with classification-specific values
+            var templateParameters = context.TemplateParameters != null
+                ? new Dictionary<string, object?>(context.TemplateParameters)
+                : new Dictionary<string, object?>();
+
+            templateParameters["categories"] = string.Join(", ", config.Categories ?? DocumentCategories.AllStandardCategories);
+            templateParameters["includeSecondaryClassifications"] = config.IncludeSecondaryClassifications;
+
+            // Render JPS prompt with RAG-enriched knowledge context
+            var rendered = _promptSchemaRenderer.Render(
+                context.ActionSystemPrompt,
+                context.SkillContext,
+                mergedKnowledge,
+                documentText,
+                templateParameters,
+                context.DownstreamNodes,
+                context.AdditionalKnowledge,
+                context.AdditionalSkills
+            );
+
+            var prompt = rendered.PromptText;
+            var inputTokens = EstimateTokens(prompt) + ragTokens;
+            var useStructuredOutput = rendered.JsonSchema != null;
+
+            _logger.LogDebug(
+                "Executing JPS document classification, format: {Format}, structuredOutput: {StructuredOutput}, ragExamples: {RagCount}, estimated tokens: {Tokens}",
+                rendered.Format, useStructuredOutput, ragExamples.Count, inputTokens);
+
+            string response;
+            if (useStructuredOutput)
+            {
+                var schemaBinaryData = BinaryData.FromString(rendered.JsonSchema!.ToJsonString());
+                var schemaName = rendered.SchemaName ?? "document_classification";
+
+                response = await _openAiClient.GetStructuredCompletionRawAsync(
+                    prompt,
+                    schemaBinaryData,
+                    schemaName,
+                    cancellationToken: cancellationToken);
+            }
+            else
+            {
+                response = await _openAiClient.GetCompletionAsync(
+                    prompt,
+                    cancellationToken: cancellationToken);
+            }
+
+            var outputTokens = EstimateTokens(response);
+            stopwatch.Stop();
+
+            // Parse response as generic JSON
+            object resultData;
+            double confidence = 0.8;
+
+            try
+            {
+                var jsonResult = JsonSerializer.Deserialize<JsonNode>(response.Trim());
+                if (jsonResult is JsonObject resultObj)
+                {
+                    if (resultObj.TryGetPropertyValue("confidence", out var confNode))
+                    {
+                        confidence = Math.Clamp(confNode?.GetValue<double>() ?? 0.8, 0.0, 1.0);
+                    }
+                    resultData = jsonResult;
+                }
+                else
+                {
+                    resultData = new { rawResponse = response };
+                }
+            }
+            catch (JsonException)
+            {
+                resultData = new { rawResponse = response, parseError = true };
+                confidence = 0.5;
+            }
+
+            var executionMetadata = new ToolExecutionMetadata
+            {
+                StartedAt = startedAt,
+                CompletedAt = DateTimeOffset.UtcNow,
+                InputTokens = inputTokens,
+                OutputTokens = outputTokens,
+                ModelCalls = config.UseRagExamples ? 2 : 1,
+                ModelName = "gpt-4o"
+            };
+
+            _logger.LogInformation(
+                "JPS document classification complete for {AnalysisId}: confidence {Confidence:P0}, ragExamples {RagCount} in {Duration}ms",
+                context.AnalysisId, confidence, ragExamples.Count, stopwatch.ElapsedMilliseconds);
+
+            return ToolResult.Ok(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                resultData,
+                response,
+                confidence,
+                executionMetadata);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("JPS document classification cancelled for analysis {AnalysisId}", context.AnalysisId);
+            return ToolResult.Error(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                "Document classification was cancelled.",
+                ToolErrorCodes.Cancelled,
+                new ToolExecutionMetadata
+                {
+                    StartedAt = startedAt,
+                    CompletedAt = DateTimeOffset.UtcNow
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "JPS document classification failed for analysis {AnalysisId}", context.AnalysisId);
             return ToolResult.Error(
                 HandlerId,
                 tool.Id,

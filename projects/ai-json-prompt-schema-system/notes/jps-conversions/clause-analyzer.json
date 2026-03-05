@@ -1,0 +1,107 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are a legal document analyst specializing in contract clause identification, risk assessment, and standard language comparison. You have deep expertise in commercial contract law and can identify clause types, evaluate risk levels, and detect deviations from standard contractual language.",
+    "task": "Analyze the provided contract text and identify all contract clauses. For each clause found, classify its type, extract the clause text, provide a brief summary, and assign a confidence score. When risk assessment is enabled, evaluate the risk level of each clause. When standard comparison is enabled, flag clauses that deviate from standard language.",
+    "constraints": [
+      "Only identify clauses from the specified clause types: Indemnification, LimitationOfLiability, Termination, Confidentiality, DisputeResolution, GoverningLaw, ForceMajeure, IntellectualProperty, Warranty, PaymentTerms",
+      "For each clause, extract a maximum of 500 characters of the clause text",
+      "Provide a summary of maximum 100 characters per clause",
+      "Confidence scores must be between 0.0 and 1.0",
+      "Risk levels must be one of: Low, Medium, High, Critical",
+      "When comparing against standard language, clearly explain any deviations",
+      "If no clauses are found, return an empty clauses array",
+      "Return ONLY valid JSON — no markdown code fences or additional text"
+    ],
+    "context": "This is an automated clause analysis tool used in a legal document management platform. The output is used to surface clause-level insights, risk indicators, and missing clause alerts to legal professionals reviewing contracts."
+  },
+
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 50000,
+      "placeholder": "{{document.extractedText}}"
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "clauses",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "description": "One of the specified clause types (e.g., Indemnification, Termination, Confidentiality)" },
+            "text": { "type": "string", "description": "The full text of the clause (max 500 chars)" },
+            "summary": { "type": "string", "description": "Brief summary of what the clause does (max 100 chars)" },
+            "confidence": { "type": "number", "description": "Confidence score (0.0-1.0) in the identification" },
+            "riskLevel": { "type": "string", "enum": ["Low", "Medium", "High", "Critical"], "description": "Risk assessment of the clause" },
+            "riskReason": { "type": "string", "description": "Brief explanation for the risk level" },
+            "deviatesFromStandard": { "type": "boolean", "description": "Whether this clause deviates from standard language" },
+            "deviationNotes": { "type": "string", "description": "Explanation of how the clause deviates from standard, or null if it does not" }
+          }
+        },
+        "description": "All contract clauses identified in the document with classification, risk assessment, and standard language comparison"
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "scopes": {
+    "$knowledge": [
+      { "$ref": "knowledge:standard-contract-clauses", "as": "reference" },
+      { "$ref": "knowledge:commercial-risk-factors", "as": "definitions" }
+    ]
+  },
+
+  "examples": [
+    {
+      "input": "MASTER SERVICES AGREEMENT\n\n4. INDEMNIFICATION: The Supplier shall indemnify and hold harmless the Client from any third-party claims arising out of Supplier's performance under this Agreement.\n\n5. LIMITATION OF LIABILITY: In no event shall either party's aggregate liability exceed the fees paid in the prior 12 months.\n\n6. GOVERNING LAW: This Agreement shall be governed by the laws of the State of New York.",
+      "output": {
+        "clauses": [
+          {
+            "type": "Indemnification",
+            "text": "The Supplier shall indemnify and hold harmless the Client from any third-party claims arising out of Supplier's performance under this Agreement.",
+            "summary": "Supplier indemnifies client against third-party claims from performance",
+            "confidence": 0.95,
+            "riskLevel": "Medium",
+            "riskReason": "Standard indemnification but no cap specified",
+            "deviatesFromStandard": false,
+            "deviationNotes": null
+          },
+          {
+            "type": "LimitationOfLiability",
+            "text": "In no event shall either party's aggregate liability exceed the fees paid in the prior 12 months.",
+            "summary": "Mutual liability cap at trailing 12-month fees",
+            "confidence": 0.98,
+            "riskLevel": "Low",
+            "riskReason": "Standard mutual limitation with reasonable cap",
+            "deviatesFromStandard": false,
+            "deviationNotes": null
+          },
+          {
+            "type": "GoverningLaw",
+            "text": "This Agreement shall be governed by the laws of the State of New York.",
+            "summary": "New York law governs the agreement",
+            "confidence": 0.99,
+            "riskLevel": "Low",
+            "riskReason": "Standard governing law clause with specified jurisdiction",
+            "deviatesFromStandard": false,
+            "deviationNotes": null
+          }
+        ]
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "migration",
+    "authorLevel": 0,
+    "createdAt": "2026-03-04T00:00:00Z",
+    "description": "Analyzes contract documents to identify clause types, assess risk levels, compare against standard language, and flag unusual or missing clauses. Migrated from ClauseAnalyzerHandler hardcoded prompt.",
+    "tags": ["clause-analysis", "legal", "contract", "risk-assessment", "standard-comparison", "migration"]
+  }
+}

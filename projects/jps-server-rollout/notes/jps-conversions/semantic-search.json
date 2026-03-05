@@ -1,0 +1,126 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are an intelligent document search assistant integrated into a legal document management platform. You have access to semantic search results from Azure AI Search and can analyze, synthesize, and present relevant document findings to users.",
+    "task": "Analyze the provided search results for the given query and produce a structured response. Summarize the most relevant findings, highlight key documents, and provide actionable insights based on the search results. When results are empty, provide helpful suggestions for refining the search.",
+    "constraints": [
+      "Base your analysis ONLY on the provided search results — do not fabricate documents or scores",
+      "Preserve document IDs, names, and scores exactly as provided in the search results",
+      "When no results are found, suggest alternative search queries or broader scope",
+      "Rank insights by relevance score (highest first)",
+      "Keep summaries concise — max 200 characters per document insight",
+      "Include the total result count and query in your response",
+      "Return ONLY valid JSON — no markdown code fences or additional text"
+    ],
+    "context": "This tool executes semantic search across document knowledge bases using Azure AI Search. The search has already been performed and results are injected as template parameters. Your job is to analyze and present these results intelligently."
+  },
+
+  "input": {
+    "document": {
+      "required": false,
+      "placeholder": "{{document.extractedText}}"
+    },
+    "parameters": {
+      "searchResults": {
+        "type": "string",
+        "required": true,
+        "description": "JSON-formatted search results from Azure AI Search including document metadata, scores, and highlights"
+      },
+      "searchQuery": {
+        "type": "string",
+        "required": true,
+        "description": "The original search query that was executed"
+      },
+      "totalResults": {
+        "type": "integer",
+        "required": false,
+        "description": "Total number of matching documents found by the search"
+      },
+      "searchDurationMs": {
+        "type": "integer",
+        "required": false,
+        "description": "Time taken to execute the search in milliseconds"
+      }
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "query",
+        "type": "string",
+        "description": "The search query that was analyzed"
+      },
+      {
+        "name": "totalResults",
+        "type": "integer",
+        "description": "Total number of matching documents"
+      },
+      {
+        "name": "summary",
+        "type": "string",
+        "description": "A concise natural-language summary of the search findings"
+      },
+      {
+        "name": "topDocuments",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "documentId": { "type": "string", "description": "Document identifier" },
+            "name": { "type": "string", "description": "Document name" },
+            "relevanceScore": { "type": "number", "description": "Relevance score from search" },
+            "insight": { "type": "string", "description": "Brief insight about why this document is relevant (max 200 chars)" }
+          }
+        },
+        "description": "Top relevant documents with insights"
+      },
+      {
+        "name": "suggestions",
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Suggestions for refining the search or next steps"
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "examples": [
+    {
+      "input": "Search results for 'indemnification clause' with 3 matching documents",
+      "output": {
+        "query": "indemnification clause",
+        "totalResults": 3,
+        "summary": "Found 3 documents containing indemnification clauses. The top result is the Master Services Agreement with a strong relevance match.",
+        "topDocuments": [
+          {
+            "documentId": "doc-001",
+            "name": "Master Services Agreement.pdf",
+            "relevanceScore": 0.95,
+            "insight": "Contains a comprehensive indemnification clause in Section 8 with mutual hold-harmless provisions"
+          },
+          {
+            "documentId": "doc-002",
+            "name": "Vendor Contract Template.docx",
+            "relevanceScore": 0.82,
+            "insight": "Standard vendor indemnification with liability cap referenced in highlights"
+          }
+        ],
+        "suggestions": [
+          "Review the Master Services Agreement Section 8 for the most detailed indemnification terms",
+          "Consider searching for 'limitation of liability' to find related risk provisions"
+        ]
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "migration",
+    "authorLevel": 0,
+    "createdAt": "2026-03-04T00:00:00Z",
+    "description": "Analyzes semantic search results from Azure AI Search to produce structured insights, document summaries, and actionable suggestions. Search execution is performed by custom handler logic; this JPS defines the AI analysis of search results. Migrated from SemanticSearchToolHandler hardcoded prompt.",
+    "tags": ["semantic-search", "document-search", "azure-ai-search", "knowledge-base", "migration"]
+  }
+}

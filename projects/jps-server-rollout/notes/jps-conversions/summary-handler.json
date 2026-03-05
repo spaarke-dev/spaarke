@@ -1,0 +1,109 @@
+{
+  "$schema": "https://spaarke.dev/schemas/jps/v1.json",
+  "version": "1.0",
+  "metadata": {
+    "name": "Document Summary Generator",
+    "description": "Generates concise document summaries with configurable format, sections, and style options. Supports paragraph, bullet, and structured output formats.",
+    "author": "Spaarke AI Platform",
+    "handlerId": "SummaryHandler",
+    "tags": ["summary", "document-analysis", "legal"]
+  },
+  "persona": {
+    "role": "Document Summarization Specialist",
+    "tone": "professional, clear, precise",
+    "instructions": "You are a document summarization assistant. Create comprehensive, accurate summaries that capture the essential information from documents. Adapt your output format and language register based on the configuration parameters provided."
+  },
+  "task": {
+    "objective": "Generate a comprehensive summary of the provided document, organized according to the requested format and sections.",
+    "instructions": [
+      "Analyze the document thoroughly to identify key information, parties, terms, obligations, and notable provisions.",
+      "Produce a summary targeting approximately {{maxLength}} words.",
+      "{{#if (eq format 'paragraph')}}Write the summary as flowing paragraphs.{{/if}}",
+      "{{#if (eq format 'bullets')}}Write the summary as bullet points organized by topic.{{/if}}",
+      "{{#if (eq format 'structured')}}Structure the summary with clear section headers (## Executive Summary, ## Key Terms, ## Obligations, ## Notable Provisions).{{/if}}",
+      "Include these sections: {{includeSections}}.",
+      "{{#if usePlainLanguage}}Use plain language that is accessible to non-legal readers. Avoid jargon where possible, and explain technical terms when they must be used.{{/if}}",
+      "{{#if highlightTimeSensitive}}Highlight any time-sensitive deadlines, dates, renewal periods, or expiration dates prominently.{{/if}}",
+      "{{formatInstructions}}"
+    ],
+    "outputFormat": "Return a JSON object with 'summary' (the full summary text) and 'confidence' (0.0-1.0 score indicating accuracy and completeness)."
+  },
+  "scopes": {
+    "$document": {
+      "label": "Document to summarize",
+      "required": true
+    },
+    "$knowledge": [],
+    "$skills": []
+  },
+  "structuredOutput": {
+    "enabled": true,
+    "schemaName": "document_summary",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "The complete summary text with all requested sections"
+        },
+        "confidence": {
+          "type": "number",
+          "description": "Confidence score from 0.0 to 1.0 indicating how well the summary captures key points, accuracy, and completeness",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "sections": {
+          "type": "object",
+          "description": "Individual sections extracted from the summary (when structured format is used)",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "wordCount": {
+          "type": "integer",
+          "description": "Approximate word count of the summary"
+        },
+        "format": {
+          "type": "string",
+          "description": "The output format used",
+          "enum": ["paragraph", "bullets", "structured"]
+        }
+      },
+      "required": ["summary", "confidence"],
+      "additionalProperties": false
+    }
+  },
+  "templateParameters": {
+    "maxLength": {
+      "type": "integer",
+      "description": "Maximum summary length in words",
+      "default": 500
+    },
+    "format": {
+      "type": "string",
+      "description": "Output format: paragraph, bullets, or structured",
+      "default": "structured",
+      "enum": ["paragraph", "bullets", "structured"]
+    },
+    "includeSections": {
+      "type": "string",
+      "description": "Comma-separated list of sections to include in the summary",
+      "default": "executive_summary, key_terms, obligations, notable_provisions"
+    },
+    "usePlainLanguage": {
+      "type": "boolean",
+      "description": "Whether to use plain language accessible to non-lawyers",
+      "default": true
+    },
+    "highlightTimeSensitive": {
+      "type": "boolean",
+      "description": "Whether to highlight time-sensitive items",
+      "default": true
+    },
+    "formatInstructions": {
+      "type": "string",
+      "description": "Pre-rendered format-specific instructions from SummaryConfig",
+      "default": ""
+    }
+  }
+}
