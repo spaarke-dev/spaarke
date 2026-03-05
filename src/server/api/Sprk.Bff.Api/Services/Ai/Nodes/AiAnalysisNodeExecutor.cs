@@ -142,8 +142,9 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
                     NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
             }
 
-            // Convert to tool execution context
-            var toolContext = CreateToolExecutionContext(context);
+            // Convert to tool execution context (async: resolves JPS $ref entries)
+            var toolContext = await CreateToolExecutionContextAsync(
+                context, scope.ServiceProvider, cancellationToken);
 
             // Convert AnalysisTool to the handler's expected format
             var analysisTool = tool;
@@ -263,11 +264,22 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
     /// use the Action's prompt as primary instruction (Option A).
     /// </summary>
     /// <remarks>
+    /// <para>
     /// If the node's <c>ConfigJson</c> contains a <c>promptSchemaOverride</c> and the
     /// Action's system prompt is in JPS format, the override is merged into the base
     /// schema before passing to the tool handler. See <see cref="PromptSchemaOverrideMerger"/>.
+    /// </para>
+    /// <para>
+    /// After prompt assembly, JPS <c>$ref</c> entries in the <c>scopes</c> section are
+    /// resolved against Dataverse via <see cref="IScopeResolverService"/>. Resolved
+    /// knowledge and skill references are populated into the context so that
+    /// <see cref="PromptSchemaRenderer"/> can merge them into the assembled prompt.
+    /// </para>
     /// </remarks>
-    private ToolExecutionContext CreateToolExecutionContext(NodeExecutionContext context)
+    private async Task<ToolExecutionContext> CreateToolExecutionContextAsync(
+        NodeExecutionContext context,
+        IServiceProvider scopedProvider,
+        CancellationToken cancellationToken)
     {
         // Build previous results dictionary from node outputs
         var previousResults = new Dictionary<string, ToolResult>();
@@ -297,6 +309,13 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
         // The override comes from ConfigJson.promptSchemaOverride on the playbook node.
         actionSystemPrompt = ApplyPromptSchemaOverride(actionSystemPrompt, context.Node.ConfigJson);
 
+        // Resolve JPS $ref entries to Dataverse records
+        var (additionalKnowledge, additionalSkills) = await ResolveJpsRefsAsync(
+            actionSystemPrompt, scopedProvider, cancellationToken);
+
+        // Extract template parameters from ConfigJson (if present)
+        var templateParameters = ExtractTemplateParameters(context.Node.ConfigJson);
+
         return new ToolExecutionContext
         {
             AnalysisId = context.RunId,
@@ -312,8 +331,115 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             Temperature = context.Temperature,
             ModelDeploymentId = context.ModelDeploymentId ?? context.Node.ModelDeploymentId,
             CorrelationId = context.CorrelationId,
-            CreatedAt = context.CreatedAt
+            CreatedAt = context.CreatedAt,
+            TemplateParameters = templateParameters,
+            AdditionalKnowledge = additionalKnowledge,
+            AdditionalSkills = additionalSkills
         };
+    }
+
+    /// <summary>
+    /// Resolves JPS <c>$ref</c> entries from the action system prompt by querying
+    /// Dataverse for matching knowledge and skill records.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Uses <see cref="JpsRefResolver"/> to extract <c>knowledge:</c> and <c>skill:</c>
+    /// references from the <c>scopes</c> section, then resolves each against
+    /// <see cref="IScopeResolverService.GetKnowledgeByNameAsync"/> and
+    /// <see cref="IScopeResolverService.GetSkillByNameAsync"/> respectively.
+    /// </para>
+    /// <para>
+    /// Resolution within each type runs in parallel via <see cref="Task.WhenAll"/>.
+    /// Unresolved references are silently skipped (graceful degradation).
+    /// </para>
+    /// </remarks>
+    /// <param name="actionSystemPrompt">The (possibly merged) action system prompt. May be null or non-JPS.</param>
+    /// <param name="scopedProvider">Scoped service provider for resolving <see cref="IScopeResolverService"/>.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// A tuple of resolved knowledge and skill reference lists. Both lists are null
+    /// when the prompt is null, not JPS format, or contains no <c>$ref</c> entries.
+    /// </returns>
+    private async Task<(IReadOnlyList<ResolvedKnowledgeRef>?, IReadOnlyList<ResolvedSkillRef>?)> ResolveJpsRefsAsync(
+        string? actionSystemPrompt,
+        IServiceProvider scopedProvider,
+        CancellationToken cancellationToken)
+    {
+        // Fast path: skip resolution when prompt is null or not JPS format
+        if (string.IsNullOrWhiteSpace(actionSystemPrompt) || !IsJpsFormat(actionSystemPrompt))
+            return (null, null);
+
+        var knowledgeRefs = JpsRefResolver.ExtractKnowledgeRefs(actionSystemPrompt);
+        var skillRefs = JpsRefResolver.ExtractSkillRefs(actionSystemPrompt);
+
+        if (knowledgeRefs.Count == 0 && skillRefs.Count == 0)
+            return (null, null);
+
+        var scopeResolver = scopedProvider.GetRequiredService<IScopeResolverService>();
+
+        // Resolve knowledge refs in parallel
+        IReadOnlyList<ResolvedKnowledgeRef>? resolvedKnowledge = null;
+        if (knowledgeRefs.Count > 0)
+        {
+            var knowledgeTasks = knowledgeRefs.Select(async kRef =>
+            {
+                var record = await scopeResolver.GetKnowledgeByNameAsync(kRef.Name, cancellationToken);
+                if (record is null)
+                {
+                    _logger.LogDebug(
+                        "JPS $ref knowledge '{KnowledgeName}' not found in Dataverse; skipping",
+                        kRef.Name);
+                    return null;
+                }
+
+                return new ResolvedKnowledgeRef(
+                    Name: record.Name,
+                    Content: record.Content ?? string.Empty,
+                    Label: kRef.Label);
+            });
+
+            var results = await Task.WhenAll(knowledgeTasks);
+            var filtered = results.Where(r => r is not null).Cast<ResolvedKnowledgeRef>().ToList();
+            resolvedKnowledge = filtered.Count > 0 ? filtered : null;
+        }
+
+        // Resolve skill refs in parallel
+        IReadOnlyList<ResolvedSkillRef>? resolvedSkills = null;
+        if (skillRefs.Count > 0)
+        {
+            var skillTasks = skillRefs.Select(async sRef =>
+            {
+                var record = await scopeResolver.GetSkillByNameAsync(sRef, cancellationToken);
+                if (record is null)
+                {
+                    _logger.LogDebug(
+                        "JPS $ref skill '{SkillName}' not found in Dataverse; skipping",
+                        sRef);
+                    return null;
+                }
+
+                return new ResolvedSkillRef(
+                    Name: record.Name,
+                    PromptFragment: record.PromptFragment ?? string.Empty);
+            });
+
+            var results = await Task.WhenAll(skillTasks);
+            var filtered = results.Where(r => r is not null).Cast<ResolvedSkillRef>().ToList();
+            resolvedSkills = filtered.Count > 0 ? filtered : null;
+        }
+
+        var knowledgeCount = resolvedKnowledge?.Count ?? 0;
+        var skillCount = resolvedSkills?.Count ?? 0;
+
+        if (knowledgeCount > 0 || skillCount > 0)
+        {
+            _logger.LogDebug(
+                "Resolved JPS $ref entries: {KnowledgeCount} knowledge, {SkillCount} skills",
+                knowledgeCount, skillCount);
+        }
+
+        return (resolvedKnowledge, resolvedSkills);
     }
 
     /// <summary>
@@ -365,6 +491,58 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
                 ex,
                 "Failed to parse or merge promptSchemaOverride; using base prompt unchanged");
             return basePrompt;
+        }
+    }
+
+    /// <summary>
+    /// Extracts the <c>templateParameters</c> dictionary from a node's ConfigJson.
+    /// Returns null if ConfigJson is missing, malformed, or does not contain templateParameters.
+    /// </summary>
+    /// <param name="configJson">The node's ConfigJson string (may be null or empty).</param>
+    /// <returns>
+    /// A dictionary of template parameter names to their values, or null if no parameters found.
+    /// </returns>
+    private Dictionary<string, object?>? ExtractTemplateParameters(string? configJson)
+    {
+        if (string.IsNullOrWhiteSpace(configJson))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(configJson);
+            if (!doc.RootElement.TryGetProperty("templateParameters", out var paramsElement))
+                return null;
+
+            if (paramsElement.ValueKind != JsonValueKind.Object)
+            {
+                _logger.LogWarning(
+                    "ConfigJson templateParameters is not an object (found {ValueKind}); ignoring",
+                    paramsElement.ValueKind);
+                return null;
+            }
+
+            var result = new Dictionary<string, object?>();
+            foreach (var prop in paramsElement.EnumerateObject())
+            {
+                result[prop.Name] = prop.Value.ValueKind switch
+                {
+                    JsonValueKind.String => prop.Value.GetString(),
+                    JsonValueKind.Number => prop.Value.GetDouble(),
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    JsonValueKind.Null => null,
+                    _ => prop.Value.GetRawText()
+                };
+            }
+
+            return result.Count > 0 ? result : null;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to parse templateParameters from ConfigJson; using null fallback");
+            return null;
         }
     }
 

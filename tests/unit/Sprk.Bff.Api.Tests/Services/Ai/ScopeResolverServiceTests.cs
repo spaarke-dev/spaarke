@@ -1,5 +1,7 @@
 using System.Net;
+using System.Reflection;
 using System.Text.Json;
+using Azure.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -12,8 +14,522 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Services.Ai;
 
 /// <summary>
-/// Unit tests for ScopeResolverService - scope resolution service.
-/// Tests Phase 1 stub behavior and action lookup.
+/// Unit tests for ScopeResolverService.ResolveScopesAsync().
+/// Tests the full resolution pipeline: empty arrays, single IDs, multiple IDs,
+/// missing/not-found IDs, and mixed found/not-found scenarios.
+/// Uses mocked HttpMessageHandler to intercept Dataverse Web API calls.
+/// </summary>
+public class ScopeResolverServiceResolveScopesTests : IDisposable
+{
+    private readonly Mock<IDataverseService> _dataverseServiceMock;
+    private readonly Mock<IPlaybookService> _playbookServiceMock;
+    private readonly Mock<HttpMessageHandler> _httpMessageHandlerMock;
+    private readonly HttpClient _httpClient;
+    private readonly Mock<IConfiguration> _configurationMock;
+    private readonly Mock<ILogger<ScopeResolverService>> _loggerMock;
+    private readonly ScopeResolverService _service;
+
+    public ScopeResolverServiceResolveScopesTests()
+    {
+        _dataverseServiceMock = new Mock<IDataverseService>();
+        _playbookServiceMock = new Mock<IPlaybookService>();
+        _httpMessageHandlerMock = new Mock<HttpMessageHandler>();
+        _httpClient = new HttpClient(_httpMessageHandlerMock.Object)
+        {
+            BaseAddress = new Uri("https://test.crm.dynamics.com/api/data/v9.2/")
+        };
+        _configurationMock = new Mock<IConfiguration>();
+        _loggerMock = new Mock<ILogger<ScopeResolverService>>();
+
+        // Setup required configuration
+        _configurationMock.Setup(c => c["Dataverse:ServiceUrl"]).Returns("https://test.crm.dynamics.com");
+        _configurationMock.Setup(c => c["TENANT_ID"]).Returns("test-tenant-id");
+        _configurationMock.Setup(c => c["API_APP_ID"]).Returns("test-app-id");
+        _configurationMock.Setup(c => c["API_CLIENT_SECRET"]).Returns("test-secret");
+
+        _service = new ScopeResolverService(
+            _dataverseServiceMock.Object,
+            _playbookServiceMock.Object,
+            _httpClient,
+            _configurationMock.Object,
+            _loggerMock.Object);
+
+        // Bypass Azure AD authentication by setting _currentToken via reflection
+        // to a non-expired fake token. This prevents the ClientSecretCredential
+        // from making real calls to Azure AD during unit tests.
+        var tokenField = typeof(ScopeResolverService)
+            .GetField("_currentToken", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        tokenField.SetValue(_service, new AccessToken("fake-token", DateTimeOffset.UtcNow.AddHours(1)));
+    }
+
+    public void Dispose()
+    {
+        _httpClient.Dispose();
+    }
+
+    /// <summary>
+    /// Sets up URL-based routing for the mock HTTP handler.
+    /// Maps request URIs (containing entity set names and IDs) to response status codes and bodies.
+    /// </summary>
+    private void SetupHttpResponses(Dictionary<string, (HttpStatusCode StatusCode, object? Body)> urlResponses)
+    {
+        _httpMessageHandlerMock
+            .Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage request, CancellationToken _) =>
+            {
+                var uri = request.RequestUri!.ToString();
+                foreach (var (urlFragment, (statusCode, body)) in urlResponses)
+                {
+                    if (uri.Contains(urlFragment))
+                    {
+                        var response = new HttpResponseMessage(statusCode);
+                        if (body != null)
+                        {
+                            response.Content = new StringContent(
+                                JsonSerializer.Serialize(body),
+                                System.Text.Encoding.UTF8,
+                                "application/json");
+                        }
+                        return response;
+                    }
+                }
+                // Default: return 404 for unmatched URLs
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            });
+    }
+
+    #region ResolveScopesAsync Tests — Empty Input
+
+    [Fact]
+    public async Task ResolveScopesAsync_EmptyArrays_ReturnsEmptyScopes()
+    {
+        // Arrange & Act
+        var result = await _service.ResolveScopesAsync([], [], [], CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Skills.Should().BeEmpty();
+        result.Knowledge.Should().BeEmpty();
+        result.Tools.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ResolveScopesAsync_AllEmptyArrays_DoesNotMakeHttpCalls()
+    {
+        // Arrange & Act
+        await _service.ResolveScopesAsync([], [], [], CancellationToken.None);
+
+        // Assert — no HTTP calls should be made
+        _httpMessageHandlerMock
+            .Protected()
+            .Verify(
+                "SendAsync",
+                Times.Never(),
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>());
+    }
+
+    #endregion
+
+    #region ResolveScopesAsync Tests — Single IDs
+
+    [Fact]
+    public async Task ResolveScopesAsync_SingleSkillId_ReturnsResolvedSkill()
+    {
+        // Arrange
+        var skillId = Guid.NewGuid();
+        SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
+        {
+            [$"sprk_promptfragments({skillId})"] = (HttpStatusCode.OK, new
+            {
+                sprk_promptfragmentid = skillId,
+                sprk_name = "Contract Analysis",
+                sprk_description = "Analyzes contract clauses",
+                sprk_promptfragment = "You are a contract analysis expert",
+                sprk_SkillTypeId = new { sprk_name = "Legal Analysis" }
+            })
+        });
+
+        // Act
+        var result = await _service.ResolveScopesAsync(new[] { skillId }, [], [], CancellationToken.None);
+
+        // Assert
+        result.Skills.Should().HaveCount(1);
+        result.Skills[0].Id.Should().Be(skillId);
+        result.Skills[0].Name.Should().Be("Contract Analysis");
+        result.Skills[0].PromptFragment.Should().Be("You are a contract analysis expert");
+        result.Skills[0].Category.Should().Be("Legal Analysis");
+        result.Knowledge.Should().BeEmpty();
+        result.Tools.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ResolveScopesAsync_SingleKnowledgeId_ReturnsResolvedKnowledge()
+    {
+        // Arrange
+        var knowledgeId = Guid.NewGuid();
+        SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
+        {
+            [$"sprk_analysisknowledges({knowledgeId})"] = (HttpStatusCode.OK, new
+            {
+                sprk_analysisknowledgeid = knowledgeId,
+                sprk_name = "Company Standards",
+                sprk_description = "Internal compliance standards",
+                sprk_content = "All contracts must include indemnification clauses.",
+                sprk_KnowledgeTypeId = new { sprk_name = "Standards" }
+            })
+        });
+
+        // Act
+        var result = await _service.ResolveScopesAsync([], new[] { knowledgeId }, [], CancellationToken.None);
+
+        // Assert
+        result.Knowledge.Should().HaveCount(1);
+        result.Knowledge[0].Id.Should().Be(knowledgeId);
+        result.Knowledge[0].Name.Should().Be("Company Standards");
+        result.Knowledge[0].Content.Should().Contain("indemnification");
+        result.Skills.Should().BeEmpty();
+        result.Tools.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ResolveScopesAsync_SingleToolId_ReturnsResolvedTool()
+    {
+        // Arrange
+        var toolId = Guid.NewGuid();
+        SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
+        {
+            [$"sprk_analysistools({toolId})"] = (HttpStatusCode.OK, new
+            {
+                sprk_analysistoolid = toolId,
+                sprk_name = "Entity Extractor",
+                sprk_description = "Extracts named entities from documents",
+                sprk_handlerclass = "EntityExtractorHandler",
+                sprk_configuration = "{\"maxEntities\": 50}",
+                sprk_ToolTypeId = new { sprk_name = "Extraction" }
+            })
+        });
+
+        // Act
+        var result = await _service.ResolveScopesAsync([], [], new[] { toolId }, CancellationToken.None);
+
+        // Assert
+        result.Tools.Should().HaveCount(1);
+        result.Tools[0].Id.Should().Be(toolId);
+        result.Tools[0].Name.Should().Be("Entity Extractor");
+        result.Tools[0].HandlerClass.Should().Be("EntityExtractorHandler");
+        result.Skills.Should().BeEmpty();
+        result.Knowledge.Should().BeEmpty();
+    }
+
+    #endregion
+
+    #region ResolveScopesAsync Tests — Multiple IDs
+
+    [Fact]
+    public async Task ResolveScopesAsync_MultipleKnowledgeIds_ReturnsAllResolved()
+    {
+        // Arrange
+        var knowledgeId1 = Guid.NewGuid();
+        var knowledgeId2 = Guid.NewGuid();
+        var knowledgeId3 = Guid.NewGuid();
+
+        SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
+        {
+            [$"sprk_analysisknowledges({knowledgeId1})"] = (HttpStatusCode.OK, new
+            {
+                sprk_analysisknowledgeid = knowledgeId1,
+                sprk_name = "Knowledge A",
+                sprk_content = "Content A",
+                sprk_KnowledgeTypeId = new { sprk_name = "Standards" }
+            }),
+            [$"sprk_analysisknowledges({knowledgeId2})"] = (HttpStatusCode.OK, new
+            {
+                sprk_analysisknowledgeid = knowledgeId2,
+                sprk_name = "Knowledge B",
+                sprk_content = "Content B",
+                sprk_KnowledgeTypeId = new { sprk_name = "Standards" }
+            }),
+            [$"sprk_analysisknowledges({knowledgeId3})"] = (HttpStatusCode.OK, new
+            {
+                sprk_analysisknowledgeid = knowledgeId3,
+                sprk_name = "Knowledge C",
+                sprk_content = "Content C",
+                sprk_KnowledgeTypeId = new { sprk_name = "Regulations" }
+            })
+        });
+
+        // Act
+        var result = await _service.ResolveScopesAsync([], new[] { knowledgeId1, knowledgeId2, knowledgeId3 }, [], CancellationToken.None);
+
+        // Assert
+        result.Knowledge.Should().HaveCount(3);
+        result.Knowledge.Select(k => k.Name).Should().Contain(new[] { "Knowledge A", "Knowledge B", "Knowledge C" });
+    }
+
+    #endregion
+
+    #region ResolveScopesAsync Tests — Missing/Not-Found IDs
+
+    [Fact]
+    public async Task ResolveScopesAsync_MissingSkillId_FilteredOutFromResults()
+    {
+        // Arrange
+        var missingSkillId = Guid.NewGuid();
+        SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
+        {
+            [$"sprk_promptfragments({missingSkillId})"] = (HttpStatusCode.NotFound, null)
+        });
+
+        // Act
+        var result = await _service.ResolveScopesAsync(new[] { missingSkillId }, [], [], CancellationToken.None);
+
+        // Assert — missing IDs filtered out, no nulls in result
+        result.Skills.Should().BeEmpty();
+        result.Skills.Should().NotContainNulls();
+    }
+
+    [Fact]
+    public async Task ResolveScopesAsync_MissingKnowledgeId_FilteredOutFromResults()
+    {
+        // Arrange
+        var missingKnowledgeId = Guid.NewGuid();
+        SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
+        {
+            [$"sprk_analysisknowledges({missingKnowledgeId})"] = (HttpStatusCode.NotFound, null)
+        });
+
+        // Act
+        var result = await _service.ResolveScopesAsync([], new[] { missingKnowledgeId }, [], CancellationToken.None);
+
+        // Assert
+        result.Knowledge.Should().BeEmpty();
+        result.Knowledge.Should().NotContainNulls();
+    }
+
+    [Fact]
+    public async Task ResolveScopesAsync_MissingToolId_FilteredOutFromResults()
+    {
+        // Arrange
+        var missingToolId = Guid.NewGuid();
+        SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
+        {
+            [$"sprk_analysistools({missingToolId})"] = (HttpStatusCode.NotFound, null)
+        });
+
+        // Act
+        var result = await _service.ResolveScopesAsync([], [], new[] { missingToolId }, CancellationToken.None);
+
+        // Assert
+        result.Tools.Should().BeEmpty();
+        result.Tools.Should().NotContainNulls();
+    }
+
+    #endregion
+
+    #region ResolveScopesAsync Tests — Mixed Found/Not-Found
+
+    [Fact]
+    public async Task ResolveScopesAsync_MixedFoundAndMissing_ReturnsOnlyFoundRecords()
+    {
+        // Arrange
+        var foundSkillId = Guid.NewGuid();
+        var missingSkillId = Guid.NewGuid();
+        var foundKnowledgeId = Guid.NewGuid();
+        var missingKnowledgeId = Guid.NewGuid();
+
+        SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
+        {
+            [$"sprk_promptfragments({foundSkillId})"] = (HttpStatusCode.OK, new
+            {
+                sprk_promptfragmentid = foundSkillId,
+                sprk_name = "Found Skill",
+                sprk_promptfragment = "Found skill fragment",
+                sprk_SkillTypeId = new { sprk_name = "General" }
+            }),
+            [$"sprk_promptfragments({missingSkillId})"] = (HttpStatusCode.NotFound, null),
+            [$"sprk_analysisknowledges({foundKnowledgeId})"] = (HttpStatusCode.OK, new
+            {
+                sprk_analysisknowledgeid = foundKnowledgeId,
+                sprk_name = "Found Knowledge",
+                sprk_content = "Found knowledge content",
+                sprk_KnowledgeTypeId = new { sprk_name = "Standards" }
+            }),
+            [$"sprk_analysisknowledges({missingKnowledgeId})"] = (HttpStatusCode.NotFound, null)
+        });
+
+        // Act
+        var result = await _service.ResolveScopesAsync(
+            new[] { foundSkillId, missingSkillId },
+            new[] { foundKnowledgeId, missingKnowledgeId },
+            [],
+            CancellationToken.None);
+
+        // Assert — only found records returned, no nulls
+        result.Skills.Should().HaveCount(1);
+        result.Skills[0].Id.Should().Be(foundSkillId);
+        result.Skills[0].Name.Should().Be("Found Skill");
+        result.Skills.Should().NotContainNulls();
+
+        result.Knowledge.Should().HaveCount(1);
+        result.Knowledge[0].Id.Should().Be(foundKnowledgeId);
+        result.Knowledge[0].Name.Should().Be("Found Knowledge");
+        result.Knowledge.Should().NotContainNulls();
+    }
+
+    #endregion
+
+    #region ResolveScopesAsync Tests — All Three Arrays Populated
+
+    [Fact]
+    public async Task ResolveScopesAsync_AllThreeArraysPopulated_ResolvesInParallel()
+    {
+        // Arrange
+        var skillId = Guid.NewGuid();
+        var knowledgeId = Guid.NewGuid();
+        var toolId = Guid.NewGuid();
+
+        SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
+        {
+            [$"sprk_promptfragments({skillId})"] = (HttpStatusCode.OK, new
+            {
+                sprk_promptfragmentid = skillId,
+                sprk_name = "Parallel Skill",
+                sprk_promptfragment = "Skill prompt",
+                sprk_SkillTypeId = new { sprk_name = "Legal Analysis" }
+            }),
+            [$"sprk_analysisknowledges({knowledgeId})"] = (HttpStatusCode.OK, new
+            {
+                sprk_analysisknowledgeid = knowledgeId,
+                sprk_name = "Parallel Knowledge",
+                sprk_content = "Knowledge content",
+                sprk_KnowledgeTypeId = new { sprk_name = "Standards" }
+            }),
+            [$"sprk_analysistools({toolId})"] = (HttpStatusCode.OK, new
+            {
+                sprk_analysistoolid = toolId,
+                sprk_name = "Parallel Tool",
+                sprk_description = "Tool for parallel test",
+                sprk_handlerclass = "GenericAnalysisHandler",
+                sprk_ToolTypeId = new { sprk_name = "Analysis" }
+            })
+        });
+
+        // Act
+        var result = await _service.ResolveScopesAsync(
+            new[] { skillId },
+            new[] { knowledgeId },
+            new[] { toolId },
+            CancellationToken.None);
+
+        // Assert
+        result.Skills.Should().HaveCount(1);
+        result.Skills[0].Name.Should().Be("Parallel Skill");
+
+        result.Knowledge.Should().HaveCount(1);
+        result.Knowledge[0].Name.Should().Be("Parallel Knowledge");
+
+        result.Tools.Should().HaveCount(1);
+        result.Tools[0].Name.Should().Be("Parallel Tool");
+    }
+
+    [Fact]
+    public async Task ResolveScopesAsync_AllThreeArraysWithMixed_ReturnsCorrectCounts()
+    {
+        // Arrange — 2 skills (1 found, 1 missing), 1 knowledge (found), 2 tools (both found)
+        var skill1 = Guid.NewGuid();
+        var skill2Missing = Guid.NewGuid();
+        var knowledge1 = Guid.NewGuid();
+        var tool1 = Guid.NewGuid();
+        var tool2 = Guid.NewGuid();
+
+        SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
+        {
+            [$"sprk_promptfragments({skill1})"] = (HttpStatusCode.OK, new
+            {
+                sprk_promptfragmentid = skill1,
+                sprk_name = "Skill One",
+                sprk_promptfragment = "Fragment one"
+            }),
+            [$"sprk_promptfragments({skill2Missing})"] = (HttpStatusCode.NotFound, null),
+            [$"sprk_analysisknowledges({knowledge1})"] = (HttpStatusCode.OK, new
+            {
+                sprk_analysisknowledgeid = knowledge1,
+                sprk_name = "Knowledge One",
+                sprk_content = "Content one",
+                sprk_KnowledgeTypeId = new { sprk_name = "Standards" }
+            }),
+            [$"sprk_analysistools({tool1})"] = (HttpStatusCode.OK, new
+            {
+                sprk_analysistoolid = tool1,
+                sprk_name = "Tool One",
+                sprk_handlerclass = "HandlerA",
+                sprk_ToolTypeId = new { sprk_name = "Extraction" }
+            }),
+            [$"sprk_analysistools({tool2})"] = (HttpStatusCode.OK, new
+            {
+                sprk_analysistoolid = tool2,
+                sprk_name = "Tool Two",
+                sprk_handlerclass = "HandlerB",
+                sprk_ToolTypeId = new { sprk_name = "Analysis" }
+            })
+        });
+
+        // Act
+        var result = await _service.ResolveScopesAsync(
+            new[] { skill1, skill2Missing },
+            new[] { knowledge1 },
+            new[] { tool1, tool2 },
+            CancellationToken.None);
+
+        // Assert
+        result.Skills.Should().HaveCount(1, "one of two skills was not found");
+        result.Knowledge.Should().HaveCount(1);
+        result.Tools.Should().HaveCount(2);
+    }
+
+    #endregion
+
+    #region ResolveScopesAsync Tests — Logging
+
+    [Fact]
+    public async Task ResolveScopesAsync_LogsRequestedCounts()
+    {
+        // Arrange
+        var skillId = Guid.NewGuid();
+        SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
+        {
+            [$"sprk_promptfragments({skillId})"] = (HttpStatusCode.OK, new
+            {
+                sprk_promptfragmentid = skillId,
+                sprk_name = "Logged Skill",
+                sprk_promptfragment = "Fragment"
+            })
+        });
+
+        // Act
+        await _service.ResolveScopesAsync(new[] { skillId }, [], [], CancellationToken.None);
+
+        // Assert — Verify logging occurred
+        _loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Debug,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Resolving scopes")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    #endregion
+}
+
+/// <summary>
+/// Unit tests for ScopeResolverService - stub action lookup and search functionality.
 /// </summary>
 public class ScopeResolverServiceTests : IDisposable
 {
@@ -59,39 +575,6 @@ public class ScopeResolverServiceTests : IDisposable
     {
         _httpClient.Dispose();
     }
-
-    #region ResolveScopesAsync Tests
-
-    [Fact]
-    public async Task ResolveScopesAsync_Phase1_ReturnsEmptyScopes()
-    {
-        // Arrange
-        var skillIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
-        var knowledgeIds = new[] { Guid.NewGuid() };
-        var toolIds = new[] { Guid.NewGuid() };
-
-        // Act
-        var result = await _service.ResolveScopesAsync(skillIds, knowledgeIds, toolIds, CancellationToken.None);
-
-        // Assert
-        result.Should().NotBeNull();
-        result.Skills.Should().BeEmpty();
-        result.Knowledge.Should().BeEmpty();
-        result.Tools.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task ResolveScopesAsync_EmptyArrays_ReturnsEmptyScopes()
-    {
-        // Arrange & Act
-        var result = await _service.ResolveScopesAsync([], [], [], CancellationToken.None);
-
-        // Assert
-        result.Should().NotBeNull();
-        result.Skills.Should().BeEmpty();
-    }
-
-    #endregion
 
     #region ResolvePlaybookScopesAsync Tests
 
@@ -255,29 +738,8 @@ public class ScopeResolverServiceTests : IDisposable
 
     #endregion
 
-    #region Logging Tests
-
-    [Fact]
-    public async Task ResolveScopesAsync_LogsRequestedCounts()
-    {
-        // Arrange
-        var skillIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
-
-        // Act
-        await _service.ResolveScopesAsync(skillIds, [], [], CancellationToken.None);
-
-        // Assert - Verify logging occurred (using loose verification)
-        _loggerMock.Verify(
-            x => x.Log(
-                LogLevel.Debug,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Resolving scopes")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
-    }
-
-    #endregion
+    // Note: ResolveScopesAsync logging tests moved to ScopeResolverServiceResolveScopesTests class
+    // which has proper HTTP mocking and auth bypass for the full resolution pipeline.
 
     #region SearchScopesAsync Tests
 
@@ -517,7 +979,7 @@ public class ScopeModelsTests
         // Assert
         ((int)ToolType.EntityExtractor).Should().Be(0);
         ((int)ToolType.ClauseAnalyzer).Should().Be(1);
-        ((int)ToolType.Custom).Should().Be(2);
+        ((int)ToolType.Custom).Should().Be(99);
     }
 }
 
@@ -559,6 +1021,11 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
             _httpClient,
             _configurationMock.Object,
             _loggerMock.Object);
+
+        // Bypass Azure AD authentication by setting _currentToken via reflection
+        var tokenField = typeof(ScopeResolverService)
+            .GetField("_currentToken", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        tokenField.SetValue(_service, new AccessToken("fake-token", DateTimeOffset.UtcNow.AddHours(1)));
     }
 
     public void Dispose()

@@ -244,10 +244,10 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 context.SkillContext,
                 context.KnowledgeContext,
                 context.Document?.ExtractedText,
-                null,  // templateParameters - not yet wired
+                context.TemplateParameters,
                 context.DownstreamNodes,
-                null,  // additionalKnowledge - resolved by executor in future
-                null   // additionalSkills - resolved by executor in future
+                context.AdditionalKnowledge,
+                context.AdditionalSkills
             );
 
 #pragma warning disable CS0618 // Obsolete BuildExecutionPrompt retained for flat-text backward compatibility
@@ -384,10 +384,10 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 context.SkillContext,
                 context.KnowledgeContext,
                 context.Document?.ExtractedText,
-                null,  // templateParameters - not yet wired
+                context.TemplateParameters,
                 context.DownstreamNodes,
-                null,  // additionalKnowledge - resolved by executor in future
-                null   // additionalSkills - resolved by executor in future
+                context.AdditionalKnowledge,
+                context.AdditionalSkills
             );
 
 #pragma warning disable CS0618 // Obsolete BuildExecutionPrompt retained for flat-text backward compatibility
