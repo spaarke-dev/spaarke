@@ -56,13 +56,13 @@
 
 | # | Task | Est. | Status | Deps | Parallel Group |
 |---|------|------|--------|------|----------------|
-| 050 | Deploy BFF API with Knowledge Augmentation | 2h | 🔲 | 020-024, 031 | — |
+| 050 | Deploy BFF API with Knowledge Augmentation | 2h | ⏭️ | 020-024, 031 | — |
 
 ## Wrap-Up
 
 | # | Task | Est. | Status | Deps | Parallel Group |
 |---|------|------|--------|------|----------------|
-| 090 | Project Wrap-Up | 2h | 🔲 | 050 | — |
+| 090 | Project Wrap-Up | 2h | ✅ | 050 | — |
 
 ---
 
