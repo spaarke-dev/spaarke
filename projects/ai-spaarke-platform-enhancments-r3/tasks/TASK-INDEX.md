@@ -23,7 +23,7 @@
 | 010 | Deploy Knowledge Source Records to Dataverse | 2h | ✅ | none | C |
 | 011 | Build ReferenceIndexingService + Admin Endpoints | 4h | ✅ | 001 | C |
 | 012 | Index All 10 Knowledge Sources | 2h | 🔲 | 010, 011 | D |
-| 013 | Wire Reference Retrieval into RagService | 3h | 🔲 | 011 | D |
+| 013 | Wire Reference Retrieval into RagService | 3h | ✅ | 011 | D |
 
 ## Phase 3: Knowledge-Augmented Execution (14h)
 
@@ -41,8 +41,8 @@
 |---|------|------|--------|------|----------------|
 | 030 | Verify/Deploy Azure OpenAI Models | 2h | ✅ | none | G |
 | 031 | Fix Hardcoded Model Selection | 3h | ✅ | none | G |
-| 032 | Document Model Selection Guidelines | 1h | 🔲 | 031 | H |
-| 033 | Add Model Selection to Playbook Builder | 2h | 🔲 | 031 | H |
+| 032 | Document Model Selection Guidelines | 1h | ✅ | 031 | H |
+| 033 | Add Model Selection to Playbook Builder | 2h | ✅ | 031 | H |
 
 ## Phase 5: Embedding Governance (3h)
 

@@ -104,12 +104,12 @@ export const ModelSelector = memo(function ModelSelector({
         <div className={styles.root}>
             <Dropdown
                 size="small"
-                value={selectedModel ? selectedModel.name : "(Default)"}
+                value={selectedModel ? selectedModel.name : "Auto (recommended)"}
                 selectedOptions={modelDeploymentId ? [modelDeploymentId] : ["__default__"]}
                 onOptionSelect={handleSelect}
             >
                 <Option key="__default__" value="__default__">
-                    (Default — System Model)
+                    Auto (recommended)
                 </Option>
                 {activeModels.map((model) => (
                     <Option key={model.id} value={model.id} text={model.name}>
@@ -125,7 +125,7 @@ export const ModelSelector = memo(function ModelSelector({
             <Text className={styles.contextHint}>
                 {selectedModel
                     ? `Context: ${(selectedModel.contextWindow / 1000).toFixed(0)}k tokens`
-                    : "Uses the system default AI model"}
+                    : "Automatically selects the best model for this operation"}
             </Text>
         </div>
     );
