@@ -111,7 +111,7 @@ $ActionMappings = @(
     @{ Name = 'Extract Entities';   File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/entity-extractor.json' }
     @{ Name = 'Calculate Values';   File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/financial-calculator.json' }
     @{ Name = 'Detect Risks';       File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/risk-detector.json' }
-    @{ Name = 'Profile Document';   File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/document-profiler.json' }
+    @{ Name = 'Document Profiler';  File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/document-profiler.json' }
     @{ Name = 'Compare Clauses';    File = 'projects/jps-server-rollout/notes/jps-conversions/clause-comparison.json' }
     @{ Name = 'Semantic Search';    File = 'projects/jps-server-rollout/notes/jps-conversions/semantic-search.json' }
     @{ Name = 'Summarize Content';  File = 'projects/jps-server-rollout/notes/jps-conversions/summary-handler.json' }
