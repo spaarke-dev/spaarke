@@ -1,0 +1,55 @@
+{
+  "taxonomy": "AP Fraud Indicators",
+  "version": "1.0",
+  "categories": [
+    {
+      "id": "APF-CAT-01",
+      "category": "Duplicate Invoice Patterns",
+      "indicators": [
+        { "id": "APF-01-01", "indicator": "Same invoice number from same vendor", "severity": "critical", "detection": "Exact match on vendor ID + invoice number" },
+        { "id": "APF-01-02", "indicator": "Same amount and date, different invoice number", "severity": "high", "detection": "Match on vendor + amount + date within 3 days" },
+        { "id": "APF-01-03", "indicator": "Sequential invoice numbers with identical amounts", "severity": "high", "detection": "Sequential numbers, same amount, same vendor" },
+        { "id": "APF-01-04", "indicator": "Same amount across different vendors", "severity": "medium", "detection": "Identical unusual amounts from multiple vendors in same period" }
+      ]
+    },
+    {
+      "id": "APF-CAT-02",
+      "category": "Vendor Master Manipulation",
+      "indicators": [
+        { "id": "APF-02-01", "indicator": "Vendor address matches employee address", "severity": "critical", "detection": "Cross-reference vendor addresses against HR records" },
+        { "id": "APF-02-02", "indicator": "Vendor bank account recently changed", "severity": "high", "detection": "Bank account change within 30 days of large payment" },
+        { "id": "APF-02-03", "indicator": "PO Box-only vendor address", "severity": "medium", "detection": "No physical address on file for non-individual vendors" },
+        { "id": "APF-02-04", "indicator": "Vendor created and paid within 48 hours", "severity": "critical", "detection": "New vendor setup to first payment time analysis" }
+      ]
+    },
+    {
+      "id": "APF-CAT-03",
+      "category": "Amount Anomalies",
+      "indicators": [
+        { "id": "APF-03-01", "indicator": "Round number invoices with no cents", "severity": "medium", "detection": "Invoices ending in .00 above threshold frequency" },
+        { "id": "APF-03-02", "indicator": "Amounts just below approval threshold", "severity": "high", "detection": "Invoices consistently at 95-99% of approval limit" },
+        { "id": "APF-03-03", "indicator": "Benford law deviation", "severity": "medium", "detection": "First-digit distribution analysis vs. expected Benford curve" },
+        { "id": "APF-03-04", "indicator": "Sudden increase in vendor spend", "severity": "high", "detection": "Month-over-month spend increase exceeding 50% without PO change" }
+      ]
+    },
+    {
+      "id": "APF-CAT-04",
+      "category": "Split Payment Schemes",
+      "indicators": [
+        { "id": "APF-04-01", "indicator": "Multiple invoices summing to a larger PO", "severity": "high", "detection": "Multiple invoices from same vendor in same period summing to round number" },
+        { "id": "APF-04-02", "indicator": "Invoices split across approval authorities", "severity": "critical", "detection": "Same work split to stay under different approver thresholds" },
+        { "id": "APF-04-03", "indicator": "Progressive billing with front-loaded amounts", "severity": "medium", "detection": "Early milestones disproportionately large vs. work completed" }
+      ]
+    },
+    {
+      "id": "APF-CAT-05",
+      "category": "Ghost Vendor Characteristics",
+      "indicators": [
+        { "id": "APF-05-01", "indicator": "No verifiable business registration", "severity": "critical", "detection": "Cannot confirm vendor via state business registry or D and B" },
+        { "id": "APF-05-02", "indicator": "Generic business name and services", "severity": "medium", "detection": "Vague company name with broad service description" },
+        { "id": "APF-05-03", "indicator": "Single point of contact, no web presence", "severity": "high", "detection": "No website, no LinkedIn, single contact phone or email" },
+        { "id": "APF-05-04", "indicator": "Invoice format matches internal templates", "severity": "critical", "detection": "Invoice layout, fonts, or formatting similar to internal documents" }
+      ]
+    }
+  ]
+}

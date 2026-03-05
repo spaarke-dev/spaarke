@@ -1,0 +1,57 @@
+{
+  "taxonomy": "Invoice Validation Rules",
+  "version": "1.0",
+  "validationCategories": [
+    {
+      "id": "IVR-CAT-01",
+      "category": "Required Fields",
+      "rules": [
+        { "id": "IVR-01-01", "rule": "Invoice number present and unique", "severity": "critical", "action": "Reject if missing or duplicate" },
+        { "id": "IVR-01-02", "rule": "Invoice date within acceptable range", "severity": "high", "action": "Flag if future-dated or more than 90 days old" },
+        { "id": "IVR-01-03", "rule": "Vendor name and address match master file", "severity": "critical", "action": "Reject if vendor not in approved vendor list" },
+        { "id": "IVR-01-04", "rule": "Payment terms specified", "severity": "high", "action": "Default to contract terms if missing" },
+        { "id": "IVR-01-05", "rule": "Tax registration number if applicable", "severity": "medium", "action": "Flag for manual review if missing in taxable jurisdiction" }
+      ]
+    },
+    {
+      "id": "IVR-CAT-02",
+      "category": "Amount Validation",
+      "rules": [
+        { "id": "IVR-02-01", "rule": "Line item totals sum to invoice total", "severity": "critical", "action": "Reject if discrepancy exceeds $0.01" },
+        { "id": "IVR-02-02", "rule": "Tax calculation accuracy", "severity": "high", "action": "Recalculate tax; flag if variance exceeds 1%" },
+        { "id": "IVR-02-03", "rule": "Unit prices match contract or PO rates", "severity": "critical", "action": "Reject if price exceeds contracted rate" },
+        { "id": "IVR-02-04", "rule": "Quantity within PO remaining balance", "severity": "high", "action": "Flag if cumulative quantity exceeds PO quantity" },
+        { "id": "IVR-02-05", "rule": "Currency matches contract terms", "severity": "medium", "action": "Convert at contract-specified rate or flag for review" }
+      ]
+    },
+    {
+      "id": "IVR-CAT-03",
+      "category": "PO Matching",
+      "rules": [
+        { "id": "IVR-03-01", "rule": "Three-way match: PO, receipt, invoice", "severity": "critical", "action": "Hold payment until all three documents reconcile" },
+        { "id": "IVR-03-02", "rule": "PO number valid and open", "severity": "critical", "action": "Reject if PO closed, cancelled, or not found" },
+        { "id": "IVR-03-03", "rule": "Price tolerance within 5% of PO", "severity": "high", "action": "Auto-approve within tolerance; escalate if exceeded" },
+        { "id": "IVR-03-04", "rule": "Quantity tolerance within 10% of PO", "severity": "medium", "action": "Auto-approve within tolerance; flag if exceeded" }
+      ]
+    },
+    {
+      "id": "IVR-CAT-04",
+      "category": "Compliance",
+      "rules": [
+        { "id": "IVR-04-01", "rule": "Goods or services received confirmation", "severity": "critical", "action": "Require receiving report or service acceptance" },
+        { "id": "IVR-04-02", "rule": "Approval authority within delegation matrix", "severity": "high", "action": "Route to appropriate approver based on amount" },
+        { "id": "IVR-04-03", "rule": "Contract period coverage", "severity": "high", "action": "Reject if invoice date outside contract period" },
+        { "id": "IVR-04-04", "rule": "Withholding tax compliance", "severity": "medium", "action": "Apply W-9 or W-8 requirements for US vendors" }
+      ]
+    },
+    {
+      "id": "IVR-CAT-05",
+      "category": "Payment Terms",
+      "rules": [
+        { "id": "IVR-05-01", "rule": "Early payment discount eligibility", "severity": "medium", "action": "Flag 2/10 Net 30 discount if payment within window" },
+        { "id": "IVR-05-02", "rule": "Payment terms match contract", "severity": "high", "action": "Override invoice terms with contract terms if different" },
+        { "id": "IVR-05-03", "rule": "Late payment interest calculation", "severity": "medium", "action": "Calculate interest per contract terms if payment delayed" }
+      ]
+    }
+  ]
+}
