@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Tools;
@@ -35,6 +36,7 @@ public sealed class FinancialCalculatorHandlerTests
         _handler = new FinancialCalculatorHandler(
             _openAiClientMock.Object,
             _textChunkingServiceMock.Object,
+            Options.Create(new ModelSelectorOptions()),
             new PromptSchemaRenderer(Mock.Of<ILogger<PromptSchemaRenderer>>()),
             _loggerMock.Object);
     }

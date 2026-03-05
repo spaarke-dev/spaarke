@@ -1,0 +1,47 @@
+<task id="AIRA-032" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Document Model Selection Guidelines</title>
+    <phase>4</phase>
+    <estimate>1h</estimate>
+    <tags>documentation</tags>
+    <dependencies>031</dependencies>
+    <parallel-group>H</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Create model selection guidelines document mapping operation types to recommended models with rationale.</goal>
+    <context>
+      The ModelSelector now routes different operation types to different models. This document provides guidance for playbook authors and developers on which model to use when.
+    </context>
+    <constraints>
+      - Include all OperationType enum values
+      - Include cost/latency tradeoffs
+      - Reference actual deployment names
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      docs/guides/SPAARKE-AI-ARCHITECTURE.md
+      .claude/constraints/ai.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read ModelSelector.cs OperationType enum for all types</step>
+    <step>Create `docs/guides/AI-MODEL-SELECTION-GUIDE.md` with operation-type → model mapping table</step>
+    <step>Include rationale for each mapping (cost, latency, capability)</step>
+    <step>Include override instructions for playbook authors</step>
+  </steps>
+
+  <tools>Read, Write, Grep</tools>
+
+  <outputs>
+    <output>`docs/guides/AI-MODEL-SELECTION-GUIDE.md`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Guide covers all OperationType values with recommended models</criterion>
+    <criterion>Includes cost/latency rationale</criterion>
+  </acceptance-criteria>
+</task>

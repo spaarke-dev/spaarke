@@ -1,0 +1,45 @@
+<task id="AIRA-005" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Validate Invoice Index</title>
+    <phase>1</phase>
+    <estimate>1h</estimate>
+    <tags>ai-search, validation</tags>
+    <dependencies>none</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Check if invoice test data exists in Dataverse. If yes, trigger indexing to populate `spaarke-invoices-dev`. If no data, document deferral.</goal>
+    <context>
+      `InvoiceIndexingJobHandler` exists but no invoices have been processed. The index schema exists with 0 documents. This task validates readiness and either populates or explicitly defers.
+    </context>
+    <constraints>
+      - Do not create fake invoice data — only index real records
+      - Document decision if deferring
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      docs/architecture/auth-AI-azure-resources.md
+      .claude/adr/ADR-013-ai-architecture.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Check Dataverse for `sprk_invoice` records (query via admin API or Power Platform)</step>
+    <step>If invoices exist: trigger indexing endpoint and verify documents appear in `spaarke-invoices-dev`</step>
+    <step>If no invoices: document deferral in project notes — "Invoice index deferred: no test data available"</step>
+    <step>Verify the InvoiceIndexingJobHandler code is correct and ready for when data exists</step>
+  </steps>
+
+  <tools>Bash, Read, Grep</tools>
+
+  <outputs>
+    <output>Invoice index populated (if data exists) OR deferral documented</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Invoice index status documented — either populated or explicitly deferred with reason</criterion>
+  </acceptance-criteria>
+</task>

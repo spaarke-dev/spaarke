@@ -332,7 +332,7 @@ public class RagDedicatedDeploymentTests : IClassFixture<IntegrationTestFixture>
             TenantId = "isolation-test-shared",
             Name = "Shared Isolation Test",
             Model = RagDeploymentModel.Shared,
-            IndexName = "spaarke-knowledge-index"
+            IndexName = "spaarke-knowledge-index-v2"
         };
 
         var dedicatedConfig = new KnowledgeDeploymentConfig
@@ -371,7 +371,7 @@ public class RagDedicatedDeploymentTests : IClassFixture<IntegrationTestFixture>
         {
             TenantId = sharedTenant,
             Model = RagDeploymentModel.Shared,
-            IndexName = "spaarke-knowledge-index"
+            IndexName = "spaarke-knowledge-index-v2"
         });
 
         await service.SaveDeploymentConfigAsync(new KnowledgeDeploymentConfig
@@ -387,7 +387,7 @@ public class RagDedicatedDeploymentTests : IClassFixture<IntegrationTestFixture>
 
         // Assert - Clients should point to different indexes
         sharedClient.IndexName.Should().NotBe(dedicatedClient.IndexName);
-        sharedClient.IndexName.Should().Be("spaarke-knowledge-index");
+        sharedClient.IndexName.Should().Be("spaarke-knowledge-index-v2");
         dedicatedClient.IndexName.Should().Be("client-test-dedicated-knowledge");
 
         _output.WriteLine($"Shared client index: {sharedClient.IndexName}");

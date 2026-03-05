@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
@@ -23,10 +24,10 @@ public class DocumentClassifierHandlerTests
         var renderer = new PromptSchemaRenderer(Mock.Of<ILogger<PromptSchemaRenderer>>());
 
         // Handler without RAG
-        _handler = new DocumentClassifierHandler(_openAiClientMock.Object, renderer, _loggerMock.Object);
+        _handler = new DocumentClassifierHandler(_openAiClientMock.Object, Options.Create(new ModelSelectorOptions()), renderer, _loggerMock.Object);
 
         // Handler with RAG
-        _handlerWithRag = new DocumentClassifierHandler(_openAiClientMock.Object, renderer, _loggerMock.Object, _ragServiceMock.Object);
+        _handlerWithRag = new DocumentClassifierHandler(_openAiClientMock.Object, Options.Create(new ModelSelectorOptions()), renderer, _loggerMock.Object, _ragServiceMock.Object);
     }
 
     #region Handler Properties Tests

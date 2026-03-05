@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai.Tools;
@@ -34,6 +35,7 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
 
     private readonly IOpenAiClient _openAiClient;
     private readonly IRagService? _ragService;
+    private readonly ModelSelectorOptions _modelSelectorOptions;
     private readonly PromptSchemaRenderer _promptSchemaRenderer;
     private readonly ILogger<DocumentClassifierHandler> _logger;
 
@@ -85,11 +87,13 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
 
     public DocumentClassifierHandler(
         IOpenAiClient openAiClient,
+        IOptions<ModelSelectorOptions> modelSelectorOptions,
         PromptSchemaRenderer promptSchemaRenderer,
         ILogger<DocumentClassifierHandler> logger,
         IRagService? ragService = null)
     {
         _openAiClient = openAiClient;
+        _modelSelectorOptions = modelSelectorOptions.Value;
         _promptSchemaRenderer = promptSchemaRenderer;
         _logger = logger;
         _ragService = ragService;
@@ -222,7 +226,7 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
                 InputTokens = classificationResult.InputTokens + ragTokens,
                 OutputTokens = classificationResult.OutputTokens,
                 ModelCalls = config.UseRagExamples ? 2 : 1, // RAG query + classification
-                ModelName = "gpt-4o-mini"
+                ModelName = _modelSelectorOptions.ToolHandlerModel
             };
 
             // Filter by confidence

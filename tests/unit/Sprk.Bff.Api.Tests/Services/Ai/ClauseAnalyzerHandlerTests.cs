@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Tools;
@@ -20,7 +21,7 @@ public class ClauseAnalyzerHandlerTests
         _textChunkingServiceMock = new Mock<ITextChunkingService>();
         _loggerMock = new Mock<ILogger<ClauseAnalyzerHandler>>();
         var renderer = new PromptSchemaRenderer(Mock.Of<ILogger<PromptSchemaRenderer>>());
-        _handler = new ClauseAnalyzerHandler(_openAiClientMock.Object, _textChunkingServiceMock.Object, renderer, _loggerMock.Object);
+        _handler = new ClauseAnalyzerHandler(_openAiClientMock.Object, _textChunkingServiceMock.Object, Options.Create(new ModelSelectorOptions()), renderer, _loggerMock.Object);
     }
 
     #region Handler Properties Tests

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using System.Text.Json.Nodes;
 
 namespace Sprk.Bff.Api.Services.Ai.Tools;
@@ -33,6 +34,7 @@ public sealed class ClauseComparisonHandler : IAnalysisToolHandler
 
     private readonly IOpenAiClient _openAiClient;
     private readonly ITextChunkingService _textChunkingService;
+    private readonly ModelSelectorOptions _modelSelectorOptions;
     private readonly PromptSchemaRenderer _promptSchemaRenderer;
     private readonly ILogger<ClauseComparisonHandler> _logger;
 
@@ -84,11 +86,13 @@ public sealed class ClauseComparisonHandler : IAnalysisToolHandler
     public ClauseComparisonHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
+        IOptions<ModelSelectorOptions> modelSelectorOptions,
         PromptSchemaRenderer promptSchemaRenderer,
         ILogger<ClauseComparisonHandler> logger)
     {
         _openAiClient = openAiClient;
         _textChunkingService = textChunkingService;
+        _modelSelectorOptions = modelSelectorOptions.Value;
         _promptSchemaRenderer = promptSchemaRenderer;
         _logger = logger;
     }
@@ -227,7 +231,7 @@ public sealed class ClauseComparisonHandler : IAnalysisToolHandler
                 InputTokens = totalInputTokens,
                 OutputTokens = totalOutputTokens,
                 ModelCalls = chunks.Count,
-                ModelName = "gpt-4o-mini"
+                ModelName = _modelSelectorOptions.ToolHandlerModel
             };
 
             var resultData = new ClauseComparisonResult

@@ -1,0 +1,52 @@
+<task id="AIRA-030" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Verify and Deploy Azure OpenAI Models</title>
+    <phase>4</phase>
+    <estimate>2h</estimate>
+    <tags>azure, infrastructure</tags>
+    <dependencies>none</dependencies>
+    <parallel-group>G</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Verify which Azure OpenAI models are deployed on `spaarke-openai-dev` and deploy any missing models (gpt-4o, gpt-4o-mini, o1-mini).</goal>
+    <context>
+      ModelSelector references gpt-4o, gpt-4o-mini, and o1-mini but only gpt-4o-mini is confirmed deployed. The others may exist in config but not actually deployed. This task verifies and provisions as needed.
+    </context>
+    <constraints>
+      - Check actual deployments, not just config references
+      - Verify TPM (tokens per minute) quotas are sufficient
+      - Document deployment names and quotas for team reference
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      docs/architecture/auth-AI-azure-resources.md
+      .claude/constraints/ai.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>List current deployments: `az cognitiveservices account deployment list --name spaarke-openai-dev --resource-group spe-infrastructure-westus2 -o table`</step>
+    <step>For each missing model, create deployment: `az cognitiveservices account deployment create --name spaarke-openai-dev --resource-group spe-infrastructure-westus2 --deployment-name {name} --model-name {model} --model-version {version} --model-format OpenAI --sku-capacity {tpm} --sku-name Standard`</step>
+    <step>Verify all 3 deployments are active and accessible</step>
+    <step>Test each model with a simple completion request</step>
+    <step>Document deployment names, model versions, and TPM quotas</step>
+    <step>Update appsettings or configuration if deployment names differ from ModelSelector expectations</step>
+  </steps>
+
+  <tools>Bash, Read, Edit</tools>
+
+  <outputs>
+    <output>All 3 models deployed and verified on Azure OpenAI</output>
+    <output>Deployment documentation in project notes</output>
+    <output>Configuration updated if needed</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>gpt-4o, gpt-4o-mini, and o1-mini all deployed and responding</criterion>
+    <criterion>TPM quotas documented</criterion>
+    <criterion>Deployment names match application configuration</criterion>
+  </acceptance-criteria>
+</task>

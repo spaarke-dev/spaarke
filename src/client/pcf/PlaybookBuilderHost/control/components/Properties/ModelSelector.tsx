@@ -109,16 +109,16 @@ export const ModelSelector = React.memo(function ModelSelector({
       <Dropdown
         id={`model-selector-${nodeId}`}
         placeholder="Select a model..."
-        value={selectedModel?.name || ''}
+        value={selectedModel?.name || 'Auto (recommended)'}
         selectedOptions={selectedModelId ? [selectedModelId] : []}
         onOptionSelect={handleModelChange}
         size="small"
       >
-        <Option key="none" value="" text="(Default)">
+        <Option key="none" value="" text="Auto (recommended)">
           <div className={styles.optionContent}>
-            <span>(Default - GPT-4o)</span>
+            <span>Auto (recommended)</span>
             <Text className={styles.optionDescription}>
-              Uses the default model for this action type
+              Automatically selects the best model for this operation
             </Text>
           </div>
         </Option>
@@ -148,7 +148,7 @@ export const ModelSelector = React.memo(function ModelSelector({
       <Text className={styles.hint}>
         {selectedModel
           ? `Context: ${(selectedModel.contextWindow / 1000).toFixed(0)}k tokens`
-          : 'Choose an AI model for this node'}
+          : 'Automatically selects the best model for this operation'}
       </Text>
     </div>
   );

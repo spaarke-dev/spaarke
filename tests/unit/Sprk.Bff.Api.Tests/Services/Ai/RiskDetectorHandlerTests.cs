@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Tools;
@@ -37,6 +38,7 @@ public class RiskDetectorHandlerTests
         _handler = new RiskDetectorHandler(
             _openAiClientMock.Object,
             _textChunkingServiceMock.Object,
+            Options.Create(new ModelSelectorOptions()),
             new PromptSchemaRenderer(Mock.Of<ILogger<PromptSchemaRenderer>>()),
             _loggerMock.Object);
     }

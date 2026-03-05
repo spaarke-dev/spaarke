@@ -9,7 +9,7 @@ namespace Sprk.Bff.Api.Models.Ai;
 /// Used for RAG (Retrieval-Augmented Generation) with hybrid search.
 /// </summary>
 /// <remarks>
-/// This model maps to the "spaarke-knowledge-index" in Azure AI Search.
+/// This model maps to the "spaarke-knowledge-index-v2" in Azure AI Search.
 /// Supports 3 deployment models: Shared (filtered by tenantId), Dedicated (per-customer index), CustomerOwned.
 /// Vector dimensions: 1536 (text-embedding-3-small) and 3072 (text-embedding-3-large) during migration.
 /// </remarks>

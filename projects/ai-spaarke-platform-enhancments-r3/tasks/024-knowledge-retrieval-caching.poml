@@ -1,0 +1,58 @@
+<task id="AIRA-024" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Knowledge Retrieval Result Caching</title>
+    <phase>3</phase>
+    <estimate>2h</estimate>
+    <tags>bff-api, caching</tags>
+    <dependencies>020</dependencies>
+    <parallel-group>F</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Cache RAG retrieval results in Redis per (query-hash, knowledgeSourceIds, topK) to prevent duplicate embedding generation and search calls when multiple action nodes in a playbook query the same knowledge sources.</goal>
+    <context>
+      A playbook may have multiple action nodes that all need the same reference knowledge. Without caching, each node independently generates embeddings and queries the index. Redis caching eliminates duplicates within a playbook execution session.
+    </context>
+    <constraints>
+      - Cache key: hash of (query, knowledgeSourceIds, topK, indexName)
+      - TTL: Duration of playbook execution session (use session-scoped TTL)
+      - Use IDistributedCache (Redis) per ADR-009
+      - Version cache keys appropriately
+      - Tenant-scoped cache keys
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      .claude/adr/ADR-009-redis-caching.md
+      .claude/adr/ADR-014-ai-caching.md
+      .claude/patterns/caching/distributed-cache.md
+      .claude/constraints/ai.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read existing caching patterns in the AI services</step>
+    <step>Design cache key structure: `rag-ref:{tenantId}:{queryHash}:{sourceIds}:{topK}`</step>
+    <step>Wrap SearchReferencesAsync with cache check/populate logic</step>
+    <step>Set TTL to match playbook execution session duration (or 10 min default)</step>
+    <step>Write unit tests verifying cache hit/miss behavior</step>
+    <step>Benchmark: measure latency with cache hit vs cache miss</step>
+  </steps>
+
+  <tools>Bash, Read, Write, Edit, Grep</tools>
+
+  <outputs>
+    <output>Redis caching layer for reference retrieval</output>
+    <output>Cache hit/miss metrics logging</output>
+    <output>Unit tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Second query with same parameters returns cached result (no index call)</criterion>
+    <criterion>Cache key includes tenantId</criterion>
+    <criterion>TTL expires after session duration</criterion>
+    <criterion>Unit tests pass</criterion>
+    <criterion>dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

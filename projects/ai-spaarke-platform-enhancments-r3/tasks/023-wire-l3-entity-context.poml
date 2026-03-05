@@ -1,0 +1,53 @@
+<task id="AIRA-023" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Wire Optional L3 Entity Context via Records Index</title>
+    <phase>3</phase>
+    <estimate>2h</estimate>
+    <tags>bff-api, ai-search</tags>
+    <dependencies>020</dependencies>
+    <parallel-group>F</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>When `includeEntityContext = true`, query `spaarke-records-index` for the parent entity of the document being analyzed and inject entity metadata as business context.</goal>
+    <context>
+      L3 gives the LLM awareness of the business entity: "This NDA is part of Matter 'Acme Corp Acquisition' involving parties Acme Corporation and BigCo LLC." This uses the records index populated in task 003.
+    </context>
+    <constraints>
+      - Query by parent entity ID (matter/project linked to the document)
+      - Inject as "Business Context" section in prompt
+      - Off by default (includeEntityContext = false)
+      - Must include tenantId filter
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      .claude/adr/ADR-013-ai-architecture.md
+      .claude/constraints/ai.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read RecordMatchingService / records index query patterns</step>
+    <step>Add L3 retrieval path in AiAnalysisNodeExecutor — only when includeEntityContext=true</step>
+    <step>Query records-index by parent entity of the document being analyzed</step>
+    <step>Inject entity metadata (name, type, description, parties) as "Business Context" section</step>
+    <step>Write unit tests for L3 retrieval (enabled and disabled)</step>
+  </steps>
+
+  <tools>Bash, Read, Write, Edit, Grep</tools>
+
+  <outputs>
+    <output>L3 entity context retrieval in execution pipeline</output>
+    <output>Unit tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>When includeEntityContext=true, matter/project metadata appears in prompt</criterion>
+    <criterion>When disabled (default), no L3 retrieval occurs</criterion>
+    <criterion>tenantId filter applied</criterion>
+    <criterion>Unit tests pass</criterion>
+    <criterion>dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

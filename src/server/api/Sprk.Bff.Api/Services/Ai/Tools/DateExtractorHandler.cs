@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai.Tools;
@@ -32,6 +33,7 @@ public sealed class DateExtractorHandler : IAnalysisToolHandler
 
     private readonly IOpenAiClient _openAiClient;
     private readonly ITextChunkingService _textChunkingService;
+    private readonly ModelSelectorOptions _modelSelectorOptions;
     private readonly PromptSchemaRenderer _promptSchemaRenderer;
     private readonly ILogger<DateExtractorHandler> _logger;
 
@@ -76,11 +78,13 @@ public sealed class DateExtractorHandler : IAnalysisToolHandler
     public DateExtractorHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
+        IOptions<ModelSelectorOptions> modelSelectorOptions,
         PromptSchemaRenderer promptSchemaRenderer,
         ILogger<DateExtractorHandler> logger)
     {
         _openAiClient = openAiClient;
         _textChunkingService = textChunkingService;
+        _modelSelectorOptions = modelSelectorOptions.Value;
         _promptSchemaRenderer = promptSchemaRenderer;
         _logger = logger;
     }
@@ -209,7 +213,7 @@ public sealed class DateExtractorHandler : IAnalysisToolHandler
                 InputTokens = totalInputTokens,
                 OutputTokens = totalOutputTokens,
                 ModelCalls = chunks.Count,
-                ModelName = "gpt-4o-mini"
+                ModelName = _modelSelectorOptions.ToolHandlerModel
             };
 
             var resultData = new DateExtractionResult

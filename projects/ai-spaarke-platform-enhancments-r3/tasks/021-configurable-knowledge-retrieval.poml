@@ -1,0 +1,60 @@
+<task id="AIRA-021" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Configurable Knowledge Retrieval per Action Node</title>
+    <phase>3</phase>
+    <estimate>3h</estimate>
+    <tags>bff-api, ai</tags>
+    <dependencies>020</dependencies>
+    <parallel-group>E</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Add configurable knowledge retrieval settings per action node: knowledgeRetrievalMode (auto/always/never), knowledgeTopK, includeDocumentContext, includeEntityContext.</goal>
+    <context>
+      Not every action benefits from knowledge retrieval. Simple classification tasks should skip it. Complex analysis tasks should always retrieve. This configuration goes into the action node's config or the playbook action definition.
+    </context>
+    <constraints>
+      - Default mode is "auto" — retrieve if playbook has linked knowledge sources
+      - "always" mode uses domain tag matching when no explicit sources linked
+      - "never" skips retrieval entirely
+      - Settings stored in action config JSON (sprk_configjson or similar)
+      - Backward compatible — existing actions default to "auto"
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      .claude/adr/ADR-013-ai-architecture.md
+      .claude/patterns/ai/analysis-scopes.md
+      .claude/constraints/ai.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Define knowledge retrieval config model: KnowledgeRetrievalConfig with mode, topK, includeDocumentContext, includeEntityContext</step>
+    <step>Add config to action node data model (part of configJson or action definition)</step>
+    <step>Modify AiAnalysisNodeExecutor to read config and conditionally execute retrieval:
+      - auto: retrieve if knowledge sources linked
+      - always: retrieve using domain matching
+      - never: skip</step>
+    <step>Wire topK into SearchReferencesAsync call</step>
+    <step>Write unit tests for each mode (auto, always, never)</step>
+    <step>Verify backward compatibility — actions without explicit config default to auto/topK=5</step>
+  </steps>
+
+  <tools>Bash, Read, Write, Edit, Grep</tools>
+
+  <outputs>
+    <output>KnowledgeRetrievalConfig model</output>
+    <output>Conditional retrieval logic in AiAnalysisNodeExecutor</output>
+    <output>Unit tests for all three modes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Three modes (auto/always/never) work correctly</criterion>
+    <criterion>topK configurable per action</criterion>
+    <criterion>Default behavior is auto with topK=5</criterion>
+    <criterion>Unit tests pass for each mode</criterion>
+    <criterion>dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

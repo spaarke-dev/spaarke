@@ -1,0 +1,51 @@
+<task id="AIRA-012" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Index All 10 Knowledge Sources into Reference Index</title>
+    <phase>2</phase>
+    <estimate>2h</estimate>
+    <tags>ai-search, deployment, validation</tags>
+    <dependencies>010, 011</dependencies>
+    <parallel-group>D</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Trigger the reference indexing pipeline to vectorize and index all 10 KNW knowledge sources, then verify retrieval quality.</goal>
+    <context>
+      KNW-001–010 are now in Dataverse (task 010) and the ReferenceIndexingService exists (task 011). Now we call the admin endpoint to index all sources and verify the reference index contains ~100 chunks with correct content.
+    </context>
+    <constraints>
+      - Verify chunk count is reasonable (~100 chunks for 10 sources)
+      - Test semantic search quality with domain-specific queries
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      docs/guides/RAG-ARCHITECTURE.md
+      .claude/constraints/ai.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Call `POST /api/admin/knowledge/index-references` to index all system knowledge sources</step>
+    <step>Verify chunk count in spaarke-rag-references (~100 expected for 10 sources)</step>
+    <step>Test retrieval: query "force majeure clause obligations" — expect KNW-001/KNW-008 chunks</step>
+    <step>Test retrieval: query "confidentiality non-disclosure" — expect KNW-002 chunks</step>
+    <step>Test scoped retrieval: query with knowledgeSourceId filter for a specific source</step>
+    <step>Test domain filter: query with domain="contract-law" filter</step>
+    <step>Document any retrieval quality issues in project notes</step>
+  </steps>
+
+  <tools>Bash, Read</tools>
+
+  <outputs>
+    <output>~100 chunks indexed in spaarke-rag-references</output>
+    <output>Retrieval quality validation results documented</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>spaarke-rag-references has ~100 chunks from 10 sources</criterion>
+    <criterion>Domain-specific queries return relevant reference chunks</criterion>
+    <criterion>Scoped queries (by knowledgeSourceId, domain) work correctly</criterion>
+  </acceptance-criteria>
+</task>

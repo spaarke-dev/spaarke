@@ -1,0 +1,59 @@
+<task id="AIRA-001" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Create Golden Reference Index (spaarke-rag-references)</title>
+    <phase>1</phase>
+    <estimate>3h</estimate>
+    <tags>ai-search, infrastructure, azure</tags>
+    <dependencies>none</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Create the dedicated Azure AI Search index `spaarke-rag-references` for golden reference knowledge with 3072-dim vector schema.</goal>
+    <context>
+      Golden references need a dedicated small index (~100 chunks) separate from the 100K+ customer document index. This ensures reliable, deterministic retrieval of curated domain knowledge during playbook execution.
+    </context>
+    <constraints>
+      - Use text-embedding-3-large (3072-dim) vector configuration — same HNSW profile as knowledge-v2
+      - Enable semantic ranking with `content` as semantic field
+      - Include fields: id, tenantId, knowledgeSourceId, knowledgeSourceName, domain, content, contentVector3072, tags, version, chunkIndex, chunkCount, createdAt, updatedAt
+      - Schema must match the design specification in spec.md Phase 1A
+      - No legacy 1536-dim vector fields
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      docs/guides/RAG-ARCHITECTURE.md
+      docs/guides/RAG-CONFIGURATION.md
+      docs/architecture/auth-AI-azure-resources.md
+      .claude/adr/ADR-013-ai-architecture.md
+      .claude/constraints/ai.md
+      projects/ai-spaarke-platform-enhancements-r1/scripts/Provision-AiSearchIndexes.ps1
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read existing index provisioning script at `projects/ai-spaarke-platform-enhancements-r1/scripts/Provision-AiSearchIndexes.ps1` and existing index schemas in `infrastructure/ai-search/` to understand current patterns</step>
+    <step>Create index schema JSON at `infrastructure/ai-search/spaarke-rag-references.json` with all fields defined in spec.md Phase 1A</step>
+    <step>Create or update provisioning script to create the index via Azure AI Search REST API or Azure CLI</step>
+    <step>Execute the script to create the index on `spaarke-search-dev`</step>
+    <step>Verify index exists: `az search index show --name spaarke-rag-references --service-name spaarke-search-dev --resource-group spe-infrastructure-westus2`</step>
+    <step>Update any configuration files (e.g., `AnalysisOptions`, `appsettings.json`) to reference the new index name</step>
+  </steps>
+
+  <tools>Bash, Read, Write, Edit, Glob, Grep</tools>
+
+  <outputs>
+    <output>`infrastructure/ai-search/spaarke-rag-references.json` — Index schema definition</output>
+    <output>Index created on Azure AI Search service</output>
+    <output>Configuration updated with new index name</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`spaarke-rag-references` index exists in Azure AI Search with correct schema</criterion>
+    <criterion>Index supports 3072-dim vector search with HNSW</criterion>
+    <criterion>Semantic ranking enabled on `content` field</criterion>
+    <criterion>Schema file committed to infrastructure/ai-search/</criterion>
+  </acceptance-criteria>
+</task>

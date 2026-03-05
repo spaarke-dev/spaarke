@@ -1,0 +1,51 @@
+<task id="AIRA-041" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Clean Up Legacy 1536-dim Vector Field Writes</title>
+    <phase>5</phase>
+    <estimate>1h</estimate>
+    <tags>bff-api, cleanup</tags>
+    <dependencies>none</dependencies>
+    <parallel-group>I</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Stop writing to the deprecated `contentVector` (1536-dim) field in RagIndexingPipeline. Verify all queries use `contentVector3072`.</goal>
+    <context>
+      The pipeline currently generates embeddings for both 1536 and 3072 dimensions, doubling embedding API costs. All queries should already use contentVector3072. We can stop generating 1536-dim embeddings.
+    </context>
+    <constraints>
+      - Keep the contentVector field in existing index schemas (Azure AI Search doesn't support field deletion)
+      - Only stop WRITING to it — old data remains
+      - Verify no queries reference contentVector (1536-dim) before removing writes
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      docs/guides/RAG-ARCHITECTURE.md
+      .claude/constraints/ai.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Search codebase for all references to `contentVector` (excluding `contentVector3072`)</step>
+    <step>Verify all search queries use `contentVector3072` vector field</step>
+    <step>Remove 1536-dim embedding generation from RagIndexingPipeline</step>
+    <step>Remove writes to `contentVector` field in index upload operations</step>
+    <step>Verify dotnet build succeeds and existing indexing still works (just without 1536-dim)</step>
+  </steps>
+
+  <tools>Bash, Read, Edit, Grep</tools>
+
+  <outputs>
+    <output>RagIndexingPipeline no longer generates 1536-dim embeddings</output>
+    <output>Reduced embedding API costs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No code generates 1536-dim embeddings</criterion>
+    <criterion>All queries use contentVector3072</criterion>
+    <criterion>Existing indexes still work (field remains, just no new writes)</criterion>
+    <criterion>dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

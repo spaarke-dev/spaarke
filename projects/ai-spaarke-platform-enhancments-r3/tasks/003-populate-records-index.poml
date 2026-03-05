@@ -1,0 +1,61 @@
+<task id="AIRA-003" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Populate Records Index and Add tenantId Field</title>
+    <phase>1</phase>
+    <estimate>3h</estimate>
+    <tags>ai-search, bff-api, infrastructure</tags>
+    <dependencies>none</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Populate `spaarke-records-index` by triggering `DataverseIndexSyncService.BulkSyncAsync()`, add missing `tenantId` field to schema, and create incremental sync background job.</goal>
+    <context>
+      The records index exists with correct schema (minus tenantId) and the sync service exists but `BulkSyncAsync()` has never been called. The index currently has 0 documents. It should contain Matters, Projects, and Invoices from Dataverse for L3 entity context in playbook execution.
+    </context>
+    <constraints>
+      - Add tenantId field to records index schema (security requirement — all queries must be tenant-scoped)
+      - Sync service must be idempotent (ADR-004)
+      - Follow existing admin endpoint patterns (ADR-001, ADR-008 endpoint filters)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      .claude/adr/ADR-001-minimal-api.md
+      .claude/adr/ADR-004-job-contract.md
+      .claude/adr/ADR-008-endpoint-filters.md
+      .claude/adr/ADR-013-ai-architecture.md
+      .claude/patterns/api/endpoint-definition.md
+      .claude/patterns/api/background-workers.md
+      .claude/constraints/api.md
+      .claude/constraints/jobs.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read `Services/RecordMatching/DataverseIndexSyncService.cs` to understand current BulkSyncAsync implementation</step>
+    <step>Add `tenantId` field to records index schema — update schema definition and re-create/update index</step>
+    <step>Update DataverseIndexSyncService to populate `tenantId` when syncing records</step>
+    <step>Ensure admin endpoint `POST /api/admin/record-matching/sync` exists and is wired (or create it)</step>
+    <step>Call the sync endpoint to bulk-sync all Matters, Projects, Invoices</step>
+    <step>Verify document count: query `spaarke-records-index` and confirm records match Dataverse count</step>
+    <step>Test search: `POST /api/ai/records/search` with sample queries</step>
+    <step>Create `RecordIndexSyncJobHandler` background job for incremental sync triggered by Service Bus</step>
+  </steps>
+
+  <tools>Bash, Read, Write, Edit, Glob, Grep</tools>
+
+  <outputs>
+    <output>Records index populated with Matters, Projects, Invoices</output>
+    <output>tenantId field added to index schema</output>
+    <output>Incremental sync job handler created</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>spaarke-records-index has document count > 0 matching Dataverse record count</criterion>
+    <criterion>tenantId field present and populated on all indexed records</criterion>
+    <criterion>Search query `POST /api/ai/records/search` returns results</criterion>
+    <criterion>RecordIndexSyncJobHandler exists for incremental sync</criterion>
+  </acceptance-criteria>
+</task>

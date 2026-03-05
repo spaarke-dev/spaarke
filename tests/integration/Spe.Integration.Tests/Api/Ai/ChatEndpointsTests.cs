@@ -320,7 +320,7 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
         builder.UseSetting("Cors:AllowedOrigins", "https://localhost:3000");
         builder.UseSetting("AzureAiSearch:Endpoint", "https://test-search.search.windows.net");
         builder.UseSetting("AzureAiSearch:ApiKey", "test-api-key");
-        builder.UseSetting("AzureAiSearch:KnowledgeIndexName", "knowledge-index");
+        builder.UseSetting("AzureAiSearch:KnowledgeIndexName", "spaarke-knowledge-index-v2");
         builder.UseSetting("AzureAiSearch:DiscoveryIndexName", "discovery-index");
         builder.UseSetting("AzureOpenAI:Endpoint", "https://test.openai.azure.com/");
         builder.UseSetting("AzureOpenAI:ApiKey", "test-api-key");

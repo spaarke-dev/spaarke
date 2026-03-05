@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
@@ -34,6 +35,7 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
     private readonly IOpenAiClient _openAiClient;
     private readonly IScopeResolverService _scopeResolver;
     private readonly PromptSchemaRenderer _promptSchemaRenderer;
+    private readonly ModelSelectorOptions _modelSelectorOptions;
     private readonly ILogger<GenericAnalysisHandler> _logger;
 
     /// <summary>
@@ -99,11 +101,13 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
         IOpenAiClient openAiClient,
         IScopeResolverService scopeResolver,
         PromptSchemaRenderer promptSchemaRenderer,
+        IOptions<ModelSelectorOptions> modelSelectorOptions,
         ILogger<GenericAnalysisHandler> logger)
     {
         _openAiClient = openAiClient;
         _scopeResolver = scopeResolver;
         _promptSchemaRenderer = promptSchemaRenderer;
+        _modelSelectorOptions = modelSelectorOptions.Value;
         _logger = logger;
     }
 
@@ -302,7 +306,7 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 InputTokens = inputTokens,
                 OutputTokens = outputTokens,
                 ModelCalls = 1,
-                ModelName = "gpt-4o"
+                ModelName = _modelSelectorOptions.DefaultModel
             };
 
             _logger.LogInformation(
@@ -457,7 +461,7 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
             InputTokens = inputTokens,
             OutputTokens = outputTokens,
             ModelCalls = 1,
-            ModelName = "gpt-4o"
+            ModelName = _modelSelectorOptions.DefaultModel
         };
 
         _logger.LogInformation(

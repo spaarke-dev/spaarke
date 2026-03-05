@@ -1,0 +1,55 @@
+<task id="AIRA-010" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Deploy Knowledge Source Records to Dataverse (KNW-001-010)</title>
+    <phase>2</phase>
+    <estimate>2h</estimate>
+    <tags>dataverse, seed-data</tags>
+    <dependencies>none</dependencies>
+    <parallel-group>C</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Deploy 10 golden reference knowledge source records (KNW-001 through KNW-010) to Dataverse using the existing seed script.</goal>
+    <context>
+      Content was authored during R1 in task files. A PowerShell creation script exists at `projects/ai-spaarke-platform-enhancements-r1/scripts/Create-KnowledgeSourceRecords.ps1`. The records go into `sprk_analysisknowledge` table with structured markdown content (500+ words each).
+    </context>
+    <constraints>
+      - Use existing seed script — do not recreate
+      - Verify N:N relationships to playbooks are established (sprk_playbook_knowledge)
+      - Verify domain tags assigned correctly
+      - Script must be idempotent (re-runnable without duplicates)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      projects/ai-spaarke-platform-enhancements-r1/scripts/Create-KnowledgeSourceRecords.ps1
+      projects/ai-spaarke-platform-enhancements-r1/notes/design/knowledge-sources/KNW-001-contract-terms-glossary.md
+      docs/guides/HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md
+      .claude/constraints/data.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read the seed script to understand current structure and any prerequisites</step>
+    <step>Review KNW-001 through KNW-010 content files to verify they are complete</step>
+    <step>Execute the seed script against the dev Dataverse environment</step>
+    <step>Verify all 10 records visible in Dataverse (query sprk_analysisknowledge)</step>
+    <step>Verify sprk_content field populated with full markdown content</step>
+    <step>Verify N:N relationships to playbooks via sprk_playbook_knowledge</step>
+    <step>Verify domain tags assigned (contract-law, finance, employment, etc.)</step>
+  </steps>
+
+  <tools>Bash, Read, Grep</tools>
+
+  <outputs>
+    <output>10 sprk_analysisknowledge records deployed to Dataverse</output>
+    <output>N:N playbook relationships established</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 10 KNW records visible in Dataverse with content populated</criterion>
+    <criterion>Each record linked to relevant playbooks via N:N relationship</criterion>
+    <criterion>Domain tags assigned correctly</criterion>
+  </acceptance-criteria>
+</task>
