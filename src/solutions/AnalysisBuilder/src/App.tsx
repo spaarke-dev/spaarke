@@ -43,7 +43,42 @@ import type {
 // Declare global Xrm for Dataverse WebAPI and navigation
 // ---------------------------------------------------------------------------
 
-declare const Xrm: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+declare const Xrm: any;
+
+// ---------------------------------------------------------------------------
+// Resolve Xrm from parent/top frames (web resource dialogs run in iframes)
+// ---------------------------------------------------------------------------
+
+function resolveWebApi(): any {
+  try {
+    if (typeof Xrm !== "undefined" && Xrm?.WebApi?.retrieveMultipleRecords) return Xrm.WebApi;
+  } catch { /* */ }
+  try {
+    const p = (window.parent as any)?.Xrm;
+    if (p?.WebApi?.retrieveMultipleRecords) return p.WebApi;
+  } catch { /* */ }
+  try {
+    const t = (window.top as any)?.Xrm;
+    if (t?.WebApi?.retrieveMultipleRecords) return t.WebApi;
+  } catch { /* */ }
+  return undefined;
+}
+
+function resolveXrmNavigation(): any {
+  try {
+    if (typeof Xrm !== "undefined" && Xrm?.Navigation) return Xrm.Navigation;
+  } catch { /* */ }
+  try {
+    const p = (window.parent as any)?.Xrm;
+    if (p?.Navigation) return p.Navigation;
+  } catch { /* */ }
+  try {
+    const t = (window.top as any)?.Xrm;
+    if (t?.Navigation) return t.Navigation;
+  } catch { /* */ }
+  return undefined;
+}
 
 // ---------------------------------------------------------------------------
 // URL param parsing
@@ -175,12 +210,20 @@ const AppContent: React.FC = () => {
   // --- Execution state ---
   const [isExecuting, setIsExecuting] = React.useState(false);
 
+  // --- Resolve Xrm.WebApi once ---
+  const webApi = React.useMemo(() => resolveWebApi(), []);
+
   // --- Load data on mount ---
   React.useEffect(() => {
+    if (!webApi) {
+      setError("Dataverse WebAPI not available. Please open this page from within Dynamics 365.");
+      setIsLoading(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
-        const data: IPlaybookData = await loadAllData();
+        const data: IPlaybookData = await loadAllData(webApi);
         if (cancelled) return;
         setPlaybooks(data.playbooks);
         setActions(data.actions);
@@ -195,19 +238,19 @@ const AppContent: React.FC = () => {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [webApi]);
 
   // --- Playbook selection handler ---
   const handlePlaybookSelect = React.useCallback(async (playbook: IPlaybook) => {
     setSelectedPlaybook(playbook);
     try {
-      const scopes = await loadPlaybookScopes(playbook.id);
+      const scopes = await loadPlaybookScopes(webApi, playbook.id);
       setPlaybookScopes(scopes);
     } catch (err) {
       console.error("[AnalysisBuilder] Failed to load playbook scopes:", err);
       setPlaybookScopes(null);
     }
-  }, []);
+  }, [webApi]);
 
   // --- Tab change handler ---
   const handleTabSelect = React.useCallback(
@@ -257,11 +300,12 @@ const AppContent: React.FC = () => {
         };
       }
 
-      const analysisId = await createAndAssociate(config);
+      const analysisId = await createAndAssociate(webApi, config);
 
       // Navigate to Analysis Workspace form
-      if (typeof Xrm !== "undefined" && Xrm.Navigation) {
-        Xrm.Navigation.navigateTo(
+      const nav = resolveXrmNavigation();
+      if (nav) {
+        nav.navigateTo(
           {
             pageType: "entityrecord",
             entityName: "sprk_analysis",
@@ -275,7 +319,7 @@ const AppContent: React.FC = () => {
     } finally {
       setIsExecuting(false);
     }
-  }, [canExecute, activeTab, selectedPlaybook, playbookScopes, selectedActionIds, selectedSkillIds, selectedKnowledgeIds, selectedToolIds, docContext]);
+  }, [canExecute, activeTab, selectedPlaybook, playbookScopes, selectedActionIds, selectedSkillIds, selectedKnowledgeIds, selectedToolIds, docContext, webApi]);
 
   // --- Cancel handler ---
   const handleCancel = React.useCallback(() => {
