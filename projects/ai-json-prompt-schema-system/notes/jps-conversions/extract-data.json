@@ -1,0 +1,158 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are an expert data extraction analyst with deep experience identifying and structuring data from unstructured documents across all document types including contracts, invoices, reports, forms, correspondence, and records.",
+    "task": "Extract all identifiable structured data points from the provided document. Identify named entities, key-value pairs, and tabular data. Classify each extracted item by type and record the document section where it appears. This is a general-purpose extraction — capture everything structured regardless of domain.",
+    "constraints": [
+      "Extract all data types: names, dates, amounts, addresses, identifiers, codes, references, and any key-value pairs present in the document",
+      "Record the document section (e.g., 'Header', 'Section 2', 'Table 1', 'Footer') for every extracted item",
+      "Classify entities using the defined type enum: person, organization, location, date, amount, identifier, other",
+      "For tabular data, preserve the original header labels and all row values exactly as they appear",
+      "Assign a per-entity confidence score (0–1) based on how clearly the entity is expressed in the source text",
+      "Do not infer or fabricate data — only extract values explicitly present in the document",
+      "Count every extracted entity, key-value pair, and table cell as a data point toward totalDataPoints"
+    ],
+    "context": "The user needs a complete structured inventory of all data present in a document. This action is domain-agnostic and is intended as a general extractor. Specialized extractors exist for dates-only or entities-only use cases — this action covers the full breadth of structured data in a single pass."
+  },
+
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 100000,
+      "placeholder": "{{document.extractedText}}"
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "documentType",
+        "type": "string",
+        "description": "The identified document type based on content and structure (e.g., 'Invoice', 'Contract', 'Medical Record', 'Financial Statement', 'Correspondence', 'Unknown')"
+      },
+      {
+        "name": "entities",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "description": "Label or field name for the extracted entity (e.g., 'Vendor Name', 'Invoice Date', 'Total Amount')" },
+            "type": {
+              "type": "string",
+              "enum": ["person", "organization", "location", "date", "amount", "identifier", "other"],
+              "description": "Classification of the entity type"
+            },
+            "value": { "type": "string", "description": "The extracted value as it appears in the document" },
+            "section": { "type": "string", "description": "Document section where this entity was found (e.g., 'Header', 'Section 3', 'Signature Block')" },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1, "description": "Confidence score for this specific extraction (0–1)" }
+          }
+        },
+        "description": "All named entities and discrete data values found in the document, classified by type"
+      },
+      {
+        "name": "keyValuePairs",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "key": { "type": "string", "description": "The field label or key as it appears in the document" },
+            "value": { "type": "string", "description": "The corresponding value as it appears in the document" },
+            "section": { "type": "string", "description": "Document section where this pair was found" }
+          }
+        },
+        "description": "Explicit key-value pairs found in the document such as form fields, labeled data points, or structured label-value layouts"
+      },
+      {
+        "name": "tables",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "headers": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Column header labels exactly as they appear in the table"
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "description": "Table row data; each inner array corresponds to a row with values aligned to the headers"
+            },
+            "section": { "type": "string", "description": "Document section where this table was found (e.g., 'Table 1', 'Appendix A')" }
+          }
+        },
+        "description": "Tabular data found in the document with headers and rows preserved"
+      },
+      {
+        "name": "totalDataPoints",
+        "type": "number",
+        "description": "Total count of all extracted items: sum of entities, key-value pairs, and individual table cells"
+      },
+      {
+        "name": "confidence",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Overall confidence in the completeness and accuracy of the extraction based on document clarity and structure"
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "examples": [
+    {
+      "input": "INVOICE\n\nInvoice Number: INV-2026-00847\nDate: March 5, 2026\nDue Date: April 4, 2026\n\nBill To:\nAcme Corporation\n123 Main Street\nNew York, NY 10001\nContact: Jane Doe, jane.doe@acme.com\n\nFrom:\nSupply Co Ltd\n456 Commerce Ave\nChicago, IL 60601\n\nDescription                  Qty   Unit Price   Total\nOffice Supplies Package        5     $120.00    $600.00\nPremium Stapler Set            2      $45.00     $90.00\nPaper Ream (500 sheets) x10   10      $12.00    $120.00\n\nSubtotal: $810.00\nTax (8.5%): $68.85\nTotal Due: $878.85\n\nPayment Terms: Net 30\nRemittance: Please reference invoice number on payment.",
+      "output": {
+        "documentType": "Invoice",
+        "entities": [
+          { "name": "Invoice Number", "type": "identifier", "value": "INV-2026-00847", "section": "Header", "confidence": 0.99 },
+          { "name": "Invoice Date", "type": "date", "value": "March 5, 2026", "section": "Header", "confidence": 0.99 },
+          { "name": "Due Date", "type": "date", "value": "April 4, 2026", "section": "Header", "confidence": 0.99 },
+          { "name": "Bill To - Organization", "type": "organization", "value": "Acme Corporation", "section": "Bill To", "confidence": 0.98 },
+          { "name": "Bill To - Address", "type": "location", "value": "123 Main Street, New York, NY 10001", "section": "Bill To", "confidence": 0.97 },
+          { "name": "Bill To - Contact", "type": "person", "value": "Jane Doe", "section": "Bill To", "confidence": 0.97 },
+          { "name": "From - Organization", "type": "organization", "value": "Supply Co Ltd", "section": "From", "confidence": 0.98 },
+          { "name": "From - Address", "type": "location", "value": "456 Commerce Ave, Chicago, IL 60601", "section": "From", "confidence": 0.97 },
+          { "name": "Subtotal", "type": "amount", "value": "$810.00", "section": "Totals", "confidence": 0.99 },
+          { "name": "Tax", "type": "amount", "value": "$68.85", "section": "Totals", "confidence": 0.99 },
+          { "name": "Total Due", "type": "amount", "value": "$878.85", "section": "Totals", "confidence": 0.99 }
+        ],
+        "keyValuePairs": [
+          { "key": "Invoice Number", "value": "INV-2026-00847", "section": "Header" },
+          { "key": "Date", "value": "March 5, 2026", "section": "Header" },
+          { "key": "Due Date", "value": "April 4, 2026", "section": "Header" },
+          { "key": "Subtotal", "value": "$810.00", "section": "Totals" },
+          { "key": "Tax (8.5%)", "value": "$68.85", "section": "Totals" },
+          { "key": "Total Due", "value": "$878.85", "section": "Totals" },
+          { "key": "Payment Terms", "value": "Net 30", "section": "Footer" }
+        ],
+        "tables": [
+          {
+            "headers": ["Description", "Qty", "Unit Price", "Total"],
+            "rows": [
+              ["Office Supplies Package", "5", "$120.00", "$600.00"],
+              ["Premium Stapler Set", "2", "$45.00", "$90.00"],
+              ["Paper Ream (500 sheets) x10", "10", "$12.00", "$120.00"]
+            ],
+            "section": "Line Items"
+          }
+        ],
+        "totalDataPoints": 30,
+        "confidence": 0.97
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "migration",
+    "authorLevel": 0,
+    "createdAt": "2026-03-05T00:00:00Z",
+    "description": "General-purpose structured data extraction from any document type — extracts entities, key-value pairs, and tables across all domains",
+    "tags": ["extraction", "data", "entities", "key-value", "tables", "general-purpose"]
+  }
+}

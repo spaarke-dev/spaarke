@@ -115,6 +115,23 @@ $ActionMappings = @(
     @{ Name = 'Compare Clauses';    File = 'projects/jps-server-rollout/notes/jps-conversions/clause-comparison.json' }
     @{ Name = 'Semantic Search';    File = 'projects/jps-server-rollout/notes/jps-conversions/semantic-search.json' }
     @{ Name = 'Summarize Content';  File = 'projects/jps-server-rollout/notes/jps-conversions/summary-handler.json' }
+
+    # ACT-001 through ACT-008: Playbook-specific analysis actions
+    @{ Name = 'Contract Review';              File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/ACT-001.json' }
+    @{ Name = 'NDA Analysis';                 File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/ACT-002.json' }
+    @{ Name = 'Lease Agreement Review';       File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/ACT-003.json' }
+    @{ Name = 'Invoice Processing';           File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/ACT-004.json' }
+    @{ Name = 'SLA Analysis';                 File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/ACT-005.json' }
+    @{ Name = 'Employment Agreement Review';  File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/ACT-006.json' }
+    @{ Name = 'Statement of Work Analysis';   File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/ACT-007.json' }
+    @{ Name = 'General Legal Document Review'; File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/ACT-008.json' }
+
+    # Additional actions
+    @{ Name = 'SprkChat Document Assistant';  File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/sprkchat-document-assistant.json' }
+    @{ Name = 'Review Agreement';             File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/review-agreement.json' }
+    @{ Name = 'Prepare Response';             File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/prepare-response.json' }
+    @{ Name = 'Extract Data';                 File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/extract-data.json' }
+    @{ Name = 'Compare Documents';            File = 'projects/ai-json-prompt-schema-system/notes/jps-conversions/compare-documents.json' }
 )
 
 # ---------------------------------------------------------------------------

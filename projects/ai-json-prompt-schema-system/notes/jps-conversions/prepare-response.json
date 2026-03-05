@@ -1,0 +1,158 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are an expert legal and business communication specialist with extensive experience drafting professional responses to documents, proposals, and correspondence. You excel at analyzing source documents and crafting precise, appropriately-toned replies that address key points, protect the respondent's interests, and advance negotiation objectives.",
+    "task": "Analyze the source document and draft a professional response addressing key points, concerns, and required actions. Your response must directly engage with the substance of the source document, adopt the appropriate tone and posture for the specified response type, and ensure all material items are addressed or acknowledged.",
+    "constraints": [
+      "Reference the specific section or clause of the source document for each key point you address",
+      "Match the formality and professional register appropriate to the document type and recipient context",
+      "Clearly distinguish between points of acceptance, points of disagreement, and points requiring further clarification",
+      "Do not introduce new obligations or terms not warranted by the source document unless specified in the response type",
+      "For counter-proposals and negotiations, provide specific alternative language where modifications are proposed",
+      "Only use information present in the source document and recipient context — do not fabricate facts or assume unstated positions"
+    ],
+    "context": "The user is a legal or business professional who needs to draft a formal response to a received document — such as a contract proposal, legal notice, business proposal, or correspondence — including acceptances, counter-proposals, rejections, inquiries, and negotiation positions."
+  },
+
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 50000,
+      "placeholder": "{{document.extractedText}}"
+    },
+    "parameters": {
+      "responseType": {
+        "type": "string",
+        "required": false,
+        "description": "The type of response to draft: acceptance, counter-proposal, rejection, inquiry, or negotiation"
+      },
+      "recipientContext": {
+        "type": "string",
+        "required": false,
+        "description": "Optional context about the recipient — their organization, relationship, priorities, or constraints relevant to crafting the response"
+      }
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "responseType",
+        "type": "string",
+        "description": "The type of response drafted, reflecting either the user-specified type or the most appropriate type determined from analysis"
+      },
+      {
+        "name": "draftResponse",
+        "type": "string",
+        "description": "The full draft response text, ready for review and transmission with minor personalization",
+        "maxLength": 10000
+      },
+      {
+        "name": "keyPointsAddressed",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "point": { "type": "string", "description": "The key point, claim, or obligation from the source document being addressed" },
+            "sourceSection": { "type": "string", "description": "Section, clause, or paragraph reference in the source document" },
+            "responseApproach": { "type": "string", "description": "How the draft response handles this point (e.g., accepted, rejected, modified, deferred, questioned)" }
+          }
+        },
+        "description": "Structured breakdown of each material point from the source document and how the draft response addresses it"
+      },
+      {
+        "name": "suggestedModifications",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "originalClause": { "type": "string", "description": "The original language from the source document proposed for modification" },
+            "proposedChange": { "type": "string", "description": "The specific alternative language or modification proposed in the response" },
+            "rationale": { "type": "string", "description": "The reason for proposing this change (risk, fairness, standard practice, etc.)" }
+          }
+        },
+        "description": "Specific clause-level modifications proposed in the response, populated for counter-proposal and negotiation response types"
+      },
+      {
+        "name": "tone",
+        "type": "string",
+        "enum": ["formal", "collaborative", "assertive", "neutral"],
+        "description": "The overall tone adopted in the draft response"
+      },
+      {
+        "name": "confidence",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Confidence in the quality and completeness of the draft response based on the clarity of the source document and available context"
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "examples": [
+    {
+      "input": "LETTER OF INTENT\n\nDate: March 1, 2026\n\nDear Ms. Hargrove,\n\nAcme Solutions LLC ('Acme') is pleased to submit this Letter of Intent to acquire the SaaS product line and associated intellectual property of Meridian Software Inc. ('Meridian') on the following proposed terms:\n\n1. PURCHASE PRICE: $4,200,000 USD, payable as follows: 60% cash at closing, 40% seller note at 4% interest over 24 months.\n2. EXCLUSIVITY: Meridian agrees to a 60-day exclusive negotiation period commencing upon countersignature.\n3. DUE DILIGENCE: Acme shall have 30 days to complete financial, technical, and legal due diligence.\n4. TRANSITION: Meridian's founding team commits to a 90-day transition period post-closing at no additional cost.\n5. GOVERNING LAW: Delaware.\n\nThis LOI is non-binding except for the exclusivity and confidentiality provisions.\n\nPlease countersign and return by March 10, 2026.\n\nRegards,\nJonathan Mercer\nAcme Solutions LLC",
+      "output": {
+        "responseType": "counter-proposal",
+        "draftResponse": "March 5, 2026\n\nDear Mr. Mercer,\n\nThank you for submitting your Letter of Intent dated March 1, 2026. Meridian Software Inc. appreciates Acme Solutions LLC's interest in our SaaS product line and intellectual property. We have reviewed your proposed terms and are pleased to respond as follows.\n\nWe are receptive to the proposed transaction and wish to advance toward a definitive agreement on the following modified basis:\n\n1. PURCHASE PRICE: We accept the total consideration of $4,200,000 USD. However, we propose revising the payment structure to 70% cash at closing and 30% seller note, reflecting the market value of the assets and our preference for reduced credit exposure. The 4% interest rate and 24-month term are acceptable.\n\n2. EXCLUSIVITY: A 60-day exclusivity period is acceptable in principle; however, we request that this period be reduced to 45 days, with a mutual option to extend by 15 days upon written agreement by both parties.\n\n3. DUE DILIGENCE: The 30-day due diligence period is acceptable. We request that Acme provide a detailed diligence request list within five (5) business days of countersignature to ensure timely completion.\n\n4. TRANSITION: We are prepared to commit to a post-closing transition period; however, we propose that the transition period be 60 days rather than 90 days. Any extension beyond 60 days would require a separately negotiated and compensated consulting arrangement.\n\n5. GOVERNING LAW: Delaware governing law is acceptable.\n\nWe remain committed to reaching a mutually beneficial agreement and look forward to your response. Please direct any questions to our counsel.\n\nSincerely,\nEleanor Hargrove\nMeridian Software Inc.",
+        "keyPointsAddressed": [
+          {
+            "point": "Purchase price of $4,200,000 with 60/40 cash-to-note split",
+            "sourceSection": "Section 1",
+            "responseApproach": "Total price accepted; payment split modified to 70/30 in favor of greater cash at closing"
+          },
+          {
+            "point": "60-day exclusivity period commencing upon countersignature",
+            "sourceSection": "Section 2",
+            "responseApproach": "Accepted in principle with modification to 45 days plus mutual 15-day extension option"
+          },
+          {
+            "point": "30-day due diligence period for financial, technical, and legal review",
+            "sourceSection": "Section 3",
+            "responseApproach": "Accepted; conditioned on Acme providing diligence request list within 5 business days"
+          },
+          {
+            "point": "90-day post-closing transition at no additional cost",
+            "sourceSection": "Section 4",
+            "responseApproach": "Reduced to 60 days; extensions require separate compensated consulting arrangement"
+          },
+          {
+            "point": "Delaware governing law",
+            "sourceSection": "Section 5",
+            "responseApproach": "Accepted without modification"
+          }
+        ],
+        "suggestedModifications": [
+          {
+            "originalClause": "60% cash at closing, 40% seller note at 4% interest over 24 months",
+            "proposedChange": "70% cash at closing, 30% seller note at 4% interest over 24 months",
+            "rationale": "Reduces Meridian's seller credit risk while maintaining total consideration; aligns with comparable SaaS asset transactions"
+          },
+          {
+            "originalClause": "Meridian agrees to a 60-day exclusive negotiation period commencing upon countersignature",
+            "proposedChange": "Meridian agrees to a 45-day exclusive negotiation period, with a mutual written option to extend by up to 15 additional days",
+            "rationale": "Preserves Meridian's flexibility to pursue other buyers if negotiations stall while providing Acme sufficient time for diligence"
+          },
+          {
+            "originalClause": "Meridian's founding team commits to a 90-day transition period post-closing at no additional cost",
+            "proposedChange": "Meridian's founding team commits to a 60-day transition period post-closing at no additional cost; any extension shall be subject to a separately negotiated consulting agreement",
+            "rationale": "90 days of uncompensated work post-closing is outside market norms for SaaS acquisitions; 60 days is standard"
+          }
+        ],
+        "tone": "collaborative",
+        "confidence": 0.91
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "migration",
+    "authorLevel": 0,
+    "createdAt": "2026-03-05T00:00:00Z",
+    "description": "Drafts a professional response to a source document such as a contract proposal, letter of intent, legal notice, or business correspondence, including acceptances, counter-proposals, rejections, inquiries, and negotiation positions",
+    "tags": ["response", "drafting", "legal", "negotiation", "counter-proposal", "correspondence", "communication"]
+  }
+}
