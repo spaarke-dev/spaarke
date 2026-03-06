@@ -860,8 +860,17 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             }
 
             // Skip Start nodes — they are canvas anchors with no execution logic.
+            // Detect via:
+            //   1. Explicit __actionType == Start (33) in ConfigJson
+            //   2. Control node with null/empty ConfigJson (auto-placed, no properties)
+            //   3. Control node named "Start" with __actionType == Condition (30) — legacy
+            //      canvas sync writes Condition instead of Start for the auto-placed node
             var configActionType = ExtractActionTypeFromConfig(node.ConfigJson);
-            if (configActionType == ActionType.Start)
+            var isStartNode = configActionType == ActionType.Start
+                || (node.NodeType == NodeType.Control && string.IsNullOrWhiteSpace(node.ConfigJson))
+                || (node.NodeType == NodeType.Control && configActionType == ActionType.Condition
+                    && string.Equals(node.Name, "Start", StringComparison.OrdinalIgnoreCase));
+            if (isStartNode)
             {
                 var skipOutput = NodeOutput.Ok(node.Id, node.OutputVariable, null, "Start node (passthrough)");
                 runContext.StoreNodeOutput(skipOutput);

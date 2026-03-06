@@ -4,7 +4,7 @@
  * PURPOSE: Opens Analysis Builder Custom Page for creating new AI analyses
  * WORKS WITH: sprk_document entity (from Analysis tab subgrid or form command)
  * DEPLOYMENT: Ribbon button on sprk_document form Analysis tab
- * ARCHITECTURE: Custom Page dialog approach
+ * ARCHITECTURE: Code Page dialog approach
  *
  * @version 1.0.0
  * @namespace Spaarke.Commands.Analysis
@@ -353,7 +353,23 @@ async function getEnvironmentVariable(schemaName) {
 }
 
 /**
- * Open Analysis Builder Custom Page dialog
+ * Build URL-encoded query string from an object
+ *
+ * @param {object} params - Key-value pairs to encode
+ * @returns {string} URL-encoded query string
+ */
+function buildQueryString(params) {
+    var parts = [];
+    for (var key in params) {
+        if (params.hasOwnProperty(key) && params[key] !== null && params[key] !== undefined && params[key] !== '') {
+            parts.push(encodeURIComponent(key) + "=" + encodeURIComponent(params[key]));
+        }
+    }
+    return parts.join("&");
+}
+
+/**
+ * Open Analysis Builder Code Page dialog
  *
  * @param {object} params - Dialog parameters
  * @param {object} formContext - Form context for refresh
@@ -383,11 +399,11 @@ async function openAnalysisBuilderDialog(params, formContext) {
         sessionStorage.setItem("analysisBuilderParams", JSON.stringify(dataPayload));
         console.log("[Spaarke.Analysis] Stored params in sessionStorage:", dataPayload);
 
-        // Pass data via recordId parameter (Custom Page reads via Param("recordId"))
+        // Pass data via query string parameters (Code Page reads via URLSearchParams)
         const pageInput = {
-            pageType: "custom",
-            name: "sprk_analysisbuilder_40af8",
-            recordId: JSON.stringify(dataPayload)
+            pageType: "webresource",
+            webresourceName: "sprk_analysisbuilder",
+            data: buildQueryString(dataPayload)
         };
 
         // Dialog options for Analysis Builder - percentage-based for responsive sizing
@@ -525,8 +541,8 @@ RIBBON CONFIGURATION:
    - Tooltip: "Create a new AI-powered document analysis"
    - Icon: AnalysisAdd or custom icon
 
-CUSTOM PAGE NAMES:
-- Analysis Builder: sprk_analysisbuilder_40af8
+WEB RESOURCE NAMES:
+- Analysis Builder: sprk_analysisbuilder
 - Analysis Workspace: sprk_analysisworkspace_8bc0b
 
 VERSION HISTORY:

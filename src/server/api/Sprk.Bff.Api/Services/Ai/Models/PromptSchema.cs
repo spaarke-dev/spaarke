@@ -222,9 +222,21 @@ public sealed record OutputFieldDefinition
     public IReadOnlyList<string>? Enum { get; init; }
 
     /// <summary>
-    /// Auto-inject valid values from a downstream node's field mapping options.
-    /// Format: <c>"downstream:{outputVariable}.{fieldName}"</c>
-    /// (e.g., <c>"downstream:update_doc.sprk_documenttype"</c>).
+    /// Auto-inject valid values into the <see cref="Enum"/> list at render time.
+    /// Supported reference prefixes:
+    /// <list type="bullet">
+    /// <item><c>"downstream:{outputVariable}.{fieldName}"</c> — from downstream node field mapping options
+    /// (e.g., <c>"downstream:update_doc.sprk_documenttype"</c>).</item>
+    /// <item><c>"lookup:{entityLogicalName}.{fieldName}"</c> — from Dataverse lookup entity record values
+    /// (e.g., <c>"lookup:sprk_mattertype_ref.sprk_mattertypename"</c>).</item>
+    /// <item><c>"optionset:{entityLogicalName}.{attributeName}"</c> — from Dataverse choice/picklist metadata
+    /// (e.g., <c>"optionset:sprk_matter.sprk_matterstatus"</c>).</item>
+    /// <item><c>"multiselect:{entityLogicalName}.{attributeName}"</c> — from Dataverse multi-select picklist metadata
+    /// (e.g., <c>"multiselect:sprk_matter.sprk_jurisdictions"</c>).</item>
+    /// <item><c>"boolean:{entityLogicalName}.{attributeName}"</c> — from Dataverse two-option boolean metadata
+    /// (e.g., <c>"boolean:sprk_matter.sprk_isconfidential"</c>). Returns [TrueLabel, FalseLabel].</item>
+    /// </list>
+    /// All Dataverse prefixes are resolved via <see cref="LookupChoicesResolver"/> before rendering.
     /// </summary>
     [JsonPropertyName("$choices")]
     public string? Choices { get; init; }

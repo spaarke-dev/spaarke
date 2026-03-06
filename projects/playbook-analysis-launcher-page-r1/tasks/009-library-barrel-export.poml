@@ -1,0 +1,51 @@
+<task id="009" project="playbook-analysis-launcher-page-r1">
+  <metadata>
+    <title>Create Playbook Library Barrel Export</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001, 002, 003, 004, 005, 006, 007, 008</dependencies>
+    <blocks>020, 030</blocks>
+    <tags>typescript, frontend</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Simple re-export file — no logic</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the barrel export index.ts for the Playbook component library. Verify all
+    components, services, and types are importable from a single path.
+  </prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>
+    Create `src/solutions/LegalWorkspace/src/components/Playbook/index.ts` that re-exports
+    all public components, services, and types from the library.
+  </goal>
+
+  <context>
+    <background>
+      The barrel export enables clean imports like `import { PlaybookCardGrid, PlaybookService } from "../Playbook"`.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/Playbook/index.ts</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step order="1">Create index.ts with re-exports of all components, services, and types</step>
+    <step order="2">Verify TypeScript compiles with all exports resolved</step>
+    <step order="3">Verify import from "../Playbook" works in a test import</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/src/components/Playbook/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All public components, services, and types exported</criterion>
+    <criterion testable="true">TypeScript compiles without circular dependency warnings</criterion>
+  </acceptance-criteria>
+</task>

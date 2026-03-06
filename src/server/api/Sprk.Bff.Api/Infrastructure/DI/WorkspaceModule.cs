@@ -69,6 +69,11 @@ public static class WorkspaceModule
         // Concrete registration per ADR-010 (no interface seam needed for single implementation).
         services.AddScoped<MatterPreFillService>();
 
+        // ProjectPreFillService: Scoped to match HttpContext lifetime used for OBO file uploads.
+        // Same dependency pattern as MatterPreFillService but returns project-specific field names.
+        // Concrete registration per ADR-010 (no interface seam needed for single implementation).
+        services.AddScoped<ProjectPreFillService>();
+
         // TodoGenerationOptions: bind from "TodoGeneration" appsettings section.
         // Defaults apply when the section is absent (IntervalHours=24, StartHourUtc=2).
         if (configuration != null)

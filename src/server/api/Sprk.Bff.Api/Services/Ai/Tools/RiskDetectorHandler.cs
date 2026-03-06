@@ -252,7 +252,7 @@ public sealed class RiskDetectorHandler : IAnalysisToolHandler
 
                 _logger.LogDebug("Analyzing chunk {ChunkIndex}/{TotalChunks} for risks", index + 1, chunks.Count);
 
-                var result = await DetectRisksInChunkAsync(chunk, config, cancellationToken);
+                var result = await DetectRisksInChunkAsync(chunk, config, cancellationToken, context);
                 allRisks.AddRange(result.Risks);
                 totalInputTokens += result.InputTokens;
                 totalOutputTokens += result.OutputTokens;
@@ -341,9 +341,10 @@ public sealed class RiskDetectorHandler : IAnalysisToolHandler
     private async Task<RiskDetectionChunkResult> DetectRisksInChunkAsync(
         string chunk,
         RiskDetectorConfig config,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ToolExecutionContext? executionContext = null)
     {
-        var prompt = BuildRiskDetectionPrompt(chunk, config);
+        var prompt = PromptContextHelper.ApplyContext(BuildRiskDetectionPrompt(chunk, config), executionContext, chunk);
         var inputTokens = EstimateTokens(prompt);
 
         var response = await _openAiClient.GetCompletionAsync(prompt, cancellationToken: cancellationToken);

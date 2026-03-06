@@ -62,6 +62,11 @@ export interface INextStepsStepProps {
   selectedActions: FollowOnActionId[];
   /** Called when selection changes. */
   onSelectionChange: (selected: FollowOnActionId[]) => void;
+  /**
+   * Label for the entity being created (e.g. "matter" or "project").
+   * Used in subtitle and skip hint text. Defaults to "matter".
+   */
+  entityLabel?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,14 +76,14 @@ export interface INextStepsStepProps {
 const CARD_DEFS: IFollowOnCardDef[] = [
   {
     id: 'assign-counsel',
-    label: 'Assign Counsel',
-    description: 'Search and assign a lead attorney to this matter.',
-    stepLabel: 'Assign Counsel',
+    label: 'Assign Resources',
+    description: 'Search and assign internal and external resources to this matter.',
+    stepLabel: 'Assign Resources',
     icon: <PersonRegular fontSize={28} />,
   },
   {
     id: 'draft-summary',
-    label: 'Draft Matter Summary',
+    label: 'Draft Summary',
     description: 'Generate an AI-assisted summary and distribute to recipients.',
     stepLabel: 'Draft Summary',
     icon: <DocumentTextRegular fontSize={28} />,
@@ -296,6 +301,7 @@ const CheckboxCard: React.FC<ICheckboxCardProps> = ({ def, selected, onToggle })
 export const NextStepsStep: React.FC<INextStepsStepProps> = ({
   selectedActions,
   onSelectionChange,
+  entityLabel = 'matter',
 }) => {
   const styles = useStyles();
 
@@ -323,8 +329,8 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
           Next steps
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
-          Optionally select follow-on actions to complete after the matter is
-          created. You can skip all and handle these from the matter record.
+          Optionally select follow-on actions to complete after the {entityLabel} is
+          created. You can skip all and handle these from the {entityLabel} record.
         </Text>
       </div>
 
@@ -343,7 +349,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
       {/* Optional skip hint */}
       {selectedActions.length === 0 && (
         <Text size={200} className={styles.skipMessage}>
-          No actions selected — click Finish to create the matter without follow-on steps.
+          No actions selected — click Finish to create the {entityLabel} without follow-on steps.
         </Text>
       )}
     </div>
@@ -363,7 +369,7 @@ export const FOLLOW_ON_STEP_ID_MAP: Record<FollowOnActionId, string> = {
 
 /** Map FollowOnActionId to the sidebar step label. */
 export const FOLLOW_ON_STEP_LABEL_MAP: Record<FollowOnActionId, string> = {
-  'assign-counsel': 'Assign Counsel',
+  'assign-counsel': 'Assign Resources',
   'draft-summary': 'Draft Summary',
   'send-email': 'Send Email',
 };

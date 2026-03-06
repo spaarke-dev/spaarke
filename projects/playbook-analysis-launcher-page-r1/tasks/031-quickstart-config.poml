@@ -1,0 +1,53 @@
+<task id="031" project="playbook-analysis-launcher-page-r1">
+  <metadata>
+    <title>Create Quick Start Per-Card Configuration</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>009</dependencies>
+    <blocks>032</blocks>
+    <tags>typescript, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration file — no complex logic, but has constraints</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the quickStartConfig.ts with per-card step configurations for all 5 Quick Start
+    action cards (document-analysis, document-search, email-compose, assign-counsel, meeting-schedule).
+  </prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>
+    Create `src/solutions/LegalWorkspace/src/components/QuickStart/quickStartConfig.ts` with
+    QUICKSTART_CONFIGS map: intent → step labels, accepted file types, follow-up actions.
+  </goal>
+
+  <context>
+    <background>See spec.md Section 6.2 for card → wizard mapping.</background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/QuickStart/quickStartConfig.ts</file>
+      <file>src/solutions/LegalWorkspace/src/components/GetStarted/analysisBuilderTypes.ts</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step order="1">Read spec.md Section 6.2 for card → wizard mapping</step>
+    <step order="2">Define IQuickStartConfig interface: title, uploadLabel, analyzeLabel, acceptedFileTypes, allowMultiple, playbookIntent, followUpActions</step>
+    <step order="3">Create QUICKSTART_CONFIGS record with 5 entries matching action card intents</step>
+    <step order="4">Configure each intent with appropriate labels, file types, actions</step>
+    <step order="5">Verify TypeScript compiles</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/src/components/QuickStart/quickStartConfig.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">5 intent configurations defined</criterion>
+    <criterion testable="true">Each config has title, upload label, analyze label, file types, follow-up actions</criterion>
+    <criterion testable="true">TypeScript compiles without errors</criterion>
+  </acceptance-criteria>
+</task>

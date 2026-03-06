@@ -242,6 +242,9 @@ export const FileUploadZone: React.FC<IFileUploadZoneProps> = ({
   const styles = useStyles();
   const [isDragOver, setIsDragOver] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  // Key forces React to recreate the input element after each selection,
+  // avoiding browser quirks where the change event is swallowed on first click.
+  const [inputKey, setInputKey] = React.useState(0);
 
   // -------------------------------------------------------------------------
   // Drag-and-drop handlers
@@ -317,7 +320,10 @@ export const FileUploadZone: React.FC<IFileUploadZoneProps> = ({
 
   const handleInputChange = React.useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const { accepted, errors } = processFileList(e.target.files);
+      const files = e.target.files;
+      if (!files || files.length === 0) return;
+
+      const { accepted, errors } = processFileList(files);
 
       if (errors.length > 0) {
         onValidationErrors(errors);
@@ -326,8 +332,10 @@ export const FileUploadZone: React.FC<IFileUploadZoneProps> = ({
         onFilesAccepted(accepted);
       }
 
-      // Reset input so the same file can be re-selected after removal
-      e.target.value = '';
+      // Force a fresh input element so the same file can be re-selected.
+      // Using key remount instead of e.target.value = '' avoids browser
+      // quirks where the change event is lost on the first selection.
+      setInputKey((k) => k + 1);
     },
     [onFilesAccepted, onValidationErrors]
   );
@@ -344,8 +352,9 @@ export const FileUploadZone: React.FC<IFileUploadZoneProps> = ({
 
   return (
     <>
-      {/* Hidden file input */}
+      {/* Hidden file input — key forces remount after each selection */}
       <input
+        key={inputKey}
         ref={fileInputRef}
         type="file"
         multiple

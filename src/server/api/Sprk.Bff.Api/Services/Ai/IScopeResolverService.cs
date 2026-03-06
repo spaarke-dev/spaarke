@@ -289,6 +289,53 @@ public interface IScopeResolverService
 
     #endregion
 
+    #region Lookup Queries
+
+    /// <summary>
+    /// Query all values of a single field from a Dataverse entity.
+    /// Used by <c>$choices</c> resolution to load lookup reference values
+    /// (e.g., all matter type names from <c>sprk_mattertype_refs</c>).
+    /// </summary>
+    /// <param name="entitySetName">OData entity set name (plural, e.g., "sprk_mattertype_refs").</param>
+    /// <param name="fieldName">Field name to select (e.g., "sprk_name").</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Array of field values, or empty if none found.</returns>
+    Task<string[]> QueryLookupValuesAsync(
+        string entitySetName,
+        string fieldName,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Query option set (picklist) or multi-select picklist labels from Dataverse entity metadata.
+    /// Used by <c>$choices</c> resolution to load choice field values
+    /// (e.g., status options from <c>sprk_matter.sprk_status</c>).
+    /// </summary>
+    /// <param name="entityLogicalName">Entity logical name (e.g., "sprk_matter").</param>
+    /// <param name="attributeLogicalName">Attribute logical name (e.g., "sprk_status").</param>
+    /// <param name="isMultiSelect">True for MultiSelectPicklistAttributeMetadata, false for PicklistAttributeMetadata.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Array of option labels, or empty if none found.</returns>
+    Task<string[]> QueryOptionSetLabelsAsync(
+        string entityLogicalName,
+        string attributeLogicalName,
+        bool isMultiSelect,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Query boolean (two-option) field labels from Dataverse entity metadata.
+    /// Returns the TrueOption and FalseOption labels (e.g., ["Yes", "No"] or ["Active", "Inactive"]).
+    /// </summary>
+    /// <param name="entityLogicalName">Entity logical name (e.g., "sprk_matter").</param>
+    /// <param name="attributeLogicalName">Attribute logical name (e.g., "sprk_isactive").</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Array of two labels [TrueLabel, FalseLabel], or empty if not found.</returns>
+    Task<string[]> QueryBooleanLabelsAsync(
+        string entityLogicalName,
+        string attributeLogicalName,
+        CancellationToken cancellationToken);
+
+    #endregion
+
     #region Search Operations
 
     /// <summary>

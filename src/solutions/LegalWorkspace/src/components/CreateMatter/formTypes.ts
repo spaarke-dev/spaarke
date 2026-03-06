@@ -38,6 +38,10 @@ export interface ICreateMatterFormState {
   assignedParalegalId: string;
   /** Display name of the assigned paralegal. */
   assignedParalegalName: string;
+  /** Assigned Outside Counsel — sprk_organization GUID. */
+  assignedOutsideCounselId: string;
+  /** Display name of the assigned outside counsel organization. */
+  assignedOutsideCounselName: string;
   /** Summary / Description — free text, multi-line. Maps to sprk_description. */
   summary: string;
 }
@@ -64,6 +68,12 @@ export interface IAiPrefillFields {
   practiceAreaId?: string;
   practiceAreaName?: string;
   matterName?: string;
+  assignedAttorneyId?: string;
+  assignedAttorneyName?: string;
+  assignedParalegalId?: string;
+  assignedParalegalName?: string;
+  assignedOutsideCounselId?: string;
+  assignedOutsideCounselName?: string;
   summary?: string;
 }
 
@@ -178,8 +188,15 @@ export interface ICreateRecordStepProps {
   onValidChange: (isValid: boolean) => void;
 
   /**
-   * Called by the parent wizard just before advancing to Step 3, so the
-   * wizard can store the final form values in its own state.
+   * Called on every form change so the parent wizard can store the latest values.
    */
   onSubmit: (values: ICreateMatterFormState) => void;
+
+  /**
+   * Initial form values from the parent. When provided with non-empty values
+   * (e.g. on remount after navigating back), the step initialises from these
+   * instead of starting empty. This preserves user edits and Assign Resources
+   * overrides that were written to the parent's form state.
+   */
+  initialFormValues?: ICreateMatterFormState;
 }

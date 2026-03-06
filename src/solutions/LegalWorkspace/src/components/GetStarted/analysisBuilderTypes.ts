@@ -38,7 +38,7 @@ export interface IAnalysisBuilderContext {
    * Supported values (defined in AI Playbook intent registry):
    *   "new-project"        — Create a new project
    *   "assign-counsel"     — Assign counsel to a matter
-   *   "document-analysis"  — Analyze a document
+   *   "file-summary"       — Summarize uploaded files
    *   "document-search"    — Search for documents
    *   "email-compose"      — Compose an email
    *   "meeting-schedule"   — Schedule a meeting
@@ -125,10 +125,10 @@ export const ANALYSIS_BUILDER_CONTEXTS: Readonly<
     displayName: "Assign to Counsel",
     initialPrompt: "Assign counsel to a matter",
   },
-  "analyze-new-document": {
-    intent: "document-analysis",
-    displayName: "Analyze New Document",
-    initialPrompt: "Analyze a document",
+  "summarize-new-files": {
+    intent: "file-summary",
+    displayName: "Summarize New File(s)",
+    initialPrompt: "Summarize uploaded files",
   },
   "search-document-files": {
     intent: "document-search",

@@ -30,6 +30,10 @@ export interface ICreateProjectFormState {
   assignedParalegalId: string;
   /** Display name of the assigned paralegal. */
   assignedParalegalName: string;
+  /** Assigned Outside Counsel — sprk_organization GUID. */
+  assignedOutsideCounselId: string;
+  /** Display name of the assigned outside counsel organization. */
+  assignedOutsideCounselName: string;
   /** Description — free text, multi-line (optional). Maps to sprk_projectdescription. */
   description: string;
 }
@@ -45,5 +49,7 @@ export const EMPTY_PROJECT_FORM: ICreateProjectFormState = {
   assignedAttorneyName: '',
   assignedParalegalId: '',
   assignedParalegalName: '',
+  assignedOutsideCounselId: '',
+  assignedOutsideCounselName: '',
   description: '',
 };

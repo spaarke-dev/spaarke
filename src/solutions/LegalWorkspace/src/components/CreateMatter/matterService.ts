@@ -216,6 +216,7 @@ export class MatterService {
     if (form.practiceAreaId) lookups.push({ col: 'sprk_practicearea', entitySet: 'sprk_practicearea_refs', guid: form.practiceAreaId });
     if (form.assignedAttorneyId) lookups.push({ col: 'sprk_assignedattorney', entitySet: 'contacts', guid: form.assignedAttorneyId });
     if (form.assignedParalegalId) lookups.push({ col: 'sprk_assignedparalegal', entitySet: 'contacts', guid: form.assignedParalegalId });
+    if (form.assignedOutsideCounselId) lookups.push({ col: 'sprk_assignedoutsidecounsel', entitySet: 'sprk_organizations', guid: form.assignedOutsideCounselId });
 
     for (const lk of lookups) {
       const navProp = navPropMap[lk.col] ?? lk.col;
@@ -612,6 +613,81 @@ export async function fetchAiDraftSummary(
     return data;
   } catch {
     return buildFallbackSummary(matterName, matterType, practiceArea);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Organization search helper (for Outside Counsel lookup)
+// ---------------------------------------------------------------------------
+
+/**
+ * Search sprk_organization records by name fragment.
+ * Returns up to 10 matching organizations as ILookupItem.
+ */
+export async function searchOrganizationsAsLookup(
+  webApi: IWebApi,
+  nameFilter: string
+): Promise<ILookupItem[]> {
+  if (!nameFilter || nameFilter.trim().length < 2) {
+    return [];
+  }
+
+  const safeFilter = nameFilter.trim().replace(/'/g, "''");
+  const query =
+    `?$select=sprk_organizationid,sprk_organizationname` +
+    `&$filter=contains(sprk_organizationname,'${safeFilter}')` +
+    `&$orderby=sprk_organizationname asc` +
+    `&$top=10`;
+
+  console.info('[MatterService] searchOrganizations query:', 'sprk_organization', query);
+  try {
+    const result = await webApi.retrieveMultipleRecords('sprk_organization', query, 10);
+    console.info('[MatterService] searchOrganizations results:', result.entities.length);
+    return result.entities.map((e) => ({
+      id: e['sprk_organizationid'] as string,
+      name: e['sprk_organizationname'] as string,
+    }));
+  } catch (err) {
+    console.error('[MatterService] searchOrganizations error:', err);
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// User search helper (for SendEmailStep — lookup systemuser table)
+// ---------------------------------------------------------------------------
+
+/**
+ * Search systemuser records by name fragment.
+ * Returns up to 10 active users as ILookupItem.
+ * Name format: "Full Name (email)" for disambiguation.
+ */
+export async function searchUsersAsLookup(
+  webApi: IWebApi,
+  nameFilter: string
+): Promise<ILookupItem[]> {
+  if (!nameFilter || nameFilter.trim().length < 2) {
+    return [];
+  }
+
+  const safeFilter = nameFilter.trim().replace(/'/g, "''");
+  const query =
+    `?$select=systemuserid,fullname,internalemailaddress` +
+    `&$filter=contains(fullname,'${safeFilter}') and isdisabled eq false` +
+    `&$orderby=fullname asc` +
+    `&$top=10`;
+
+  console.info('[MatterService] searchUsers query:', 'systemuser', query);
+  try {
+    const result = await webApi.retrieveMultipleRecords('systemuser', query, 10);
+    console.info('[MatterService] searchUsers results:', result.entities.length);
+    return result.entities.map((e) => ({
+      id: e['systemuserid'] as string,
+      name: (e['fullname'] as string) + (e['internalemailaddress'] ? ` (${e['internalemailaddress']})` : ''),
+    }));
+  } catch (err) {
+    console.error('[MatterService] searchUsers error:', err);
+    throw err;
   }
 }
 

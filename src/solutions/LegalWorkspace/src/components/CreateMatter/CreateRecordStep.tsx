@@ -54,8 +54,12 @@ import {
   searchMatterTypes,
   searchPracticeAreas,
   searchContactsAsLookup,
+  searchOrganizationsAsLookup,
   fetchAiDraftSummary,
 } from './matterService';
+// Note: searchContactsAsLookup and searchOrganizationsAsLookup are still imported
+// for AI pre-fill resolution (resolving AI names → Dataverse IDs for form state)
+// even though the lookup UI fields are now in AssignResourcesStep.
 import type { ILookupItem } from '../../types/entities';
 import { getBffBaseUrl } from '../../config/bffConfig';
 import { authenticatedFetch } from '../../services/bffAuthProvider';
@@ -81,6 +85,8 @@ function buildInitialFormState(): ICreateMatterFormState {
     assignedAttorneyName: '',
     assignedParalegalId: '',
     assignedParalegalName: '',
+    assignedOutsideCounselId: '',
+    assignedOutsideCounselName: '',
     summary: '',
   };
 }
@@ -349,12 +355,17 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
   uploadedFiles,
   onValidChange,
   onSubmit,
+  initialFormValues,
 }) => {
   const styles = useStyles();
 
   // ── Reducer ────────────────────────────────────────────────────────────────
+  // When initialFormValues is provided with non-empty values (remount after
+  // user navigated back), start from those values to preserve user edits and
+  // Assign Resources overrides. Otherwise start empty for first mount.
+  const hasInitialValues = initialFormValues && initialFormValues.matterName.trim() !== '';
   const [state, dispatch] = React.useReducer(combinedReducer, undefined, () => ({
-    form: buildInitialFormState(),
+    form: hasInitialValues ? { ...initialFormValues } : buildInitialFormState(),
     ai: buildInitialAiState(),
   }));
 
@@ -384,7 +395,9 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
   // Stable dependency key: join file names into a single string so the effect
   // doesn't re-run on every render (uploadedFileNames is a new array ref each time).
   const prefillKey = uploadedFileNames.join('|');
-  const prefillAttemptedRef = React.useRef(false);
+  // Skip AI pre-fill if we already have initial values from the parent
+  // (remount after navigating back — AI was already run on the first mount).
+  const prefillAttemptedRef = React.useRef(!!hasInitialValues);
 
   React.useEffect(() => {
     if (uploadedFiles.length === 0 || prefillAttemptedRef.current) {
@@ -444,6 +457,14 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
         if (data.matterName) fields.matterName = data.matterName;
         if (data.summary) fields.summary = data.summary;
 
+        // Person / org fields from AI
+        const aiAttorney = data.assignedAttorneyName;
+        const aiParalegal = data.assignedParalegalName;
+        const aiOutsideCounsel = data.assignedOutsideCounselName;
+        if (aiAttorney) fields.assignedAttorneyName = aiAttorney;
+        if (aiParalegal) fields.assignedParalegalName = aiParalegal;
+        if (aiOutsideCounsel) fields.assignedOutsideCounselName = aiOutsideCounsel;
+
         // Resolve AI display names to Dataverse lookup IDs so LookupField
         // renders them as selected chips (LookupField needs both id + name).
         // Uses fuzzy matching since AI output won't always exactly match
@@ -469,6 +490,42 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
               if (best) {
                 fields.practiceAreaId = best.id;
                 fields.practiceAreaName = best.name;
+              }
+            }).catch(() => { /* keep display name only */ })
+          );
+        }
+
+        if (aiAttorney && webApi) {
+          resolvePromises.push(
+            searchContactsAsLookup(webApi, aiAttorney).then((results) => {
+              const best = findBestLookupMatch(aiAttorney, results);
+              if (best) {
+                fields.assignedAttorneyId = best.id;
+                fields.assignedAttorneyName = best.name;
+              }
+            }).catch(() => { /* keep display name only */ })
+          );
+        }
+
+        if (aiParalegal && webApi) {
+          resolvePromises.push(
+            searchContactsAsLookup(webApi, aiParalegal).then((results) => {
+              const best = findBestLookupMatch(aiParalegal, results);
+              if (best) {
+                fields.assignedParalegalId = best.id;
+                fields.assignedParalegalName = best.name;
+              }
+            }).catch(() => { /* keep display name only */ })
+          );
+        }
+
+        if (aiOutsideCounsel && webApi) {
+          resolvePromises.push(
+            searchOrganizationsAsLookup(webApi, aiOutsideCounsel).then((results) => {
+              const best = findBestLookupMatch(aiOutsideCounsel, results);
+              if (best) {
+                fields.assignedOutsideCounselId = best.id;
+                fields.assignedOutsideCounselName = best.name;
               }
             }).catch(() => { /* keep display name only */ })
           );
@@ -527,6 +584,11 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
     [webApi]
   );
 
+  const handleSearchOutsideCounsel = React.useCallback(
+    (query: string) => searchOrganizationsAsLookup(webApi, query),
+    [webApi]
+  );
+
   // ── Lookup change handlers ─────────────────────────────────────────────────
 
   const handleMatterTypeChange = React.useCallback(
@@ -574,6 +636,19 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
         type: 'SET_LOOKUP',
         idField: 'assignedParalegalId',
         nameField: 'assignedParalegalName',
+        id: item?.id ?? '',
+        name: item?.name ?? '',
+      });
+    },
+    []
+  );
+
+  const handleOutsideCounselChange = React.useCallback(
+    (item: ILookupItem | null) => {
+      dispatch({
+        type: 'SET_LOOKUP',
+        idField: 'assignedOutsideCounselId',
+        nameField: 'assignedOutsideCounselName',
         id: item?.id ?? '',
         name: item?.name ?? '',
       });
@@ -631,6 +706,10 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
     ? { id: form.assignedParalegalId, name: form.assignedParalegalName }
     : null;
 
+  const outsideCounselValue: ILookupItem | null = form.assignedOutsideCounselId
+    ? { id: form.assignedOutsideCounselId, name: form.assignedOutsideCounselName }
+    : null;
+
   /**
    * Renders the label for a text field with optional required mark and AI tag.
    */
@@ -657,7 +736,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
       <div className={styles.headerRow}>
         <div className={styles.headerText}>
           <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
-            Create record
+            Enter Info
           </Text>
           <Text size={200} className={styles.stepSubtitle}>
             {isLoading
@@ -686,8 +765,6 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
           <div className={styles.fullWidth}>
             <FieldSkeleton />
           </div>
-          <FieldSkeleton />
-          <FieldSkeleton />
           <div className={styles.fullWidth}>
             <FieldSkeleton large />
           </div>
@@ -733,38 +810,18 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
             />
           </Field>
 
-          {/* ── Row 3: Assigned Attorney + Assigned Paralegal ── */}
-
-          <LookupField
-            label="Assigned Attorney"
-            placeholder="Search contacts..."
-            value={attorneyValue}
-            onChange={handleAttorneyChange}
-            onSearch={handleSearchAttorneys}
-            minSearchLength={2}
-          />
-
-          <LookupField
-            label="Assigned Paralegal"
-            placeholder="Search contacts..."
-            value={paralegalValue}
-            onChange={handleParalegalChange}
-            onSearch={handleSearchParalegals}
-            minSearchLength={2}
-          />
-
-          {/* ── Row 4: Summary — full width with AI generate ── */}
+          {/* ── Row 3: Matter Description — full width with AI generate ── */}
 
           <div className={styles.fullWidth}>
             <div className={styles.summaryHeader}>
-              {renderLabel('Summary', 'summary')}
+              {renderLabel('Matter Description', 'summary')}
               <Button
                 appearance="subtle"
                 size="small"
                 icon={isGeneratingSummary ? <Spinner size="extra-tiny" /> : <SparkleRegular />}
                 onClick={handleGenerateSummary}
                 disabled={isGeneratingSummary || !form.matterName.trim()}
-                aria-label="Generate summary with AI"
+                aria-label="Generate description with AI"
               >
                 {isGeneratingSummary ? 'Generating\u2026' : 'Generate with AI'}
               </Button>
@@ -773,10 +830,10 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
               value={form.summary}
               onChange={handleFieldChange('summary')}
               placeholder="Brief description of the matter, its background, and objectives"
-              rows={5}
+              rows={11}
               resize="vertical"
-              aria-label="Summary"
-              style={{ marginTop: tokens.spacingVerticalXS }}
+              aria-label="Matter Description"
+              style={{ marginTop: tokens.spacingVerticalXS, width: '100%' }}
             />
           </div>
         </div>

@@ -178,9 +178,18 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
                 MergeKnowledgeContext(referenceKnowledge, documentContextKnowledge),
                 entityContextKnowledge);
 
+            // Resolve $choices lookup references from Dataverse before tool execution.
+            // This pre-resolves "lookup:entity.field" references in the JPS so the renderer
+            // can inject them as enum constraints for constrained decoding.
+            var lookupChoicesResolver = scope.ServiceProvider.GetService<LookupChoicesResolver>();
+            var preResolvedLookupChoices = lookupChoicesResolver != null
+                ? await lookupChoicesResolver.ResolveFromJpsAsync(
+                    context.Action.SystemPrompt, cancellationToken)
+                : null;
+
             // Convert to tool execution context (async: resolves JPS $ref entries, includes merged RAG knowledge)
             var toolContext = await CreateToolExecutionContextAsync(
-                context, mergedRagKnowledge, scope.ServiceProvider, cancellationToken);
+                context, mergedRagKnowledge, preResolvedLookupChoices, scope.ServiceProvider, cancellationToken);
 
             // Convert AnalysisTool to the handler's expected format
             var analysisTool = tool;
@@ -322,9 +331,13 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
     /// Optional formatted reference knowledge from L1 RAG retrieval.
     /// Null when no RagIndex knowledge sources are linked.
     /// </param>
+    /// <param name="preResolvedLookupChoices">
+    /// Pre-resolved $choices values from Dataverse lookup entities. Null when not applicable.
+    /// </param>
     private async Task<ToolExecutionContext> CreateToolExecutionContextAsync(
         NodeExecutionContext context,
         string? referenceKnowledge,
+        IReadOnlyDictionary<string, string[]>? preResolvedLookupChoices,
         IServiceProvider scopedProvider,
         CancellationToken cancellationToken)
     {
@@ -378,6 +391,7 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             SkillContext = skillContext,
             KnowledgeContext = knowledgeContext,
             DownstreamNodes = context.DownstreamNodes,
+            PreResolvedLookupChoices = preResolvedLookupChoices,
             MaxTokens = context.MaxTokens,
             Temperature = context.Temperature,
             ModelDeploymentId = context.ModelDeploymentId ?? context.Node.ModelDeploymentId,

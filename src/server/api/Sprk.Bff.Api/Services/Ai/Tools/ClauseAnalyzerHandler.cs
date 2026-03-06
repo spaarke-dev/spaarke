@@ -210,7 +210,8 @@ public sealed class ClauseAnalyzerHandler : IAnalysisToolHandler
                     config.ClauseTypes ?? ClauseTypes.StandardTypes,
                     config.IncludeRiskAssessment,
                     config.IncludeStandardComparison,
-                    cancellationToken);
+                    cancellationToken,
+                    context);
 
                 if (chunkResult.Clauses != null)
                 {
@@ -462,9 +463,11 @@ public sealed class ClauseAnalyzerHandler : IAnalysisToolHandler
         string[] clauseTypes,
         bool includeRiskAssessment,
         bool includeStandardComparison,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ToolExecutionContext? executionContext = null)
     {
-        var prompt = BuildAnalysisPrompt(chunk, clauseTypes, includeRiskAssessment, includeStandardComparison);
+        var prompt = PromptContextHelper.ApplyContext(
+            BuildAnalysisPrompt(chunk, clauseTypes, includeRiskAssessment, includeStandardComparison), executionContext, chunk);
         var inputTokens = EstimateTokens(prompt);
 
         var response = await _openAiClient.GetCompletionAsync(prompt, cancellationToken: cancellationToken);

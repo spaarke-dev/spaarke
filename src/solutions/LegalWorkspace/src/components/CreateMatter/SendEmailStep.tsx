@@ -8,20 +8,17 @@
  *   │  Compose an introductory email. It will be created as a Dataverse   │
  *   │  email activity linked to this matter.                               │
  *   │                                                                       │
- *   │  To *                                                                │
- *   │  [client@example.com                                     ]           │
+ *   │  To *      [Search users...                             ]           │
  *   │                                                                       │
- *   │  Subject *                                                           │
- *   │  [New Matter: Smith v. Jones                              ]           │
+ *   │  Subject * [New Matter: Smith v. Jones                  ]           │
  *   │                                                                       │
- *   │  Message *                                                           │
- *   │  [Dear Client,                                            ]           │
- *   │  [We are pleased to confirm that your matter...           ]           │
+ *   │  Message * [Dear Client,                                ]           │
+ *   │            [We are pleased to confirm that your matter...]           │
  *   └──────────────────────────────────────────────────────────────────────┘
  *
+ * "To" field uses LookupField searching the systemuser table.
  * Subject is pre-filled: "New Matter: {matterName}"
  * Body uses a default template including matter type + practice area.
- * All fields are editable.
  *
  * Constraints:
  *   - Fluent v9: Input, Textarea, Field, Text
@@ -37,7 +34,9 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
+import { LookupField } from './LookupField';
 import type { ICreateMatterFormState } from './formTypes';
+import type { ILookupItem } from '../../types/entities';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -46,7 +45,7 @@ import type { ICreateMatterFormState } from './formTypes';
 export interface ISendEmailStepProps {
   /** Form values from Step 2 — used to pre-fill subject/body. */
   formValues: ICreateMatterFormState;
-  /** Controlled "To" value. */
+  /** Controlled "To" value (email address string). */
   emailTo: string;
   /** Called when "To" changes. */
   onEmailToChange: (value: string) => void;
@@ -58,6 +57,8 @@ export interface ISendEmailStepProps {
   emailBody: string;
   /** Called when body changes. */
   onEmailBodyChange: (value: string) => void;
+  /** Search function for user lookup. */
+  onSearchUsers: (query: string) => Promise<ILookupItem[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +83,18 @@ export function buildDefaultEmailBody(form: ICreateMatterFormState): string {
     `[Your Name]\n` +
     `[Firm Name]`
   );
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract email from a lookup item name like "John Doe (john@example.com)".
+ */
+function extractEmailFromUserName(name: string): string {
+  const match = name.match(/\(([^)]+@[^)]+)\)/);
+  return match ? match[1] : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -140,8 +153,25 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
   onEmailSubjectChange,
   emailBody,
   onEmailBodyChange,
+  onSearchUsers,
 }) => {
   const styles = useStyles();
+
+  // Track the selected user lookup item for the LookupField display
+  const [selectedUser, setSelectedUser] = React.useState<ILookupItem | null>(null);
+
+  const handleUserSelect = React.useCallback(
+    (item: ILookupItem | null) => {
+      setSelectedUser(item);
+      if (item) {
+        const email = extractEmailFromUserName(item.name);
+        onEmailToChange(email || item.name);
+      } else {
+        onEmailToChange('');
+      }
+    },
+    [onEmailToChange]
+  );
 
   const renderLabel = (text: string, required?: boolean): React.ReactElement => (
     <span className={styles.labelRow}>
@@ -169,19 +199,16 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
 
       {/* Email form */}
       <div className={styles.form}>
-        {/* To */}
-        <Field
-          label={renderLabel('To', true)}
+        {/* To — user lookup */}
+        <LookupField
+          label="To"
           required
-        >
-          <Input
-            type="email"
-            value={emailTo}
-            onChange={(e) => onEmailToChange(e.target.value)}
-            placeholder="client@example.com"
-            aria-label="To"
-          />
-        </Field>
+          placeholder="Search users..."
+          value={selectedUser}
+          onChange={handleUserSelect}
+          onSearch={onSearchUsers}
+          minSearchLength={2}
+        />
 
         {/* Subject */}
         <Field
@@ -204,8 +231,8 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
           <Textarea
             value={emailBody}
             onChange={(e) => onEmailBodyChange(e.target.value)}
-            placeholder="Compose your message\u2026"
-            rows={10}
+            placeholder="Compose your message&hellip;"
+            rows={15}
             resize="vertical"
             aria-label="Message body"
           />

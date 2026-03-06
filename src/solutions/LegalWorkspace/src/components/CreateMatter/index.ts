@@ -21,6 +21,8 @@ export { AiFieldTag } from './AiFieldTag';
 // Task 024 — Step 3 + follow-on step components
 export { NextStepsStep, FOLLOW_ON_STEP_ID_MAP, FOLLOW_ON_STEP_LABEL_MAP } from './NextStepsStep';
 export { AssignCounselStep } from './AssignCounselStep';
+export { AssignResourcesStep } from './AssignResourcesStep';
+export { RecipientField } from './RecipientField';
 export { DraftSummaryStep } from './DraftSummaryStep';
 export {
   SendEmailStep,
@@ -36,6 +38,7 @@ export {
   searchContactsAsLookup,
   searchMatterTypes,
   searchPracticeAreas,
+  searchUsersAsLookup,
   fetchAiDraftSummary,
 } from './matterService';
 
@@ -77,6 +80,8 @@ export type {
   INextStepsStepProps,
 } from './NextStepsStep';
 export type { IAssignCounselStepProps } from './AssignCounselStep';
+export type { IAssignResourcesStepProps } from './AssignResourcesStep';
+export type { IRecipientItem, IRecipientFieldProps } from './RecipientField';
 export type { IDraftSummaryStepProps } from './DraftSummaryStep';
 export type { ISendEmailStepProps } from './SendEmailStep';
 // ISuccessConfirmationProps removed — SuccessConfirmation component deleted (T012)
