@@ -857,7 +857,12 @@ foreach ($node in $definition.nodes) {
         id       = $nodeId.ToString()
         type     = $canvasType
         position = @{ x = $posX; y = $posY }
-        data     = @{ label = $nodeName }
+        data     = @{
+            label            = $nodeName
+            type             = $canvasType
+            isConfigured     = $true
+            validationErrors = @()
+        }
     }
 
     # Build edges from dependencies

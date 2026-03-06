@@ -44,7 +44,7 @@ import { useExecutionStore } from "../stores/executionStore";
 import { useScopeStore } from "../stores/scopeStore";
 import { useModelStore } from "../stores/modelStore";
 import { syncNodesToDataverse } from "../services/playbookNodeSync";
-import { updateRecord } from "../services/dataverseClient";
+import { createRecord, updateRecord } from "../services/dataverseClient";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import type { PlaybookNodeType } from "../types/canvas";
 
@@ -239,6 +239,9 @@ export function BuilderLayout({ playbookId }: BuilderLayoutProps): JSX.Element {
     const closeAiModal = useAiAssistantStore((s) => s.closeModal);
     const isExecuting = useExecutionStore((s) => s.isExecuting);
 
+    // Effective playbook ID — starts from prop, updated if we create a new record on first save
+    const effectivePlaybookIdRef = useRef(playbookId);
+
     // Panel visibility
     const [leftPanelOpen, setLeftPanelOpen] = useState(true);
     const [rightPanelOpen, setRightPanelOpen] = useState(false);
@@ -262,16 +265,29 @@ export function BuilderLayout({ playbookId }: BuilderLayoutProps): JSX.Element {
 
     // Save handler
     const handleSave = useCallback(async () => {
-        if (!playbookId || isSaving) return;
+        if (isSaving) return;
         setIsSaving(true);
         try {
+            let activeId = effectivePlaybookIdRef.current;
+
+            // New playbook — create the record in Dataverse first
+            if (!activeId) {
+                const newName = playbookName || "New Playbook";
+                activeId = await createRecord("sprk_analysisplaybooks", {
+                    sprk_name: newName,
+                    sprk_ispublic: true,
+                });
+                effectivePlaybookIdRef.current = activeId;
+                console.info(`[BuilderLayout] Created new playbook: ${activeId}`);
+            }
+
             // Save canvas JSON to Dataverse
             const canvasJson = exportToCanvasJson();
-            await updateRecord("sprk_analysisplaybooks", playbookId, {
+            await updateRecord("sprk_analysisplaybooks", activeId, {
                 sprk_canvaslayoutjson: canvasJson,
             });
             // Sync nodes to Dataverse records
-            await syncNodesToDataverse(playbookId, nodes, edges, getInitialNodeScopes());
+            await syncNodesToDataverse(activeId, nodes, edges, getInitialNodeScopes());
             markSaved();
             setSaveStatus("saved");
             console.info("[BuilderLayout] Playbook saved successfully");
@@ -284,11 +300,11 @@ export function BuilderLayout({ playbookId }: BuilderLayoutProps): JSX.Element {
             if (saveStatusTimeoutRef.current) clearTimeout(saveStatusTimeoutRef.current);
             saveStatusTimeoutRef.current = setTimeout(() => setSaveStatus(null), 3000);
         }
-    }, [playbookId, isSaving, exportToCanvasJson, nodes, edges, markSaved]);
+    }, [isSaving, playbookName, exportToCanvasJson, nodes, edges, markSaved]);
 
     // Auto-save debounced (30 seconds after last change)
     useEffect(() => {
-        if (!isDirty || !playbookId) return;
+        if (!isDirty) return;
         if (saveTimeoutRef.current) {
             clearTimeout(saveTimeoutRef.current);
         }
