@@ -3,6 +3,8 @@
 > **External ID**: KNW-010
 > **Content Type**: Reference
 > **Tenant**: system
+> **Domain**: legal
+> **Keywords**: red flags, legal risk, contract issues, warning signs, review
 > **Created**: 2026-02-23
 > **Task**: AIPL-032
 

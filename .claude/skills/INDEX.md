@@ -65,6 +65,7 @@
 | [jps-action-create](jps-action-create/SKILL.md) | Create a new JPS definition for an Analysis Action | No | "create JPS action", "new JPS definition", "new playbook action" |
 | [jps-playbook-design](jps-playbook-design/SKILL.md) | Design a complete AI playbook with JPS nodes, scopes, routing | No | "design playbook", "create playbook", "new AI playbook" |
 | [jps-validate](jps-validate/SKILL.md) | Validate JPS JSON against schema and test rendering | No | "validate JPS", "check JPS", "test JPS definition" |
+| [add-reference-to-index](add-reference-to-index/SKILL.md) | Index golden reference documents into AI Search for RAG retrieval | No | "add reference to index", "index reference document", "add golden reference" |
 
 ## Skill Categories
 
@@ -92,6 +93,7 @@
 - **jps-action-create** - Component: Create a new JPS definition for an Analysis Action (Tier 1)
 - **jps-playbook-design** - Orchestrator: Design complete AI playbook with nodes, scopes, routing (Tier 2)
 - **jps-validate** - Component: Validate JPS JSON against schema and test rendering (Tier 1)
+- **add-reference-to-index** - Operational: Index golden reference documents into AI Search for L1 knowledge retrieval
 
 ### 🔧 Maintenance
 - **ai-procedure-maintenance** - Propagate updates when adding ADRs, constraints, patterns, skills

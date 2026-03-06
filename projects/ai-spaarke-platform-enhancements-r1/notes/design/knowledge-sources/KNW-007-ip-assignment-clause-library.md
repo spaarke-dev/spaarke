@@ -3,6 +3,8 @@
 > **External ID**: KNW-007
 > **Content Type**: Reference
 > **Tenant**: system
+> **Domain**: legal
+> **Keywords**: intellectual property, IP, assignment, ownership, clause, patent, copyright
 > **Created**: 2026-02-23
 > **Task**: AIPL-032
 

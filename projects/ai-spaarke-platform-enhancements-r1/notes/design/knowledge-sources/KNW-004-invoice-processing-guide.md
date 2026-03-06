@@ -3,6 +3,8 @@
 > **External ID**: KNW-004
 > **Content Type**: Reference
 > **Tenant**: system
+> **Domain**: finance
+> **Keywords**: invoice, processing, accounts payable, vendor, payment
 > **Created**: 2026-02-23
 > **Task**: AIPL-032
 
