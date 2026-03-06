@@ -539,7 +539,7 @@ public class ScopeResolverService : IScopeResolverService
 
         var query = BuildODataQuery(
             options,
-            selectFields: "sprk_analysisknowledgeid,sprk_name,sprk_description,sprk_content,sprk_deploymentid",
+            selectFields: "sprk_analysisknowledgeid,sprk_name,sprk_description,sprk_content,sprk_deploymentid,sprk_knowledgedeliverytype",
             expandClause: "sprk_KnowledgeTypeId($select=sprk_name)",
             nameFieldPath: "sprk_name",
             categoryFieldPath: null, // Type filter needs special handling for lookup
@@ -566,7 +566,7 @@ public class ScopeResolverService : IScopeResolverService
 
         var knowledgeItems = result.Value.Select(entity =>
         {
-            var knowledgeType = MapKnowledgeTypeName(entity.KnowledgeTypeId?.Name);
+            var knowledgeType = ResolveKnowledgeDeliveryType(entity);
             return new AnalysisKnowledge
             {
                 Id = entity.Id,
@@ -1159,7 +1159,7 @@ public class ScopeResolverService : IScopeResolverService
             return null;
         }
 
-        var knowledgeType = MapKnowledgeTypeName(entity.KnowledgeTypeId?.Name);
+        var knowledgeType = ResolveKnowledgeDeliveryType(entity);
 
         var knowledge = new AnalysisKnowledge
         {
@@ -1179,11 +1179,28 @@ public class ScopeResolverService : IScopeResolverService
         return knowledge;
     }
 
-    private static KnowledgeType MapKnowledgeTypeName(string? typeName)
+    /// <summary>
+    /// Resolves the <see cref="KnowledgeType"/> for a knowledge entity.
+    /// Prefers the explicit <c>sprk_knowledgedeliverytype</c> choice field when set;
+    /// falls back to name-based mapping from the KnowledgeTypeId lookup for backward compatibility.
+    /// </summary>
+    private static KnowledgeType ResolveKnowledgeDeliveryType(KnowledgeEntity entity)
     {
-        return typeName?.ToLowerInvariant() switch
+        // Prefer the explicit delivery type field when available
+        if (entity.DeliveryType.HasValue)
         {
-            "standards" => KnowledgeType.Inline,
+            return entity.DeliveryType.Value switch
+            {
+                100000000 => KnowledgeType.Inline,
+                100000001 => KnowledgeType.Document,
+                100000002 => KnowledgeType.RagIndex,
+                _ => KnowledgeType.Inline
+            };
+        }
+
+        // Backward compatibility: infer from content category name
+        return entity.KnowledgeTypeId?.Name?.ToLowerInvariant() switch
+        {
             "regulations" => KnowledgeType.RagIndex,
             "rag" => KnowledgeType.RagIndex,
             "document" => KnowledgeType.Document,
@@ -1216,7 +1233,7 @@ public class ScopeResolverService : IScopeResolverService
             return null;
         }
 
-        var knowledgeType = MapKnowledgeTypeName(entity.KnowledgeTypeId?.Name);
+        var knowledgeType = ResolveKnowledgeDeliveryType(entity);
 
         var knowledge = new AnalysisKnowledge
         {
@@ -1326,9 +1343,9 @@ public class ScopeResolverService : IScopeResolverService
             throw new InvalidOperationException("Failed to deserialize created knowledge from Dataverse response");
         }
 
-        // Use type from entity if available, otherwise fall back to request type
-        var knowledgeType = entity.KnowledgeTypeId?.Name != null
-            ? MapKnowledgeTypeName(entity.KnowledgeTypeId.Name)
+        // Use delivery type from entity if available, otherwise fall back to request type
+        var knowledgeType = entity.DeliveryType.HasValue || entity.KnowledgeTypeId?.Name != null
+            ? ResolveKnowledgeDeliveryType(entity)
             : request.Type;
 
         var knowledge = new AnalysisKnowledge
@@ -2160,6 +2177,13 @@ public class ScopeResolverService : IScopeResolverService
 
         [JsonPropertyName("sprk_KnowledgeTypeId")]
         public KnowledgeTypeReference? KnowledgeTypeId { get; set; }
+
+        /// <summary>
+        /// Delivery mechanism choice field: Inline (100000000), Document (100000001), RAG Index (100000002).
+        /// When present, this takes precedence over the name-based mapping from KnowledgeTypeId.
+        /// </summary>
+        [JsonPropertyName("sprk_knowledgedeliverytype")]
+        public int? DeliveryType { get; set; }
     }
 
     private class KnowledgeTypeReference

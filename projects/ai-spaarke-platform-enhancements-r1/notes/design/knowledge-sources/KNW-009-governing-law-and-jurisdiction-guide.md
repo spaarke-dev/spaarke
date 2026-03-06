@@ -3,6 +3,8 @@
 > **External ID**: KNW-009
 > **Content Type**: Reference
 > **Tenant**: system
+> **Domain**: legal
+> **Keywords**: governing law, jurisdiction, choice of law, venue, forum selection
 > **Created**: 2026-02-23
 > **Task**: AIPL-032
 

@@ -3,6 +3,8 @@
 > **External ID**: KNW-008
 > **Content Type**: Reference
 > **Tenant**: system
+> **Domain**: legal
+> **Keywords**: termination, remedy, provisions, breach, cure, dispute resolution
 > **Created**: 2026-02-23
 > **Task**: AIPL-032
 

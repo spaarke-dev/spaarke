@@ -67,6 +67,7 @@
 | [jps-playbook-design](jps-playbook-design/SKILL.md) | End-to-end AI playbook: design → scope/model selection → deploy to Dataverse → verify | No | "design playbook", "create playbook", "new AI playbook" |
 | [jps-scope-refresh](jps-scope-refresh/SKILL.md) | Refresh scope-model-index.json from Dataverse state | No | "refresh scope index", "update scope catalog", "sync scopes" |
 | [jps-validate](jps-validate/SKILL.md) | Validate JPS JSON against schema and test rendering | No | "validate JPS", "check JPS", "test JPS definition" |
+| [add-reference-to-index](add-reference-to-index/SKILL.md) | Index golden reference documents into AI Search for RAG retrieval | No | "add reference to index", "index reference document", "add golden reference" |
 
 ## Skill Categories
 
@@ -96,6 +97,7 @@
 - **jps-playbook-design** - Orchestrator: End-to-end playbook creation — design, scope/model selection, deploy, verify (Tier 2)
 - **jps-scope-refresh** - Operational: Refresh scope-model-index.json from Dataverse (Tier 3)
 - **jps-validate** - Component: Validate JPS JSON against schema and test rendering (Tier 1)
+- **add-reference-to-index** - Operational: Index golden reference documents into AI Search for L1 knowledge retrieval
 
 ### 🔧 Maintenance
 - **ai-procedure-maintenance** - Propagate updates when adding ADRs, constraints, patterns, skills

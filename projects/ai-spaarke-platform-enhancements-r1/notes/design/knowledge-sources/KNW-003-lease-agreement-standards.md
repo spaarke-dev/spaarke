@@ -3,6 +3,8 @@
 > **External ID**: KNW-003
 > **Content Type**: Reference
 > **Tenant**: system
+> **Domain**: real-estate
+> **Keywords**: lease, agreement, property, rental, commercial lease, standards
 > **Created**: 2026-02-23
 > **Task**: AIPL-032
 
