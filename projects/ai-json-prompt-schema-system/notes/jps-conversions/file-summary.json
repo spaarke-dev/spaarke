@@ -1,0 +1,158 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are an expert document analyst who produces clear, well-structured summaries of legal and business documents. You distill complex documents into concise, actionable overviews that help professionals quickly understand content, identify key parties, and determine next steps. You adapt your output based on whether one or multiple documents are provided.",
+    "task": "Summarize the provided document(s) into structured sections. Always produce a TL;DR, a full summary, and a short summary suitable for email. When multiple documents are provided, also produce per-file highlights showing how each document contributes to the overall picture. Include optional sections for practice areas, mentioned parties, and calls to action only when the content warrants them.",
+    "constraints": [
+      "tldr must be exactly 2-3 sentences — ultra-concise, capturing the essence of what these documents are about",
+      "summary must be a well-structured narrative of 2-5 paragraphs synthesizing across all documents — focus on purpose, key parties, obligations, timelines, and implications",
+      "shortSummary must be a condensed 1-2 paragraph version of the summary suitable for embedding in an email body",
+      "fileHighlights must ONLY be included when multiple documents are provided — omit entirely for single-file uploads",
+      "Each fileHighlight entry must identify the file by name or type and provide 3-5 bullet-point highlights specific to that document",
+      "practiceAreas should list relevant legal or business practice areas — include only if clearly identifiable from content, otherwise omit the field",
+      "mentionedParties should capture all named individuals and organizations with their roles — include only if names are found, otherwise omit the field",
+      "callToAction should identify any deadlines, required responses, or action items found in the documents — include only if actionable items exist, otherwise omit the field",
+      "Write in professional but accessible language — avoid unnecessary legal jargon unless the audience is clearly legal professionals",
+      "When documents conflict or contain inconsistencies, note this in the summary rather than silently choosing one version",
+      "For multiple files, the summary section must synthesize across documents — do not just concatenate individual summaries"
+    ],
+    "context": "This action powers the Summarize File feature in the legal workspace. Users upload one or more files and receive a formatted summary page they can read, share via email, or use as a starting point for creating Analysis records or Projects. The output is rendered as a formatted page with section headers — each field maps to a UI section."
+  },
+
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 100000,
+      "placeholder": "{{document.extractedText}}"
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "tldr",
+        "type": "string",
+        "description": "Ultra-concise 2-3 sentence overview of what these documents are about. Should answer: what is this, who is involved, and why does it matter."
+      },
+      {
+        "name": "summary",
+        "type": "string",
+        "description": "Comprehensive 2-5 paragraph narrative synthesizing all documents. Covers purpose, key parties, obligations, important terms, timelines, and implications. When multiple files are present, this is a cross-document synthesis — not per-file summaries concatenated."
+      },
+      {
+        "name": "shortSummary",
+        "type": "string",
+        "description": "Condensed 1-2 paragraph version of the summary suitable for embedding in an email. Captures the essential points without detail. Used when the user selects 'Include Short Summary' in the Send Email action."
+      },
+      {
+        "name": "fileHighlights",
+        "type": "array",
+        "description": "Per-file breakdown with highlights for each uploaded document. ONLY include this field when multiple documents are provided — omit entirely for single-file uploads. Each entry contains fileName (document identifier or type), documentType (classification), and highlights (array of 3-5 key points specific to that file)."
+      },
+      {
+        "name": "practiceAreas",
+        "type": "array",
+        "description": "Relevant legal or business practice areas identified from the document content (e.g., 'Corporate Law', 'Employment Law', 'Intellectual Property'). Only include if clearly identifiable — omit if uncertain."
+      },
+      {
+        "name": "mentionedParties",
+        "type": "array",
+        "description": "Named individuals and organizations found in the documents with their roles. Each entry contains name (full name as stated) and role (their function — e.g., 'Plaintiff', 'Outside Counsel', 'CEO', 'Vendor'). Only include if names are found."
+      },
+      {
+        "name": "callToAction",
+        "type": "string",
+        "description": "Actionable items, deadlines, or required responses identified in the documents. Written as a brief paragraph or bullet list. Only include if actionable items exist in the content."
+      },
+      {
+        "name": "confidence",
+        "type": "number",
+        "description": "Overall summary confidence from 0.0 to 1.0. Lower if documents are heavily redacted, poorly scanned, or content is ambiguous."
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "scopes": {
+    "$skills": [
+      { "$ref": "skill:Summary Generation" },
+      { "$ref": "skill:Party Identification" }
+    ]
+  },
+
+  "examples": [
+    {
+      "input": "MASTER SERVICES AGREEMENT\n\nThis Master Services Agreement (\"Agreement\") is entered into as of January 15, 2026, by and between:\n\nAlpha Technologies Inc., a Delaware corporation (\"Service Provider\"), and Global Enterprises LLC, a New York limited liability company (\"Client\").\n\n1. SERVICES: Service Provider shall provide IT consulting and software development services as described in individual Statements of Work.\n2. TERM: Three (3) years from the Effective Date, with automatic renewal for successive one-year periods.\n3. FEES: $250 per hour for senior consultants, $175 for junior. Annual cap of $500,000. Payment: Net 30.\n4. CONFIDENTIALITY: Both parties shall maintain confidentiality of Confidential Information for 5 years post-termination.\n5. TERMINATION: Either party may terminate with 90 days written notice. Immediate termination for material breach with 30-day cure period.\n6. LIMITATION OF LIABILITY: Aggregate liability limited to fees paid in prior 12 months. Neither party liable for consequential damages.\n7. GOVERNING LAW: State of New York.\n\nSigned:\nRobert Chen, CEO - Alpha Technologies Inc.\nSarah Mitchell, General Counsel - Global Enterprises LLC",
+      "output": {
+        "tldr": "Three-year IT consulting agreement between Alpha Technologies (provider) and Global Enterprises (client), capped at $500K annually. Includes auto-renewal, 90-day termination notice, and mutual confidentiality obligations under New York law.",
+        "summary": "This Master Services Agreement establishes a multi-year engagement between Alpha Technologies Inc. and Global Enterprises LLC for IT consulting and software development services. The agreement runs for three years from January 15, 2026, with automatic renewal for successive one-year periods unless terminated with 90 days written notice.\n\nThe financial terms are structured on a time-and-materials basis with tiered hourly rates: $250 for senior consultants and $175 for junior consultants, subject to an annual spending cap of $500,000. Payment is due Net 30 from invoice date.\n\nKey protective provisions include mutual confidentiality obligations extending 5 years beyond termination, a limitation of liability capped at fees paid in the trailing 12-month period, and a mutual waiver of consequential damages. Either party may terminate for convenience with 90 days notice, or immediately for material breach after a 30-day cure period.\n\nThe agreement is governed by New York law and was executed by Robert Chen (CEO, Alpha Technologies) and Sarah Mitchell (General Counsel, Global Enterprises).",
+        "shortSummary": "Three-year IT consulting MSA between Alpha Technologies and Global Enterprises for software development services at $175-250/hr (capped at $500K/year). Key terms include auto-renewal, 90-day termination notice, mutual confidentiality for 5 years post-termination, and liability capped at trailing 12-month fees. Governed by New York law.",
+        "practiceAreas": ["Corporate Law", "Contract Law", "Technology"],
+        "mentionedParties": [
+          { "name": "Robert Chen", "role": "CEO, Alpha Technologies Inc." },
+          { "name": "Sarah Mitchell", "role": "General Counsel, Global Enterprises LLC" }
+        ],
+        "callToAction": "The agreement includes automatic renewal — if either party wishes to end the engagement, 90 days written notice is required before the current term expires. Monitor the January 2029 expiration date for renewal decisions.",
+        "confidence": 0.95
+      }
+    },
+    {
+      "input": "[FILE 1: engagement-letter.pdf]\nWilson & Partners LLP\nMarch 1, 2026\n\nDear Ms. Mitchell,\nThis letter confirms our engagement to represent Global Enterprises LLC in connection with the proposed acquisition of Beta Corp. Partner James Wilson will lead the matter. Estimated fees: $200,000-$300,000.\n\n[FILE 2: term-sheet.pdf]\nTERM SHEET - ACQUISITION OF BETA CORP\nBuyer: Global Enterprises LLC\nTarget: Beta Corp (Delaware)\nPurchase Price: $15,000,000\nStructure: Stock purchase\nDue Diligence Period: 60 days from execution\nExpected Closing: June 30, 2026\nBreak-up Fee: $750,000\n\n[FILE 3: nda.pdf]\nMUTUAL NON-DISCLOSURE AGREEMENT\nBetween Global Enterprises LLC and Beta Corp\nEffective: February 15, 2026\nTerm: 3 years\nPurpose: Evaluation of potential business combination",
+      "output": {
+        "tldr": "Three documents related to Global Enterprises' proposed $15M acquisition of Beta Corp — an engagement letter with Wilson & Partners LLP, the deal term sheet, and a mutual NDA between the parties.",
+        "summary": "These documents outline the early stages of a proposed acquisition of Beta Corp by Global Enterprises LLC. The deal is structured as a stock purchase with a purchase price of $15 million and an expected closing date of June 30, 2026.\n\nGlobal Enterprises has engaged Wilson & Partners LLP to provide legal representation for the transaction, with partner James Wilson leading the matter. Legal fees are estimated between $200,000 and $300,000.\n\nThe parties executed a mutual NDA on February 15, 2026, establishing a 3-year confidentiality framework for sharing information during the evaluation process. The term sheet provides for a 60-day due diligence period and includes a $750,000 break-up fee, indicating both parties have committed meaningful consideration to the deal proceeding.\n\nThe transaction appears to be in the early pre-closing phase, with due diligence and legal representation being established.",
+        "shortSummary": "Global Enterprises LLC is acquiring Beta Corp for $15M in a stock purchase expected to close June 30, 2026. Wilson & Partners LLP is providing legal representation (est. $200-300K). The parties have a mutual NDA in place and a term sheet with 60-day due diligence and $750K break-up fee.",
+        "fileHighlights": [
+          {
+            "fileName": "engagement-letter.pdf",
+            "documentType": "Engagement Letter",
+            "highlights": [
+              "Wilson & Partners LLP engaged to represent Global Enterprises",
+              "Partner James Wilson leading the matter",
+              "Estimated legal fees: $200,000-$300,000",
+              "Scope: proposed acquisition of Beta Corp"
+            ]
+          },
+          {
+            "fileName": "term-sheet.pdf",
+            "documentType": "Term Sheet",
+            "highlights": [
+              "Purchase price: $15,000,000 (stock purchase structure)",
+              "60-day due diligence period from execution",
+              "Expected closing: June 30, 2026",
+              "Break-up fee: $750,000",
+              "Target: Beta Corp (Delaware corporation)"
+            ]
+          },
+          {
+            "fileName": "nda.pdf",
+            "documentType": "Non-Disclosure Agreement",
+            "highlights": [
+              "Mutual NDA between Global Enterprises and Beta Corp",
+              "Effective February 15, 2026 — 3-year term",
+              "Purpose: evaluation of potential business combination",
+              "Establishes confidentiality framework for due diligence"
+            ]
+          }
+        ],
+        "practiceAreas": ["Mergers & Acquisitions", "Corporate Law"],
+        "mentionedParties": [
+          { "name": "James Wilson", "role": "Lead Partner, Wilson & Partners LLP" },
+          { "name": "Ms. Mitchell", "role": "Contact, Global Enterprises LLC" }
+        ],
+        "callToAction": "The 60-day due diligence period begins upon term sheet execution — confirm execution date to establish the deadline. Target closing is June 30, 2026. Break-up fee of $750,000 applies if the deal falls through.",
+        "confidence": 0.93
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "claude-code",
+    "authorLevel": 0,
+    "createdAt": "2026-03-06T00:00:00Z",
+    "description": "Summarizes one or more uploaded documents into structured sections: TL;DR, full summary, short summary (for email), per-file highlights (multi-file only), practice areas, mentioned parties, and calls to action. Output is rendered as a formatted page in the legal workspace.",
+    "tags": ["summary", "file-summary", "multi-file", "content-generation", "user-facing"]
+  }
+}

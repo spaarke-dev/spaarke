@@ -277,7 +277,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
     const [local, setLocal] = useState<PromptSchema>(
         () => schema ?? createDefaultPromptSchema(),
     );
-    const [taskTouched, setTaskTouched] = useState(false);
+    // taskTouched removed — Task field is now optional (override only)
 
     // -- Downstream $choices discovery from canvas state --
     const canvasNodes = useCanvasStore((s) => s.nodes);
@@ -341,14 +341,9 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
         [local, emit],
     );
 
-    const handleTaskBlur = useCallback(() => {
-        setTaskTouched(true);
-    }, []);
+    // handleTaskBlur removed — Task field no longer validates on blur
 
-    const taskError =
-        taskTouched && local.instruction.task.trim() === ""
-            ? "Task is required."
-            : undefined;
+    const taskError = undefined;
 
     // -----------------------------------------------------------------------
     // Constraints
@@ -533,7 +528,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
                 validationMessage={taskError}
                 validationState={taskError ? "error" : "none"}
             >
-                <Label size="small" required>
+                <Label size="small">
                     Task
                 </Label>
                 <Textarea
@@ -541,12 +536,11 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
                     className={styles.promptArea}
                     value={local.instruction.task}
                     onChange={handleTaskChange}
-                    onBlur={handleTaskBlur}
-                    placeholder="e.g., Extract key entities and assess risk factors..."
+                    placeholder="Inherited from action — override here if needed"
                     resize="vertical"
                 />
                 <Text className={styles.fieldHint}>
-                    The specific work the AI must perform (required)
+                    Override the action's task instruction for this node (optional)
                 </Text>
             </Field>
 

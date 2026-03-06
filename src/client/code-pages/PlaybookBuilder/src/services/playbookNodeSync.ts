@@ -110,6 +110,37 @@ export async function loadPlaybookNodes(playbookId: string): Promise<DataverseRe
 }
 
 /**
+ * Load N:N scope associations for all nodes in a playbook and return them
+ * keyed by canvas node ID. Used by usePlaybookLoader to merge scope data
+ * into the canvas store after loading the canvas JSON layout.
+ *
+ * @param playbookId - Playbook record GUID (no braces).
+ * @returns Map of canvas node ID → { skillIds, knowledgeIds, toolIds }.
+ */
+export async function loadNodeScopes(
+    playbookId: string,
+): Promise<Map<string, { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] }>> {
+    const existing = await getExistingNodes(playbookId);
+    const scopeMap = new Map<string, { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] }>();
+
+    for (const record of existing) {
+        const canvasId = extractCanvasNodeId(record.configJson);
+        if (canvasId) {
+            scopeMap.set(canvasId, {
+                skillIds: record.skillIds,
+                knowledgeIds: record.knowledgeIds,
+                toolIds: record.toolIds,
+            });
+        }
+    }
+
+    console.info(
+        `${LOG_PREFIX} Loaded N:N scopes for ${scopeMap.size} nodes (of ${existing.length} total)`,
+    );
+    return scopeMap;
+}
+
+/**
  * Synchronise canvas nodes/edges to sprk_playbooknode Dataverse records.
  *
  * @param playbookId - Playbook record GUID (no braces).
@@ -120,6 +151,7 @@ export async function syncNodesToDataverse(
     playbookId: string,
     nodes: CanvasNode[],
     edges: CanvasEdge[],
+    initialNodeScopes?: Map<string, { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] }>,
 ): Promise<void> {
     console.info(`${LOG_PREFIX} Syncing ${nodes.length} nodes, ${edges.length} edges for playbook ${playbookId}`);
 
@@ -149,14 +181,15 @@ export async function syncNodesToDataverse(
 
         try {
             const existingRecord = existingByCanvasId.get(node.id);
+            const nodeInitialScopes = initialNodeScopes?.get(node.id);
             if (existingRecord) {
                 await updateNodeRecord(existingRecord.id, node, order);
-                // Sync N:N relationships (skills, knowledge)
-                await syncNodeRelationships(existingRecord.id, node.data, existingRecord);
+                // Sync N:N relationships (skills, knowledge, tools)
+                await syncNodeRelationships(existingRecord.id, node.data, existingRecord, nodeInitialScopes);
             } else {
                 const newId = await createNodeRecord(playbookId, node, order);
                 canvasIdToNodeId.set(node.id, newId);
-                // Create N:N relationships for new nodes
+                // Create N:N relationships for new nodes (no initial scopes — all are new)
                 await syncNodeRelationships(newId, node.data, { id: newId, configJson: null, skillIds: [], knowledgeIds: [], toolIds: [] });
             }
         } catch (err) {
@@ -238,6 +271,7 @@ export async function validateAndSyncNodes(
     playbookId: string,
     nodes: CanvasNode[],
     edges: CanvasEdge[],
+    initialNodeScopes?: Map<string, { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] }>,
 ): Promise<ValidatedSyncResult> {
     // Cast CanvasNode[] to the @xyflow/react Node shape for validation.
     // CanvasNode is structurally compatible (has id, type, data with PlaybookNodeData).
@@ -262,7 +296,7 @@ export async function validateAndSyncNodes(
     }
 
     // No errors — proceed with sync (warnings are informational)
-    await syncNodesToDataverse(playbookId, nodes, edges);
+    await syncNodesToDataverse(playbookId, nodes, edges, initialNodeScopes);
     return { synced: true, validations, validationsByNode };
 }
 
@@ -602,20 +636,36 @@ async function updateNodeRecord(
  *
  * Computes the diff between current canvas selections and existing
  * Dataverse associations, then adds/removes as needed.
+ *
+ * @param initialScopes - The N:N scopes that were loaded when the canvas first opened.
+ *   Used to distinguish "user explicitly removed a scope in the canvas" from
+ *   "scope was added externally after the canvas loaded". Without this, externally-
+ *   added scopes would be disassociated on save because the canvas doesn't know
+ *   about them.
  */
 async function syncNodeRelationships(
     nodeId: string,
     data: PlaybookNodeData,
     existingRecord: ExistingNode,
+    initialScopes?: { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] },
 ): Promise<void> {
     // Filter out non-GUID IDs (e.g. mock/placeholder IDs like "skill-5")
     const desiredSkillIds = (data.skillIds ?? []).filter(isGuid);
     const desiredKnowledgeIds = (data.knowledgeIds ?? []).filter(isGuid);
     const desiredToolIds = (data.toolIds ?? []).filter(isGuid);
 
+    // Protect externally-added scopes: only remove scopes that were present
+    // at load time AND were explicitly removed by the user in the canvas.
+    // Scopes added externally (in Dataverse but not in initialScopes) are preserved.
+    const safeToRemoveSkills = initialScopes?.skillIds ?? [];
+    const safeToRemoveKnowledge = initialScopes?.knowledgeIds ?? [];
+    const safeToRemoveTools = initialScopes?.toolIds ?? [];
+
     // Sync skills
     const skillsToAdd = desiredSkillIds.filter((id) => !existingRecord.skillIds.includes(id));
-    const skillsToRemove = existingRecord.skillIds.filter((id) => !desiredSkillIds.includes(id));
+    const skillsToRemove = existingRecord.skillIds.filter(
+        (id) => !desiredSkillIds.includes(id) && safeToRemoveSkills.includes(id),
+    );
 
     for (const skillId of skillsToAdd) {
         try {
@@ -646,7 +696,9 @@ async function syncNodeRelationships(
 
     // Sync knowledge
     const knowledgeToAdd = desiredKnowledgeIds.filter((id) => !existingRecord.knowledgeIds.includes(id));
-    const knowledgeToRemove = existingRecord.knowledgeIds.filter((id) => !desiredKnowledgeIds.includes(id));
+    const knowledgeToRemove = existingRecord.knowledgeIds.filter(
+        (id) => !desiredKnowledgeIds.includes(id) && safeToRemoveKnowledge.includes(id),
+    );
 
     for (const knowledgeId of knowledgeToAdd) {
         try {
@@ -677,7 +729,9 @@ async function syncNodeRelationships(
 
     // Sync tools
     const toolsToAdd = desiredToolIds.filter((id) => !existingRecord.toolIds.includes(id));
-    const toolsToRemove = existingRecord.toolIds.filter((id) => !desiredToolIds.includes(id));
+    const toolsToRemove = existingRecord.toolIds.filter(
+        (id) => !desiredToolIds.includes(id) && safeToRemoveTools.includes(id),
+    );
 
     for (const toolId of toolsToAdd) {
         try {

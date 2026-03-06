@@ -232,6 +232,7 @@ export function BuilderLayout({ playbookId }: BuilderLayoutProps): JSX.Element {
     const nodes = useCanvasStore((s) => s.nodes);
     const edges = useCanvasStore((s) => s.edges);
     const exportToCanvasJson = useCanvasStore((s) => s.exportToCanvasJson);
+    const getInitialNodeScopes = useCanvasStore((s) => s.getInitialNodeScopes);
     const markSaved = useCanvasStore((s) => s.markSaved);
     const isAiModalOpen = useAiAssistantStore((s) => s.isModalOpen);
     const openAiModal = useAiAssistantStore((s) => s.openModal);
@@ -270,7 +271,7 @@ export function BuilderLayout({ playbookId }: BuilderLayoutProps): JSX.Element {
                 sprk_canvaslayoutjson: canvasJson,
             });
             // Sync nodes to Dataverse records
-            await syncNodesToDataverse(playbookId, nodes, edges);
+            await syncNodesToDataverse(playbookId, nodes, edges, getInitialNodeScopes());
             markSaved();
             setSaveStatus("saved");
             console.info("[BuilderLayout] Playbook saved successfully");
