@@ -188,8 +188,15 @@ export interface ICreateRecordStepProps {
   onValidChange: (isValid: boolean) => void;
 
   /**
-   * Called by the parent wizard just before advancing to Step 3, so the
-   * wizard can store the final form values in its own state.
+   * Called on every form change so the parent wizard can store the latest values.
    */
   onSubmit: (values: ICreateMatterFormState) => void;
+
+  /**
+   * Initial form values from the parent. When provided with non-empty values
+   * (e.g. on remount after navigating back), the step initialises from these
+   * instead of starting empty. This preserves user edits and Assign Resources
+   * overrides that were written to the parent's form state.
+   */
+  initialFormValues?: ICreateMatterFormState;
 }

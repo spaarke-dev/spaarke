@@ -183,7 +183,7 @@ export class MatterService {
       sprk_mattername: form.matterName.trim(),
     };
     if (form.summary && form.summary.trim() !== '') {
-      entity['sprk_description'] = form.summary.trim();
+      entity['sprk_matterdescription'] = form.summary.trim();
     }
     // Store the SPE container ID on the matter record
     if (this._containerId) {
@@ -649,6 +649,44 @@ export async function searchOrganizationsAsLookup(
     }));
   } catch (err) {
     console.error('[MatterService] searchOrganizations error:', err);
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// User search helper (for SendEmailStep — lookup systemuser table)
+// ---------------------------------------------------------------------------
+
+/**
+ * Search systemuser records by name fragment.
+ * Returns up to 10 active users as ILookupItem.
+ * Name format: "Full Name (email)" for disambiguation.
+ */
+export async function searchUsersAsLookup(
+  webApi: IWebApi,
+  nameFilter: string
+): Promise<ILookupItem[]> {
+  if (!nameFilter || nameFilter.trim().length < 2) {
+    return [];
+  }
+
+  const safeFilter = nameFilter.trim().replace(/'/g, "''");
+  const query =
+    `?$select=systemuserid,fullname,internalemailaddress` +
+    `&$filter=contains(fullname,'${safeFilter}') and isdisabled eq false` +
+    `&$orderby=fullname asc` +
+    `&$top=10`;
+
+  console.info('[MatterService] searchUsers query:', 'systemuser', query);
+  try {
+    const result = await webApi.retrieveMultipleRecords('systemuser', query, 10);
+    console.info('[MatterService] searchUsers results:', result.entities.length);
+    return result.entities.map((e) => ({
+      id: e['systemuserid'] as string,
+      name: (e['fullname'] as string) + (e['internalemailaddress'] ? ` (${e['internalemailaddress']})` : ''),
+    }));
+  } catch (err) {
+    console.error('[MatterService] searchUsers error:', err);
     throw err;
   }
 }

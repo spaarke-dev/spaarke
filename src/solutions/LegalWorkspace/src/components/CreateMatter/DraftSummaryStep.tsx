@@ -1,28 +1,29 @@
 /**
  * DraftSummaryStep.tsx
- * Follow-on step for "Draft Matter Summary" in the Create New Matter wizard.
+ * Follow-on step for "Draft Summary" in the Create New Matter wizard.
  *
  * Layout:
  *   ┌──────────────────────────────────────────────────────────────────────┐
- *   │  Draft Matter Summary                             ✦ AI Generated     │
+ *   │  Draft Summary                                  ✦ AI Generated       │
  *   │  Review and edit the AI-generated summary, then add recipients.      │
  *   │                                                                       │
  *   │  ┌─ AI Summary ─────────────────────────────────────────────────┐   │
  *   │  │  ✦  This litigation matter, "Smith v. Jones", has been...    │   │
  *   │  └─────────────────────────────────────────────────────────────┘   │
  *   │                                                                       │
- *   │  Recipient emails (one per line)                                     │
- *   │  [                                               ]                   │
+ *   │  Distribute to                                                       │
+ *   │  [Search contacts or type email...     ] + chips                    │
  *   │                                                                       │
- *   │  [+ Add recipient]                                                   │
+ *   │  CC                                                                  │
+ *   │  [Search contacts or type email...     ] + chips                    │
  *   └──────────────────────────────────────────────────────────────────────┘
  *
  * On mount: calls fetchAiDraftSummary from matterService (stub / BFF).
- * While in-flight: spinner in the summary card area.
- * On error: "Summary unavailable" fallback message.
+ * Uses RecipientField for "Distribute to" and "CC" with contact lookup
+ * and freeform email entry.
  *
  * Constraints:
- *   - Fluent v9: Card, Textarea, Input, Button, Spinner, Text
+ *   - Fluent v9: Card, Textarea, Text, Spinner, Badge
  *   - SparkleRegular for AI indicator
  *   - makeStyles with semantic tokens — ZERO hardcoded colors
  */
@@ -32,8 +33,6 @@ import {
   Card,
   CardHeader,
   Textarea,
-  Input,
-  Button,
   Spinner,
   Text,
   Badge,
@@ -42,12 +41,12 @@ import {
 } from '@fluentui/react-components';
 import {
   SparkleRegular,
-  AddRegular,
-  DismissRegular,
   WarningRegular,
 } from '@fluentui/react-icons';
 import { fetchAiDraftSummary } from './matterService';
+import { RecipientField, IRecipientItem } from './RecipientField';
 import type { ICreateMatterFormState } from './formTypes';
+import type { ILookupItem } from '../../types/entities';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -60,10 +59,16 @@ export interface IDraftSummaryStepProps {
   summaryText: string;
   /** Called when summary text changes. */
   onSummaryChange: (text: string) => void;
-  /** Current recipient email list (controlled). */
-  recipientEmails: string[];
-  /** Called when recipient list changes. */
-  onRecipientsChange: (emails: string[]) => void;
+  /** Current "Distribute to" recipients (controlled). */
+  recipients: IRecipientItem[];
+  /** Called when "Distribute to" recipients change. */
+  onRecipientsChange: (recipients: IRecipientItem[]) => void;
+  /** Current CC recipients (controlled). */
+  ccRecipients: IRecipientItem[];
+  /** Called when CC recipients change. */
+  onCcRecipientsChange: (recipients: IRecipientItem[]) => void;
+  /** Search function for contact lookup. */
+  onSearchContacts: (query: string) => Promise<ILookupItem[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -149,32 +154,6 @@ const useStyles = makeStyles({
   summaryTextarea: {
     width: '100%',
   },
-
-  // ── Recipient emails section ──────────────────────────────────────────
-  recipientSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-  },
-  recipientLabel: {
-    color: tokens.colorNeutralForeground1,
-  },
-  recipientRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  recipientInput: {
-    flex: '1 1 auto',
-  },
-  addRecipientRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  addEmailInput: {
-    flex: '1 1 auto',
-  },
 });
 
 // ---------------------------------------------------------------------------
@@ -185,15 +164,17 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
   formValues,
   summaryText,
   onSummaryChange,
-  recipientEmails,
+  recipients,
   onRecipientsChange,
+  ccRecipients,
+  onCcRecipientsChange,
+  onSearchContacts,
 }) => {
   const styles = useStyles();
 
   const [summaryStatus, setSummaryStatus] = React.useState<
     'idle' | 'loading' | 'loaded' | 'error'
   >('idle');
-  const [newEmailInput, setNewEmailInput] = React.useState('');
   const hasFetchedRef = React.useRef(false);
 
   // ── Fetch AI summary on mount (once) ────────────────────────────────────
@@ -230,35 +211,6 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Recipient handlers ──────────────────────────────────────────────────
-  const handleAddEmail = React.useCallback(() => {
-    const email = newEmailInput.trim();
-    if (!email) return;
-    if (recipientEmails.includes(email)) {
-      setNewEmailInput('');
-      return;
-    }
-    onRecipientsChange([...recipientEmails, email]);
-    setNewEmailInput('');
-  }, [newEmailInput, recipientEmails, onRecipientsChange]);
-
-  const handleRemoveEmail = React.useCallback(
-    (email: string) => {
-      onRecipientsChange(recipientEmails.filter((e) => e !== email));
-    },
-    [recipientEmails, onRecipientsChange]
-  );
-
-  const handleAddEmailKeyDown = React.useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        handleAddEmail();
-      }
-    },
-    [handleAddEmail]
-  );
-
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div className={styles.root}>
@@ -266,7 +218,7 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
       <div className={styles.headerRow}>
         <div className={styles.headerText}>
           <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
-            Draft Matter Summary
+            Draft Summary
           </Text>
           <Text size={200} className={styles.stepSubtitle}>
             Review and edit the AI-generated summary below, then add recipient
@@ -302,7 +254,7 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
         {summaryStatus === 'loading' && (
           <div className={styles.summaryLoading}>
             <Spinner size="tiny" />
-            <Text size={200}>Generating summary\u2026</Text>
+            <Text size={200}>Generating summary&hellip;</Text>
           </div>
         )}
 
@@ -320,65 +272,31 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
             className={styles.summaryTextarea}
             value={summaryText}
             onChange={(e) => onSummaryChange(e.target.value)}
-            placeholder="Enter or edit the matter summary here\u2026"
-            rows={5}
+            placeholder="Enter or edit the matter summary here&hellip;"
+            rows={10}
             resize="vertical"
             aria-label="Matter summary"
           />
         )}
       </Card>
 
-      {/* Recipient emails */}
-      <div className={styles.recipientSection}>
-        <Text size={300} weight="semibold" className={styles.recipientLabel}>
-          Distribute to
-        </Text>
-        <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-          Add email addresses to receive the matter summary.
-        </Text>
+      {/* Distribute to — contact lookup + freeform email */}
+      <RecipientField
+        label="Distribute to"
+        placeholder="Search contacts or type email..."
+        recipients={recipients}
+        onRecipientsChange={onRecipientsChange}
+        onSearch={onSearchContacts}
+      />
 
-        {/* Existing recipients */}
-        {recipientEmails.map((email) => (
-          <div key={email} className={styles.recipientRow}>
-            <Input
-              className={styles.recipientInput}
-              value={email}
-              readOnly
-              aria-label={`Recipient: ${email}`}
-            />
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<DismissRegular fontSize={14} />}
-              onClick={() => handleRemoveEmail(email)}
-              aria-label={`Remove ${email}`}
-            />
-          </div>
-        ))}
-
-        {/* Add new recipient row */}
-        <div className={styles.addRecipientRow}>
-          <Input
-            className={styles.addEmailInput}
-            type="email"
-            value={newEmailInput}
-            onChange={(e) => setNewEmailInput(e.target.value)}
-            onKeyDown={handleAddEmailKeyDown}
-            placeholder="Enter email address"
-            aria-label="New recipient email"
-          />
-          <Button
-            appearance="secondary"
-            size="small"
-            icon={<AddRegular fontSize={14} />}
-            onClick={handleAddEmail}
-            disabled={!newEmailInput.trim()}
-            aria-label="Add recipient"
-          >
-            Add
-          </Button>
-        </div>
-      </div>
+      {/* CC — same pattern */}
+      <RecipientField
+        label="CC"
+        placeholder="Search contacts or type email..."
+        recipients={ccRecipients}
+        onRecipientsChange={onCcRecipientsChange}
+        onSearch={onSearchContacts}
+      />
     </div>
   );
 };

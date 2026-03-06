@@ -56,6 +56,10 @@ const LazyQuickStartWizardDialog = React.lazy(
   () => import("../QuickStart/QuickStartWizardDialog")
 );
 
+const LazySummarizeFilesDialog = React.lazy(
+  () => import("../SummarizeFiles/SummarizeFilesDialog")
+);
+
 // ---------------------------------------------------------------------------
 // Suspense fallback: Fluent Spinner shown while lazy chunk loads
 // ---------------------------------------------------------------------------
@@ -258,6 +262,14 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleCloseProjectWizard = React.useCallback(() => setIsProjectWizardOpen(false), []);
 
   // -------------------------------------------------------------------------
+  // Summarize New File(s) wizard dialog state
+  // -------------------------------------------------------------------------
+
+  const [isSummarizeOpen, setIsSummarizeOpen] = React.useState(false);
+  const handleOpenSummarize = React.useCallback(() => setIsSummarizeOpen(true), []);
+  const handleCloseSummarize = React.useCallback(() => setIsSummarizeOpen(false), []);
+
+  // -------------------------------------------------------------------------
   // Quick Start wizard dialog state
   // -------------------------------------------------------------------------
 
@@ -325,8 +337,9 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       // Explicit handlers AFTER spread to prevent overwrite
       "create-new-matter": handleOpenWizard,
       "create-new-project": handleOpenProjectWizard,
+      "summarize-new-files": handleOpenSummarize,
     }),
-    [quickStartHandlers, handleOpenWizard, handleOpenProjectWizard]
+    [quickStartHandlers, handleOpenWizard, handleOpenProjectWizard, handleOpenSummarize]
   );
 
   // -------------------------------------------------------------------------
@@ -489,6 +502,14 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       {isProjectWizardOpen && (
         <React.Suspense fallback={<DialogLoadingFallback />}>
           <LazyProjectWizardDialog open={isProjectWizardOpen} onClose={handleCloseProjectWizard} webApi={webApi} />
+        </React.Suspense>
+      )}
+
+      {/* Summarize New File(s) wizard dialog — dedicated file summary wizard.
+          Lazy-loaded: chunk only fetched on first user interaction. */}
+      {isSummarizeOpen && (
+        <React.Suspense fallback={<DialogLoadingFallback />}>
+          <LazySummarizeFilesDialog open={isSummarizeOpen} onClose={handleCloseSummarize} />
         </React.Suspense>
       )}
 

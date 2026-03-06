@@ -76,14 +76,14 @@ export interface INextStepsStepProps {
 const CARD_DEFS: IFollowOnCardDef[] = [
   {
     id: 'assign-counsel',
-    label: 'Assign Counsel',
-    description: 'Search and assign a lead attorney to this matter.',
-    stepLabel: 'Assign Counsel',
+    label: 'Assign Resources',
+    description: 'Search and assign internal and external resources to this matter.',
+    stepLabel: 'Assign Resources',
     icon: <PersonRegular fontSize={28} />,
   },
   {
     id: 'draft-summary',
-    label: 'Draft Matter Summary',
+    label: 'Draft Summary',
     description: 'Generate an AI-assisted summary and distribute to recipients.',
     stepLabel: 'Draft Summary',
     icon: <DocumentTextRegular fontSize={28} />,
@@ -369,7 +369,7 @@ export const FOLLOW_ON_STEP_ID_MAP: Record<FollowOnActionId, string> = {
 
 /** Map FollowOnActionId to the sidebar step label. */
 export const FOLLOW_ON_STEP_LABEL_MAP: Record<FollowOnActionId, string> = {
-  'assign-counsel': 'Assign Counsel',
+  'assign-counsel': 'Assign Resources',
   'draft-summary': 'Draft Summary',
   'send-email': 'Send Email',
 };

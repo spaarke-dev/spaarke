@@ -33,7 +33,6 @@ function logInfo(message: string, ...args: unknown[]): void {
  */
 const CARD_INTENT_MAP: Readonly<Record<string, string>> = {
   "assign-to-counsel": "assign-counsel",
-  "analyze-new-document": "document-analysis",
   "search-document-files": "document-search",
   "send-email-message": "email-compose",
   "schedule-new-meeting": "meeting-schedule",

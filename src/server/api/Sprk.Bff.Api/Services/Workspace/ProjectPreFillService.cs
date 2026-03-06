@@ -28,9 +28,9 @@ public class ProjectPreFillService
     // Playbook configuration key — overridable via appsettings
     private const string PlaybookIdConfigKey = "Workspace:ProjectPreFillPlaybookId";
 
-    // Default: "Create New Project Pre-Fill" playbook (Extract Project Fields — ACT-008, gpt-4o)
+    // Default: "Create New Project Pre-Fill" playbook (Extract Project Fields, gpt-4o)
     private static readonly Guid DefaultPreFillPlaybookId =
-        Guid.Parse("54cf6bb4-c018-f111-8343-7ced8d1dc988");
+        Guid.Parse("3f21cec1-7d19-f111-8343-7ced8d1dc988");
 
     // Reuse same file constraints as MatterPreFillService
     private static readonly HashSet<string> AllowedExtensions =

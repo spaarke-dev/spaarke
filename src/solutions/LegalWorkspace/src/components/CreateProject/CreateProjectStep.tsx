@@ -13,12 +13,8 @@
  *   │  Project Type (lookup)    │  Practice Area (lookup)       │
  *   ├───────────────────────────┴──────────────────────────────┤
  *   │  Project Name (Input, full-width) *                       │
- *   ├───────────────────────────┬──────────────────────────────┤
- *   │  Assigned Attorney (lookup)│  Assigned Paralegal (lookup) │
  *   ├───────────────────────────┴──────────────────────────────┤
- *   │  Assigned Outside Counsel (lookup)                        │
- *   ├───────────────────────────┴──────────────────────────────┤
- *   │  Description (Textarea, full-width, optional)             │
+ *   │  Project Description (Textarea, full-width, optional)     │
  *   └──────────────────────────────────────────────────────────┘
  *
  * Form validation:
@@ -78,6 +74,13 @@ export interface ICreateProjectStepProps {
    * upload to the BFF AI pre-fill endpoint. Empty array if no files uploaded.
    */
   uploadedFiles?: IUploadedFile[];
+  /**
+   * Initial form values from the parent. When provided with non-empty values
+   * (e.g. on remount after navigating back), the step initialises from these
+   * instead of starting empty. This preserves user edits and Assign Resources
+   * overrides that were written to the parent's form state.
+   */
+  initialFormValues?: ICreateProjectFormState;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,12 +234,17 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
   onValidChange,
   onFormValues,
   uploadedFiles = [],
+  initialFormValues,
 }) => {
   const styles = useStyles();
 
   // ── Form state ──────────────────────────────────────────────────────────
+  // When initialFormValues is provided with non-empty values (remount after
+  // user navigated back), start from those to preserve user edits and
+  // Assign Resources overrides. Otherwise start empty for first mount.
+  const hasInitialValues = initialFormValues && initialFormValues.projectName.trim() !== '';
   const [formState, setFormState] = React.useState<ICreateProjectFormState>(
-    () => ({ ...EMPTY_PROJECT_FORM })
+    () => hasInitialValues ? { ...initialFormValues } : { ...EMPTY_PROJECT_FORM }
   );
 
   // ── AI pre-fill state ───────────────────────────────────────────────────
@@ -269,7 +277,7 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
   }, [formState]);
 
   // ── AI Pre-fill on mount ───────────────────────────────────────────────
-  const prefillAttemptedRef = React.useRef(false);
+  const prefillAttemptedRef = React.useRef(!!hasInitialValues);
 
   React.useEffect(() => {
     if (uploadedFiles.length === 0 || prefillAttemptedRef.current) {
@@ -442,21 +450,6 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
     []
   );
 
-  const handleSearchAttorneys = React.useCallback(
-    (query: string) => serviceRef.current.searchContacts(query),
-    []
-  );
-
-  const handleSearchParalegals = React.useCallback(
-    (query: string) => serviceRef.current.searchContacts(query),
-    []
-  );
-
-  const handleSearchOutsideCounsel = React.useCallback(
-    (query: string) => serviceRef.current.searchOrganizations(query),
-    []
-  );
-
   // ── Lookup change handlers ─────────────────────────────────────────────
 
   const handleProjectTypeChange = React.useCallback(
@@ -476,39 +469,6 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
         ...prev,
         practiceAreaId: item?.id ?? '',
         practiceAreaName: item?.name ?? '',
-      }));
-    },
-    []
-  );
-
-  const handleAttorneyChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setFormState((prev) => ({
-        ...prev,
-        assignedAttorneyId: item?.id ?? '',
-        assignedAttorneyName: item?.name ?? '',
-      }));
-    },
-    []
-  );
-
-  const handleParalegalChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setFormState((prev) => ({
-        ...prev,
-        assignedParalegalId: item?.id ?? '',
-        assignedParalegalName: item?.name ?? '',
-      }));
-    },
-    []
-  );
-
-  const handleOutsideCounselChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setFormState((prev) => ({
-        ...prev,
-        assignedOutsideCounselId: item?.id ?? '',
-        assignedOutsideCounselName: item?.name ?? '',
       }));
     },
     []
@@ -546,18 +506,6 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
     ? { id: formState.practiceAreaId, name: formState.practiceAreaName }
     : null;
 
-  const attorneyValue: ILookupItem | null = formState.assignedAttorneyId
-    ? { id: formState.assignedAttorneyId, name: formState.assignedAttorneyName }
-    : null;
-
-  const paralegalValue: ILookupItem | null = formState.assignedParalegalId
-    ? { id: formState.assignedParalegalId, name: formState.assignedParalegalName }
-    : null;
-
-  const outsideCounselValue: ILookupItem | null = formState.assignedOutsideCounselId
-    ? { id: formState.assignedOutsideCounselId, name: formState.assignedOutsideCounselName }
-    : null;
-
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div className={styles.root}>
@@ -565,7 +513,7 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
       <div className={styles.headerRow}>
         <div className={styles.headerText}>
           <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
-            Create record
+            Enter Info
           </Text>
           <Text size={200} className={styles.stepSubtitle}>
             {isLoading
@@ -594,9 +542,6 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
           <div className={styles.fullWidth}>
             <FieldSkeleton />
           </div>
-          <FieldSkeleton />
-          <FieldSkeleton />
-          <FieldSkeleton />
           <div className={styles.fullWidth}>
             <FieldSkeleton large />
           </div>
@@ -648,47 +593,13 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
             />
           </Field>
 
-          {/* ── Row 3: Assigned Attorney + Assigned Paralegal ── */}
-
-          <LookupField
-            label="Assigned Attorney"
-            placeholder="Search contacts..."
-            value={attorneyValue}
-            onChange={handleAttorneyChange}
-            onSearch={handleSearchAttorneys}
-            isAiPrefilled={isAiField('assignedAttorneyId')}
-            minSearchLength={2}
-          />
-
-          <LookupField
-            label="Assigned Paralegal"
-            placeholder="Search contacts..."
-            value={paralegalValue}
-            onChange={handleParalegalChange}
-            onSearch={handleSearchParalegals}
-            isAiPrefilled={isAiField('assignedParalegalId')}
-            minSearchLength={2}
-          />
-
-          {/* ── Row 3b: Assigned Outside Counsel ── */}
-
-          <LookupField
-            label="Assigned Outside Counsel"
-            placeholder="Search organizations..."
-            value={outsideCounselValue}
-            onChange={handleOutsideCounselChange}
-            onSearch={handleSearchOutsideCounsel}
-            isAiPrefilled={isAiField('assignedOutsideCounselId')}
-            minSearchLength={2}
-          />
-
-          {/* ── Row 4: Description (full width, optional) ── */}
+          {/* ── Row 3: Project Description (full width, optional) ── */}
 
           <Field
             className={styles.fullWidth}
             label={
               <span>
-                Description
+                Project Description
                 {isAiField('description') && <AiFieldTag />}
               </span>
             }
@@ -697,9 +608,10 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
               value={formState.description}
               onChange={handleDescriptionChange}
               placeholder="Brief description of the project, its objectives, and scope"
-              rows={5}
+              rows={11}
               resize="vertical"
-              aria-label="Description"
+              aria-label="Project Description"
+              style={{ width: '100%' }}
             />
           </Field>
         </div>

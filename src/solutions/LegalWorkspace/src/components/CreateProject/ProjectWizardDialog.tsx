@@ -48,13 +48,19 @@ import {
   FOLLOW_ON_STEP_ID_MAP,
   FOLLOW_ON_STEP_LABEL_MAP,
 } from '../CreateMatter/NextStepsStep';
-import { AssignCounselStep } from '../CreateMatter/AssignCounselStep';
+import { AssignResourcesStep } from '../CreateMatter/AssignResourcesStep';
 import { DraftSummaryStep } from '../CreateMatter/DraftSummaryStep';
+import type { IRecipientItem } from '../CreateMatter/RecipientField';
 import {
   SendEmailStep,
   buildDefaultEmailSubject,
   buildDefaultEmailBody,
 } from '../CreateMatter/SendEmailStep';
+import {
+  searchContactsAsLookup,
+  searchOrganizationsAsLookup,
+  searchUsersAsLookup,
+} from '../CreateMatter/matterService';
 
 import { CreateProjectStep } from './CreateProjectStep';
 import { ProjectService } from './projectService';
@@ -64,7 +70,7 @@ import type { ICreateProjectFormState } from './projectFormTypes';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import { getSpeContainerIdFromBusinessUnit } from '../../services/xrmProvider';
 import { navigateToEntity } from '../../utils/navigation';
-import type { IContact } from '../../types/entities';
+import type { ILookupItem } from '../../types/entities';
 import type { IWebApi } from '../../types/xrm';
 
 // ---------------------------------------------------------------------------
@@ -173,12 +179,13 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
   // ── Step 3: Next Steps selection ────────────────────────────────────────
   const [selectedActions, setSelectedActions] = React.useState<FollowOnActionId[]>([]);
 
-  // ── Assign Counsel state ────────────────────────────────────────────────
-  const [selectedContact, setSelectedContact] = React.useState<IContact | null>(null);
+  // ── Assign Resources state (notify toggle — UI only, not wired) ────────
+  const [notifyResources, setNotifyResources] = React.useState(false);
 
   // ── Draft Summary state ─────────────────────────────────────────────────
   const [summaryText, setSummaryText] = React.useState('');
-  const [recipientEmails, setRecipientEmails] = React.useState<string[]>([]);
+  const [recipients, setRecipients] = React.useState<IRecipientItem[]>([]);
+  const [ccRecipients, setCcRecipients] = React.useState<IRecipientItem[]>([]);
 
   // ── Send Email state ────────────────────────────────────────────────────
   const [emailTo, setEmailTo] = React.useState('');
@@ -203,9 +210,10 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
       setFormValid(false);
       setFormValues(EMPTY_PROJECT_FORM);
       setSelectedActions([]);
-      setSelectedContact(null);
+      setNotifyResources(false);
       setSummaryText('');
-      setRecipientEmails([]);
+      setRecipients([]);
+      setCcRecipients([]);
       setEmailTo('');
       setEmailSubject('');
       setEmailBody('');
@@ -213,20 +221,76 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
   }, [open]);
 
   // ── Refs for dynamic step closures (prevents stale closure bug) ─────────
-  const selectedContactRef = React.useRef(selectedContact);
-  selectedContactRef.current = selectedContact;
   const formValuesRef = React.useRef(formValues);
   formValuesRef.current = formValues;
+  const notifyResourcesRef = React.useRef(notifyResources);
+  notifyResourcesRef.current = notifyResources;
   const summaryTextRef = React.useRef(summaryText);
   summaryTextRef.current = summaryText;
-  const recipientEmailsRef = React.useRef(recipientEmails);
-  recipientEmailsRef.current = recipientEmails;
+  const recipientsRef = React.useRef(recipients);
+  recipientsRef.current = recipients;
+  const ccRecipientsRef = React.useRef(ccRecipients);
+  ccRecipientsRef.current = ccRecipients;
   const emailToRef = React.useRef(emailTo);
   emailToRef.current = emailTo;
   const emailSubjectRef = React.useRef(emailSubject);
   emailSubjectRef.current = emailSubject;
   const emailBodyRef = React.useRef(emailBody);
   emailBodyRef.current = emailBody;
+
+  // ── Stable search callbacks ─────────────────────────────────────────────
+  const handleSearchAttorneys = React.useCallback(
+    (query: string) => searchContactsAsLookup(webApi, query),
+    [webApi]
+  );
+  const handleSearchParalegals = React.useCallback(
+    (query: string) => searchContactsAsLookup(webApi, query),
+    [webApi]
+  );
+  const handleSearchOutsideCounsel = React.useCallback(
+    (query: string) => searchOrganizationsAsLookup(webApi, query),
+    [webApi]
+  );
+  const handleSearchContacts = React.useCallback(
+    (query: string) => searchContactsAsLookup(webApi, query),
+    [webApi]
+  );
+  const handleSearchUsers = React.useCallback(
+    (query: string) => searchUsersAsLookup(webApi, query),
+    [webApi]
+  );
+
+  // ── Assign Resources change handlers ────────────────────────────────────
+  const handleAttorneyChange = React.useCallback(
+    (item: ILookupItem | null) => {
+      setFormValues((prev) => ({
+        ...prev,
+        assignedAttorneyId: item?.id ?? '',
+        assignedAttorneyName: item?.name ?? '',
+      }));
+    },
+    []
+  );
+  const handleParalegalChange = React.useCallback(
+    (item: ILookupItem | null) => {
+      setFormValues((prev) => ({
+        ...prev,
+        assignedParalegalId: item?.id ?? '',
+        assignedParalegalName: item?.name ?? '',
+      }));
+    },
+    []
+  );
+  const handleOutsideCounselChange = React.useCallback(
+    (item: ILookupItem | null) => {
+      setFormValues((prev) => ({
+        ...prev,
+        assignedOutsideCounselId: item?.id ?? '',
+        assignedOutsideCounselName: item?.name ?? '',
+      }));
+    },
+    []
+  );
 
   // ── Sync dynamic steps with selected action cards (via shellRef) ────────
   const prevSelectedActionsRef = React.useRef<FollowOnActionId[]>([]);
@@ -245,51 +309,88 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
           id: stepId,
           label: stepLabel,
           canAdvance: () => {
-            if (stepId === 'followon-assign-counsel') return selectedContactRef.current !== null;
             if (stepId === 'followon-send-email') {
               return emailToRef.current.trim() !== '' && emailSubjectRef.current.trim() !== '' && emailBodyRef.current.trim() !== '';
             }
-            return true; // draft-summary has no hard requirement
+            return true; // assign-resources and draft-summary have no hard requirement
           },
           renderContent: () => {
-            // Build form values in the shape DraftSummaryStep / SendEmailStep expect
-            const fv = formValuesRef.current;
-            const matterShapedValues = {
-              matterTypeId: fv.projectTypeId,
-              matterTypeName: fv.projectTypeName,
-              practiceAreaId: fv.practiceAreaId,
-              practiceAreaName: fv.practiceAreaName,
-              matterName: fv.projectName,
-              assignedAttorneyId: fv.assignedAttorneyId,
-              assignedAttorneyName: fv.assignedAttorneyName,
-              assignedParalegalId: fv.assignedParalegalId,
-              assignedParalegalName: fv.assignedParalegalName,
-              assignedOutsideCounselId: fv.assignedOutsideCounselId,
-              assignedOutsideCounselName: fv.assignedOutsideCounselName,
-              summary: fv.description,
-            };
-
             if (stepId === 'followon-assign-counsel') {
+              // Build lookup values from form state
+              const fv = formValuesRef.current;
+              const attVal: ILookupItem | null = fv.assignedAttorneyId
+                ? { id: fv.assignedAttorneyId, name: fv.assignedAttorneyName }
+                : null;
+              const paraVal: ILookupItem | null = fv.assignedParalegalId
+                ? { id: fv.assignedParalegalId, name: fv.assignedParalegalName }
+                : null;
+              const ocVal: ILookupItem | null = fv.assignedOutsideCounselId
+                ? { id: fv.assignedOutsideCounselId, name: fv.assignedOutsideCounselName }
+                : null;
+
               return (
-                <AssignCounselStep
-                  webApi={webApi}
-                  selectedContact={selectedContactRef.current}
-                  onContactChange={setSelectedContact}
+                <AssignResourcesStep
+                  attorneyValue={attVal}
+                  onAttorneyChange={handleAttorneyChange}
+                  onSearchAttorneys={handleSearchAttorneys}
+                  paralegalValue={paraVal}
+                  onParalegalChange={handleParalegalChange}
+                  onSearchParalegals={handleSearchParalegals}
+                  outsideCounselValue={ocVal}
+                  onOutsideCounselChange={handleOutsideCounselChange}
+                  onSearchOutsideCounsel={handleSearchOutsideCounsel}
+                  notifyResources={notifyResourcesRef.current}
+                  onNotifyChange={setNotifyResources}
                 />
               );
             }
             if (stepId === 'followon-draft-summary') {
+              // Build form values in the shape DraftSummaryStep expects
+              const fv = formValuesRef.current;
+              const matterShapedValues = {
+                matterTypeId: fv.projectTypeId,
+                matterTypeName: fv.projectTypeName,
+                practiceAreaId: fv.practiceAreaId,
+                practiceAreaName: fv.practiceAreaName,
+                matterName: fv.projectName,
+                assignedAttorneyId: fv.assignedAttorneyId,
+                assignedAttorneyName: fv.assignedAttorneyName,
+                assignedParalegalId: fv.assignedParalegalId,
+                assignedParalegalName: fv.assignedParalegalName,
+                assignedOutsideCounselId: fv.assignedOutsideCounselId,
+                assignedOutsideCounselName: fv.assignedOutsideCounselName,
+                summary: fv.description,
+              };
               return (
                 <DraftSummaryStep
                   formValues={matterShapedValues}
                   summaryText={summaryTextRef.current}
                   onSummaryChange={setSummaryText}
-                  recipientEmails={recipientEmailsRef.current}
-                  onRecipientsChange={setRecipientEmails}
+                  recipients={recipientsRef.current}
+                  onRecipientsChange={setRecipients}
+                  ccRecipients={ccRecipientsRef.current}
+                  onCcRecipientsChange={setCcRecipients}
+                  onSearchContacts={handleSearchContacts}
                 />
               );
             }
             if (stepId === 'followon-send-email') {
+              // Build form values in the shape SendEmailStep expects
+              const fv = formValuesRef.current;
+              const matterShapedValues = {
+                matterTypeId: fv.projectTypeId,
+                matterTypeName: fv.projectTypeName,
+                practiceAreaId: fv.practiceAreaId,
+                practiceAreaName: fv.practiceAreaName,
+                matterName: fv.projectName,
+                assignedAttorneyId: fv.assignedAttorneyId,
+                assignedAttorneyName: fv.assignedAttorneyName,
+                assignedParalegalId: fv.assignedParalegalId,
+                assignedParalegalName: fv.assignedParalegalName,
+                assignedOutsideCounselId: fv.assignedOutsideCounselId,
+                assignedOutsideCounselName: fv.assignedOutsideCounselName,
+                summary: fv.description,
+              };
               return (
                 <SendEmailStep
                   formValues={matterShapedValues}
@@ -299,6 +400,7 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
                   onEmailSubjectChange={setEmailSubject}
                   emailBody={emailBodyRef.current}
                   onEmailBodyChange={setEmailBody}
+                  onSearchUsers={handleSearchUsers}
                 />
               );
             }
@@ -318,7 +420,18 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
     });
 
     prevSelectedActionsRef.current = next;
-  }, [selectedActions, webApi]);
+  }, [
+    selectedActions,
+    webApi,
+    handleSearchAttorneys,
+    handleSearchParalegals,
+    handleSearchOutsideCounsel,
+    handleSearchContacts,
+    handleSearchUsers,
+    handleAttorneyChange,
+    handleParalegalChange,
+    handleOutsideCounselChange,
+  ]);
 
   // ── Pre-fill email fields when send-email is selected ────────────────────
   React.useEffect(() => {
@@ -367,13 +480,26 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
   );
 
   // ── Finish handler (returns IWizardSuccessConfig) ───────────────────────
+  // Refs for finish handler — read latest values at invocation time to avoid
+  // stale closures (same pattern as dynamic step renderContent).
+  const selectedActionsRef = React.useRef(selectedActions);
+  selectedActionsRef.current = selectedActions;
+  const fileStateRef = React.useRef(fileState);
+  fileStateRef.current = fileState;
+  const speContainerIdRef = React.useRef(speContainerId);
+  speContainerIdRef.current = speContainerId;
 
   const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig> => {
     const warnings: string[] = [];
 
+    // Read latest values from refs — not closure-captured state
+    const currentFormValues = formValuesRef.current;
+    const currentFiles = fileStateRef.current.uploadedFiles;
+    const currentContainerId = speContainerIdRef.current;
+
     // 1. Create sprk_project record
     const projectService = new ProjectService(webApi);
-    const result = await projectService.createProject(formValues);
+    const result = await projectService.createProject(currentFormValues);
     if (!result.success) {
       throw new Error(result.errorMessage ?? 'Failed to create project');
     }
@@ -382,14 +508,14 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
     const projectName = result.projectName!;
 
     // 2. Upload files to SPE + create document records (if files uploaded and container available)
-    if (fileState.uploadedFiles.length > 0 && speContainerId) {
+    if (currentFiles.length > 0 && currentContainerId) {
       try {
         const entityService = new EntityCreationService(webApi);
 
         // Upload files to SPE
         const uploadResult = await entityService.uploadFilesToSpe(
-          speContainerId,
-          fileState.uploadedFiles
+          currentContainerId,
+          currentFiles
         );
 
         if (uploadResult.errors.length > 0) {
@@ -406,7 +532,7 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
             'sprk_Project',        // Navigation property on sprk_document
             uploadResult.uploadedFiles,
             {
-              containerId: speContainerId,
+              containerId: currentContainerId,
               parentRecordName: projectName,
             }
           );
@@ -419,7 +545,7 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
         const message = err instanceof Error ? err.message : 'File processing failed';
         warnings.push(`File pipeline error: ${message}`);
       }
-    } else if (fileState.uploadedFiles.length > 0 && !speContainerId) {
+    } else if (currentFiles.length > 0 && !currentContainerId) {
       warnings.push('SPE container not configured — files were not uploaded to SharePoint Embedded.');
     }
 
@@ -473,19 +599,7 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
       ),
       warnings,
     };
-  }, [
-    webApi,
-    speContainerId,
-    formValues,
-    fileState.uploadedFiles,
-    selectedActions,
-    selectedContact,
-    recipientEmails,
-    emailTo,
-    emailSubject,
-    emailBody,
-    onClose,
-  ]);
+  }, [webApi, onClose]);
 
   // ── Step configurations ─────────────────────────────────────────────────
 
@@ -536,7 +650,7 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
       },
       {
         id: 'create-record',
-        label: 'Create record',
+        label: 'Enter Info',
         canAdvance: () => formValid,
         renderContent: () => (
           <CreateProjectStep
@@ -544,6 +658,7 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
             onValidChange={setFormValid}
             onFormValues={setFormValues}
             uploadedFiles={fileState.uploadedFiles}
+            initialFormValues={formValues}
           />
         ),
       },

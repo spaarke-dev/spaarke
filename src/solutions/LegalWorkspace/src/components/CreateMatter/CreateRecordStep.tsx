@@ -57,6 +57,9 @@ import {
   searchOrganizationsAsLookup,
   fetchAiDraftSummary,
 } from './matterService';
+// Note: searchContactsAsLookup and searchOrganizationsAsLookup are still imported
+// for AI pre-fill resolution (resolving AI names → Dataverse IDs for form state)
+// even though the lookup UI fields are now in AssignResourcesStep.
 import type { ILookupItem } from '../../types/entities';
 import { getBffBaseUrl } from '../../config/bffConfig';
 import { authenticatedFetch } from '../../services/bffAuthProvider';
@@ -352,12 +355,17 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
   uploadedFiles,
   onValidChange,
   onSubmit,
+  initialFormValues,
 }) => {
   const styles = useStyles();
 
   // ── Reducer ────────────────────────────────────────────────────────────────
+  // When initialFormValues is provided with non-empty values (remount after
+  // user navigated back), start from those values to preserve user edits and
+  // Assign Resources overrides. Otherwise start empty for first mount.
+  const hasInitialValues = initialFormValues && initialFormValues.matterName.trim() !== '';
   const [state, dispatch] = React.useReducer(combinedReducer, undefined, () => ({
-    form: buildInitialFormState(),
+    form: hasInitialValues ? { ...initialFormValues } : buildInitialFormState(),
     ai: buildInitialAiState(),
   }));
 
@@ -387,7 +395,9 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
   // Stable dependency key: join file names into a single string so the effect
   // doesn't re-run on every render (uploadedFileNames is a new array ref each time).
   const prefillKey = uploadedFileNames.join('|');
-  const prefillAttemptedRef = React.useRef(false);
+  // Skip AI pre-fill if we already have initial values from the parent
+  // (remount after navigating back — AI was already run on the first mount).
+  const prefillAttemptedRef = React.useRef(!!hasInitialValues);
 
   React.useEffect(() => {
     if (uploadedFiles.length === 0 || prefillAttemptedRef.current) {
@@ -726,7 +736,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
       <div className={styles.headerRow}>
         <div className={styles.headerText}>
           <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
-            Create record
+            Enter Info
           </Text>
           <Text size={200} className={styles.stepSubtitle}>
             {isLoading
@@ -755,8 +765,6 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
           <div className={styles.fullWidth}>
             <FieldSkeleton />
           </div>
-          <FieldSkeleton />
-          <FieldSkeleton />
           <div className={styles.fullWidth}>
             <FieldSkeleton large />
           </div>
@@ -802,45 +810,11 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
             />
           </Field>
 
-          {/* ── Row 3: Assigned Attorney + Assigned Paralegal ── */}
-
-          <LookupField
-            label="Assigned Attorney"
-            placeholder="Search contacts..."
-            value={attorneyValue}
-            onChange={handleAttorneyChange}
-            onSearch={handleSearchAttorneys}
-            isAiPrefilled={isAiField('assignedAttorneyId')}
-            minSearchLength={2}
-          />
-
-          <LookupField
-            label="Assigned Paralegal"
-            placeholder="Search contacts..."
-            value={paralegalValue}
-            onChange={handleParalegalChange}
-            onSearch={handleSearchParalegals}
-            isAiPrefilled={isAiField('assignedParalegalId')}
-            minSearchLength={2}
-          />
-
-          {/* ── Row 3b: Assigned Outside Counsel (full width) ── */}
-
-          <LookupField
-            label="Assigned Outside Counsel"
-            placeholder="Search organizations..."
-            value={outsideCounselValue}
-            onChange={handleOutsideCounselChange}
-            onSearch={handleSearchOutsideCounsel}
-            isAiPrefilled={isAiField('assignedOutsideCounselId')}
-            minSearchLength={2}
-          />
-
-          {/* ── Row 4: Description — full width with AI generate ── */}
+          {/* ── Row 3: Matter Description — full width with AI generate ── */}
 
           <div className={styles.fullWidth}>
             <div className={styles.summaryHeader}>
-              {renderLabel('Description', 'summary')}
+              {renderLabel('Matter Description', 'summary')}
               <Button
                 appearance="subtle"
                 size="small"
@@ -856,10 +830,10 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
               value={form.summary}
               onChange={handleFieldChange('summary')}
               placeholder="Brief description of the matter, its background, and objectives"
-              rows={5}
+              rows={11}
               resize="vertical"
-              aria-label="Description"
-              style={{ marginTop: tokens.spacingVerticalXS }}
+              aria-label="Matter Description"
+              style={{ marginTop: tokens.spacingVerticalXS, width: '100%' }}
             />
           </div>
         </div>

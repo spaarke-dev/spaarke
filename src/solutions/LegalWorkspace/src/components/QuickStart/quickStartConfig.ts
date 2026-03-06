@@ -41,31 +41,6 @@ const noop = (_analysisId: string): void => {
 // ---------------------------------------------------------------------------
 
 export const QUICKSTART_CONFIGS: Record<string, IQuickStartConfig> = {
-  "document-analysis": {
-    title: "Analyze New Document",
-    uploadLabel: "Upload Document",
-    analyzeLabel: "Run Analysis",
-    acceptedFileTypes: ["application/pdf", ".docx", ".xlsx"],
-    allowMultiple: false,
-    playbookIntent: "document-analysis",
-    followUpActions: [
-      {
-        id: "share-results",
-        label: "Share Results",
-        description: "Share the analysis results with your team.",
-        icon: "share",
-        onClick: noop,
-      },
-      {
-        id: "assign-counsel",
-        label: "Assign Counsel",
-        description: "Assign counsel based on the analysis findings.",
-        icon: "people",
-        onClick: noop,
-      },
-    ],
-  },
-
   "document-search": {
     title: "Search Document Files",
     uploadLabel: "Upload Documents",
