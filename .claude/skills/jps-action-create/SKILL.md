@@ -37,7 +37,7 @@ Ask the user (use AskUserQuestion or conversation):
 3. **Does it need structured output?** (JSON Schema for constrained decoding — recommended for extraction tasks)
 4. **Does it need shared knowledge scopes?** (reusable context like standard clause libraries)
 5. **Does it need template parameters?** (runtime customization like `{{jurisdiction}}`)
-6. **Does it need dynamic routing?** ($choices from downstream nodes)
+6. **Does it need dynamic enum values?** (`$choices` from Dataverse lookups, option sets, or downstream routing nodes)
 
 ### Step 2: Load Context
 
@@ -88,7 +88,7 @@ Build the JPS following this structure:
         "description": "[What this field should contain]",
         "maxLength": 5000,
         "enum": ["option1", "option2"],
-        "$choices": "downstream:{outputVariable}.{fieldName}"
+        "$choices": "lookup:{entity}.{field} | optionset:{entity}.{attr} | multiselect:{entity}.{attr} | boolean:{entity}.{attr} | downstream:{outputVar}.{field}"
       }
     ],
     "structuredOutput": true
@@ -138,7 +138,7 @@ Run validation checks:
 - [ ] Has at least 1 output field
 - [ ] Output field types are valid: string, number, boolean, array
 - [ ] $ref values use correct prefix: `knowledge:` or `skill:`
-- [ ] $choices values use correct format: `downstream:{var}.{field}`
+- [ ] $choices values use a supported prefix: `lookup:`, `optionset:`, `multiselect:`, `boolean:`, or `downstream:`
 - [ ] Template parameters use `{{paramName}}` syntax
 - [ ] At least 1 example provided
 - [ ] Metadata has description and tags
@@ -207,7 +207,20 @@ User: "Create a JPS action that extracts key dates from contracts — effective 
 - structuredOutput: true
 - 1 example with sample contract dates
 
-### Example 2: Classification with $choices
+### Example 2: Pre-fill with $choices (Dataverse lookup)
+
+**Input:**
+```
+User: "Create a JPS action that pre-fills matter fields from document analysis — matter type should come from Dataverse"
+```
+
+**Output:** Creates `matter-pre-fill.json` with:
+- output.fields: matterTypeName with `$choices: "lookup:sprk_mattertype_ref.sprk_mattertypename"`
+- output.fields: practiceAreaName with `$choices: "lookup:sprk_practicearea_ref.sprk_practiceareaname"`
+- structuredOutput: true
+- Enum values resolved from Dataverse at render time, constraining AI to exact values
+
+### Example 3: Classification with $choices (downstream routing)
 
 **Input:**
 ```
@@ -215,7 +228,7 @@ User: "Create a JPS action for document classification that routes to different 
 ```
 
 **Output:** Creates `document-classifier.json` with:
-- output.fields: sprk_documenttype with $choices: "downstream:classificationResult.documentType"
+- output.fields: sprk_documenttype with `$choices: "downstream:classificationResult.documentType"`
 - structuredOutput: true
 - Routing values populated from downstream node fieldMappings
 

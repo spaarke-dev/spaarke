@@ -78,7 +78,7 @@ IDENTIFY:
 
 DESIGN variables flow:
   - Which output fields from Node A feed into Node B?
-  - Which output fields drive $choices routing?
+  - Which output fields use $choices (Dataverse lookups, option sets, or downstream routing)?
   - What template parameters customize nodes at runtime?
 
 IDENTIFY shared scopes:
@@ -358,7 +358,7 @@ Create a playbook design document at `projects/{project}/notes/playbook-{name}.m
 {Per-node model selections from Step 5 with cost estimate}
 
 ## Routing
-{$choices routing table}
+{$choices table — include prefix type (lookup/optionset/multiselect/boolean/downstream) and resolution source}
 
 ## Variable Flow
 {How data flows between nodes}
@@ -401,7 +401,7 @@ INFORM user:
 - Playbook definitions stored in `projects/{project}/notes/playbook-definitions/{playbook-name}.json`
 - JPS files stored in `projects/ai-json-prompt-schema-system/notes/jps-conversions/`
 - Use consistent `outputVariable` names across the playbook
-- $choices routing values must exactly match downstream node ConfigJson fieldMappings
+- $choices values must use a supported prefix: `lookup:`, `optionset:`, `multiselect:`, `boolean:` (Dataverse-resolved), or `downstream:` (routing). Downstream routing values must exactly match downstream node ConfigJson fieldMappings
 - Shared scopes use $ref (never inline the same content in multiple JPS files)
 - Scope codes (ACT-xxx, SKL-xxx, KNW-xxx, TL-xxx) must come from `scope-model-index.json`
 - Model assignments must follow `modelSelectionRules` from the index unless explicitly overridden
@@ -470,7 +470,8 @@ Next steps:
 | Situation | Response |
 |-----------|----------|
 | Circular routing (A -> B -> A) | Warn user, suggest breaking the cycle |
-| Missing downstream node for $choices | Create the missing node or ask user |
+| Missing downstream node for $choices (downstream:) | Create the missing node or ask user |
+| Dataverse entity/field not found for $choices (lookup:/optionset:/etc.) | Verify entity logical name and field name in Dataverse |
 | Scope referenced but not defined | Prompt user to define scope content |
 | Too many nodes (>10) | Suggest splitting into sub-playbooks |
 | Scope code not found in index | Flag for new scope creation via `jps-action-create` |
@@ -502,7 +503,7 @@ Next steps:
 - Start with the node graph (Step 3) before selecting scopes — get user buy-in on architecture first
 - Always load `scope-model-index.json` in Step 2 — it is the single source of truth for available scopes and model rules
 - Use AskUserQuestion to confirm routing logic before generating $choices
-- Always trace variable flow end-to-end — ensure every $choices reference has a matching source
+- Always trace variable flow end-to-end — ensure every `downstream:` $choices has a matching source node, and every `lookup:`/`optionset:`/`multiselect:`/`boolean:` $choices references a valid Dataverse entity and field
 - Reuse existing JPS definitions whenever possible (check jps-conversions/ folder first)
 - Keep playbooks under 8 nodes — larger workflows should be split into sub-playbooks
 - When selecting scopes (Step 4), prefer exact `documentTypes` matches over broad tag matches

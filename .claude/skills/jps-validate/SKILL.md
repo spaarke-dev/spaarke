@@ -81,7 +81,13 @@ FOR each field in output.fields:
   ✅/⚠️ CHECK 15: "enum" values are strings (if present)
 
 IF field has "$choices":
-  ✅/❌ CHECK 16: Format is "downstream:{outputVariable}.{fieldName}"
+  ✅/❌ CHECK 16: Format uses a supported prefix:
+    - "lookup:{entity}.{field}" (Dataverse reference entity records)
+    - "optionset:{entity}.{attribute}" (single-select choice/picklist)
+    - "multiselect:{entity}.{attribute}" (multi-select picklist)
+    - "boolean:{entity}.{attribute}" (two-option boolean labels)
+    - "downstream:{outputVariable}.{fieldName}" (downstream node routing)
+  ✅/❌ CHECK 16a: Reference has two parts separated by "." after the prefix
   ✅/⚠️ CHECK 17: No static "enum" alongside "$choices" (choices override enum)
 ```
 
@@ -149,7 +155,7 @@ Generate validation report.
   ✅ instruction.task defined
   ✅ {N} output fields valid
   ⚠️ No examples section (recommended)
-  ❌ $choices format invalid: "downstream:result" (missing .fieldName)
+  ❌ $choices format invalid: "result" (missing prefix and .fieldName)
 
 📊 Summary:
   Passed:  {N}
@@ -157,7 +163,7 @@ Generate validation report.
   Failed:  {N}
 
 🔧 Fixes Required:
-  1. ❌ Fix $choices format: change "downstream:result" to "downstream:result.fieldName"
+  1. ❌ Fix $choices format: use a supported prefix — e.g., "lookup:entity.field", "optionset:entity.attr", or "downstream:var.field"
 
 ⚠️ Recommendations:
   1. Add examples section with at least 1 input/output pair
@@ -256,4 +262,4 @@ User: "check this JPS: { \"instruction\": { \"role\": \"analyst\" } }"
 - The `$schema` field is critical: without it, IsJpsFormat() returns false and the entire JPS is ignored
 - Report ALL issues at once — don't stop at the first failure
 - Offer auto-fix suggestions for every failed check
-- For $choices validation, trace the full reference chain if possible
+- For $choices validation, verify the prefix is one of: `lookup:`, `optionset:`, `multiselect:`, `boolean:`, `downstream:` and the value after the prefix contains exactly one `.` separator (e.g., `entity.field`)
