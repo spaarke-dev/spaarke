@@ -634,9 +634,9 @@ export async function searchOrganizationsAsLookup(
 
   const safeFilter = nameFilter.trim().replace(/'/g, "''");
   const query =
-    `?$select=sprk_organizationid,sprk_name` +
-    `&$filter=contains(sprk_name,'${safeFilter}')` +
-    `&$orderby=sprk_name asc` +
+    `?$select=sprk_organizationid,sprk_organizationname` +
+    `&$filter=contains(sprk_organizationname,'${safeFilter}')` +
+    `&$orderby=sprk_organizationname asc` +
     `&$top=10`;
 
   console.info('[MatterService] searchOrganizations query:', 'sprk_organization', query);
@@ -645,7 +645,7 @@ export async function searchOrganizationsAsLookup(
     console.info('[MatterService] searchOrganizations results:', result.entities.length);
     return result.entities.map((e) => ({
       id: e['sprk_organizationid'] as string,
-      name: e['sprk_name'] as string,
+      name: e['sprk_organizationname'] as string,
     }));
   } catch (err) {
     console.error('[MatterService] searchOrganizations error:', err);

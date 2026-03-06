@@ -265,6 +265,12 @@ public class ProjectPreFillService
                 PlaybookId = playbookId,
                 DocumentIds = [],
                 UserContext = documentText,
+                Document = new DocumentContext
+                {
+                    DocumentId = requestId,
+                    Name = "Pre-fill upload",
+                    ExtractedText = documentText,
+                },
                 Parameters = new Dictionary<string, string>
                 {
                     ["entity_type"] = "project",

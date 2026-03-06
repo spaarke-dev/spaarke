@@ -77,7 +77,8 @@ public sealed class PromptSchemaRenderer
         Dictionary<string, object?>? templateParameters,
         IReadOnlyList<DownstreamNodeInfo>? downstreamNodes,
         IReadOnlyList<ResolvedKnowledgeRef>? additionalKnowledge = null,
-        IReadOnlyList<ResolvedSkillRef>? additionalSkills = null)
+        IReadOnlyList<ResolvedSkillRef>? additionalSkills = null,
+        IReadOnlyDictionary<string, string[]>? preResolvedLookupChoices = null)
     {
         // Step 1: Format detection
         if (string.IsNullOrWhiteSpace(rawPrompt))
@@ -91,7 +92,7 @@ public sealed class PromptSchemaRenderer
 
         if (IsJpsFormat(rawPrompt))
         {
-            return RenderJps(rawPrompt, skillContext, knowledgeContext, documentText, downstreamNodes, additionalKnowledge, additionalSkills);
+            return RenderJps(rawPrompt, skillContext, knowledgeContext, documentText, downstreamNodes, additionalKnowledge, additionalSkills, preResolvedLookupChoices);
         }
 
         // Flat text legacy path — return rawPrompt as-is.
@@ -123,7 +124,8 @@ public sealed class PromptSchemaRenderer
         string? documentText,
         IReadOnlyList<DownstreamNodeInfo>? downstreamNodes,
         IReadOnlyList<ResolvedKnowledgeRef>? additionalKnowledge,
-        IReadOnlyList<ResolvedSkillRef>? additionalSkills)
+        IReadOnlyList<ResolvedSkillRef>? additionalSkills,
+        IReadOnlyDictionary<string, string[]>? preResolvedLookupChoices = null)
     {
         PromptSchema schema;
 
@@ -145,8 +147,8 @@ public sealed class PromptSchemaRenderer
         }
 
         // Resolve $choices references before assembling the prompt.
-        // This injects enum values from downstream node field mappings.
-        var resolvedFields = ResolveChoices(schema.Output?.Fields, downstreamNodes);
+        // This injects enum values from downstream node field mappings or pre-resolved Dataverse lookups.
+        var resolvedFields = ResolveChoices(schema.Output?.Fields, downstreamNodes, preResolvedLookupChoices);
         if (resolvedFields != null && schema.Output != null)
         {
             schema = schema with
@@ -269,6 +271,17 @@ public sealed class PromptSchemaRenderer
         // Step 7: Generate JSON Schema for constrained decoding (if structuredOutput is true)
         var jsonSchema = GenerateJsonSchema(schema.Output, "prompt_response");
 
+        // Diagnostic: log why schema may be null
+        if (jsonSchema == null)
+        {
+            _logger.LogWarning(
+                "JPS parsed successfully but no JSON schema generated. " +
+                "Output={HasOutput}, Fields={FieldCount}, StructuredOutput={StructuredOutput}",
+                schema.Output != null,
+                schema.Output?.Fields?.Count ?? 0,
+                schema.Output?.StructuredOutput ?? false);
+        }
+
         return new RenderedPrompt
         {
             PromptText = sb.ToString().TrimEnd(),
@@ -315,13 +328,80 @@ public sealed class PromptSchemaRenderer
             required.Add(field.Name);
         }
 
-        return new JsonObject
+        var schema = new JsonObject
         {
             ["type"] = "object",
             ["properties"] = properties,
             ["required"] = required,
             ["additionalProperties"] = false
         };
+
+        // Azure OpenAI structured output requires specific schema constraints:
+        // - additionalProperties: false on EVERY object
+        // - No unsupported keywords (maxLength, minimum, maximum, etc.)
+        // Recursively enforce these across all nested schemas.
+        EnforceAzureOpenAiSchemaCompliance(schema);
+
+        return schema;
+    }
+
+    /// <summary>
+    /// Recursively walks a JSON Schema node and enforces Azure OpenAI structured output requirements:
+    /// - <c>additionalProperties: false</c> on every object-typed node
+    /// - All properties listed in <c>required</c>
+    /// - Strips unsupported constraints: <c>maxLength</c>, <c>minimum</c>, <c>maximum</c>,
+    ///   <c>minLength</c>, <c>pattern</c>, <c>minItems</c>, <c>maxItems</c>
+    /// </summary>
+    private static void EnforceAzureOpenAiSchemaCompliance(JsonNode? node)
+    {
+        if (node is not JsonObject obj)
+            return;
+
+        // Strip unsupported JSON Schema keywords that Azure OpenAI rejects in strict mode
+        obj.Remove("maxLength");
+        obj.Remove("minLength");
+        obj.Remove("minimum");
+        obj.Remove("maximum");
+        obj.Remove("pattern");
+        obj.Remove("minItems");
+        obj.Remove("maxItems");
+
+        // If this node represents an object type with properties, ensure additionalProperties: false
+        if (obj.TryGetPropertyValue("type", out var typeNode) &&
+            typeNode?.GetValue<string>() == "object" &&
+            obj.ContainsKey("properties"))
+        {
+            obj["additionalProperties"] = false;
+
+            // Also ensure all properties are listed in "required" if not already present
+            if (obj.TryGetPropertyValue("properties", out var propsNode) && propsNode is JsonObject propsObj)
+            {
+                if (!obj.ContainsKey("required"))
+                {
+                    var req = new JsonArray();
+                    foreach (var kvp in propsObj)
+                    {
+                        req.Add(kvp.Key);
+                    }
+                    obj["required"] = req;
+                }
+            }
+        }
+
+        // Recurse into properties
+        if (obj.TryGetPropertyValue("properties", out var properties) && properties is JsonObject propsObject)
+        {
+            foreach (var kvp in propsObject)
+            {
+                EnforceAzureOpenAiSchemaCompliance(kvp.Value);
+            }
+        }
+
+        // Recurse into array items
+        if (obj.TryGetPropertyValue("items", out var items))
+        {
+            EnforceAzureOpenAiSchemaCompliance(items);
+        }
     }
 
     /// <summary>
@@ -362,24 +442,17 @@ public sealed class PromptSchemaRenderer
         }
 
         // Type-specific constraints
+        // Azure OpenAI structured output only supports a restricted JSON Schema subset.
+        // maxLength, minimum, maximum are NOT supported and cause HTTP 400 errors.
+        // These constraints are already conveyed as text in the prompt's constraints section.
         switch (field.Type)
         {
             case "string":
-                if (field.MaxLength.HasValue)
-                {
-                    prop["maxLength"] = field.MaxLength.Value;
-                }
+                // maxLength not supported by Azure OpenAI structured output — omitted
                 break;
 
             case "number":
-                if (field.Minimum.HasValue)
-                {
-                    prop["minimum"] = field.Minimum.Value;
-                }
-                if (field.Maximum.HasValue)
-                {
-                    prop["maximum"] = field.Maximum.Value;
-                }
+                // minimum/maximum not supported by Azure OpenAI structured output — omitted
                 break;
 
             case "array":
@@ -752,7 +825,8 @@ public sealed class PromptSchemaRenderer
     /// </returns>
     private IReadOnlyList<OutputFieldDefinition>? ResolveChoices(
         IReadOnlyList<OutputFieldDefinition>? fields,
-        IReadOnlyList<DownstreamNodeInfo>? downstreamNodes)
+        IReadOnlyList<DownstreamNodeInfo>? downstreamNodes,
+        IReadOnlyDictionary<string, string[]>? preResolvedLookupChoices = null)
     {
         if (fields is null or { Count: 0 })
             return fields;
@@ -771,10 +845,14 @@ public sealed class PromptSchemaRenderer
         if (!hasChoices)
             return fields;
 
-        if (downstreamNodes is null or { Count: 0 })
+        // Check if we have any resolution sources available
+        var hasDownstream = downstreamNodes is { Count: > 0 };
+        var hasLookups = preResolvedLookupChoices is { Count: > 0 };
+
+        if (!hasDownstream && !hasLookups)
         {
             _logger.LogWarning(
-                "$choices references found in output fields but no downstream nodes provided; choices will not be resolved");
+                "$choices references found in output fields but no resolution sources provided (no downstream nodes, no lookup choices)");
             return fields;
         }
 
@@ -788,12 +866,12 @@ public sealed class PromptSchemaRenderer
                 continue;
             }
 
-            var choiceValues = ResolveChoiceReference(field.Choices, field.Name, downstreamNodes);
+            var choiceValues = ResolveChoiceReference(field.Choices, field.Name, downstreamNodes, preResolvedLookupChoices);
             if (choiceValues != null)
             {
                 // Merge: $choices-resolved values replace any existing enum.
                 // If the field already has enum values, $choices takes precedence
-                // (single source of truth from the downstream node).
+                // (single source of truth from the resolution source).
                 resolved.Add(field with { Enum = choiceValues });
             }
             else
@@ -818,14 +896,45 @@ public sealed class PromptSchemaRenderer
     private string[]? ResolveChoiceReference(
         string choicesRef,
         string fieldName,
-        IReadOnlyList<DownstreamNodeInfo> downstreamNodes)
+        IReadOnlyList<DownstreamNodeInfo>? downstreamNodes,
+        IReadOnlyDictionary<string, string[]>? preResolvedLookupChoices = null)
     {
+        // Route by prefix:
+        // - "lookup:", "optionset:", "multiselect:", "boolean:" → pre-resolved Dataverse values
+        // - "downstream:" → node field mappings (resolved inline below)
+        if (choicesRef.StartsWith("lookup:", StringComparison.OrdinalIgnoreCase) ||
+            choicesRef.StartsWith("optionset:", StringComparison.OrdinalIgnoreCase) ||
+            choicesRef.StartsWith("multiselect:", StringComparison.OrdinalIgnoreCase) ||
+            choicesRef.StartsWith("boolean:", StringComparison.OrdinalIgnoreCase))
+        {
+            if (preResolvedLookupChoices != null && preResolvedLookupChoices.TryGetValue(choicesRef, out var resolvedValues))
+            {
+                _logger.LogDebug(
+                    "$choices resolved for field '{FieldName}': {Count} values from pre-resolved reference '{Ref}'",
+                    fieldName, resolvedValues.Length, choicesRef);
+                return resolvedValues;
+            }
+
+            _logger.LogWarning(
+                "$choices reference on field '{FieldName}' uses Dataverse prefix but no pre-resolved values found for '{Ref}'",
+                fieldName, choicesRef);
+            return null;
+        }
+
         // Parse reference: "downstream:{outputVariable}.{fieldName}"
         const string prefix = "downstream:";
         if (!choicesRef.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning(
-                "$choices reference on field '{FieldName}' does not start with 'downstream:'; skipping resolution",
+                "$choices reference on field '{FieldName}' has unrecognized prefix (expected 'downstream:', 'lookup:', 'optionset:', 'multiselect:', or 'boolean:'): {Ref}",
+                fieldName, choicesRef);
+            return null;
+        }
+
+        if (downstreamNodes is null or { Count: 0 })
+        {
+            _logger.LogWarning(
+                "$choices reference on field '{FieldName}' uses downstream: prefix but no downstream nodes provided",
                 fieldName);
             return null;
         }

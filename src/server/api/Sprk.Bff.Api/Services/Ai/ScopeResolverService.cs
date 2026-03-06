@@ -891,7 +891,7 @@ public class ScopeResolverService : IScopeResolverService
 
         await EnsureAuthenticatedAsync(cancellationToken);
 
-        var url = $"sprk_promptfragments({skillId})?$expand=sprk_SkillTypeId($select=sprk_name)";
+        var url = $"sprk_analysisskills({skillId})?$select=sprk_analysisskillid,sprk_name,sprk_description,sprk_promptfragment&$expand=sprk_SkillTypeId($select=sprk_name)";
         var response = await _httpClient.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -1538,6 +1538,225 @@ public class ScopeResolverService : IScopeResolverService
     #region Search Operations
 
     /// <inheritdoc />
+    public async Task<string[]> QueryLookupValuesAsync(
+        string entitySetName,
+        string fieldName,
+        CancellationToken cancellationToken)
+    {
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        // Sanitize inputs to prevent OData injection
+        var safeEntitySet = entitySetName.Replace("'", "").Replace("/", "");
+        var safeField = fieldName.Replace("'", "").Replace("/", "");
+
+        var url = $"{safeEntitySet}?$select={safeField}&$orderby={safeField} asc&$top=200&$filter=statecode eq 0";
+
+        _logger.LogDebug(
+            "[LOOKUP CHOICES] Querying {EntitySet}.{Field}",
+            safeEntitySet, safeField);
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, cancellationToken);
+            await EnsureSuccessWithDiagnosticsAsync(response, $"QueryLookupValues({safeEntitySet}.{safeField})", cancellationToken);
+
+            using var doc = await JsonDocument.ParseAsync(
+                await response.Content.ReadAsStreamAsync(cancellationToken),
+                cancellationToken: cancellationToken);
+
+            if (!doc.RootElement.TryGetProperty("value", out var valueArray) ||
+                valueArray.ValueKind != JsonValueKind.Array)
+            {
+                return [];
+            }
+
+            var values = new List<string>();
+            foreach (var item in valueArray.EnumerateArray())
+            {
+                if (item.TryGetProperty(safeField, out var fieldValue) &&
+                    fieldValue.ValueKind == JsonValueKind.String)
+                {
+                    var val = fieldValue.GetString();
+                    if (!string.IsNullOrWhiteSpace(val))
+                        values.Add(val);
+                }
+            }
+
+            _logger.LogDebug(
+                "[LOOKUP CHOICES] Found {Count} values in {EntitySet}.{Field}",
+                values.Count, safeEntitySet, safeField);
+
+            return values.ToArray();
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex,
+                "[LOOKUP CHOICES] Failed to query {EntitySet}.{Field}",
+                safeEntitySet, safeField);
+            return [];
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<string[]> QueryOptionSetLabelsAsync(
+        string entityLogicalName,
+        string attributeLogicalName,
+        bool isMultiSelect,
+        CancellationToken cancellationToken)
+    {
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        var safeEntity = entityLogicalName.Replace("'", "").Replace("/", "");
+        var safeAttribute = attributeLogicalName.Replace("'", "").Replace("/", "");
+
+        // Dataverse metadata API: cast to the correct attribute type to get OptionSet.Options
+        var metadataType = isMultiSelect
+            ? "Microsoft.Dynamics.CRM.MultiSelectPicklistAttributeMetadata"
+            : "Microsoft.Dynamics.CRM.PicklistAttributeMetadata";
+
+        var url = $"EntityDefinitions(LogicalName='{safeEntity}')" +
+                  $"/Attributes(LogicalName='{safeAttribute}')/{metadataType}" +
+                  $"?$select=LogicalName&$expand=OptionSet($select=Options)";
+
+        _logger.LogDebug(
+            "[OPTIONSET CHOICES] Querying {Entity}.{Attribute} (multiSelect={MultiSelect})",
+            safeEntity, safeAttribute, isMultiSelect);
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, cancellationToken);
+            await EnsureSuccessWithDiagnosticsAsync(
+                response, $"QueryOptionSetLabels({safeEntity}.{safeAttribute})", cancellationToken);
+
+            using var doc = await JsonDocument.ParseAsync(
+                await response.Content.ReadAsStreamAsync(cancellationToken),
+                cancellationToken: cancellationToken);
+
+            var root = doc.RootElement;
+
+            // Navigate: OptionSet → Options → each option's Label.UserLocalizedLabel.Label
+            if (!root.TryGetProperty("OptionSet", out var optionSet) ||
+                !optionSet.TryGetProperty("Options", out var options) ||
+                options.ValueKind != JsonValueKind.Array)
+            {
+                _logger.LogWarning(
+                    "[OPTIONSET CHOICES] No OptionSet.Options found for {Entity}.{Attribute}",
+                    safeEntity, safeAttribute);
+                return [];
+            }
+
+            var labels = new List<string>();
+            foreach (var option in options.EnumerateArray())
+            {
+                var label = ExtractOptionLabel(option);
+                if (!string.IsNullOrWhiteSpace(label))
+                    labels.Add(label);
+            }
+
+            _logger.LogDebug(
+                "[OPTIONSET CHOICES] Found {Count} options for {Entity}.{Attribute}",
+                labels.Count, safeEntity, safeAttribute);
+
+            return labels.ToArray();
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex,
+                "[OPTIONSET CHOICES] Failed to query {Entity}.{Attribute}",
+                safeEntity, safeAttribute);
+            return [];
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<string[]> QueryBooleanLabelsAsync(
+        string entityLogicalName,
+        string attributeLogicalName,
+        CancellationToken cancellationToken)
+    {
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        var safeEntity = entityLogicalName.Replace("'", "").Replace("/", "");
+        var safeAttribute = attributeLogicalName.Replace("'", "").Replace("/", "");
+
+        var url = $"EntityDefinitions(LogicalName='{safeEntity}')" +
+                  $"/Attributes(LogicalName='{safeAttribute}')/Microsoft.Dynamics.CRM.BooleanAttributeMetadata" +
+                  $"?$select=LogicalName&$expand=OptionSet($select=TrueOption,FalseOption)";
+
+        _logger.LogDebug(
+            "[BOOLEAN CHOICES] Querying {Entity}.{Attribute}",
+            safeEntity, safeAttribute);
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, cancellationToken);
+            await EnsureSuccessWithDiagnosticsAsync(
+                response, $"QueryBooleanLabels({safeEntity}.{safeAttribute})", cancellationToken);
+
+            using var doc = await JsonDocument.ParseAsync(
+                await response.Content.ReadAsStreamAsync(cancellationToken),
+                cancellationToken: cancellationToken);
+
+            var root = doc.RootElement;
+
+            if (!root.TryGetProperty("OptionSet", out var optionSet))
+            {
+                _logger.LogWarning(
+                    "[BOOLEAN CHOICES] No OptionSet found for {Entity}.{Attribute}",
+                    safeEntity, safeAttribute);
+                return [];
+            }
+
+            var labels = new List<string>(2);
+
+            // TrueOption label first, then FalseOption
+            if (optionSet.TryGetProperty("TrueOption", out var trueOption))
+            {
+                var trueLabel = ExtractOptionLabel(trueOption);
+                if (!string.IsNullOrWhiteSpace(trueLabel))
+                    labels.Add(trueLabel);
+            }
+
+            if (optionSet.TryGetProperty("FalseOption", out var falseOption))
+            {
+                var falseLabel = ExtractOptionLabel(falseOption);
+                if (!string.IsNullOrWhiteSpace(falseLabel))
+                    labels.Add(falseLabel);
+            }
+
+            _logger.LogDebug(
+                "[BOOLEAN CHOICES] Found labels [{Labels}] for {Entity}.{Attribute}",
+                string.Join(", ", labels), safeEntity, safeAttribute);
+
+            return labels.ToArray();
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex,
+                "[BOOLEAN CHOICES] Failed to query {Entity}.{Attribute}",
+                safeEntity, safeAttribute);
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Extracts the display label from a Dataverse OptionSet option element.
+    /// Navigates: option → Label → UserLocalizedLabel → Label.
+    /// </summary>
+    private static string? ExtractOptionLabel(JsonElement option)
+    {
+        if (option.TryGetProperty("Label", out var labelObj) &&
+            labelObj.TryGetProperty("UserLocalizedLabel", out var userLabel) &&
+            userLabel.TryGetProperty("Label", out var labelValue) &&
+            labelValue.ValueKind == JsonValueKind.String)
+        {
+            return labelValue.GetString();
+        }
+
+        return null;
+    }
+
+    /// <inheritdoc />
     public async Task<ScopeSearchResult> SearchScopesAsync(ScopeSearchQuery query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
@@ -1964,12 +2183,12 @@ public class ScopeResolverService : IScopeResolverService
     }
 
     /// <summary>
-    /// DTO for deserializing sprk_promptfragment entity from Dataverse Web API (Skills).
-    /// Skills are stored in the sprk_promptfragments entity set in Dataverse.
+    /// DTO for deserializing sprk_analysisskill entity from Dataverse Web API (Skills).
+    /// Skills are stored in the sprk_analysisskills entity set in Dataverse.
     /// </summary>
     private class SkillEntity
     {
-        [JsonPropertyName("sprk_promptfragmentid")]
+        [JsonPropertyName("sprk_analysisskillid")]
         public Guid Id { get; set; }
 
         [JsonPropertyName("sprk_name")]

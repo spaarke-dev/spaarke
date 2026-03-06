@@ -247,7 +247,8 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 null,  // templateParameters - not yet wired
                 context.DownstreamNodes,
                 null,  // additionalKnowledge - resolved by executor in future
-                null   // additionalSkills - resolved by executor in future
+                null,  // additionalSkills - resolved by executor in future
+                context.PreResolvedLookupChoices
             );
 
 #pragma warning disable CS0618 // Obsolete BuildExecutionPrompt retained for flat-text backward compatibility
@@ -365,6 +366,8 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
         GenericToolConfig config = null!;
         string prompt = null!;
         int inputTokens = 0;
+        bool useStructuredOutput = false;
+        RenderedPrompt rendered = default!;
 
         try
         {
@@ -379,7 +382,7 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
 
             // Build the execution prompt — try PromptSchemaRenderer first,
             // fall back to legacy BuildExecutionPrompt for flat text.
-            var rendered = _promptSchemaRenderer.Render(
+            rendered = _promptSchemaRenderer.Render(
                 context.ActionSystemPrompt,
                 context.SkillContext,
                 context.KnowledgeContext,
@@ -387,7 +390,8 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 null,  // templateParameters - not yet wired
                 context.DownstreamNodes,
                 null,  // additionalKnowledge - resolved by executor in future
-                null   // additionalSkills - resolved by executor in future
+                null,  // additionalSkills - resolved by executor in future
+                context.PreResolvedLookupChoices
             );
 
 #pragma warning disable CS0618 // Obsolete BuildExecutionPrompt retained for flat-text backward compatibility
@@ -396,26 +400,19 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 : BuildExecutionPrompt(context, tool, config);
 #pragma warning restore CS0618
 
-            // For streaming, constrained decoding (response_format: json_schema) is not
-            // wired through StreamCompletionAsync. If the JPS defines structured output,
-            // append the schema as a text instruction so the model still targets the shape.
-            if (rendered.JsonSchema != null)
-            {
-                _logger.LogWarning(
-                    "Structured output requested for streaming analysis {AnalysisId} but constrained decoding is not available for streaming. " +
-                    "Falling back to schema instruction in prompt text. Schema: {SchemaName}",
-                    context.AnalysisId, rendered.SchemaName ?? "prompt_response");
-
-                prompt += "\n\n## Required Response Format\n\nYou MUST return valid JSON conforming to this schema:\n```json\n"
-                    + rendered.JsonSchema.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true })
-                    + "\n```\nReturn ONLY the JSON object, no markdown code fences or additional text.";
-            }
+            // When JPS defines structured output, use constrained decoding (non-streaming)
+            // to guarantee the AI returns valid JSON matching the schema. The full response
+            // is emitted as a single token event — partial JSON streaming isn't useful anyway.
+            useStructuredOutput = rendered.JsonSchema != null;
 
             inputTokens = EstimateTokens(prompt);
 
-            _logger.LogDebug(
-                "Streaming generic tool with operation: {Operation}, format: {Format}, structuredOutput: {StructuredOutput}, estimated input tokens: {Tokens}",
-                config.Operation, rendered.Format, rendered.JsonSchema != null, inputTokens);
+            // Diagnostic: log JPS detection results so we can trace structured output decisions
+            _logger.LogInformation(
+                "Streaming generic tool — JPS detection: format={Format}, hasJsonSchema={HasSchema}, useStructuredOutput={UseStructured}, " +
+                "actionSystemPromptLength={PromptLen}, operation={Operation}, analysisId={AnalysisId}",
+                rendered.Format, rendered.JsonSchema != null, useStructuredOutput,
+                context.ActionSystemPrompt?.Length ?? -1, config.Operation, context.AnalysisId);
         }
         catch (Exception ex)
         {
@@ -433,18 +430,47 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
             yield break;
         }
 
-        // Stream tokens from OpenAI — same pattern as action-based path in
-        // AnalysisOrchestrationService.ExecuteAnalysisAsync (lines 248-262)
-        var responseBuilder = new StringBuilder();
-
-        await foreach (var token in _openAiClient.StreamCompletionAsync(prompt!, cancellationToken: cancellationToken))
+        string response;
+        if (useStructuredOutput)
         {
-            responseBuilder.Append(token);
-            yield return new ToolStreamEvent.Token(token);
+            // Constrained decoding: non-streaming call guarantees valid JSON matching the schema.
+            // Emit the full response as a single token event.
+            var schemaJsonString = rendered.JsonSchema!.ToJsonString();
+            var schemaBinaryData = BinaryData.FromString(schemaJsonString);
+            var schemaName = rendered.SchemaName ?? "prompt_response";
+
+            // TEMP DIAG: Log the exact schema being sent to OpenAI
+            _logger.LogWarning(
+                "DIAG_SCHEMA: AnalysisId={AnalysisId}, ToolName={ToolName}, SchemaName={SchemaName}, PromptFormat={Format}, Schema={Schema}",
+                context.AnalysisId, tool.Name, schemaName, rendered.Format, schemaJsonString);
+
+            _logger.LogInformation(
+                "Using structured output (response_format: json_schema) for streaming analysis {AnalysisId}, schema: {SchemaName}",
+                context.AnalysisId, schemaName);
+
+            response = await _openAiClient.GetStructuredCompletionRawAsync(
+                prompt!,
+                schemaBinaryData,
+                schemaName,
+                cancellationToken: cancellationToken);
+
+            yield return new ToolStreamEvent.Token(response);
+        }
+        else
+        {
+            // Standard streaming path for non-structured output
+            var responseBuilder = new StringBuilder();
+
+            await foreach (var token in _openAiClient.StreamCompletionAsync(prompt!, cancellationToken: cancellationToken))
+            {
+                responseBuilder.Append(token);
+                yield return new ToolStreamEvent.Token(token);
+            }
+
+            response = responseBuilder.ToString();
         }
 
         stopwatch.Stop();
-        var response = responseBuilder.ToString();
         var outputTokens = EstimateTokens(response);
 
         // Parse the accumulated response — same as ExecuteAsync

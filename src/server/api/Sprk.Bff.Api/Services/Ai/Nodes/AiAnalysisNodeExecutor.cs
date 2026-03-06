@@ -142,8 +142,17 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
                     NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
             }
 
+            // Resolve $choices lookup references from Dataverse before tool execution.
+            // This pre-resolves "lookup:entity.field" references in the JPS so the renderer
+            // can inject them as enum constraints for constrained decoding.
+            var lookupChoicesResolver = scope.ServiceProvider.GetService<LookupChoicesResolver>();
+            var preResolvedLookupChoices = lookupChoicesResolver != null
+                ? await lookupChoicesResolver.ResolveFromJpsAsync(
+                    context.Action.SystemPrompt, cancellationToken)
+                : null;
+
             // Convert to tool execution context
-            var toolContext = CreateToolExecutionContext(context);
+            var toolContext = CreateToolExecutionContext(context, preResolvedLookupChoices);
 
             // Convert AnalysisTool to the handler's expected format
             var analysisTool = tool;
@@ -267,7 +276,9 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
     /// Action's system prompt is in JPS format, the override is merged into the base
     /// schema before passing to the tool handler. See <see cref="PromptSchemaOverrideMerger"/>.
     /// </remarks>
-    private ToolExecutionContext CreateToolExecutionContext(NodeExecutionContext context)
+    private ToolExecutionContext CreateToolExecutionContext(
+        NodeExecutionContext context,
+        IReadOnlyDictionary<string, string[]>? preResolvedLookupChoices = null)
     {
         // Build previous results dictionary from node outputs
         var previousResults = new Dictionary<string, ToolResult>();
@@ -308,6 +319,7 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             SkillContext = skillContext,
             KnowledgeContext = knowledgeContext,
             DownstreamNodes = context.DownstreamNodes,
+            PreResolvedLookupChoices = preResolvedLookupChoices,
             MaxTokens = context.MaxTokens,
             Temperature = context.Temperature,
             ModelDeploymentId = context.ModelDeploymentId ?? context.Node.ModelDeploymentId,

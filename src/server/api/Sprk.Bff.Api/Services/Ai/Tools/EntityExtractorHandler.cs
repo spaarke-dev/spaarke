@@ -177,7 +177,7 @@ public sealed class EntityExtractorHandler : IAnalysisToolHandler
                 _logger.LogDebug("Processing chunk {ChunkIndex}/{TotalChunks}", index + 1, chunks.Count);
 
                 var chunkResult = await ExtractEntitiesFromChunkAsync(
-                    chunk, config.EntityTypes ?? EntityExtractorConfig.Default.EntityTypes!, cancellationToken);
+                    chunk, config.EntityTypes ?? EntityExtractorConfig.Default.EntityTypes!, cancellationToken, context);
 
                 if (chunkResult.Entities != null)
                 {
@@ -267,9 +267,10 @@ public sealed class EntityExtractorHandler : IAnalysisToolHandler
     private async Task<ChunkExtractionResult> ExtractEntitiesFromChunkAsync(
         string chunk,
         string[] entityTypes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ToolExecutionContext? executionContext = null)
     {
-        var prompt = BuildExtractionPrompt(chunk, entityTypes);
+        var prompt = PromptContextHelper.ApplyContext(BuildExtractionPrompt(chunk, entityTypes), executionContext, chunk);
         var inputTokens = EstimateTokens(prompt);
 
         var response = await _openAiClient.GetCompletionAsync(prompt, cancellationToken: cancellationToken);

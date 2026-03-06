@@ -28,6 +28,9 @@ public static class ToolFrameworkExtensions
         // Register prompt schema renderer (stateless, singleton)
         services.AddSingleton<PromptSchemaRenderer>();
 
+        // Register lookup choices resolver (scoped: caches per-request, needs IScopeResolverService)
+        services.AddScoped<LookupChoicesResolver>();
+
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());
 
@@ -52,6 +55,9 @@ public static class ToolFrameworkExtensions
 
         // Register prompt schema renderer (stateless, singleton)
         services.AddSingleton<PromptSchemaRenderer>();
+
+        // Register lookup choices resolver (scoped: caches per-request, needs IScopeResolverService)
+        services.AddScoped<LookupChoicesResolver>();
 
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());

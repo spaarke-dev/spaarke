@@ -19,12 +19,13 @@ public record PreFillResponse(
     string? AssignedParalegalName,
     string? AssignedOutsideCounselName,
     double Confidence,
-    string[] PreFilledFields)
+    string[] PreFilledFields,
+    string? _debugRawAiResponse = null)
 {
     /// <summary>
     /// Returns an empty PreFillResponse indicating no fields were extracted (e.g., AI timeout).
     /// </summary>
-    public static PreFillResponse Empty() =>
+    public static PreFillResponse Empty(string? debugInfo = null) =>
         new(
             MatterTypeName: null,
             PracticeAreaName: null,
@@ -34,7 +35,8 @@ public record PreFillResponse(
             AssignedParalegalName: null,
             AssignedOutsideCounselName: null,
             Confidence: 0,
-            PreFilledFields: []);
+            PreFilledFields: [],
+            _debugRawAiResponse: debugInfo);
 }
 
 /// <summary>

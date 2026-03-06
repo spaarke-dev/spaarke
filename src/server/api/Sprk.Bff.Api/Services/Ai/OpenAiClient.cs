@@ -721,9 +721,9 @@ public class OpenAiClient : IOpenAiClient
             new UserChatMessage(prompt)
         };
 
-        _logger.LogDebug(
-            "Starting structured raw completion. Model={Model}, Schema={Schema}",
-            deploymentName, schemaName);
+        _logger.LogInformation(
+            "Starting structured raw completion. Model={Model}, Schema={Schema}, SchemaJson={SchemaJson}",
+            deploymentName, schemaName, jsonSchema.ToString());
 
         try
         {
@@ -758,8 +758,8 @@ public class OpenAiClient : IOpenAiClient
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Failed to get structured raw completion. Model={Model}, Schema={Schema}",
-                deploymentName, schemaName);
+                "Failed to get structured raw completion. Model={Model}, Schema={Schema}, ErrorMessage={ErrorMessage}, SchemaJson={SchemaJson}",
+                deploymentName, schemaName, ex.Message, jsonSchema.ToString());
             throw;
         }
     }

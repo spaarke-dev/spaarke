@@ -556,6 +556,7 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
           <NextStepsStep
             selectedActions={selectedActions}
             onSelectionChange={setSelectedActions}
+            entityLabel="project"
           />
         ),
       },

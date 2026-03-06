@@ -179,7 +179,7 @@ public sealed class DateExtractorHandler : IAnalysisToolHandler
 
                 _logger.LogDebug("Extracting dates from chunk {ChunkIndex}/{TotalChunks}", index + 1, chunks.Count);
 
-                var result = await ExtractDatesFromChunkAsync(chunk, config, cancellationToken);
+                var result = await ExtractDatesFromChunkAsync(chunk, config, cancellationToken, context);
                 allDates.AddRange(result.Dates);
                 totalInputTokens += result.InputTokens;
                 totalOutputTokens += result.OutputTokens;
@@ -269,9 +269,10 @@ public sealed class DateExtractorHandler : IAnalysisToolHandler
     private async Task<ChunkDateResult> ExtractDatesFromChunkAsync(
         string chunk,
         DateExtractorConfig config,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ToolExecutionContext? executionContext = null)
     {
-        var prompt = BuildExtractionPrompt(chunk, config);
+        var prompt = PromptContextHelper.ApplyContext(BuildExtractionPrompt(chunk, config), executionContext, chunk);
         var inputTokens = EstimateTokens(prompt);
 
         var response = await _openAiClient.GetCompletionAsync(prompt, cancellationToken: cancellationToken);

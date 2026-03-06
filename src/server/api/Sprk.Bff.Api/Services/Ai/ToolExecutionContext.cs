@@ -93,6 +93,14 @@ public record ToolExecutionContext
     public IReadOnlyList<DownstreamNodeInfo>? DownstreamNodes { get; init; }
 
     /// <summary>
+    /// Pre-resolved <c>$choices</c> values from Dataverse lookup entities.
+    /// Keyed by the full <c>$choices</c> reference string (e.g., <c>"lookup:sprk_mattertype_ref.sprk_name"</c>),
+    /// values are arrays of valid option strings.
+    /// Resolved by <see cref="LookupChoicesResolver"/> before tool execution.
+    /// </summary>
+    public IReadOnlyDictionary<string, string[]>? PreResolvedLookupChoices { get; init; }
+
+    /// <summary>
     /// Correlation ID for distributed tracing.
     /// </summary>
     public string? CorrelationId { get; init; }

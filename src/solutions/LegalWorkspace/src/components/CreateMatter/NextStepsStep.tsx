@@ -62,6 +62,11 @@ export interface INextStepsStepProps {
   selectedActions: FollowOnActionId[];
   /** Called when selection changes. */
   onSelectionChange: (selected: FollowOnActionId[]) => void;
+  /**
+   * Label for the entity being created (e.g. "matter" or "project").
+   * Used in subtitle and skip hint text. Defaults to "matter".
+   */
+  entityLabel?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +301,7 @@ const CheckboxCard: React.FC<ICheckboxCardProps> = ({ def, selected, onToggle })
 export const NextStepsStep: React.FC<INextStepsStepProps> = ({
   selectedActions,
   onSelectionChange,
+  entityLabel = 'matter',
 }) => {
   const styles = useStyles();
 
@@ -323,8 +329,8 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
           Next steps
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
-          Optionally select follow-on actions to complete after the matter is
-          created. You can skip all and handle these from the matter record.
+          Optionally select follow-on actions to complete after the {entityLabel} is
+          created. You can skip all and handle these from the {entityLabel} record.
         </Text>
       </div>
 
@@ -343,7 +349,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
       {/* Optional skip hint */}
       {selectedActions.length === 0 && (
         <Text size={200} className={styles.skipMessage}>
-          No actions selected — click Finish to create the matter without follow-on steps.
+          No actions selected — click Finish to create the {entityLabel} without follow-on steps.
         </Text>
       )}
     </div>

@@ -266,7 +266,7 @@ The solution is a format that's:
 | `type` | string | `string`, `number`, `boolean`, `array`, `object` |
 | `description` | string | What this field represents (becomes part of the prompt) |
 | `enum` | string[] | Fixed set of valid values (rendered inline in prompt) |
-| `$choices` | string | Auto-inject values from downstream node: `"downstream:nodeVar.fieldName"` |
+| `$choices` | string | Auto-inject enum values at render time (see Reference Types table below for all supported prefixes) |
 | `items` | object | Array item schema (when type is `array`) |
 | `maxLength` | number | Maximum string length |
 | `minimum`/`maximum` | number | Numeric range constraints |
@@ -311,7 +311,11 @@ When present, examples are rendered as a "## Examples" section in the prompt, fo
 
 | Reference | Syntax | Resolution Source | Example |
 |-----------|--------|-------------------|---------|
-| `$choices` | `"downstream:nodeVar.fieldName"` | Downstream UpdateRecord node's `fieldMappings[].options` map | `"downstream:update_doc.sprk_documenttype"` → `["contract", "invoice", "proposal"]` |
+| `$choices` (lookup) | `"lookup:{entity}.{field}"` | Active records from Dataverse reference entity | `"lookup:sprk_mattertype_ref.sprk_mattertypename"` → `["Patent", "Trademark", "Copyright"]` |
+| `$choices` (optionset) | `"optionset:{entity}.{attribute}"` | Single-select choice/picklist metadata labels | `"optionset:sprk_matter.sprk_matterstatus"` → `["Active", "Closed", "Pending"]` |
+| `$choices` (multiselect) | `"multiselect:{entity}.{attribute}"` | Multi-select picklist metadata labels | `"multiselect:sprk_matter.sprk_jurisdictions"` → `["US", "EU", "UK", "CA"]` |
+| `$choices` (boolean) | `"boolean:{entity}.{attribute}"` | Two-option boolean field labels | `"boolean:sprk_matter.sprk_isconfidential"` → `["Yes", "No"]` |
+| `$choices` (downstream) | `"downstream:nodeVar.fieldName"` | Downstream UpdateRecord node's `fieldMappings[].options` map | `"downstream:update_doc.sprk_documenttype"` → `["contract", "invoice", "proposal"]` |
 | `$knowledge` | `{"$ref": "knowledge:name"}` | `sprk_analysisknowledge` record by `sprk_name` | `{"$ref": "knowledge:standard-contract-clauses"}` |
 | `$skill` | `{"$ref": "skill:name"}` | `sprk_analysisskill` record by `sprk_name` | `{"$ref": "skill:liability-analysis"}` |
 | Template | `{{output_nodeVar.output.field}}` | Handlebars from `PreviousOutputs` at runtime | `{{output_classify.output.documentType}}` |
@@ -385,11 +389,15 @@ Step 2: PARSE & VALIDATE
   └─ Validate field types and constraints
 
 Step 3: RESOLVE $choices REFERENCES
-  ├─ For each output.field with $choices:
-  │   ├─ Parse reference: "downstream:{outputVariable}.{fieldName}"
-  │   ├─ Find downstream UpdateRecord node by outputVariable
-  │   ├─ Read fieldMappings[].options for matching field
-  │   └─ Inject option labels as enum values on the field
+  ├─ Dataverse prefixes (pre-resolved by LookupChoicesResolver):
+  │   ├─ "lookup:{entity}.{field}" → query active records from reference entity
+  │   ├─ "optionset:{entity}.{attr}" → query PicklistAttributeMetadata labels
+  │   ├─ "multiselect:{entity}.{attr}" → query MultiSelectPicklistAttributeMetadata labels
+  │   └─ "boolean:{entity}.{attr}" → query BooleanAttributeMetadata TrueOption/FalseOption labels
+  ├─ Downstream prefix (resolved inline by renderer):
+  │   ├─ "downstream:{outputVar}.{field}" → find downstream node by outputVariable
+  │   └─ Read fieldMappings[].options for matching field
+  ├─ Inject resolved values as enum on the output field
   └─ Log warnings for unresolvable references
 
 Step 4: RESOLVE $knowledge AND $skill REFERENCES
