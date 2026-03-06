@@ -1,0 +1,53 @@
+<task id="050" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Fix Prompt Configuration — Task Field Should Not Be Required</title>
+    <phase>3</phase>
+    <tags>frontend, fluent-ui, bug-fix, canvas</tags>
+    <estimate>1h</estimate>
+    <dependencies>013</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Make the Prompt Configuration section on AI nodes optional (override only), not required. The Task field currently has a required marker (*) which forces users to fill it even when the node's action already provides a full JPS definition.</goal>
+    <context>
+      The Playbook Builder canvas added a "Prompt Configuration" section to AI node properties with:
+      - Role (text area)
+      - Task (text area, currently marked required *)
+      - Constraints (add/remove list)
+      - Output Fields (add/remove list)
+      - Use Structured Output checkbox
+      - Switch to JSON Editor button
+
+      The problem: When a node has an action selected (e.g., ACT-023 "Matter Field Extraction"),
+      the action's sprk_systemprompt column contains the full JPS definition with role, task,
+      constraints, and output fields. The Prompt Configuration should be an OPTIONAL OVERRIDE
+      mechanism — not the primary source.
+
+      Current behavior: Task is required (*), forcing users to duplicate what the action already provides.
+      Expected behavior: All Prompt Configuration fields are optional. If blank, the node inherits
+      from the action's JPS. If filled, they override the action's defaults for this specific node.
+    </context>
+    <constraints>
+      <constraint>Task field must NOT be required — remove the required marker</constraint>
+      <constraint>All Prompt Configuration fields should be optional override fields</constraint>
+      <constraint>When Prompt Configuration fields are blank, the node must use the action's JPS values</constraint>
+      <constraint>When Prompt Configuration fields have values, they override the action's JPS for that node only</constraint>
+      <constraint>The UI should indicate these are overrides (e.g., placeholder text like "Inherited from action" or a visual cue)</constraint>
+    </constraints>
+  </prompt>
+
+  <steps>
+    <step>Find the Prompt Configuration form component in the canvas code (likely in NodePropertiesForm or PromptSchemaForm)</step>
+    <step>Remove the required validation from the Task field</step>
+    <step>Make all Prompt Configuration fields optional with placeholder text indicating they inherit from the action</step>
+    <step>Update the node executor to merge: action JPS defaults + node-level overrides (node wins if present)</step>
+    <step>Test: create a node with an action, leave Prompt Config blank — verify action JPS is used</step>
+    <step>Test: create a node with an action, fill Task override — verify override is used for Task but action JPS for everything else</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Task field has no required marker and can be saved blank</criterion>
+    <criterion>Node with action and blank Prompt Config uses action's JPS at execution time</criterion>
+    <criterion>Node with action and filled Prompt Config fields uses overrides for filled fields only</criterion>
+  </acceptance-criteria>
+</task>

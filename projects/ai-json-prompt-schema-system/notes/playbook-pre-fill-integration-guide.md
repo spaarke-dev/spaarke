@@ -4,6 +4,8 @@
 >
 > **Audience**: Claude Code sessions working on playbook creation, BFF endpoint wiring, and frontend integration.
 
+> **Created Date: March 5, 2026
+
 ---
 
 ## Overview
