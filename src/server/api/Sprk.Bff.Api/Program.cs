@@ -1807,6 +1807,7 @@ app.MapWorkspaceEndpoints();
 app.MapWorkspaceAiEndpoints();
 app.MapWorkspaceMatterEndpoints();
 app.MapWorkspaceProjectEndpoints();
+app.MapWorkspaceFileEndpoints();
 
 // Finance Intelligence endpoints (Financial Intelligence Module R1)
 app.MapFinanceEndpoints();

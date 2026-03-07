@@ -60,6 +60,10 @@ const LazySummarizeFilesDialog = React.lazy(
   () => import("../SummarizeFiles/SummarizeFilesDialog")
 );
 
+const LazyFindSimilarDialog = React.lazy(
+  () => import("../FindSimilar/FindSimilarDialog")
+);
+
 // ---------------------------------------------------------------------------
 // Suspense fallback: Fluent Spinner shown while lazy chunk loads
 // ---------------------------------------------------------------------------
@@ -270,6 +274,14 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleCloseSummarize = React.useCallback(() => setIsSummarizeOpen(false), []);
 
   // -------------------------------------------------------------------------
+  // Find Similar wizard dialog state
+  // -------------------------------------------------------------------------
+
+  const [isFindSimilarOpen, setIsFindSimilarOpen] = React.useState(false);
+  const handleOpenFindSimilar = React.useCallback(() => setIsFindSimilarOpen(true), []);
+  const handleCloseFindSimilar = React.useCallback(() => setIsFindSimilarOpen(false), []);
+
+  // -------------------------------------------------------------------------
   // Quick Start wizard dialog state
   // -------------------------------------------------------------------------
 
@@ -338,8 +350,9 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       "create-new-matter": handleOpenWizard,
       "create-new-project": handleOpenProjectWizard,
       "summarize-new-files": handleOpenSummarize,
+      "find-similar": handleOpenFindSimilar,
     }),
-    [quickStartHandlers, handleOpenWizard, handleOpenProjectWizard, handleOpenSummarize]
+    [quickStartHandlers, handleOpenWizard, handleOpenProjectWizard, handleOpenSummarize, handleOpenFindSimilar]
   );
 
   // -------------------------------------------------------------------------
@@ -510,6 +523,14 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       {isSummarizeOpen && (
         <React.Suspense fallback={<DialogLoadingFallback />}>
           <LazySummarizeFilesDialog open={isSummarizeOpen} onClose={handleCloseSummarize} />
+        </React.Suspense>
+      )}
+
+      {/* Find Similar wizard dialog — dedicated semantic search wizard.
+          Lazy-loaded: chunk only fetched on first user interaction. */}
+      {isFindSimilarOpen && (
+        <React.Suspense fallback={<DialogLoadingFallback />}>
+          <LazyFindSimilarDialog open={isFindSimilarOpen} onClose={handleCloseFindSimilar} />
         </React.Suspense>
       )}
 

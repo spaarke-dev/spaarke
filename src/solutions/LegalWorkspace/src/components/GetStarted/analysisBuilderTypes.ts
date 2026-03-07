@@ -39,7 +39,7 @@ export interface IAnalysisBuilderContext {
    *   "new-project"        — Create a new project
    *   "assign-counsel"     — Assign counsel to a matter
    *   "file-summary"       — Summarize uploaded files
-   *   "document-search"    — Search for documents
+   *   "find-similar"       — Find similar documents and records
    *   "email-compose"      — Compose an email
    *   "meeting-schedule"   — Schedule a meeting
    */
@@ -130,10 +130,10 @@ export const ANALYSIS_BUILDER_CONTEXTS: Readonly<
     displayName: "Summarize New File(s)",
     initialPrompt: "Summarize uploaded files",
   },
-  "search-document-files": {
-    intent: "document-search",
-    displayName: "Search Document Files",
-    initialPrompt: "Search for documents",
+  "find-similar": {
+    intent: "find-similar",
+    displayName: "Find Similar",
+    initialPrompt: "Find similar documents and records",
   },
   "send-email-message": {
     intent: "email-compose",
