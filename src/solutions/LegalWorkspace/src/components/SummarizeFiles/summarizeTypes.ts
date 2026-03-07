@@ -11,6 +11,8 @@
 export interface IFileHighlight {
   fileName: string;
   documentType: string;
+  /** Short ~100 word summary for this specific file. */
+  summary?: string;
   highlights: string[];
 }
 
