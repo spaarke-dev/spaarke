@@ -323,8 +323,8 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
   return (
     <WizardShell
       open={open}
-      title="Find Similar"
-      ariaLabel="Find Similar"
+      title="Find Similar Records"
+      ariaLabel="Find Similar Records"
       steps={stepConfigs}
       onClose={onClose}
       onFinish={handleFinish}

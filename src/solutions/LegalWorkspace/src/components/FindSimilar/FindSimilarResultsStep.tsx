@@ -1,15 +1,13 @@
 /**
  * FindSimilarResultsStep.tsx
- * Step 2 of the Find Similar wizard — tabbed results grid.
+ * Step 2 of the Find Similar Records wizard — tabbed results grid.
  *
  * Displays search results in three domain tabs:
- *   - Documents (sprk_document)
- *   - Matters   (sprk_matter)
- *   - Projects  (sprk_project)
+ *   - Documents (sprk_document) — Name, Score, File Type + action icons
+ *   - Matters   (sprk_matter)   — Matter Name, Score, Description + action icon
+ *   - Projects  (sprk_project)  — Project Name, Score, Description + action icon
  *
- * Uses the same DataGrid pattern as the Semantic Search code page
- * (SearchResultsGrid.tsx) with dataType-based cell rendering, sortable
- * columns, column visibility picker, and 44px row height.
+ * Uses progressive rendering (intersection observer) instead of scrollbars.
  */
 import * as React from 'react';
 import {
@@ -21,22 +19,24 @@ import {
   DataGridCell,
   createTableColumn,
   Button,
-  Menu,
-  MenuTrigger,
-  MenuPopover,
-  MenuList,
-  MenuItemCheckbox,
   Spinner,
   Tab,
   TabList,
   Text,
   Badge,
+  Tooltip,
   makeStyles,
   tokens,
   type TableColumnDefinition,
   type TableColumnSizingOptions,
 } from '@fluentui/react-components';
-import { ColumnTriple20Regular } from '@fluentui/react-icons';
+import {
+  EyeRegular,
+  DesktopRegular,
+  DocumentOnePageRegular,
+  OpenRegular,
+} from '@fluentui/react-icons';
+import { navigateToEntity, openRecordDialog } from '../../utils/navigation';
 import type {
   FindSimilarStatus,
   FindSimilarDomain,
@@ -59,34 +59,25 @@ export interface IFindSimilarResultsStepProps {
 }
 
 // ---------------------------------------------------------------------------
-// Column definitions per domain
+// Column definitions per domain (simplified per user feedback)
 // ---------------------------------------------------------------------------
 
 const DOCUMENT_COLUMNS: IGridColumn[] = [
-  { name: 'name', displayName: 'Name', dataType: 'SingleLine.Text', visualSizeFactor: 2.5 },
+  { name: 'name', displayName: 'Name', dataType: 'SingleLine.Text', visualSizeFactor: 3 },
   { name: 'combinedScore', displayName: 'Score', dataType: 'Percentage', visualSizeFactor: 0.8 },
-  { name: 'documentType', displayName: 'Doc Type', dataType: 'SingleLine.Text', visualSizeFactor: 1 },
-  { name: 'fileType', displayName: 'File Type', dataType: 'FileType', visualSizeFactor: 0.7 },
-  { name: 'parentEntityName', displayName: 'Related To', dataType: 'SingleLine.Text', visualSizeFactor: 1.5 },
-  { name: 'updatedAt', displayName: 'Updated', dataType: 'DateAndTime.DateOnly', visualSizeFactor: 1 },
+  { name: 'fileType', displayName: 'File Type', dataType: 'FileType', visualSizeFactor: 1 },
 ];
 
 const MATTER_COLUMNS: IGridColumn[] = [
   { name: 'recordName', displayName: 'Matter Name', dataType: 'SingleLine.Text', visualSizeFactor: 2.5 },
   { name: 'confidenceScore', displayName: 'Score', dataType: 'Percentage', visualSizeFactor: 0.8 },
-  { name: 'recordDescription', displayName: 'Description', dataType: 'SingleLine.Text', visualSizeFactor: 2 },
-  { name: 'organizations', displayName: 'Organizations', dataType: 'StringArray', visualSizeFactor: 1.5 },
-  { name: 'people', displayName: 'People', dataType: 'StringArray', visualSizeFactor: 1.5 },
-  { name: 'modifiedAt', displayName: 'Modified', dataType: 'DateAndTime.DateOnly', visualSizeFactor: 1 },
+  { name: 'recordDescription', displayName: 'Description', dataType: 'SingleLine.Text', visualSizeFactor: 3 },
 ];
 
 const PROJECT_COLUMNS: IGridColumn[] = [
   { name: 'recordName', displayName: 'Project Name', dataType: 'SingleLine.Text', visualSizeFactor: 2.5 },
   { name: 'confidenceScore', displayName: 'Score', dataType: 'Percentage', visualSizeFactor: 0.8 },
-  { name: 'recordDescription', displayName: 'Description', dataType: 'SingleLine.Text', visualSizeFactor: 2 },
-  { name: 'organizations', displayName: 'Organizations', dataType: 'StringArray', visualSizeFactor: 1.5 },
-  { name: 'people', displayName: 'People', dataType: 'StringArray', visualSizeFactor: 1.5 },
-  { name: 'modifiedAt', displayName: 'Modified', dataType: 'DateAndTime.DateOnly', visualSizeFactor: 1 },
+  { name: 'recordDescription', displayName: 'Description', dataType: 'SingleLine.Text', visualSizeFactor: 3 },
 ];
 
 const COLUMNS_BY_DOMAIN: Record<FindSimilarDomain, IGridColumn[]> = {
@@ -96,7 +87,13 @@ const COLUMNS_BY_DOMAIN: Record<FindSimilarDomain, IGridColumn[]> = {
 };
 
 // ---------------------------------------------------------------------------
-// DataType-based cell rendering (matches SearchResultsGrid pattern)
+// Lazy loading constants
+// ---------------------------------------------------------------------------
+
+const PAGE_SIZE = 10;
+
+// ---------------------------------------------------------------------------
+// DataType-based cell rendering
 // ---------------------------------------------------------------------------
 
 function renderByDataType(value: unknown, dataType: string): string {
@@ -108,28 +105,11 @@ function renderByDataType(value: unknown, dataType: string): string {
       if (isNaN(num)) return String(value);
       return `${Math.round(num * 100)}%`;
     }
-    case 'DateAndTime.DateOnly': {
-      if (typeof value !== 'string' && typeof value !== 'number') return String(value);
-      try {
-        return new Date(value as string | number).toLocaleDateString(undefined, {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric',
-        });
-      } catch {
-        return String(value);
-      }
-    }
-    case 'StringArray': {
-      if (Array.isArray(value)) return value.join(', ');
-      return typeof value === 'string' ? value : String(value);
-    }
     case 'FileType': {
       return typeof value === 'string' ? value.toUpperCase() : String(value);
     }
     default: {
       if (typeof value === 'number') return value.toLocaleString();
-      if (Array.isArray(value)) return value.join(', ');
       return String(value);
     }
   }
@@ -145,13 +125,10 @@ function mapDocumentResults(docs: IDocumentResult[]): IGridRecord[] {
     entityName: 'sprk_document',
     name: d.name,
     combinedScore: d.combinedScore,
-    documentType: d.documentType,
     fileType: d.fileType,
-    parentEntityName: d.parentEntityName,
     parentEntityType: d.parentEntityType,
+    parentEntityName: d.parentEntityName,
     parentEntityId: d.parentEntityId,
-    updatedAt: d.updatedAt,
-    createdAt: d.createdAt,
   }));
 }
 
@@ -162,12 +139,59 @@ function mapRecordResults(records: IRecordResult[]): IGridRecord[] {
     recordName: r.recordName,
     confidenceScore: r.confidenceScore,
     recordDescription: r.recordDescription,
-    organizations: r.organizations,
-    people: r.people,
-    matchReasons: r.matchReasons,
-    modifiedAt: r.modifiedAt,
-    createdAt: r.createdAt,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Row action handlers
+// ---------------------------------------------------------------------------
+
+function handlePreview(record: IGridRecord): void {
+  // Open document preview via navigateTo webresource
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm;
+  if (xrm?.Navigation?.navigateTo) {
+    try {
+      xrm.Navigation.navigateTo(
+        {
+          pageType: 'webresource',
+          webresourceName: 'sprk_documentpreview',
+          data: `documentId=${record.id}`,
+        },
+        {
+          target: 2,
+          width: { value: 80, unit: '%' },
+          height: { value: 80, unit: '%' },
+        },
+      );
+      return;
+    } catch (err) {
+      console.warn('[FindSimilar] Preview navigateTo failed, falling back to openRecordDialog:', err);
+    }
+  }
+  // Fallback: open document record dialog
+  openRecordDialog('sprk_document', record.id);
+}
+
+function handleOpenFile(record: IGridRecord): void {
+  // Open file on desktop via Xrm.Navigation.openFile or fallback to record
+  navigateToEntity({
+    action: 'openRecord',
+    entityName: 'sprk_document',
+    entityId: record.id,
+  });
+}
+
+function handleOpenDocument(record: IGridRecord): void {
+  openRecordDialog('sprk_document', record.id);
+}
+
+function handleOpenRecord(record: IGridRecord): void {
+  navigateToEntity({
+    action: 'openRecord',
+    entityName: record.entityName,
+    entityId: record.id,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -199,22 +223,9 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     flex: 1,
     minHeight: 0,
-    overflow: 'hidden',
-  },
-  gridToolbar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground2,
-    minHeight: '32px',
   },
   gridContainer: {
     flex: 1,
-    overflow: 'auto',
   },
   emptyState: {
     display: 'flex',
@@ -238,6 +249,11 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalS,
     fontWeight: tokens.fontWeightSemibold,
   },
+  actionsCell: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
+  },
   stepTitle: {
     display: 'block',
     marginBottom: tokens.spacingVerticalXS,
@@ -245,6 +261,16 @@ const useStyles = makeStyles({
   stepSubtitle: {
     display: 'block',
     color: tokens.colorNeutralForeground3,
+  },
+  sentinel: {
+    height: '1px',
+    width: '100%',
+  },
+  loadMoreText: {
+    textAlign: 'center',
+    color: tokens.colorNeutralForeground3,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
   },
 });
 
@@ -260,43 +286,118 @@ interface IDomainGridProps {
 
 const DomainGrid: React.FC<IDomainGridProps> = ({ records, columns, domain }) => {
   const styles = useStyles();
-  const [hiddenColumns, setHiddenColumns] = React.useState<Set<string>>(new Set());
 
-  // Reset hidden columns when domain changes
+  // Lazy loading state
+  const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
+  const sentinelRef = React.useRef<HTMLDivElement>(null);
+
+  // Reset visible count when domain or records change
   React.useEffect(() => {
-    setHiddenColumns(new Set());
-  }, [domain]);
+    setVisibleCount(PAGE_SIZE);
+  }, [domain, records]);
 
-  const visibleColumns = React.useMemo(
-    () => columns.filter((col) => !hiddenColumns.has(col.name)),
-    [columns, hiddenColumns],
-  );
+  // Intersection observer for lazy loading
+  React.useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, records.length));
+        }
+      },
+      { threshold: 0.1 },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [records.length]);
 
   type GridItem = IGridRecord & { _rowId: number };
 
-  const tableColumns: TableColumnDefinition<GridItem>[] = React.useMemo(
-    () =>
-      visibleColumns.map((col) =>
-        createTableColumn<GridItem>({
-          columnId: col.name,
-          compare: (a, b) => {
-            const aVal = a[col.name];
-            const bVal = b[col.name];
-            if (typeof aVal === 'number' && typeof bVal === 'number') {
-              return aVal - bVal;
-            }
-            return String(aVal ?? '').localeCompare(String(bVal ?? ''));
-          },
-          renderHeaderCell: () => col.displayName,
-          renderCell: (item) => renderByDataType(item[col.name], col.dataType),
-        }),
-      ),
-    [visibleColumns],
-  );
+  // Build table columns (data columns + actions column)
+  const tableColumns: TableColumnDefinition<GridItem>[] = React.useMemo(() => {
+    const dataCols = columns.map((col) =>
+      createTableColumn<GridItem>({
+        columnId: col.name,
+        compare: (a, b) => {
+          const aVal = a[col.name];
+          const bVal = b[col.name];
+          if (typeof aVal === 'number' && typeof bVal === 'number') {
+            return aVal - bVal;
+          }
+          return String(aVal ?? '').localeCompare(String(bVal ?? ''));
+        },
+        renderHeaderCell: () => col.displayName,
+        renderCell: (item) => renderByDataType(item[col.name], col.dataType),
+      }),
+    );
+
+    // Actions column
+    const actionsCol = createTableColumn<GridItem>({
+      columnId: '_actions',
+      compare: () => 0,
+      renderHeaderCell: () => '',
+      renderCell: (item) => {
+        if (domain === 'documents') {
+          return (
+            <div className={styles.actionsCell}>
+              <Tooltip content="Preview" relationship="label">
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<EyeRegular />}
+                  aria-label="Preview document"
+                  onClick={(e) => { e.stopPropagation(); handlePreview(item); }}
+                />
+              </Tooltip>
+              <Tooltip content="Open file" relationship="label">
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<DesktopRegular />}
+                  aria-label="Open file on desktop"
+                  onClick={(e) => { e.stopPropagation(); handleOpenFile(item); }}
+                />
+              </Tooltip>
+              <Tooltip content="Open document" relationship="label">
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<DocumentOnePageRegular />}
+                  aria-label="Open document record"
+                  onClick={(e) => { e.stopPropagation(); handleOpenDocument(item); }}
+                />
+              </Tooltip>
+            </div>
+          );
+        }
+
+        // Matters and Projects — single "Open" action
+        const label = domain === 'matters' ? 'Open matter' : 'Open project';
+        return (
+          <div className={styles.actionsCell}>
+            <Tooltip content={label} relationship="label">
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<OpenRegular />}
+                aria-label={label}
+                onClick={(e) => { e.stopPropagation(); handleOpenRecord(item); }}
+              />
+            </Tooltip>
+          </div>
+        );
+      },
+    });
+
+    return [...dataCols, actionsCol];
+  }, [columns, domain, styles.actionsCell]);
 
   const columnSizingOptions: TableColumnSizingOptions = React.useMemo(() => {
     const options: TableColumnSizingOptions = {};
-    for (const col of visibleColumns) {
+    for (const col of columns) {
       const defaultWidth = col.visualSizeFactor ? Math.round(col.visualSizeFactor * 100) : 150;
       options[col.name] = {
         defaultWidth,
@@ -304,34 +405,23 @@ const DomainGrid: React.FC<IDomainGridProps> = ({ records, columns, domain }) =>
         idealWidth: defaultWidth,
       };
     }
+    // Actions column sizing
+    options['_actions'] = {
+      defaultWidth: domain === 'documents' ? 120 : 48,
+      minWidth: domain === 'documents' ? 120 : 48,
+      idealWidth: domain === 'documents' ? 120 : 48,
+    };
     return options;
-  }, [visibleColumns]);
+  }, [columns, domain]);
 
-  const columnCheckedValues = React.useMemo(() => {
-    const visible = columns
-      .filter((col) => !hiddenColumns.has(col.name))
-      .map((col) => col.name);
-    return { columns: visible };
-  }, [columns, hiddenColumns]);
-
-  const handleCheckedValueChange = React.useCallback(
-    (_ev: unknown, data: { name: string; checkedItems: string[] }) => {
-      if (data.name !== 'columns') return;
-      const visibleSet = new Set(data.checkedItems);
-      const newHidden = new Set<string>();
-      for (const col of columns) {
-        if (!visibleSet.has(col.name)) {
-          newHidden.add(col.name);
-        }
-      }
-      setHiddenColumns(newHidden);
-    },
-    [columns],
+  const visibleRecords = React.useMemo(
+    () => records.slice(0, visibleCount),
+    [records, visibleCount],
   );
 
   const items: GridItem[] = React.useMemo(
-    () => records.map((r, i) => ({ ...r, _rowId: i })),
-    [records],
+    () => visibleRecords.map((r, i) => ({ ...r, _rowId: i })),
+    [visibleRecords],
   );
 
   if (records.length === 0) {
@@ -345,32 +435,10 @@ const DomainGrid: React.FC<IDomainGridProps> = ({ records, columns, domain }) =>
     );
   }
 
+  const hasMore = visibleCount < records.length;
+
   return (
     <>
-      <div className={styles.gridToolbar}>
-        <Menu checkedValues={columnCheckedValues} onCheckedValueChange={handleCheckedValueChange}>
-          <MenuTrigger disableButtonEnhancement>
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<ColumnTriple20Regular />}
-              aria-label="Choose columns"
-            >
-              Columns
-            </Button>
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              {columns.map((col) => (
-                <MenuItemCheckbox key={col.name} name="columns" value={col.name}>
-                  {col.displayName}
-                </MenuItemCheckbox>
-              ))}
-            </MenuList>
-          </MenuPopover>
-        </Menu>
-      </div>
-
       <div className={styles.gridContainer}>
         <DataGrid
           items={items}
@@ -404,6 +472,15 @@ const DomainGrid: React.FC<IDomainGridProps> = ({ records, columns, domain }) =>
           </DataGridBody>
         </DataGrid>
       </div>
+
+      {hasMore && (
+        <>
+          <div ref={sentinelRef} className={styles.sentinel} />
+          <Text size={200} className={styles.loadMoreText}>
+            Showing {visibleCount} of {records.length} results...
+          </Text>
+        </>
+      )}
     </>
   );
 };

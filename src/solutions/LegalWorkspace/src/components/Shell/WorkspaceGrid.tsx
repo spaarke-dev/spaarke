@@ -522,7 +522,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
           Lazy-loaded: chunk only fetched on first user interaction. */}
       {isSummarizeOpen && (
         <React.Suspense fallback={<DialogLoadingFallback />}>
-          <LazySummarizeFilesDialog open={isSummarizeOpen} onClose={handleCloseSummarize} />
+          <LazySummarizeFilesDialog open={isSummarizeOpen} onClose={handleCloseSummarize} webApi={webApi} />
         </React.Suspense>
       )}
 
