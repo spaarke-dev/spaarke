@@ -21,13 +21,13 @@
 | 002 | Complete Communication Account Admin UX | ✅ | 001 | STANDARD |
 | 003 | Complete ApprovedSenderValidator Migration | ✅ | 001 | FULL |
 | 004 | Document Exchange Access Policy Setup | ✅ | 001 | MINIMAL |
-| 005 | End-to-End Outbound Shared Mailbox Test | 🔲 | 003 | STANDARD |
+| 005 | End-to-End Outbound Shared Mailbox Test | ✅ | 003 | STANDARD |
 
 ## Phase 2: Individual User Outbound (Phase B)
 
 | # | Task | Status | Depends On | Rigor |
 |---|------|--------|------------|-------|
-| 010 | Assess R1 OBO Send Implementation | 🔲 | 005 | STANDARD |
+| 010 | Assess R1 OBO Send Implementation | ✅ | 005 | STANDARD |
 | 011 | Complete OBO Individual Send Path | 🔲 | 010 | FULL |
 | 012 | Communication Form Send Mode UX | 🔲 | 011 | FULL |
 | 013 | End-to-End Individual Send Test | 🔲 | 012 | STANDARD |
@@ -36,7 +36,7 @@
 
 | # | Task | Status | Depends On | Rigor |
 |---|------|--------|------------|-------|
-| 020 | Assess R1 Inbound Pipeline | 🔲 | 005 | STANDARD |
+| 020 | Assess R1 Inbound Pipeline | ✅ | 005 | STANDARD |
 | 021 | Complete Graph Subscription Lifecycle | 🔲 | 020 | FULL |
 | 022 | Complete Webhook Endpoint | 🔲 | 020 | FULL |
 | 023 | Complete Incoming Communication Processor | 🔲 | 022 | FULL |

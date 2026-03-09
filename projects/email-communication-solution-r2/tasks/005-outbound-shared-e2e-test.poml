@@ -1,7 +1,7 @@
 <task id="ECS-005" project="Email Communication Solution R2">
   <metadata>
     <title>End-to-End Outbound Shared Mailbox Test</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>1 - Communication Account Entity (Phase A)</phase>
     <tags>testing, bff-api, deploy</tags>

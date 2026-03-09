@@ -1,7 +1,7 @@
 <task id="ECS-010" project="Email Communication Solution R2">
   <metadata>
     <title>Assess R1 OBO Individual Send Implementation</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <phase>2 - Individual User Outbound (Phase B)</phase>
     <tags>bff-api, assessment</tags>
