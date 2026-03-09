@@ -206,7 +206,7 @@ public sealed class SummaryHandler : IAnalysisToolHandler
             if (chunks.Count == 1)
             {
                 // Single chunk - generate summary directly
-                var result = await GenerateSummaryAsync(chunks[0], config, cancellationToken);
+                var result = await GenerateSummaryAsync(chunks[0], config, cancellationToken, context);
                 summaryText = result.Summary;
                 confidence = result.Confidence;
                 totalInputTokens = result.InputTokens;
@@ -469,13 +469,16 @@ public sealed class SummaryHandler : IAnalysisToolHandler
 
     /// <summary>
     /// Generate a complete summary from a single document chunk.
+    /// When ActionSystemPrompt is available, it replaces the hardcoded template.
+    /// SkillContext and KnowledgeContext are always appended when present.
     /// </summary>
     private async Task<SummaryGenerationResult> GenerateSummaryAsync(
         string text,
         SummaryConfig config,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ToolExecutionContext? executionContext = null)
     {
-        var prompt = BuildSummaryPrompt(text, config);
+        var prompt = PromptContextHelper.ApplyContext(BuildSummaryPrompt(text, config), executionContext, text);
         var inputTokens = EstimateTokens(prompt);
 
         var response = await _openAiClient.GetCompletionAsync(prompt, cancellationToken: cancellationToken);
@@ -592,7 +595,7 @@ public sealed class SummaryHandler : IAnalysisToolHandler
     }
 
     /// <summary>
-    /// Build the main summary generation prompt.
+    /// Build the default summary generation prompt (used when no ActionSystemPrompt is configured).
     /// </summary>
     private static string BuildSummaryPrompt(string text, SummaryConfig config)
     {

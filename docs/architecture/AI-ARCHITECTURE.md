@@ -1,7 +1,7 @@
 # Spaarke AI Architecture
 
 > **Version**: 3.3
-> **Last Updated**: March 5, 2026
+> **Last Updated**: March 6, 2026
 > **Audience**: Claude Code, AI agents, engineers
 > **Purpose**: Technical reference for the Spaarke AI platform component framework
 > **Supersedes**: `AI-PLAYBOOK-ARCHITECTURE.md` (v2.0), `AI-ANALYSIS-PLAYBOOK-SCOPE-DESIGN.md` (v2.0)
@@ -67,7 +67,7 @@ src/server/api/Sprk.Bff.Api/
 │   ├── ModelEndpoints.cs            # Model/deployment management
 │   ├── VisualizationEndpoints.cs    # Data visualization
 │   └── RecordMatchEndpoints.cs      # Record matching
-├── Services/Ai/                     # Core AI services (~124 files)
+├── Services/Ai/                     # Core AI services (~127 files)
 │   ├── Nodes/                       # Node executor implementations
 │   ├── Tools/                       # Tool handler implementations
 │   ├── Builder/                     # Playbook builder agent
@@ -75,11 +75,14 @@ src/server/api/Sprk.Bff.Api/
 │   ├── Export/                      # Export format handlers
 │   ├── Delivery/                    # Email/Word templates
 │   ├── Handlers/                    # GenericAnalysisHandler
+│   ├── Models/                      # PromptSchema.cs (JPS model), DTOs
 │   ├── Prompts/                     # System prompt definitions
 │   ├── Testing/                     # Playbook test infrastructure
 │   ├── Visualization/              # Chart/visualization generation
 │   ├── ReferenceIndexingService.cs   # Golden reference knowledge indexing
-│   └── ReferenceRetrievalService.cs  # L1 reference knowledge retrieval
+│   ├── ReferenceRetrievalService.cs  # L1 reference knowledge retrieval
+│   ├── PromptSchemaRenderer.cs      # JPS → prompt text + JSON Schema
+│   └── LookupChoicesResolver.cs     # $choices Dataverse pre-resolution
 ├── Models/Ai/                       # DTOs and request/response models (~37 files)
 │   ├── SemanticSearch/              # Search-specific models
 │   ├── ReferenceSearchResult.cs      # Reference retrieval response models
@@ -152,12 +155,71 @@ Scopes are reusable AI primitives stored as Dataverse records. They are the buil
 
 ### Prompt Composition
 
+Prompts are assembled by `PromptSchemaRenderer` from either flat text or **JSON Prompt Schema (JPS)** stored in `Action.SystemPrompt`:
+
 ```
-Final LLM Prompt = Action.SystemPrompt
+Final LLM Prompt = Action.SystemPrompt (flat text OR JPS)
                  + Skill.PromptFragment(s)
                  + Knowledge (RAG context or inline)
                  + Document text
+                 + $choices-resolved enum constraints (JPS only)
 ```
+
+**JPS (JSON Prompt Schema)**: A structured JSON format (`$schema: "https://spaarke.com/schemas/prompt/v1"`) that enables:
+- Structured instruction sections (role, task, constraints, context)
+- Typed output field definitions with `structuredOutput: true` for Azure OpenAI constrained decoding
+- Dynamic `$choices` enum injection from Dataverse at render time
+- `$ref` scope references for knowledge and skills
+- Template parameters (`{{paramName}}`) for runtime customization
+
+**Format detection**: If `SystemPrompt` starts with `{` and contains `"$schema"`, it is parsed as JPS; otherwise it is treated as flat text.
+
+**File**: `src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaRenderer.cs`
+**Schema**: `src/server/api/Sprk.Bff.Api/Services/Ai/Models/PromptSchema.cs`
+
+### $choices — Dynamic Enum Resolution
+
+**File**: `src/server/api/Sprk.Bff.Api/Services/Ai/LookupChoicesResolver.cs`
+
+JPS output fields can declare `"$choices"` to auto-inject valid enum values at render time. This constrains the AI model (via JSON Schema `"enum"`) to return only values that exist in Dataverse, eliminating frontend fuzzy matching.
+
+**Supported prefixes**:
+
+| Prefix | Format | Resolution Source | Resolver |
+|--------|--------|-------------------|----------|
+| `lookup:` | `"lookup:{entity}.{field}"` | Active records from Dataverse reference entity | `IScopeResolverService.QueryLookupValuesAsync()` |
+| `optionset:` | `"optionset:{entity}.{attribute}"` | Single-select choice/picklist metadata labels | `IScopeResolverService.QueryOptionSetLabelsAsync()` |
+| `multiselect:` | `"multiselect:{entity}.{attribute}"` | Multi-select picklist metadata labels | `IScopeResolverService.QueryOptionSetLabelsAsync(isMultiSelect: true)` |
+| `boolean:` | `"boolean:{entity}.{attribute}"` | Two-option boolean field labels | `IScopeResolverService.QueryBooleanLabelsAsync()` |
+| `downstream:` | `"downstream:{outputVar}.{field}"` | Downstream UpdateRecord node field mapping options | `PromptSchemaRenderer` (inline) |
+
+**Pipeline**:
+```
+1. LookupChoicesResolver.ResolveFromJpsAsync(rawPrompt)
+   └─ Scans JPS for $choices with Dataverse prefixes
+   └─ Pre-resolves via IScopeResolverService queries
+   └─ Returns Dictionary<string, string[]>
+
+2. AiAnalysisNodeExecutor stores result in ToolExecutionContext.PreResolvedLookupChoices
+
+3. GenericAnalysisHandler passes to PromptSchemaRenderer.Render()
+
+4. PromptSchemaRenderer.ResolveChoices() injects values as "enum" in JSON Schema
+   └─ downstream: prefix resolved inline from DownstreamNodeInfo[]
+   └─ All other prefixes looked up from PreResolvedLookupChoices dict
+```
+
+**Example JPS field**:
+```json
+{
+  "name": "matterTypeName",
+  "type": "string",
+  "description": "The matter type that best matches this document",
+  "$choices": "lookup:sprk_mattertype_ref.sprk_mattertypename"
+}
+```
+
+At render time → `"enum": ["Patent", "Trademark", "Copyright", ...]` in JSON Schema → Azure OpenAI constrained decoding forces exact value selection.
 
 ### Scope Ownership Model
 
@@ -186,6 +248,12 @@ Task<AnalysisAction?> GetActionAsync(Guid actionId, CancellationToken ct);
 Task<AnalysisTool?> GetToolAsync(Guid toolId, CancellationToken ct);
 Task<AnalysisSkill?> GetSkillAsync(Guid skillId, CancellationToken ct);
 Task<AnalysisKnowledge?> GetKnowledgeAsync(Guid knowledgeId, CancellationToken ct);
+
+// $choices Dataverse queries (used by LookupChoicesResolver)
+Task<string[]> QueryLookupValuesAsync(string entitySetName, string fieldName, CancellationToken ct);
+Task<string[]> QueryOptionSetLabelsAsync(string entityLogicalName, string attributeLogicalName, bool isMultiSelect, CancellationToken ct);
+Task<string[]> QueryBooleanLabelsAsync(string entityLogicalName, string attributeLogicalName, CancellationToken ct);
+
 // + CRUD, SaveAs, Extend, Search operations
 ```
 
@@ -884,11 +952,14 @@ PlaybookOrchestrationService.ExecutePlaybookAsync()
   │   │   │   │   ├── L1 Reference Retrieval: SearchReferencesAsync (if knowledge sources linked)
   │   │   │   │   ├── L2 Document Context: RagService search (if includeDocumentContext=true)
   │   │   │   │   ├── L3 Entity Context: RecordSearchService (if includeEntityContext=true)
+  │   │   │   │   ├── Pre-resolve $choices: LookupChoicesResolver.ResolveFromJpsAsync()
+  │   │   │   │   │   └── Queries Dataverse for lookup/optionset/multiselect/boolean values
   │   │   │   │   ├── Build prompt: Action.SystemPrompt + Skills + L1/L2/L3 Knowledge + Document
   │   │   │   │   ├── Template substitution: {{variable}} from PreviousOutputs
+  │   │   │   │   ├── PromptSchemaRenderer: JPS → prompt text + JSON Schema (with $choices → enum)
   │   │   │   │   ├── Resolve tool handler (ToolHandlerRegistry)
   │   │   │   │   ├── Execute: handler.ExecuteAsync()
-  │   │   │   │   │   └── IOpenAiClient.GetCompletionAsync() → Azure OpenAI
+  │   │   │   │   │   └── IOpenAiClient.GetCompletionAsync() → Azure OpenAI (constrained decoding)
   │   │   │   │   └── Return NodeOutput (Data JSON + Summary text + Confidence)
   │   │   │   │
   │   │   │   ├── ConditionNodeExecutor (ActionType 30):
@@ -1273,6 +1344,7 @@ The PlaybookOrchestrationService evolves from a full execution engine to a thin 
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-03-06 | 3.3 | Added JSON Prompt Schema (JPS) documentation: prompt composition with JPS format detection, $choices dynamic enum resolution with 5 Dataverse prefix types (lookup, optionset, multiselect, boolean, downstream), LookupChoicesResolver pre-resolution pipeline, IScopeResolverService query methods, updated execution flow with $choices pre-resolution step, updated file structure. |
 | 2026-03-03 | 3.2 | Updated for typed field mappings: TemplateEngine (ConvertJsonElement, FlattenArrays), UpdateRecord OData PATCH with typed coercion (Choice/Boolean/Number), consumer integration pattern (PCF triggers playbook, no client-side field writes), removed obsolete DocumentProfileFieldMapper references from execution flow. |
 | 2026-03-01 | 3.1 | Updated for Playbook Builder R5: three-level node type system (Canvas Type → NodeType → ActionType), Code Page builder as primary (PCF legacy), canvas-to-Dataverse sync with sprk_nodetype + __actionType, parallel execution batches and performance optimization, updated file structure, all 6 node executors, all 12 tool handlers. |
 | 2026-02-21 | 3.0 | Created from consolidation of AI-PLAYBOOK-ARCHITECTURE.md (v2.0) and AI-ANALYSIS-PLAYBOOK-SCOPE-DESIGN.md (v2.0). Added four-tier architecture, playbooks-as-frontend model, backend flexibility, nodes-as-agents evolution, complete file mapping from codebase. |

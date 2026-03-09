@@ -1,0 +1,65 @@
+{
+  "taxonomy": "Commercial Risk Factors",
+  "version": "1.0",
+  "riskCategories": [
+    {
+      "id": "CRF-CAT-01",
+      "category": "Liability and Indemnification",
+      "factors": [
+        { "id": "CRF-01-01", "factor": "Uncapped indemnification obligation", "severity": "critical", "description": "No monetary cap on indemnification exposure" },
+        { "id": "CRF-01-02", "factor": "Asymmetric indemnification", "severity": "high", "description": "One party bears disproportionate indemnification burden" },
+        { "id": "CRF-01-03", "factor": "No mutual waiver of consequential damages", "severity": "high", "description": "Consequential damages exposure without limitation" },
+        { "id": "CRF-01-04", "factor": "Broad definition of losses", "severity": "medium", "description": "Losses definition includes speculative or remote damages" }
+      ]
+    },
+    {
+      "id": "CRF-CAT-02",
+      "category": "Payment and Financial",
+      "factors": [
+        { "id": "CRF-02-01", "factor": "Automatic price escalation without cap", "severity": "critical", "description": "Pricing increases automatically without ceiling or opt-out" },
+        { "id": "CRF-02-02", "factor": "Unilateral price change right", "severity": "high", "description": "Vendor can change pricing with minimal notice" },
+        { "id": "CRF-02-03", "factor": "Payment terms shorter than 30 days", "severity": "medium", "description": "Accelerated payment timeline creating cash flow pressure" },
+        { "id": "CRF-02-04", "factor": "Late payment penalties exceeding market rate", "severity": "medium", "description": "Penalties above 1.5% per month or state usury limits" }
+      ]
+    },
+    {
+      "id": "CRF-CAT-03",
+      "category": "Termination",
+      "factors": [
+        { "id": "CRF-03-01", "factor": "No termination for cause right", "severity": "critical", "description": "Cannot exit agreement even for material breach" },
+        { "id": "CRF-03-02", "factor": "Excessive cure period", "severity": "high", "description": "Cure period exceeds 60 days for material breach" },
+        { "id": "CRF-03-03", "factor": "Immediate acceleration on termination", "severity": "high", "description": "All remaining fees become due immediately upon termination" },
+        { "id": "CRF-03-04", "factor": "No termination for convenience", "severity": "medium", "description": "Locked into agreement for full term without exit option" }
+      ]
+    },
+    {
+      "id": "CRF-CAT-04",
+      "category": "Data and Privacy",
+      "factors": [
+        { "id": "CRF-04-01", "factor": "Vendor claims ownership of customer data", "severity": "critical", "description": "Agreement assigns data ownership to vendor" },
+        { "id": "CRF-04-02", "factor": "No data return obligation on termination", "severity": "high", "description": "No requirement to return or destroy customer data post-term" },
+        { "id": "CRF-04-03", "factor": "Broad data usage rights for vendor", "severity": "high", "description": "Vendor may use customer data for analytics, training, or sharing" },
+        { "id": "CRF-04-04", "factor": "Inadequate breach notification provisions", "severity": "high", "description": "No specific timeline or process for data breach notification" }
+      ]
+    },
+    {
+      "id": "CRF-CAT-05",
+      "category": "Intellectual Property",
+      "factors": [
+        { "id": "CRF-05-01", "factor": "Overly broad work product ownership", "severity": "critical", "description": "Counterparty claims ownership of all work product including pre-existing IP" },
+        { "id": "CRF-05-02", "factor": "No background IP carve-out", "severity": "high", "description": "Agreement fails to exclude pre-existing IP from assignment" },
+        { "id": "CRF-05-03", "factor": "No license-back for assigned IP", "severity": "medium", "description": "Assigning party loses all rights to use assigned IP" }
+      ]
+    },
+    {
+      "id": "CRF-CAT-06",
+      "category": "Contract Structure",
+      "factors": [
+        { "id": "CRF-06-01", "factor": "Auto-renewal without notification", "severity": "high", "description": "Contract renews automatically without advance notice to customer" },
+        { "id": "CRF-06-02", "factor": "Unilateral modification right", "severity": "critical", "description": "One party can change terms without consent" },
+        { "id": "CRF-06-03", "factor": "Order of precedence favoring counterparty", "severity": "medium", "description": "Conflicts between documents resolved in counterparty favor" },
+        { "id": "CRF-06-04", "factor": "Most favored nation clause missing", "severity": "medium", "description": "No price protection against better deals to competitors" }
+      ]
+    }
+  ]
+}

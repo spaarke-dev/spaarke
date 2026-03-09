@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Api.Workspace.Models;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
@@ -34,9 +35,9 @@ public class MatterPreFillService
     // Playbook configuration key — overridable via appsettings
     private const string PlaybookIdConfigKey = "Workspace:PreFillPlaybookId";
 
-    // Default: Document Profile playbook
+    // Default: "Create New Matter Pre-Fill" playbook (Extract Matter Fields — ACT-008, gpt-4o)
     private static readonly Guid DefaultPreFillPlaybookId =
-        Guid.Parse("18cf3cc8-02ec-f011-8406-7c1e520aa4df");
+        Guid.Parse("2d660cad-d418-f111-8343-7ced8d1dc988");
 
     // Supported MIME types for the pre-fill endpoint
     private static readonly HashSet<string> AllowedExtensions =
@@ -149,7 +150,7 @@ public class MatterPreFillService
                 "No text could be extracted from any uploaded files. Returning empty pre-fill. " +
                 "RequestId={RequestId}",
                 requestId);
-            return PreFillResponse.Empty();
+            return PreFillResponse.Empty("NO_TEXT: could not extract text from uploaded files");
         }
 
         _logger.LogInformation(
@@ -264,8 +265,9 @@ public class MatterPreFillService
     /// The playbook's extraction node (configured with a Skill prompt in Dataverse) handles
     /// the AI prompt and JSON schema — no hardcoded prompts in this code.
     ///
-    /// Extracted text is passed via UserContext since files haven't been registered as
-    /// sprk_document records yet (pre-fill happens before matter creation).
+    /// Extracted text is passed via DocumentContext.ExtractedText (required by AiAnalysisNodeExecutor)
+    /// and also in UserContext. Files haven't been registered as sprk_document records yet
+    /// (pre-fill happens before matter creation), so DocumentId uses the requestId.
     /// </summary>
     private async Task<PreFillResponse> ExtractFieldsViaPlaybookAsync(
         string documentText,
@@ -304,6 +306,12 @@ public class MatterPreFillService
                 PlaybookId = playbookId,
                 DocumentIds = [],
                 UserContext = documentText,
+                Document = new DocumentContext
+                {
+                    DocumentId = requestId,
+                    Name = "Pre-fill upload",
+                    ExtractedText = documentText,
+                },
                 Parameters = new Dictionary<string, string>
                 {
                     ["entity_type"] = "matter",
@@ -344,7 +352,7 @@ public class MatterPreFillService
                     _logger.LogWarning(
                         "Playbook execution failed for pre-fill. Error={Error}. RequestId={RequestId}",
                         evt.Error, requestId);
-                    return PreFillResponse.Empty();
+                    return PreFillResponse.Empty($"PLAYBOOK_FAILED: {evt.Error}");
                 }
             }
 
@@ -353,7 +361,7 @@ public class MatterPreFillService
                 _logger.LogWarning(
                     "Playbook completed but no pre-fill data was produced. RequestId={RequestId}",
                     requestId);
-                return PreFillResponse.Empty();
+                return PreFillResponse.Empty("PLAYBOOK_NO_OUTPUT: completed but no structured/text data");
             }
 
             _logger.LogInformation(
@@ -368,65 +376,266 @@ public class MatterPreFillService
             _logger.LogWarning(
                 "Playbook pre-fill request timed out after 45s. Returning empty response. RequestId={RequestId}",
                 requestId);
-            return PreFillResponse.Empty();
+            return PreFillResponse.Empty("TIMEOUT: playbook timed out after 45s");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
                 "Playbook pre-fill call failed. Returning empty response. RequestId={RequestId}",
                 requestId);
-            return PreFillResponse.Empty();
+            return PreFillResponse.Empty($"EXCEPTION: {ex.Message}");
         }
     }
 
     /// <summary>
     /// Parses the AI JSON response into a PreFillResponse.
-    /// Handles partial JSON, malformed responses, and builds the PreFilledFields array.
+    /// Handles multiple response formats from the AI pipeline:
+    /// 1. Direct pre-fill schema: {"matterName":"...","matterDescription":"...",...}
+    /// 2. Entity extraction: {"entities":[{"name":"Matter Name","value":"..."},...]}
+    /// 3. rawResponse wrapper: {"rawResponse":"{...inner JSON...}"}
     /// </summary>
     private PreFillResponse ParseAiResponse(string aiResponse, double overallConfidence, Guid requestId)
     {
-        // Strip markdown code fences if the model included them
         var json = StripMarkdownCodeFences(aiResponse.Trim());
 
+        // Unwrap rawResponse envelope if present
+        json = UnwrapRawResponse(json);
+
+        // Try direct pre-fill schema first (preferred format from JPS)
+        AiPreFillResult? parsed = null;
         try
         {
-            var parsed = JsonSerializer.Deserialize<AiPreFillResult>(json, AiJsonOptions);
-            if (parsed == null)
-            {
-                _logger.LogWarning(
-                    "AI response deserialized to null. RequestId={RequestId}", requestId);
-                return PreFillResponse.Empty();
-            }
-
-            // Build the list of successfully extracted (non-null) field names
-            var preFilledFields = new List<string>();
-            if (!string.IsNullOrWhiteSpace(parsed.MatterTypeName)) preFilledFields.Add("matterTypeName");
-            if (!string.IsNullOrWhiteSpace(parsed.PracticeAreaName)) preFilledFields.Add("practiceAreaName");
-            if (!string.IsNullOrWhiteSpace(parsed.MatterName)) preFilledFields.Add("matterName");
-            if (!string.IsNullOrWhiteSpace(parsed.Summary)) preFilledFields.Add("summary");
-
-            var confidence = Math.Clamp(parsed.Confidence ?? overallConfidence, 0.0, 1.0);
-
-            _logger.LogInformation(
-                "AI extraction complete. FieldsExtracted={Fields}, Confidence={Confidence}. RequestId={RequestId}",
-                preFilledFields.Count, confidence, requestId);
-
-            return new PreFillResponse(
-                MatterTypeName: NormalizeNullableString(parsed.MatterTypeName),
-                PracticeAreaName: NormalizeNullableString(parsed.PracticeAreaName),
-                MatterName: NormalizeNullableString(parsed.MatterName),
-                Summary: NormalizeNullableString(parsed.Summary),
-                Confidence: confidence,
-                PreFilledFields: [.. preFilledFields]);
+            parsed = JsonSerializer.Deserialize<AiPreFillResult>(json, AiJsonOptions);
         }
         catch (JsonException ex)
         {
             _logger.LogWarning(ex,
-                "Failed to parse AI JSON response. Raw response (first 500 chars): '{Response}'. RequestId={RequestId}",
-                aiResponse.Length > 500 ? aiResponse[..500] : aiResponse,
+                "Direct JSON deserialization failed (may be truncated). Trying entity extraction. RequestId={RequestId}",
                 requestId);
-            return PreFillResponse.Empty();
         }
+
+        // If direct parse produced no useful fields, try entity extraction format
+        if (parsed == null || !HasAnyField(parsed))
+        {
+            _logger.LogInformation(
+                "Direct schema parse found no fields; trying entity extraction format. RequestId={RequestId}",
+                requestId);
+            parsed = TryParseEntityExtractionFormat(json, overallConfidence, requestId);
+        }
+
+        // If strict JSON parsing failed (truncated response), try regex-based extraction
+        if (parsed == null)
+        {
+            _logger.LogInformation(
+                "Entity extraction parse also failed; trying regex-based extraction from partial JSON. RequestId={RequestId}",
+                requestId);
+            parsed = TryExtractFromPartialJson(json, overallConfidence, requestId);
+        }
+
+        if (parsed == null)
+        {
+            _logger.LogWarning(
+                "AI response could not be parsed by any method. First 500 chars: '{Response}'. RequestId={RequestId}",
+                json.Length > 500 ? json[..500] : json, requestId);
+            return PreFillResponse.Empty($"PARSE_FAILED: {(json.Length > 500 ? json[..500] : json)}");
+        }
+
+        var result = BuildPreFillResponse(parsed, overallConfidence, requestId);
+        // Attach raw AI response for debugging
+        return result with { _debugRawAiResponse = $"OK: {(json.Length > 500 ? json[..500] : json)}" };
+    }
+
+    /// <summary>
+    /// Unwraps a {"rawResponse": "..."} envelope if present (GenericAnalysisHandler wraps output this way).
+    /// </summary>
+    private static string UnwrapRawResponse(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("rawResponse", out var inner) && inner.ValueKind == JsonValueKind.String)
+            {
+                return inner.GetString() ?? json;
+            }
+        }
+        catch (JsonException) { }
+        return json;
+    }
+
+    /// <summary>
+    /// Returns true if at least one pre-fill field has a non-null value.
+    /// </summary>
+    private static bool HasAnyField(AiPreFillResult result) =>
+        !string.IsNullOrWhiteSpace(result.MatterTypeName) ||
+        !string.IsNullOrWhiteSpace(result.PracticeAreaName) ||
+        !string.IsNullOrWhiteSpace(result.MatterName) ||
+        !string.IsNullOrWhiteSpace(result.MatterDescription);
+
+    /// <summary>
+    /// Parses entity extraction format into AiPreFillResult by mapping entity names to pre-fill fields.
+    /// Handles: {"entities":[{"name":"Matter Name","value":"..."},...], "keyValuePairs":[...]}
+    /// </summary>
+    private AiPreFillResult? TryParseEntityExtractionFormat(string json, double confidence, Guid requestId)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            // Extract from "entities" array
+            if (root.TryGetProperty("entities", out var entities) && entities.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var entity in entities.EnumerateArray())
+                {
+                    var name = entity.TryGetProperty("name", out var n) ? n.GetString() : null;
+                    var value = entity.TryGetProperty("value", out var v) ? v.GetString() : null;
+                    if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(value))
+                        fields.TryAdd(name, value);
+                }
+            }
+
+            // Extract from "keyValuePairs" array
+            if (root.TryGetProperty("keyValuePairs", out var kvPairs) && kvPairs.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var kv in kvPairs.EnumerateArray())
+                {
+                    var key = kv.TryGetProperty("key", out var k) ? k.GetString() : null;
+                    var value = kv.TryGetProperty("value", out var v) ? v.GetString() : null;
+                    if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+                        fields.TryAdd(key, value);
+                }
+            }
+
+            if (fields.Count == 0)
+                return null;
+
+            // Try to extract documentType for matter type inference
+            var docType = root.TryGetProperty("documentType", out var dt) ? dt.GetString() : null;
+
+            _logger.LogInformation(
+                "Parsed entity extraction format: {FieldCount} fields, documentType='{DocType}'. RequestId={RequestId}",
+                fields.Count, docType ?? "(none)", requestId);
+
+            return new AiPreFillResult
+            {
+                MatterTypeName = MatchField(fields, "Matter Type", "matterType", "Type", "Category"),
+                PracticeAreaName = MatchField(fields, "Practice Area", "practiceArea", "Area", "Practice"),
+                MatterName = MatchField(fields, "Matter Name", "matterName", "Title", "Name", "Patent Title"),
+                MatterDescription = MatchField(fields, "Description", "Summary", "Abstract", "matterDescription",
+                    "Matter Description", "Document Summary"),
+                AssignedAttorneyName = MatchField(fields, "Assigned Attorney", "Attorney", "assignedAttorney",
+                    "Lead Attorney", "Responsible Attorney"),
+                AssignedParalegalName = MatchField(fields, "Assigned Paralegal", "Paralegal", "assignedParalegal"),
+                AssignedOutsideCounselName = MatchField(fields, "Outside Counsel", "outsideCounsel",
+                    "assignedOutsideCounsel", "External Counsel"),
+                Confidence = confidence
+            };
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Last-resort extraction from truncated/malformed JSON using regex.
+    /// Extracts entity name/value pairs from the raw text even if JSON is incomplete.
+    /// </summary>
+    private AiPreFillResult? TryExtractFromPartialJson(string json, double confidence, Guid requestId)
+    {
+        var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // Extract "name": "...", "value": "..." pairs from entity objects using regex
+        var entityPattern = new Regex(
+            @"""name""\s*:\s*""([^""]+)""\s*,\s*""(?:type|category)""\s*:\s*""[^""]*""\s*,\s*""value""\s*:\s*""([^""]+)""",
+            RegexOptions.IgnoreCase);
+
+        foreach (Match match in entityPattern.Matches(json))
+        {
+            var name = match.Groups[1].Value;
+            var value = match.Groups[2].Value;
+            if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(value))
+                fields.TryAdd(name, value);
+        }
+
+        // Also try simple "key": "value" patterns for top-level fields
+        var kvPattern = new Regex(
+            @"""(documentType|matterTypeName|practiceAreaName|matterName|matterDescription)""\s*:\s*""([^""]+)""",
+            RegexOptions.IgnoreCase);
+
+        foreach (Match match in kvPattern.Matches(json))
+        {
+            fields.TryAdd(match.Groups[1].Value, match.Groups[2].Value);
+        }
+
+        if (fields.Count == 0)
+            return null;
+
+        _logger.LogInformation(
+            "Regex extraction from partial JSON found {FieldCount} fields. RequestId={RequestId}",
+            fields.Count, requestId);
+
+        return new AiPreFillResult
+        {
+            MatterTypeName = MatchField(fields, "Matter Type", "matterType", "matterTypeName", "Type", "Category", "documentType"),
+            PracticeAreaName = MatchField(fields, "Practice Area", "practiceArea", "practiceAreaName", "Area", "Practice"),
+            MatterName = MatchField(fields, "Matter Name", "matterName", "Title", "Name", "Patent Title", "Subject"),
+            MatterDescription = MatchField(fields, "Description", "Summary", "Abstract", "matterDescription",
+                "Matter Description", "Document Summary"),
+            AssignedAttorneyName = MatchField(fields, "Assigned Attorney", "Attorney", "assignedAttorney",
+                "assignedAttorneyName", "Lead Attorney", "Responsible Attorney"),
+            AssignedParalegalName = MatchField(fields, "Assigned Paralegal", "Paralegal", "assignedParalegal",
+                "assignedParalegalName"),
+            AssignedOutsideCounselName = MatchField(fields, "Outside Counsel", "outsideCounsel",
+                "assignedOutsideCounselName", "External Counsel"),
+            Confidence = confidence
+        };
+    }
+
+    /// <summary>
+    /// Matches a field by trying multiple possible key names against the field map.
+    /// </summary>
+    private static string? MatchField(Dictionary<string, string> fields, params string[] possibleKeys)
+    {
+        foreach (var key in possibleKeys)
+        {
+            if (fields.TryGetValue(key, out var value))
+                return value;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Builds the PreFillResponse from a successfully parsed AiPreFillResult.
+    /// </summary>
+    private PreFillResponse BuildPreFillResponse(AiPreFillResult parsed, double overallConfidence, Guid requestId)
+    {
+        var preFilledFields = new List<string>();
+        if (!string.IsNullOrWhiteSpace(parsed.MatterTypeName)) preFilledFields.Add("matterTypeName");
+        if (!string.IsNullOrWhiteSpace(parsed.PracticeAreaName)) preFilledFields.Add("practiceAreaName");
+        if (!string.IsNullOrWhiteSpace(parsed.MatterName)) preFilledFields.Add("matterName");
+        if (!string.IsNullOrWhiteSpace(parsed.MatterDescription)) preFilledFields.Add("summary");
+        if (!string.IsNullOrWhiteSpace(parsed.AssignedAttorneyName)) preFilledFields.Add("assignedAttorneyName");
+        if (!string.IsNullOrWhiteSpace(parsed.AssignedParalegalName)) preFilledFields.Add("assignedParalegalName");
+        if (!string.IsNullOrWhiteSpace(parsed.AssignedOutsideCounselName)) preFilledFields.Add("assignedOutsideCounselName");
+
+        var confidence = Math.Clamp(parsed.Confidence ?? overallConfidence, 0.0, 1.0);
+
+        _logger.LogInformation(
+            "Pre-fill result: FieldCount={Fields}, Confidence={Confidence}. RequestId={RequestId}",
+            preFilledFields.Count, confidence, requestId);
+
+        return new PreFillResponse(
+            MatterTypeName: NormalizeNullableString(parsed.MatterTypeName),
+            PracticeAreaName: NormalizeNullableString(parsed.PracticeAreaName),
+            MatterName: NormalizeNullableString(parsed.MatterName),
+            Summary: NormalizeNullableString(parsed.MatterDescription),
+            AssignedAttorneyName: NormalizeNullableString(parsed.AssignedAttorneyName),
+            AssignedParalegalName: NormalizeNullableString(parsed.AssignedParalegalName),
+            AssignedOutsideCounselName: NormalizeNullableString(parsed.AssignedOutsideCounselName),
+            Confidence: confidence,
+            PreFilledFields: [.. preFilledFields]);
     }
 
     private static string? NormalizeNullableString(string? value)
@@ -468,8 +677,17 @@ public class MatterPreFillService
         [JsonPropertyName("matterName")]
         public string? MatterName { get; init; }
 
-        [JsonPropertyName("summary")]
-        public string? Summary { get; init; }
+        [JsonPropertyName("matterDescription")]
+        public string? MatterDescription { get; init; }
+
+        [JsonPropertyName("assignedAttorneyName")]
+        public string? AssignedAttorneyName { get; init; }
+
+        [JsonPropertyName("assignedParalegalName")]
+        public string? AssignedParalegalName { get; init; }
+
+        [JsonPropertyName("assignedOutsideCounselName")]
+        public string? AssignedOutsideCounselName { get; init; }
 
         [JsonPropertyName("confidence")]
         public double? Confidence { get; init; }

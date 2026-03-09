@@ -212,7 +212,7 @@ public sealed class ClauseComparisonHandler : IAnalysisToolHandler
 
                 _logger.LogDebug("Comparing clauses in chunk {ChunkIndex}/{TotalChunks}", index + 1, chunks.Count);
 
-                var result = await CompareClausesInChunkAsync(chunk, standardTermsContext, config, cancellationToken);
+                var result = await CompareClausesInChunkAsync(chunk, standardTermsContext, config, cancellationToken, context);
                 allDeviations.AddRange(result.Deviations);
                 allClausesAnalyzed.AddRange(result.ClausesAnalyzed);
                 totalInputTokens += result.InputTokens;
@@ -563,9 +563,11 @@ public sealed class ClauseComparisonHandler : IAnalysisToolHandler
         string chunk,
         string standardTermsContext,
         ClauseComparisonConfig config,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ToolExecutionContext? executionContext = null)
     {
-        var prompt = BuildComparisonPrompt(chunk, standardTermsContext, config);
+        var prompt = PromptContextHelper.ApplyContext(
+            BuildComparisonPrompt(chunk, standardTermsContext, config), executionContext, chunk);
         var inputTokens = EstimateTokens(prompt);
 
         var response = await _openAiClient.GetCompletionAsync(prompt, cancellationToken: cancellationToken);

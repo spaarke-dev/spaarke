@@ -12,9 +12,9 @@
  *
  * Steps:
  *   0 — Add file(s)       (FileUploadZone + UploadedFileList)
- *   1 — Create record     (CreateRecordStep)
- *   2 — Next Steps        (NextStepsStep — checkbox card selection)
- *   3+ — Follow-on steps  (AssignCounselStep, DraftSummaryStep, SendEmailStep)
+ *   1 — Enter Info         (CreateRecordStep)
+ *   2 — Next Steps         (NextStepsStep — checkbox card selection)
+ *   3+ — Follow-on steps   (AssignResourcesStep, DraftSummaryStep, SendEmailStep)
  *        Injected dynamically based on card selections in Step 2.
  */
 import * as React from 'react';
@@ -45,16 +45,23 @@ import {
   FOLLOW_ON_STEP_ID_MAP,
   FOLLOW_ON_STEP_LABEL_MAP,
 } from './NextStepsStep';
-import { AssignCounselStep } from './AssignCounselStep';
+import { AssignResourcesStep } from './AssignResourcesStep';
 import { DraftSummaryStep } from './DraftSummaryStep';
+import type { IRecipientItem } from './RecipientField';
 import {
   SendEmailStep,
   buildDefaultEmailSubject,
   buildDefaultEmailBody,
 } from './SendEmailStep';
-import { MatterService, IFollowOnActions } from './matterService';
+import {
+  MatterService,
+  IFollowOnActions,
+  searchContactsAsLookup,
+  searchOrganizationsAsLookup,
+  searchUsersAsLookup,
+} from './matterService';
 import type { ICreateMatterFormState } from './formTypes';
-import type { IContact } from '../../types/entities';
+import type { ILookupItem } from '../../types/entities';
 import type { IWebApi } from '../../types/xrm';
 import { getSpeContainerIdFromBusinessUnit } from '../../services/xrmProvider';
 import { navigateToEntity } from '../../utils/navigation';
@@ -152,6 +159,8 @@ const EMPTY_FORM_STATE: ICreateMatterFormState = {
   assignedAttorneyName: '',
   assignedParalegalId: '',
   assignedParalegalName: '',
+  assignedOutsideCounselId: '',
+  assignedOutsideCounselName: '',
   summary: '',
 };
 
@@ -190,12 +199,13 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
   // ── Step 3: Next Steps selection ────────────────────────────────────────
   const [selectedActions, setSelectedActions] = React.useState<FollowOnActionId[]>([]);
 
-  // ── Assign Counsel state ────────────────────────────────────────────────
-  const [selectedContact, setSelectedContact] = React.useState<IContact | null>(null);
+  // ── Assign Resources state (notify toggle — UI only, not wired) ────────
+  const [notifyResources, setNotifyResources] = React.useState(false);
 
   // ── Draft Summary state ─────────────────────────────────────────────────
   const [summaryText, setSummaryText] = React.useState('');
-  const [recipientEmails, setRecipientEmails] = React.useState<string[]>([]);
+  const [recipients, setRecipients] = React.useState<IRecipientItem[]>([]);
+  const [ccRecipients, setCcRecipients] = React.useState<IRecipientItem[]>([]);
 
   // ── Send Email state ────────────────────────────────────────────────────
   const [emailTo, setEmailTo] = React.useState('');
@@ -220,14 +230,87 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
       setStep2Valid(false);
       setStep2FormValues(EMPTY_FORM_STATE);
       setSelectedActions([]);
-      setSelectedContact(null);
+      setNotifyResources(false);
       setSummaryText('');
-      setRecipientEmails([]);
+      setRecipients([]);
+      setCcRecipients([]);
       setEmailTo('');
       setEmailSubject('');
       setEmailBody('');
     }
   }, [open]);
+
+  // ── Refs for dynamic step closures (prevents stale closure bug) ─────────
+  const step2FormValuesRef = React.useRef(step2FormValues);
+  step2FormValuesRef.current = step2FormValues;
+  const notifyResourcesRef = React.useRef(notifyResources);
+  notifyResourcesRef.current = notifyResources;
+  const summaryTextRef = React.useRef(summaryText);
+  summaryTextRef.current = summaryText;
+  const recipientsRef = React.useRef(recipients);
+  recipientsRef.current = recipients;
+  const ccRecipientsRef = React.useRef(ccRecipients);
+  ccRecipientsRef.current = ccRecipients;
+  const emailToRef = React.useRef(emailTo);
+  emailToRef.current = emailTo;
+  const emailSubjectRef = React.useRef(emailSubject);
+  emailSubjectRef.current = emailSubject;
+  const emailBodyRef = React.useRef(emailBody);
+  emailBodyRef.current = emailBody;
+
+  // ── Stable search callbacks ─────────────────────────────────────────────
+  const handleSearchAttorneys = React.useCallback(
+    (query: string) => webApi ? searchContactsAsLookup(webApi, query) : Promise.resolve([]),
+    [webApi]
+  );
+  const handleSearchParalegals = React.useCallback(
+    (query: string) => webApi ? searchContactsAsLookup(webApi, query) : Promise.resolve([]),
+    [webApi]
+  );
+  const handleSearchOutsideCounsel = React.useCallback(
+    (query: string) => webApi ? searchOrganizationsAsLookup(webApi, query) : Promise.resolve([]),
+    [webApi]
+  );
+  const handleSearchContacts = React.useCallback(
+    (query: string) => webApi ? searchContactsAsLookup(webApi, query) : Promise.resolve([]),
+    [webApi]
+  );
+  const handleSearchUsers = React.useCallback(
+    (query: string) => webApi ? searchUsersAsLookup(webApi, query) : Promise.resolve([]),
+    [webApi]
+  );
+
+  // ── Assign Resources change handlers ────────────────────────────────────
+  const handleAttorneyChange = React.useCallback(
+    (item: ILookupItem | null) => {
+      setStep2FormValues((prev) => ({
+        ...prev,
+        assignedAttorneyId: item?.id ?? '',
+        assignedAttorneyName: item?.name ?? '',
+      }));
+    },
+    []
+  );
+  const handleParalegalChange = React.useCallback(
+    (item: ILookupItem | null) => {
+      setStep2FormValues((prev) => ({
+        ...prev,
+        assignedParalegalId: item?.id ?? '',
+        assignedParalegalName: item?.name ?? '',
+      }));
+    },
+    []
+  );
+  const handleOutsideCounselChange = React.useCallback(
+    (item: ILookupItem | null) => {
+      setStep2FormValues((prev) => ({
+        ...prev,
+        assignedOutsideCounselId: item?.id ?? '',
+        assignedOutsideCounselName: item?.name ?? '',
+      }));
+    },
+    []
+  );
 
   // ── Sync dynamic steps with selected action cards (via shellRef) ────────
   const prevSelectedActionsRef = React.useRef<FollowOnActionId[]>([]);
@@ -246,50 +329,66 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
           id: stepId,
           label: stepLabel,
           canAdvance: () => {
-            if (stepId === 'followon-assign-counsel') return selectedContact !== null;
             if (stepId === 'followon-send-email') {
-              return emailTo.trim() !== '' && emailSubject.trim() !== '' && emailBody.trim() !== '';
+              return emailToRef.current.trim() !== '' && emailSubjectRef.current.trim() !== '' && emailBodyRef.current.trim() !== '';
             }
-            return true; // draft-summary has no hard requirement
+            return true; // assign-resources and draft-summary have no hard requirement
           },
           renderContent: () => {
             if (stepId === 'followon-assign-counsel') {
-              if (!webApi) {
-                return (
-                  <Text size={300} style={{ color: tokens.colorNeutralForeground3 }}>
-                    Dataverse connection not available.
-                  </Text>
-                );
-              }
+              // Build lookup values from form state
+              const fv = step2FormValuesRef.current;
+              const attVal: ILookupItem | null = fv.assignedAttorneyId
+                ? { id: fv.assignedAttorneyId, name: fv.assignedAttorneyName }
+                : null;
+              const paraVal: ILookupItem | null = fv.assignedParalegalId
+                ? { id: fv.assignedParalegalId, name: fv.assignedParalegalName }
+                : null;
+              const ocVal: ILookupItem | null = fv.assignedOutsideCounselId
+                ? { id: fv.assignedOutsideCounselId, name: fv.assignedOutsideCounselName }
+                : null;
+
               return (
-                <AssignCounselStep
-                  webApi={webApi}
-                  selectedContact={selectedContact}
-                  onContactChange={setSelectedContact}
+                <AssignResourcesStep
+                  attorneyValue={attVal}
+                  onAttorneyChange={handleAttorneyChange}
+                  onSearchAttorneys={handleSearchAttorneys}
+                  paralegalValue={paraVal}
+                  onParalegalChange={handleParalegalChange}
+                  onSearchParalegals={handleSearchParalegals}
+                  outsideCounselValue={ocVal}
+                  onOutsideCounselChange={handleOutsideCounselChange}
+                  onSearchOutsideCounsel={handleSearchOutsideCounsel}
+                  notifyResources={notifyResourcesRef.current}
+                  onNotifyChange={setNotifyResources}
                 />
               );
             }
             if (stepId === 'followon-draft-summary') {
               return (
                 <DraftSummaryStep
-                  formValues={step2FormValues}
-                  summaryText={summaryText}
+                  formValues={step2FormValuesRef.current}
+                  summaryText={summaryTextRef.current}
                   onSummaryChange={setSummaryText}
-                  recipientEmails={recipientEmails}
-                  onRecipientsChange={setRecipientEmails}
+                  recipients={recipientsRef.current}
+                  onRecipientsChange={setRecipients}
+                  ccRecipients={ccRecipientsRef.current}
+                  onCcRecipientsChange={setCcRecipients}
+                  onSearchContacts={handleSearchContacts}
                 />
               );
             }
             if (stepId === 'followon-send-email') {
               return (
                 <SendEmailStep
-                  formValues={step2FormValues}
-                  emailTo={emailTo}
+                  formValues={step2FormValuesRef.current}
+                  emailTo={emailToRef.current}
                   onEmailToChange={setEmailTo}
-                  emailSubject={emailSubject}
+                  emailSubject={emailSubjectRef.current}
                   onEmailSubjectChange={setEmailSubject}
-                  emailBody={emailBody}
+                  emailBody={emailBodyRef.current}
                   onEmailBodyChange={setEmailBody}
+                  onSearchUsers={handleSearchUsers}
                 />
               );
             }
@@ -309,7 +408,18 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
     });
 
     prevSelectedActionsRef.current = next;
-  }, [selectedActions, selectedContact, webApi, step2FormValues, summaryText, recipientEmails, emailTo, emailSubject, emailBody]);
+  }, [
+    selectedActions,
+    webApi,
+    handleSearchAttorneys,
+    handleSearchParalegals,
+    handleSearchOutsideCounsel,
+    handleSearchContacts,
+    handleSearchUsers,
+    handleAttorneyChange,
+    handleParalegalChange,
+    handleOutsideCounselChange,
+  ]);
 
   // ── Pre-fill email fields when send-email is selected ────────────────────
   React.useEffect(() => {
@@ -347,36 +457,59 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
 
   // ── Finish handler (returns IWizardSuccessConfig) ───────────────────────
 
+  // Refs for finish handler — read latest values at invocation time to avoid
+  // stale closures. The dynamic step renderContent functions already use this
+  // pattern; handleFinish must do the same so record creation always reflects
+  // the user's latest edits (including Assign Resources overrides).
+  const selectedActionsRef = React.useRef(selectedActions);
+  selectedActionsRef.current = selectedActions;
+  const fileStateRef = React.useRef(fileState);
+  fileStateRef.current = fileState;
+  const speContainerIdRef = React.useRef(speContainerId);
+  speContainerIdRef.current = speContainerId;
+
   const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig> => {
     if (!webApi) {
       throw new Error('Dataverse connection not available. Please close and retry.');
     }
 
+    // Read latest values from refs — not closure-captured state
+    const currentFormValues = step2FormValuesRef.current;
+    const currentSelectedActions = selectedActionsRef.current;
+    const currentRecipients = recipientsRef.current;
+    const currentCcRecipients = ccRecipientsRef.current;
+    const currentEmailTo = emailToRef.current;
+    const currentEmailSubject = emailSubjectRef.current;
+    const currentEmailBody = emailBodyRef.current;
+    const currentFiles = fileStateRef.current.uploadedFiles;
+    const currentContainerId = speContainerIdRef.current;
+
     const followOnActions: IFollowOnActions = {};
 
-    if (selectedActions.includes('assign-counsel') && selectedContact) {
-      followOnActions.assignCounsel = {
-        contactId: selectedContact.sprk_contactid,
-        contactName: selectedContact.sprk_name,
-      };
+    // Assign Resources — values are already in currentFormValues (written by
+    // createMatter via lookup bindings). No separate follow-on action needed.
+
+    if (currentSelectedActions.includes('draft-summary')) {
+      // Extract emails from IRecipientItem[] for the BFF
+      const allRecipientEmails = [
+        ...currentRecipients.map((r) => r.email).filter(Boolean),
+        ...currentCcRecipients.map((r) => r.email).filter(Boolean),
+      ];
+      followOnActions.draftSummary = { recipientEmails: allRecipientEmails };
     }
 
-    if (selectedActions.includes('draft-summary')) {
-      followOnActions.draftSummary = { recipientEmails };
-    }
-
-    if (selectedActions.includes('send-email') && emailTo.trim()) {
+    if (currentSelectedActions.includes('send-email') && currentEmailTo.trim()) {
       followOnActions.sendEmail = {
-        to: emailTo.trim(),
-        subject: emailSubject,
-        body: emailBody,
+        to: currentEmailTo.trim(),
+        subject: currentEmailSubject,
+        body: currentEmailBody,
       };
     }
 
-    const service = new MatterService(webApi, speContainerId || undefined);
+    const service = new MatterService(webApi, currentContainerId || undefined);
     const result = await service.createMatter(
-      step2FormValues,
-      fileState.uploadedFiles,
+      currentFormValues,
+      currentFiles,
       followOnActions
     );
 
@@ -432,19 +565,7 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
       ),
       warnings: result.warnings,
     };
-  }, [
-    webApi,
-    speContainerId,
-    step2FormValues,
-    fileState.uploadedFiles,
-    selectedActions,
-    selectedContact,
-    recipientEmails,
-    emailTo,
-    emailSubject,
-    emailBody,
-    onClose,
-  ]);
+  }, [webApi, onClose]);
 
   // ── Step configurations ─────────────────────────────────────────────────
 
@@ -495,7 +616,7 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
       },
       {
         id: 'create-record',
-        label: 'Create record',
+        label: 'Enter Info',
         canAdvance: () => step2Valid,
         renderContent: () => (
           <CreateRecordStep
@@ -504,6 +625,7 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
             uploadedFiles={fileState.uploadedFiles}
             onValidChange={setStep2Valid}
             onSubmit={(values) => setStep2FormValues(values)}
+            initialFormValues={step2FormValues}
           />
         ),
       },
@@ -545,7 +667,7 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
       steps={stepConfigs}
       onClose={onClose}
       onFinish={handleFinish}
-      finishingLabel="Creating matter\u2026"
+      finishingLabel="Creating matter&hellip;"
       finishLabel="Finish"
     />
   );

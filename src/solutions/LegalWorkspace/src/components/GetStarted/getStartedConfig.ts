@@ -28,7 +28,7 @@ export interface IActionCardConfig {
  *   - "create-new-matter"         → opens WizardDialog (Create Matter, tasks 022-024)
  *   - "create-new-project"        → Analysis Builder, intent "new-project" (task 025)
  *   - "assign-to-counsel"         → Analysis Builder, intent "assign-counsel" (task 025)
- *   - "analyze-new-document"      → Analysis Builder, intent "document-analysis" (task 025)
+ *   - "summarize-new-files"        → Summarize Files wizard (dedicated dialog)
  *   - "search-document-files"     → Analysis Builder, intent "document-search" (task 025)
  *   - "send-email-message"        → Analysis Builder, intent "email-compose" (task 025)
  *   - "schedule-new-meeting"      → Analysis Builder, intent "meeting-schedule" (task 025)
@@ -56,10 +56,10 @@ export const ACTION_CARD_CONFIGS: IActionCardConfig[] = [
     ariaLabel: "Assign a matter or task to counsel",
   },
   {
-    id: "analyze-new-document",
-    label: "Analyze New Document",
+    id: "summarize-new-files",
+    label: "Summarize New File(s)",
     icon: DocumentSearchRegular,
-    ariaLabel: "Analyze a new document using AI",
+    ariaLabel: "Summarize new files using AI",
   },
   {
     id: "search-document-files",

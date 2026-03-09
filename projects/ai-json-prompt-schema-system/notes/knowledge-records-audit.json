@@ -1,0 +1,322 @@
+[
+  {
+    "@odata.etag": "W/\"7972037\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "ap-fraud-indicators",
+    "sprk_analysisknowledgeid": "bb6eef90-5218-f111-8342-7c1e525abd8b",
+    "statecode": 0,
+    "sprk_description": "Accounts payable fraud red flags and indicators",
+    "createdon": "2026-03-05T05:17:17Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"6126320\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "Best Practices",
+    "sprk_analysisknowledgeid": "400c7059-ede9-f011-8406-7ced8d1dc988",
+    "statecode": 0,
+    "sprk_description": "Document review best practices and guidelines for thorough contract analysis.",
+    "createdon": "2026-01-05T04:16:57Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"5499740\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "Business Writing Guidelines",
+    "sprk_analysisknowledgeid": "b0addef0-71d9-f011-8406-7ced8d1dc988",
+    "statecode": 0,
+    "sprk_description": "Style guides, formatting standards, and writing best practices for professional documents.",
+    "createdon": "2025-12-15T04:53:05Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"7972031\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "commercial-lease-benchmarks",
+    "sprk_analysisknowledgeid": "b86eef90-5218-f111-8342-7c1e525abd8b",
+    "statecode": 0,
+    "sprk_description": "Market benchmarks for evaluating commercial lease terms",
+    "createdon": "2026-03-05T05:17:17Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"7972017\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "commercial-risk-factors",
+    "sprk_analysisknowledgeid": "f958948e-5218-f111-8343-7ced8d1dc988",
+    "statecode": 0,
+    "sprk_description": "Risk factor definitions for contract risk assessment",
+    "createdon": "2026-03-05T05:17:16Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"5499738\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "Company Policies",
+    "sprk_analysisknowledgeid": "a070d3eb-71d9-f011-8406-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "Internal company policies, procedures, and guidelines.",
+    "createdon": "2025-12-15T04:53:05Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"7972025\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "confidentiality-best-practices",
+    "sprk_analysisknowledgeid": "fb58948e-5218-f111-8343-7ced8d1dc988",
+    "statecode": 0,
+    "sprk_description": "Best practices for confidentiality provisions",
+    "createdon": "2026-03-05T05:17:17Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"6126343\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "DD Checklist",
+    "sprk_analysisknowledgeid": "46b4825f-ede9-f011-8406-7ced8d1dc988",
+    "statecode": 0,
+    "sprk_description": "Due diligence checklist categories for comprehensive contract and document review.",
+    "createdon": "2026-01-05T04:16:58Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"6126327\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "Defined Terms",
+    "sprk_analysisknowledgeid": "737c3e5e-ede9-f011-8406-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "Standard legal definitions and defined terms commonly used in commercial agreements.",
+    "createdon": "2026-01-05T04:16:57Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"7972052\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "defined-terms",
+    "sprk_analysisknowledgeid": "6ca89c92-5218-f111-8343-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "Legal defined terms glossary for document analysis",
+    "createdon": "2026-03-05T05:17:18Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"6126337\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "Employment Standards",
+    "sprk_analysisknowledgeid": "887c3e5e-ede9-f011-8406-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "Standard employment agreement terms including compensation, benefits, and restrictive covenants.",
+    "createdon": "2026-01-05T04:16:58Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"7972046\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "employment-law",
+    "sprk_analysisknowledgeid": "6aa89c92-5218-f111-8343-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "Employment law compliance reference for agreement review",
+    "createdon": "2026-03-05T05:17:18Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"5499745\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "Example Analyses",
+    "sprk_analysisknowledgeid": "a270d3eb-71d9-f011-8406-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "Examples of completed document analyses that can be used as reference for style and format.",
+    "createdon": "2025-12-15T04:53:06Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"7972034\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "invoice-validation-rules",
+    "sprk_analysisknowledgeid": "67a89c92-5218-f111-8343-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "Invoice validation and compliance rules",
+    "createdon": "2026-03-05T05:17:17Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"6564886\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "KNW-BUILDER-001: Scope Catalog",
+    "sprk_analysisknowledgeid": "94f5242f-60f3-f011-8406-7ced8d1dc988",
+    "statecode": 0,
+    "sprk_description": "Catalog of all available system scopes for search and selection",
+    "createdon": "2026-01-17T04:51:37Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"6564889\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "KNW-BUILDER-002: Reference Playbooks",
+    "sprk_analysisknowledgeid": "52811a31-60f3-f011-8406-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "Example playbook patterns for common use cases",
+    "createdon": "2026-01-17T04:51:37Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"6564892\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "KNW-BUILDER-003: Node Schema",
+    "sprk_analysisknowledgeid": "99f5242f-60f3-f011-8406-7ced8d1dc988",
+    "statecode": 0,
+    "sprk_description": "Valid node configurations and their schemas",
+    "createdon": "2026-01-17T04:51:37Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"6564895\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "KNW-BUILDER-004: Best Practices",
+    "sprk_analysisknowledgeid": "9af5242f-60f3-f011-8406-7ced8d1dc988",
+    "statecode": 0,
+    "sprk_description": "Guidelines for effective playbook design",
+    "createdon": "2026-01-17T04:51:38Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"6126333\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "Lease Standards",
+    "sprk_analysisknowledgeid": "827c3e5e-ede9-f011-8406-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "Standard commercial lease terms and market benchmarks for real estate agreements.",
+    "createdon": "2026-01-05T04:16:58Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"7972028\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "lease-standard-provisions",
+    "sprk_analysisknowledgeid": "66a89c92-5218-f111-8343-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "Standard commercial lease terms reference",
+    "createdon": "2026-03-05T05:17:17Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"5499743\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "Legal Reference Materials",
+    "sprk_analysisknowledgeid": "b4addef0-71d9-f011-8406-7ced8d1dc988",
+    "statecode": 0,
+    "sprk_description": "Legal terminology glossaries, clause explanations, and regulatory reference materials.",
+    "createdon": "2025-12-15T04:53:05Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"6126330\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "NDA Standards",
+    "sprk_analysisknowledgeid": "44b4825f-ede9-f011-8406-7ced8d1dc988",
+    "statecode": 0,
+    "sprk_description": "Standard terms and benchmarks for Non-Disclosure Agreements including mutual and one-way NDAs.",
+    "createdon": "2026-01-05T04:16:58Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"7972021\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "nda-standard-provisions",
+    "sprk_analysisknowledgeid": "b76eef90-5218-f111-8342-7c1e525abd8b",
+    "statecode": 0,
+    "sprk_description": "Standard NDA provisions checklist for analysis",
+    "createdon": "2026-03-05T05:17:16Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"6126317\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "Regulatory Guidelines",
+    "sprk_analysisknowledgeid": "6c7c3e5e-ede9-f011-8406-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "Regulatory compliance requirements and guidelines including GDPR, CCPA, SOX, HIPAA, and industry-specific regulations.",
+    "createdon": "2026-01-05T04:16:57Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"6126324\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "Risk Categories",
+    "sprk_analysisknowledgeid": "43b4825f-ede9-f011-8406-7ced8d1dc988",
+    "statecode": 0,
+    "sprk_description": "Taxonomy of risk categories used for document risk assessment and classification.",
+    "createdon": "2026-01-05T04:16:57Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"7972049\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "risk-categories",
+    "sprk_analysisknowledgeid": "6ba89c92-5218-f111-8343-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "Risk classification taxonomy for document analysis",
+    "createdon": "2026-03-05T05:17:18Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"6126340\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "SLA Benchmarks",
+    "sprk_analysisknowledgeid": "907c3e5e-ede9-f011-8406-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "Industry-standard Service Level Agreement benchmarks and metrics.",
+    "createdon": "2026-01-05T04:16:58Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"7972040\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "sla-standards",
+    "sprk_analysisknowledgeid": "68a89c92-5218-f111-8343-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "SLA standard metrics and thresholds",
+    "createdon": "2026-03-05T05:17:18Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"5499735\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "Standard Contract Templates",
+    "sprk_analysisknowledgeid": "9f70d3eb-71d9-f011-8406-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "Library of standard contract templates including NDAs, service agreements, and employment contracts.",
+    "createdon": "2025-12-15T04:53:04Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"6126313\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "Standard Contract Terms",
+    "sprk_analysisknowledgeid": "6b7c3e5e-ede9-f011-8406-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "Standard contract terms and clauses used as baseline for comparison. Sourced from industry-standard agreements and legal best practices.",
+    "createdon": "2026-01-05T04:16:56Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"7972013\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "standard-contract-clauses",
+    "sprk_analysisknowledgeid": "65a89c92-5218-f111-8343-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "Standard contract clause templates for comparison and analysis",
+    "createdon": "2026-03-05T05:17:16Z",
+    "sprk_knowledgedeliverytype": null
+  },
+  {
+    "@odata.etag": "W/\"7972043\"",
+    "sprk_knowledgecode": null,
+    "sprk_name": "standard-contract-terms",
+    "sprk_analysisknowledgeid": "69a89c92-5218-f111-8343-7c1e520aa4df",
+    "statecode": 0,
+    "sprk_description": "General contract term definitions used across multiple action types",
+    "createdon": "2026-03-05T05:17:18Z",
+    "sprk_knowledgedeliverytype": null
+  }
+]

@@ -2,7 +2,7 @@
 
 **Purpose:** Utility scripts for SDAP development, deployment, and operations.
 
-**Last Updated:** December 2, 2025
+**Last Updated:** March 5, 2026
 
 ---
 
@@ -21,6 +21,105 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 - ✅ **Maintained** - Actively maintained and updated
 - ⚠️ **Deprecated** - Superseded by better tooling, kept for reference
 - 📦 **Archive** - One-time setup scripts, kept for new environments
+
+---
+
+## AI Playbook & Scope Provisioning
+
+### `Deploy-Playbook.ps1`
+**Purpose:** Create complete AI analysis playbooks in Dataverse from definition JSON files — resolves scope codes, creates playbook + nodes, associates N:N scopes, saves canvas layout
+**Usage:** 🟢 Active - Create new playbooks on-demand
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), Dataverse connection
+**Owner:** AI Team
+**Last Used:** March 2026
+
+**When to Use:**
+- After designing a playbook with `/jps-playbook-design` skill
+- Deploying new playbook definitions from `projects/*/notes/playbook-definitions/`
+- Recreating playbooks in new environments
+
+**Command:**
+```powershell
+# Preview without creating (recommended first)
+.\Deploy-Playbook.ps1 -DefinitionFile "path/to/my-playbook.json" -DryRun
+
+# Deploy for real
+.\Deploy-Playbook.ps1 -DefinitionFile "path/to/my-playbook.json"
+
+# Overwrite existing playbook
+.\Deploy-Playbook.ps1 -DefinitionFile "path/to/my-playbook.json" -Force
+```
+
+**Relationship to seed-data/:**
+- `scripts/seed-data/` bootstraps base primitives (actions, skills, knowledge, tools) — run once per environment
+- `Deploy-Playbook.ps1` creates NEW playbooks from definition files using those existing primitives
+- Both use the same Dataverse entities (`sprk_analysisplaybooks`, `sprk_playbooknodes`, etc.)
+
+---
+
+### `Refresh-ScopeModelIndex.ps1`
+**Purpose:** Regenerate `docs/ai-knowledge/catalogs/scope-model-index.json` from current Dataverse state — keeps the scope catalog in sync for Claude Code
+**Usage:** 🟡 Occasional - After adding new scopes to Dataverse
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), Dataverse connection
+**Owner:** AI Team
+**Last Used:** March 2026
+
+**When to Use:**
+- After seeding new actions, skills, knowledge, or tools to Dataverse
+- After manually creating scopes in Dataverse UI
+- To ensure Claude Code has the latest scope catalog for playbook design
+
+**Command:**
+```powershell
+.\Refresh-ScopeModelIndex.ps1 -Environment dev
+```
+
+---
+
+### `Seed-JpsActions.ps1`
+**Purpose:** Seed JPS (JSON Prompt Schema) action definitions to Dataverse — creates/updates `sprk_analysisactions` records with full prompt content
+**Usage:** 🟡 Occasional - After creating or modifying JPS files
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI, JPS files in `projects/ai-json-prompt-schema-system/notes/jps-conversions/`
+**Owner:** AI Team
+**Last Used:** March 2026
+
+**Command:**
+```powershell
+.\Seed-JpsActions.ps1
+```
+
+---
+
+### `Seed-AnalysisSkills.ps1`
+**Purpose:** Seed enriched analysis skill prompt fragments to Dataverse — updates `sprk_analysisskills` records with structured prompt content
+**Usage:** 🟡 Occasional - After updating skill definitions
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI, Dataverse connection
+**Owner:** AI Team
+**Last Used:** March 2026
+
+**Command:**
+```powershell
+.\Seed-AnalysisSkills.ps1
+```
+
+---
+
+### `Seed-KnowledgeScopes.ps1`
+**Purpose:** Seed knowledge source records to Dataverse — creates/updates `sprk_analysisknowledges` with reference content
+**Usage:** 🟡 Occasional - After creating new knowledge sources
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI, Dataverse connection
+**Owner:** AI Team
+**Last Used:** March 2026
+
+**Command:**
+```powershell
+.\Seed-KnowledgeScopes.ps1
+```
 
 ---
 

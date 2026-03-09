@@ -1,0 +1,73 @@
+<task id="008" project="playbook-analysis-launcher-page-r1">
+  <metadata>
+    <title>Create FollowUpActionsStep Component</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>030</blocks>
+    <tags>typescript, react, fluent-ui, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>UI component with limited logic — action card display</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the FollowUpActionsStep component — post-analysis action cards displayed in the
+    final wizard step (View Results, Share Report, Assign Counsel, Open Analysis Workspace).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Fluent UI v9 card layout.
+  </role>
+
+  <goal>
+    Create `src/solutions/LegalWorkspace/src/components/Playbook/FollowUpActionsStep.tsx` —
+    a card grid showing available post-analysis actions configured per wizard intent.
+  </goal>
+
+  <context>
+    <background>
+      The wizard's final step shows "What's Next?" action cards. Each card triggers a
+      navigation or operation (open Analysis Workspace, share, email, assign).
+      Actions are configurable per wizard intent via the quickStartConfig.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/Playbook/FollowUpActionsStep.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Playbook/types.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9 Card components with semantic tokens</constraint>
+    <constraint source="project">Config-driven — actions come from props, not hardcoded</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/playbook-analysis-launcher-page-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define IFollowUpAction interface: id, label, icon, description, onClick</step>
+    <step order="2">Create FollowUpActionsStep.tsx with props: analysisId, availableActions</step>
+    <step order="3">Render action cards in a responsive grid using Fluent v9 Card</step>
+    <step order="4">Add "Open Analysis Workspace" as always-available action</step>
+    <step order="5">Wire onClick handlers for navigation actions</step>
+    <step order="6">Verify TypeScript compiles</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/src/components/Playbook/FollowUpActionsStep.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Renders action cards from availableActions prop</criterion>
+    <criterion testable="true">"Open Analysis Workspace" always shown</criterion>
+    <criterion testable="true">Card clicks invoke onClick handlers</criterion>
+    <criterion testable="true">Dark mode compliant — semantic tokens only</criterion>
+  </acceptance-criteria>
+</task>

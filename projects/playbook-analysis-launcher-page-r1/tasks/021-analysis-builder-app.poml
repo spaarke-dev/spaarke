@@ -1,0 +1,117 @@
+<task id="021" project="playbook-analysis-launcher-page-r1">
+  <metadata>
+    <title>Build AnalysisBuilderApp — 2-Tab Layout</title>
+    <phase>2</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020, 002, 003, 004, 006</dependencies>
+    <blocks>022</blocks>
+    <tags>typescript, react, fluent-ui, frontend, code-page</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Main app component with complex state, Dataverse integration, N:N creation</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build the AnalysisBuilderApp component — the main 2-tab layout for the Analysis Builder
+    code page. Tab 1: Playbook selection (cards with locked scopes). Tab 2: Custom Scope
+    (manual action/skills/knowledge/tools selection). Footer with Cancel + Run Analysis.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React 18, Fluent v9, Dataverse WebAPI.
+  </role>
+
+  <goal>
+    Create `src/solutions/AnalysisBuilder/src/App.tsx` with:
+    - URL param parsing for document context
+    - 2-tab layout using Fluent TabList
+    - Tab 1: PlaybookCardGrid with locked scopes on selection
+    - Tab 2: ScopeConfigurator for manual scope selection
+    - Footer: Cancel + Run Analysis buttons
+    - Run Analysis: creates sprk_analysis via AnalysisService, navigates to Analysis Workspace
+  </goal>
+
+  <context>
+    <background>
+      This is the main component of the Analysis Builder code page. It replaces the
+      AnalysisBuilderApp.tsx from the PCF (751 lines). Key differences: React 18, bundled
+      Fluent v9, URL params instead of PCF context, direct navigateTo instead of PCF outputs.
+    </background>
+    <relevant-files>
+      <file>src/solutions/AnalysisBuilder/src/App.tsx</file>
+      <file>src/client/pcf/AnalysisBuilder/control/components/AnalysisBuilderApp.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Playbook/PlaybookCardGrid.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Playbook/ScopeConfigurator.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Playbook/playbookService.ts</file>
+      <file>src/solutions/LegalWorkspace/src/components/Playbook/analysisService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Zero hardcoded colors — Fluent v9 semantic tokens</constraint>
+    <constraint source="ADR-022">React 18 bundled — use createRoot, hooks</constraint>
+    <constraint source="project">Tab 1: Playbook scopes are LOCKED (read-only) after selection</constraint>
+    <constraint source="project">URL params: documentId, documentName, containerId, fileId, apiBaseUrl</constraint>
+    <constraint source="project">navigateTo Analysis Workspace after creation — not PCF output properties</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>projects/playbook-analysis-launcher-page-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing PCF app" location="src/client/pcf/AnalysisBuilder/control/components/AnalysisBuilderApp.tsx">
+        State management, parallel data loading, N:N creation — port to hooks
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing AnalysisBuilderApp.tsx from PCF for state/logic reference</step>
+    <step order="2">Read shared Playbook components (PlaybookCardGrid, ScopeConfigurator, services)</step>
+    <step order="3">Create App.tsx with URL param parsing via URLSearchParams</step>
+    <step order="4">Add data loading via PlaybookService.loadAllData() in useEffect</step>
+    <step order="5">Implement Tab 1: PlaybookCardGrid with onSelect that loads + locks scopes</step>
+    <step order="6">Implement Tab 2: ScopeConfigurator with free selection</step>
+    <step order="7">Implement Run Analysis button: create record via AnalysisService, then navigateTo</step>
+    <step order="8">Add error handling and loading states</step>
+    <step order="9">Verify npm run build succeeds with full app</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/AnalysisBuilder/src/App.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">URL params parsed for document context</criterion>
+    <criterion testable="true">Tab 1 shows PlaybookCardGrid, selecting locks scopes</criterion>
+    <criterion testable="true">Tab 2 shows ScopeConfigurator with free selection</criterion>
+    <criterion testable="true">Run Analysis creates sprk_analysis with N:N associations</criterion>
+    <criterion testable="true">After creation, navigates to Analysis Workspace form</criterion>
+    <criterion testable="true">npm run build produces valid dist/analysisbuilder.html</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Analysis Builder Opens">
+      <steps>
+        <step>Open code page with URL params: ?documentId=xxx&amp;documentName=test.docx</step>
+        <step>Verify 2 tabs render: "Select Playbook" and "Custom Scope"</step>
+        <step>Verify playbook cards load from Dataverse</step>
+      </steps>
+      <expected>2-tab layout renders with playbook cards, no console errors</expected>
+    </test>
+    <test name="Playbook Selection Locks Scopes">
+      <steps>
+        <step>Click a playbook card</step>
+        <step>Verify scope tabs show playbook's pre-configured scopes</step>
+        <step>Verify scopes are read-only (locked)</step>
+      </steps>
+      <expected>Scopes display as read-only after playbook selection</expected>
+    </test>
+  </ui-tests>
+</task>

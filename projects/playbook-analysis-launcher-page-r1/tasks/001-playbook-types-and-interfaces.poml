@@ -1,0 +1,94 @@
+<task id="001" project="playbook-analysis-launcher-page-r1">
+  <metadata>
+    <title>Create Playbook Types and Interfaces</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 003, 004, 005, 006, 007, 008</blocks>
+    <tags>typescript, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates foundational types used by all subsequent tasks</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the shared Playbook type definitions extracted from the existing AnalysisBuilder PCF control.
+    These types are the foundation for both the Analysis Builder code page and Quick Start wizards.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADR-021 (Fluent v9) and ADR-022 (React 18 for code pages).
+  </role>
+
+  <goal>
+    Create `src/solutions/LegalWorkspace/src/components/Playbook/types.ts` with all shared interfaces
+    for playbooks, actions, skills, knowledge, tools, analysis config, and scope definitions.
+  </goal>
+
+  <context>
+    <background>
+      The existing AnalysisBuilder PCF (v2.9.2) defines types inline in AnalysisBuilderApp.tsx.
+      These need to be extracted into a shared types file for reuse across both experiences.
+      See spec.md Section 7.3 for the interface definitions.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/Playbook/types.ts</file>
+      <file>src/client/pcf/AnalysisBuilder/control/components/AnalysisBuilderApp.tsx</file>
+      <file>projects/playbook-analysis-launcher-page-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">Code pages use React 18 bundled — types must be compatible</constraint>
+    <constraint source="project">No Dataverse schema changes — types map to existing entities</constraint>
+    <constraint source="project">Types must support both Analysis Builder and Quick Start contexts</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>projects/playbook-analysis-launcher-page-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing PCF types" location="src/client/pcf/AnalysisBuilder/control/components/AnalysisBuilderApp.tsx">
+        Extract IPlaybook, IAction, ISkill, IKnowledge, ITool, IAnalysisConfig, IPlaybookScopes
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing PCF types from AnalysisBuilderApp.tsx</step>
+    <step order="2">Read spec.md Section 7.3 for target type definitions</step>
+    <step order="3">Create directory src/solutions/LegalWorkspace/src/components/Playbook/</step>
+    <step order="4">Create types.ts with all interfaces: IPlaybook, IAction, ISkill, IKnowledge, ITool, IAnalysisConfig, IPlaybookScopes, IEntityContext</step>
+    <step order="5">Add Dataverse field mappings as comments for each interface</step>
+    <step order="6">Verify TypeScript compiles without errors</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing PCF types</tool>
+    <tool name="Write">Create types file</tool>
+    <tool name="Bash(npm)">Verify TypeScript compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/src/components/Playbook/types.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">types.ts contains IPlaybook, IAction, ISkill, IKnowledge, ITool interfaces</criterion>
+    <criterion testable="true">IAnalysisConfig and IPlaybookScopes interfaces defined</criterion>
+    <criterion testable="true">All interfaces map to existing Dataverse entities (no new fields)</criterion>
+    <criterion testable="true">TypeScript compiles without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Extract from existing PCF AnalysisBuilderApp.tsx state variables and WebAPI query shapes.
+    The Dataverse entity logical names are: sprk_analysisplaybook, sprk_analysisaction,
+    sprk_analysisskill, sprk_analysisknowledge, sprk_analysistool, sprk_analysis.
+  </notes>
+</task>

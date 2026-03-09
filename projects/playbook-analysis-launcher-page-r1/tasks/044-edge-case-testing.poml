@@ -1,0 +1,42 @@
+<task id="044" project="playbook-analysis-launcher-page-r1">
+  <metadata>
+    <title>Edge Case Testing</title>
+    <phase>4</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>040, 041</dependencies>
+    <blocks>050</blocks>
+    <tags>e2e-test, testing</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Test edge cases: no playbooks in system, WebAPI errors, large file uploads, dialog
+    close during upload, missing URL params in code page.
+  </prompt>
+
+  <role>SPAARKE QA engineer.</role>
+
+  <goal>Verify graceful handling of edge cases in both experiences.</goal>
+
+  <steps>
+    <step order="1">Test Analysis Builder with missing URL params — verify error message</step>
+    <step order="2">Test with no playbooks in Dataverse — verify empty state message</step>
+    <step order="3">Test with WebAPI error (invalid credentials) — verify error handling</step>
+    <step order="4">Test Quick Start with large file upload (>10MB) — verify validation</step>
+    <step order="5">Test dialog close during upload — verify cleanup</step>
+    <step order="6">Test Cancel button at each wizard step</step>
+    <step order="7">Document findings and fix any issues</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Missing URL params shows user-friendly error</criterion>
+    <criterion testable="true">No playbooks shows empty state</criterion>
+    <criterion testable="true">WebAPI errors display error message (not crash)</criterion>
+    <criterion testable="true">File validation rejects files >10MB</criterion>
+    <criterion testable="true">Cancel works at every step without errors</criterion>
+  </acceptance-criteria>
+</task>

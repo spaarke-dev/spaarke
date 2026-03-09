@@ -7,6 +7,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { retrieveRecord } from "../services/dataverseClient";
+import { loadNodeScopes } from "../services/playbookNodeSync";
 import { useCanvasStore } from "../stores/canvasStore";
 
 const LOG_PREFIX = "[PlaybookBuilder:usePlaybookLoader]";
@@ -39,6 +40,7 @@ export function usePlaybookLoader(playbookId: string): UsePlaybookLoaderResult {
     const [playbookName, setPlaybookName] = useState<string | null>(null);
 
     const loadFromCanvasJson = useCanvasStore((s) => s.loadFromCanvasJson);
+    const mergeNodeScopes = useCanvasStore((s) => s.mergeNodeScopes);
     const initializeNewCanvas = useCanvasStore((s) => s.initializeNewCanvas);
     const reset = useCanvasStore((s) => s.reset);
 
@@ -75,6 +77,19 @@ export function usePlaybookLoader(playbookId: string): UsePlaybookLoaderResult {
                 initializeNewCanvas();
                 console.info(`${LOG_PREFIX} Playbook "${name}" has no saved canvas; initialized with Start node`);
             }
+
+            // Load N:N scope associations from Dataverse and merge into canvas nodes.
+            // This ensures scopes created via Deploy-Playbook.ps1 or direct N:N writes
+            // are reflected in the canvas, not just scopes set through the canvas UI.
+            try {
+                const scopeMap = await loadNodeScopes(playbookId);
+                if (scopeMap.size > 0) {
+                    mergeNodeScopes(scopeMap);
+                    console.info(`${LOG_PREFIX} Merged N:N scopes for ${scopeMap.size} nodes`);
+                }
+            } catch (scopeErr) {
+                console.warn(`${LOG_PREFIX} Failed to load N:N scopes (non-fatal):`, scopeErr);
+            }
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             console.error(`${LOG_PREFIX} Failed to load playbook:`, message);
@@ -83,7 +98,7 @@ export function usePlaybookLoader(playbookId: string): UsePlaybookLoaderResult {
         } finally {
             setIsLoading(false);
         }
-    }, [playbookId, loadFromCanvasJson, reset]);
+    }, [playbookId, loadFromCanvasJson, mergeNodeScopes, reset]);
 
     useEffect(() => {
         void load();

@@ -242,11 +242,13 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     }, [open, stepConfigs]);
 
     // ── Sync configMapRef when base step configs change ────────────────────
-    React.useEffect(() => {
-      stepConfigs.forEach((config) => {
-        configMapRef.current.set(config.id, config);
-      });
-    }, [stepConfigs]);
+    // Sync during render (not in an effect) so canAdvance() reads latest
+    // configs immediately. This fixes the stale-closure bug where AI pre-fill
+    // updates form validity but the Next button stays disabled until user
+    // interaction triggers a re-render.
+    stepConfigs.forEach((config) => {
+      configMapRef.current.set(config.id, config);
+    });
 
     // ── Derived values ────────────────────────────────────────────────────
     const currentStepDef = shellState.steps[shellState.currentStepIndex];

@@ -149,10 +149,49 @@ Defines the expected output fields. When `structuredOutput` is `true`, the rende
 | `description` | string | What the model should generate for this field |
 | `maxLength` | number | Max characters (string fields only) |
 | `enum` | string[] | Allowed values — model must pick from this list |
+| `$choices` | string | Auto-inject enum values at render time from Dataverse or downstream nodes |
 
 ### $choices
 
-When an enum contains `"$choices"`, the pipeline replaces it with display names from downstream playbook nodes at render time. This enables dynamic routing decisions based on the playbook graph structure. The model's output determines which downstream path executes.
+The `$choices` property auto-injects valid enum values at render time, constraining the AI to return only values that exist in Dataverse. This eliminates fuzzy matching on the frontend.
+
+**Supported prefixes**:
+
+| Prefix | Example | Source |
+|--------|---------|--------|
+| `lookup:` | `"lookup:sprk_mattertype_ref.sprk_mattertypename"` | Active records from a Dataverse reference entity |
+| `optionset:` | `"optionset:sprk_matter.sprk_matterstatus"` | Single-select choice/picklist metadata labels |
+| `multiselect:` | `"multiselect:sprk_matter.sprk_jurisdictions"` | Multi-select picklist metadata labels |
+| `boolean:` | `"boolean:sprk_matter.sprk_isconfidential"` | Two-option boolean field labels (e.g., `["Yes", "No"]`) |
+| `downstream:` | `"downstream:update_doc.sprk_documenttype"` | Downstream node field mapping options (routing patterns) |
+
+**Example — Pre-fill with exact Dataverse values**:
+
+```json
+{
+  "output": {
+    "structuredOutput": true,
+    "fields": [
+      {
+        "name": "matterTypeName",
+        "type": "string",
+        "description": "The matter type that best matches this document",
+        "$choices": "lookup:sprk_mattertype_ref.sprk_mattertypename"
+      },
+      {
+        "name": "practiceAreaName",
+        "type": "string",
+        "description": "The practice area for this matter",
+        "$choices": "lookup:sprk_practicearea_ref.sprk_practiceareaname"
+      }
+    ]
+  }
+}
+```
+
+At render time, the `$choices` values are resolved from Dataverse and injected as `"enum"` arrays in the JSON Schema, forcing the model to select from exact values.
+
+**Legacy format**: Fields with `"enum": ["$choices"]` are still supported for backward compatibility with downstream routing patterns. The literal `"$choices"` string is replaced with downstream node display names.
 
 ### structuredOutput
 

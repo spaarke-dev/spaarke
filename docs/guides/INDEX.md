@@ -25,7 +25,12 @@ This directory contains practical guides for implementing features, configuring 
 - [AI-DOCUMENT-INTELLIGENCE-INTEGRATION.md](AI-DOCUMENT-INTELLIGENCE-INTEGRATION.md)
 - [AI-STREAMING-SSE-IMPLEMENTATION.md](AI-STREAMING-SSE-IMPLEMENTATION.md)
 - [AI-TOOL-FRAMEWORK-GUIDE.md](AI-TOOL-FRAMEWORK-GUIDE.md)
-- **[HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md](HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md)** - **NEW**: User guide for creating Tools, Skills, Knowledge, and Actions in Dataverse
+- **[HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md](HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md)** - User guide for creating Tools, Skills, Knowledge, and Actions in Dataverse
+- **[PLAYBOOK-CREATION-GUIDE.md](PLAYBOOK-CREATION-GUIDE.md)** - **NEW**: End-to-end guide for creating AI playbooks via Claude Code — scope selection, model optimization, deployment
+- [JPS-AUTHORING-GUIDE.md](JPS-AUTHORING-GUIDE.md) - JSON Prompt Schema authoring reference
+- [JPS-COMPREHENSIVE-GUIDE.md](JPS-COMPREHENSIVE-GUIDE.md) - Full JPS schema reference with patterns and deployment
+- [SPAARKE-AI-ARCHITECTURE.md](SPAARKE-AI-ARCHITECTURE.md) - Platform AI architecture overview (pipeline, tools, agents)
+- [RAG-ARCHITECTURE.md](RAG-ARCHITECTURE.md) - RAG pipeline architecture and knowledge-augmented execution
 
 ### Email Automation
 
@@ -65,6 +70,7 @@ This directory contains practical guides for implementing features, configuring 
 - Creating PCF control → Load HOW-TO-CREATE-NEW-PCF-CONTROL.md, PCF-CONTROL-DEVELOPMENT.md
 - Adding document support → Load HOW-TO-ADD-DOCUMENT-SUPPORT-TO-ENTITY.md
 - **Creating AI playbook scopes → Load HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md**
+- **Creating AI playbooks → Load PLAYBOOK-CREATION-GUIDE.md** (or use `/jps-playbook-design` skill)
 - AI integration → Load AI-TOOL-FRAMEWORK-GUIDE.md, AI-STREAMING-SSE-IMPLEMENTATION.md
 - Dataverse work → Load DATAVERSE-*.md guides
 - Email automation → Load EMAIL-TO-DOCUMENT-ARCHITECTURE.md

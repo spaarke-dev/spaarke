@@ -1,0 +1,73 @@
+<task id="032" project="playbook-analysis-launcher-page-r1">
+  <metadata>
+    <title>Update ActionCardHandlers for Wizard Launch</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>030, 031</dependencies>
+    <blocks>033</blocks>
+    <tags>typescript, react, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifying existing handler code — behavior change for 5 cards</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Replace the Analysis Builder postMessage handlers in ActionCardHandlers.ts with wizard
+    dialog state handlers. Each of the 5 action cards should now open QuickStartWizardDialog
+    with the appropriate intent instead of posting messages to window.parent.
+  </prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>
+    Update `src/solutions/LegalWorkspace/src/components/GetStarted/ActionCardHandlers.ts`
+    to return handlers that set wizard dialog state instead of postMessage.
+  </goal>
+
+  <context>
+    <background>
+      Currently, the 5 action card handlers post "openAnalysisBuilder" messages to window.parent
+      which nothing listens to. After this change, they'll set React state to open
+      QuickStartWizardDialog with the card's intent.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/GetStarted/ActionCardHandlers.ts</file>
+      <file>src/solutions/LegalWorkspace/src/components/QuickStart/QuickStartWizardDialog.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Keep "create-new-project" handler excluded (opens ProjectWizardDialog)</constraint>
+    <constraint source="project">Handlers must work with React state — return intent string, not directly open dialog</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/playbook-analysis-launcher-page-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current ActionCardHandlers.ts</step>
+    <step order="2">Replace createAnalysisBuilderHandlers with createQuickStartHandlers</step>
+    <step order="3">Each handler calls onOpenWizard(intent) callback instead of postMessage</step>
+    <step order="4">Update IAnalysisBuilderHandlerOptions to accept onOpenWizard callback</step>
+    <step order="5">Map card IDs to intents: assign-to-counsel → assign-counsel, etc.</step>
+    <step order="6">Remove postMessage infrastructure (isEmbeddedInParentFrame, postAnalysisBuilderMessage)</step>
+    <step order="7">Keep logging for debugging</step>
+    <step order="8">Verify TypeScript compiles</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/src/components/GetStarted/ActionCardHandlers.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">5 card handlers call onOpenWizard(intent) instead of postMessage</criterion>
+    <criterion testable="true">"create-new-project" handler NOT included (separate wizard)</criterion>
+    <criterion testable="true">postMessage infrastructure removed</criterion>
+    <criterion testable="true">TypeScript compiles without errors</criterion>
+  </acceptance-criteria>
+</task>

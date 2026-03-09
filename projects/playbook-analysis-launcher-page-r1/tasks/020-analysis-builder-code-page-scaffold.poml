@@ -1,0 +1,102 @@
+<task id="020" project="playbook-analysis-launcher-page-r1">
+  <metadata>
+    <title>Scaffold Analysis Builder Code Page</title>
+    <phase>2</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>009</dependencies>
+    <blocks>021</blocks>
+    <tags>typescript, react, frontend, code-page</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New code page scaffold — Vite config, React 18 entry, ThemeProvider</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the Analysis Builder code page scaffold at src/solutions/AnalysisBuilder/.
+    Follow the existing LegalWorkspace Vite + singlefile pattern. Include React 18 entry,
+    ThemeProvider, and build configuration.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Vite + vite-plugin-singlefile code page setup.
+  </role>
+
+  <goal>
+    Create `src/solutions/AnalysisBuilder/` with Vite config, React 18 entry (main.tsx),
+    ThemeProvider (copied from LegalWorkspace), package.json, and verify `npm run build`
+    produces `dist/analysisbuilder.html`.
+  </goal>
+
+  <context>
+    <background>
+      The Analysis Builder is a standalone code page (ADR-006) using the same build pattern
+      as LegalWorkspace. It bundles React 18 + Fluent v9 into a single HTML file via
+      vite-plugin-singlefile for deployment as a Dataverse web resource.
+    </background>
+    <relevant-files>
+      <file>src/solutions/AnalysisBuilder/</file>
+      <file>src/solutions/LegalWorkspace/vite.config.ts</file>
+      <file>src/solutions/LegalWorkspace/package.json</file>
+      <file>src/solutions/LegalWorkspace/index.html</file>
+      <file>src/solutions/LegalWorkspace/src/main.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/providers/ThemeProvider.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Standalone dialog = Code Page (not PCF, not Custom Page)</constraint>
+    <constraint source="ADR-022">Code Pages bundle React 18 (not platform-provided)</constraint>
+    <constraint source="ADR-021">ThemeProvider uses app-level detection chain</constraint>
+    <constraint source="project">Vite path aliases must resolve shared Playbook components from LegalWorkspace source</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>projects/playbook-analysis-launcher-page-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Code page Vite config" location="src/solutions/LegalWorkspace/vite.config.ts">
+        Vite + vite-plugin-singlefile → single HTML output
+      </pattern>
+      <pattern name="React 18 entry" location="src/solutions/LegalWorkspace/src/main.tsx">
+        createRoot entry point with FluentProvider
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read LegalWorkspace Vite config, package.json, index.html, main.tsx</step>
+    <step order="2">Create src/solutions/AnalysisBuilder/ directory</step>
+    <step order="3">Create package.json (based on LegalWorkspace, trimmed dependencies)</step>
+    <step order="4">Create vite.config.ts with singlefile plugin + path alias for shared Playbook components</step>
+    <step order="5">Create tsconfig.json</step>
+    <step order="6">Create index.html with title "New Analysis"</step>
+    <step order="7">Copy ThemeProvider.ts from LegalWorkspace (adapt storage key)</step>
+    <step order="8">Create src/main.tsx with React 18 createRoot + FluentProvider + ThemeProvider</step>
+    <step order="9">Create placeholder App.tsx that renders "Analysis Builder"</step>
+    <step order="10">Run npm install and npm run build — verify dist/analysisbuilder.html is produced</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/AnalysisBuilder/package.json</output>
+    <output type="code">src/solutions/AnalysisBuilder/vite.config.ts</output>
+    <output type="code">src/solutions/AnalysisBuilder/tsconfig.json</output>
+    <output type="code">src/solutions/AnalysisBuilder/index.html</output>
+    <output type="code">src/solutions/AnalysisBuilder/src/main.tsx</output>
+    <output type="code">src/solutions/AnalysisBuilder/src/App.tsx</output>
+    <output type="code">src/solutions/AnalysisBuilder/src/providers/ThemeProvider.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build produces dist/analysisbuilder.html</criterion>
+    <criterion testable="true">dist/analysisbuilder.html is a single self-contained file</criterion>
+    <criterion testable="true">Vite path alias resolves shared Playbook components</criterion>
+    <criterion testable="true">ThemeProvider follows app-level detection chain</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,29 @@
+{
+  "taxonomy": "SLA Benchmarks",
+  "version": "1.0",
+  "availabilityTiers": [
+    { "id": "SLA-AV-01", "tier": "Standard", "uptime": "99.0%", "annualDowntime": "87.6 hours", "monthlyDowntime": "7.3 hours", "typicalUse": "Non-critical internal tools" },
+    { "id": "SLA-AV-02", "tier": "Enhanced", "uptime": "99.5%", "annualDowntime": "43.8 hours", "monthlyDowntime": "3.65 hours", "typicalUse": "Business applications" },
+    { "id": "SLA-AV-03", "tier": "Premium", "uptime": "99.9%", "annualDowntime": "8.76 hours", "monthlyDowntime": "43.8 minutes", "typicalUse": "Production SaaS, enterprise apps" },
+    { "id": "SLA-AV-04", "tier": "High Availability", "uptime": "99.95%", "annualDowntime": "4.38 hours", "monthlyDowntime": "21.9 minutes", "typicalUse": "Financial systems, healthcare" },
+    { "id": "SLA-AV-05", "tier": "Mission Critical", "uptime": "99.99%", "annualDowntime": "52.6 minutes", "monthlyDowntime": "4.38 minutes", "typicalUse": "Payment processing, emergency services" },
+    { "id": "SLA-AV-06", "tier": "Carrier Grade", "uptime": "99.999%", "annualDowntime": "5.26 minutes", "monthlyDowntime": "26.3 seconds", "typicalUse": "Telecom infrastructure" }
+  ],
+  "responseTimes": [
+    { "id": "SLA-RT-01", "metric": "Web Page Load", "p50": "200ms", "p95": "1s", "p99": "3s" },
+    { "id": "SLA-RT-02", "metric": "API Response", "p50": "100ms", "p95": "500ms", "p99": "2s" },
+    { "id": "SLA-RT-03", "metric": "Database Query", "p50": "50ms", "p95": "200ms", "p99": "1s" },
+    { "id": "SLA-RT-04", "metric": "Batch Processing", "p50": "5min", "p95": "15min", "p99": "30min" }
+  ],
+  "incidentSeverity": [
+    { "id": "SLA-SEV-P1", "severity": "P1 - Critical", "definition": "Complete service outage or data loss", "responseTime": "15 minutes", "resolutionTarget": "4 hours", "escalation": "Immediate to VP or CTO" },
+    { "id": "SLA-SEV-P2", "severity": "P2 - High", "definition": "Major feature unavailable, workaround exists", "responseTime": "30 minutes", "resolutionTarget": "8 hours", "escalation": "1 hour to Director" },
+    { "id": "SLA-SEV-P3", "severity": "P3 - Medium", "definition": "Minor feature impacted, workaround available", "responseTime": "4 hours", "resolutionTarget": "3 business days", "escalation": "24 hours to Manager" },
+    { "id": "SLA-SEV-P4", "severity": "P4 - Low", "definition": "Cosmetic issue or enhancement request", "responseTime": "1 business day", "resolutionTarget": "Next release", "escalation": "Weekly review" }
+  ],
+  "serviceCreditSchedule": [
+    { "id": "SLA-SC-01", "uptimeRange": "99.0% - 99.9%", "creditPercent": "10%", "notes": "Standard credit" },
+    { "id": "SLA-SC-02", "uptimeRange": "95.0% - 99.0%", "creditPercent": "25%", "notes": "Significant degradation" },
+    { "id": "SLA-SC-03", "uptimeRange": "Below 95.0%", "creditPercent": "50%", "notes": "Major outage, cap typically at 1 month fees" }
+  ]
+}

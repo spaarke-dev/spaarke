@@ -1,0 +1,43 @@
+<task id="041" project="playbook-analysis-launcher-page-r1">
+  <metadata>
+    <title>E2E: Quick Start Playbook Wizards</title>
+    <phase>4</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>034</dependencies>
+    <blocks>050</blocks>
+    <tags>e2e-test, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task — 5 wizard flows to verify</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    End-to-end verification of all 5 Quick Start wizard flows in the Corporate Workspace.
+    Test each action card: upload → analyze → follow-up actions.
+  </prompt>
+
+  <role>SPAARKE QA engineer.</role>
+
+  <goal>Verify all 5 Quick Start wizard cards work in the deployed workspace.</goal>
+
+  <steps>
+    <step order="1">Deploy updated corporateworkspace.html to Dataverse</step>
+    <step order="2">Open Corporate Workspace in Dataverse</step>
+    <step order="3">Test "Analyze New Document" card → wizard opens → upload → analyze → actions</step>
+    <step order="4">Test "Search Document Files" card → wizard opens → upload → search → actions</step>
+    <step order="5">Test "Send Email Message" card → wizard opens → upload → compose → actions</step>
+    <step order="6">Test "Assign to Counsel" card → wizard opens → select → assign → actions</step>
+    <step order="7">Test "Schedule New Meeting" card → wizard opens → select → schedule → actions</step>
+    <step order="8">Verify "Create New Project" card still opens ProjectWizardDialog (regression)</step>
+    <step order="9">Document test results in notes/testing/</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 5 Quick Start cards open their respective wizard</criterion>
+    <criterion testable="true">Upload step works (files upload to SPE)</criterion>
+    <criterion testable="true">Analysis creation works per wizard intent</criterion>
+    <criterion testable="true">"Create New Project" regression — still opens ProjectWizardDialog</criterion>
+  </acceptance-criteria>
+</task>

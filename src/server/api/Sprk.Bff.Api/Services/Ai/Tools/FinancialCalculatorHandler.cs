@@ -196,7 +196,7 @@ public sealed class FinancialCalculatorHandler : IAnalysisToolHandler
 
                 _logger.LogDebug("Analyzing financials in chunk {ChunkIndex}/{TotalChunks}", index + 1, chunks.Count);
 
-                var result = await ExtractFinancialsFromChunkAsync(chunk, config, cancellationToken);
+                var result = await ExtractFinancialsFromChunkAsync(chunk, config, cancellationToken, context);
                 allItems.AddRange(result.Items);
                 allPaymentTerms.AddRange(result.PaymentTerms);
                 totalInputTokens += result.InputTokens;
@@ -442,9 +442,10 @@ public sealed class FinancialCalculatorHandler : IAnalysisToolHandler
     private async Task<ChunkFinancialResult> ExtractFinancialsFromChunkAsync(
         string chunk,
         FinancialCalculatorConfig config,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ToolExecutionContext? executionContext = null)
     {
-        var prompt = BuildExtractionPrompt(chunk, config);
+        var prompt = PromptContextHelper.ApplyContext(BuildExtractionPrompt(chunk, config), executionContext, chunk);
         var inputTokens = EstimateTokens(prompt);
 
         var response = await _openAiClient.GetCompletionAsync(prompt, cancellationToken: cancellationToken);

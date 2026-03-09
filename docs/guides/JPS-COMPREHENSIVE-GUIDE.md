@@ -76,7 +76,7 @@ sprk_aiaction.sprk_systemprompt (JSON or flat text)
         |
         v
  5. $choices Resolution
-    output.fields[].enum populated from downstream node display names
+    output.fields[].enum populated from Dataverse lookups, option sets, or downstream nodes
         |
         v
  6. PromptSchemaRenderer.Render()
@@ -196,7 +196,7 @@ For the complete authoring reference with examples and best practices, see [JPS 
 | `description` | string | What the model should generate (becomes schema description) |
 | `maxLength` | number | Max characters (string fields) |
 | `enum` | string[] | Allowed values — model must pick from this list |
-| `$choices` | string | Dynamic enum from downstream nodes (format: `"downstream:{outputVariable}.{fieldName}"`) |
+| `$choices` | string | Dynamic enum auto-injected at render time (see [$choices Resolution](#choices-resolution) for all supported prefixes) |
 | `items` | object | Schema for array items when type is `"array"` |
 | `minimum` / `maximum` | number | Numeric range constraints |
 
@@ -248,19 +248,36 @@ Scopes reference external knowledge and skills by name. The pipeline resolves th
 
 ### $choices Resolution
 
-Output fields with `"$choices"` or `["$choices"]` in their enum are dynamically populated from downstream playbook node display names. This enables classification-to-routing patterns where the model selects a downstream path.
+The `$choices` property on output fields auto-injects valid enum values at render time. This constrains the AI model to return only values that exist in Dataverse, eliminating fuzzy matching on the frontend.
+
+**Supported prefixes**:
+
+| Prefix | Format | Resolution Source | Example |
+|--------|--------|-------------------|---------|
+| `lookup:` | `"lookup:{entity}.{field}"` | Active records from a Dataverse reference entity | `"lookup:sprk_mattertype_ref.sprk_mattertypename"` → `["Patent", "Trademark", "Copyright"]` |
+| `optionset:` | `"optionset:{entity}.{attribute}"` | Single-select choice/picklist metadata | `"optionset:sprk_matter.sprk_matterstatus"` → `["Active", "Closed", "Pending"]` |
+| `multiselect:` | `"multiselect:{entity}.{attribute}"` | Multi-select picklist metadata | `"multiselect:sprk_matter.sprk_jurisdictions"` → `["US", "EU", "UK", "CA"]` |
+| `boolean:` | `"boolean:{entity}.{attribute}"` | Two-option boolean field labels | `"boolean:sprk_matter.sprk_isconfidential"` → `["Yes", "No"]` |
+| `downstream:` | `"downstream:{outputVar}.{field}"` | Downstream UpdateRecord node field mapping options | `"downstream:update_doc.sprk_documenttype"` → `["contract", "invoice", "proposal"]` |
+
+**Dataverse prefixes** (`lookup:`, `optionset:`, `multiselect:`, `boolean:`) are pre-resolved by `LookupChoicesResolver` before rendering. The resolver queries Dataverse via `IScopeResolverService` and passes results through `ToolExecutionContext.PreResolvedLookupChoices`.
+
+**Downstream prefix** (`downstream:`) is resolved inline by the renderer from `DownstreamNodeInfo[]`.
+
+**Example — Lookup-constrained field**:
 
 ```json
 {
-  "name": "sprk_routingdecision",
+  "name": "matterTypeName",
   "type": "string",
-  "enum": ["$choices"]
+  "description": "The matter type that best matches the document content",
+  "$choices": "lookup:sprk_mattertype_ref.sprk_mattertypename"
 }
 ```
 
-At render time, `"$choices"` is replaced with actual display names from connected downstream nodes (e.g., `["IP Review", "Compliance Review", "Standard Review"]`).
+At render time, the `$choices` reference is resolved and injected as `"enum": ["Patent", "Trademark", "Copyright", ...]` in the JSON Schema, forcing the AI to pick an exact Dataverse value.
 
-The `$choices` property supports a more explicit format: `"downstream:{outputVariable}.{fieldName}"` which resolves from a specific downstream node's field mapping options.
+**Legacy inline format**: Fields with `"enum": ["$choices"]` are still supported for backward compatibility with downstream routing patterns. At render time, `"$choices"` is replaced with display names from connected downstream nodes.
 
 ### Override Merge
 
@@ -525,10 +542,15 @@ Restore from backup files (`-BackupPath`), re-seed from git history, or remove J
 
 ### $choices Not Resolving
 
-**Symptom**: Enum contains literal `"$choices"` instead of node names.
+**Symptom**: Enum contains literal `"$choices"` or field has no enum constraint.
 
 | Cause | Fix |
 |-------|-----|
+| **Dataverse prefixes** (`lookup:`, `optionset:`, `multiselect:`, `boolean:`) | |
+| Entity or field name misspelled | Verify entity logical name and field name in Dataverse |
+| No active records in lookup entity | Check that the reference entity has `statecode eq 0` records |
+| `LookupChoicesResolver` not registered | Verify `AddScoped<LookupChoicesResolver>()` in DI |
+| **Downstream prefix** (`downstream:`) | |
 | No downstream nodes connected | Connect at least one downstream node in the playbook |
 | Downstream nodes have no display name | Set display names on connected downstream nodes |
 | `DownstreamNodeInfo[]` not passed to renderer | Verify `AiAnalysisNodeExecutor` passes downstream info |

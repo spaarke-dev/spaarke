@@ -215,7 +215,8 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
                 config.Categories ?? DocumentCategories.AllStandardCategories,
                 ragExamples,
                 config.IncludeSecondaryClassifications,
-                cancellationToken);
+                cancellationToken,
+                context);
 
             stopwatch.Stop();
 
@@ -556,9 +557,11 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
         string[] categories,
         List<RagExample> ragExamples,
         bool includeSecondary,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ToolExecutionContext? executionContext = null)
     {
-        var prompt = BuildClassificationPrompt(documentText, categories, ragExamples, includeSecondary);
+        var prompt = PromptContextHelper.ApplyContext(
+            BuildClassificationPrompt(documentText, categories, ragExamples, includeSecondary), executionContext, documentText);
         var inputTokens = EstimateTokens(prompt);
 
         var response = await _openAiClient.GetCompletionAsync(prompt, cancellationToken: cancellationToken);

@@ -1,0 +1,331 @@
+{
+  "$schema": "https://spaarke.com/schemas/scope-model-index/v1",
+  "$generated": "2026-03-05T00:00:00Z",
+
+  "actions": [
+    {
+      "code": "ACT-001",
+      "name": "Contract Review",
+      "description": "Comprehensive review of commercial contracts, MSAs, PSAs, and vendor agreements. Extracts parties, obligations, key dates, payment terms, termination rights, IP provisions, and liability clauses.",
+      "documentTypes": ["Contract", "MSA", "PSA", "VendorAgreement"],
+      "keyExtractions": ["parties", "obligations", "dates", "payment-terms", "termination-rights", "IP", "liability"],
+      "tags": ["legal", "contract", "review"]
+    },
+    {
+      "code": "ACT-002",
+      "name": "NDA Analysis",
+      "description": "Deep analysis of non-disclosure agreements, confidentiality agreements, and CDAs. Extracts confidential information definition, obligations, exclusions, duration, and remedies.",
+      "documentTypes": ["NDA", "ConfidentialityAgreement", "CDA"],
+      "keyExtractions": ["confidential-info-definition", "obligations", "exclusions", "duration", "remedies"],
+      "tags": ["legal", "nda", "confidentiality"]
+    },
+    {
+      "code": "ACT-003",
+      "name": "Lease Agreement Review",
+      "description": "Analysis of commercial and residential leases including NNN, office, and retail leases. Extracts rent, escalation, renewal options, permitted use, and landlord/tenant obligations.",
+      "documentTypes": ["CommercialLease", "ResidentialLease", "NNN", "OfficeLease", "RetailLease"],
+      "keyExtractions": ["rent", "escalation", "renewal-options", "permitted-use", "landlord-obligations", "tenant-obligations"],
+      "tags": ["legal", "lease", "real-estate"]
+    },
+    {
+      "code": "ACT-004",
+      "name": "Invoice Processing",
+      "description": "Validation and processing of vendor invoices, utility bills, subscription invoices, and AP processing documents. Extracts vendor info, line items, financial totals, payment terms, and performs validation checks.",
+      "documentTypes": ["Invoice", "UtilityBill", "SubscriptionInvoice", "APDocument"],
+      "keyExtractions": ["vendor-info", "line-items", "financial-totals", "payment-terms", "validation-checks"],
+      "tags": ["financial", "invoice", "accounts-payable"]
+    },
+    {
+      "code": "ACT-005",
+      "name": "SLA Analysis",
+      "description": "Review of service level agreements, managed service SLAs, and cloud SLAs. Extracts SLOs, measurement methodology, credits, escalation procedures, and maintenance exclusions.",
+      "documentTypes": ["SLA", "ManagedServiceSLA", "CloudSLA"],
+      "keyExtractions": ["SLOs", "measurement-methodology", "credits", "escalation", "maintenance-exclusions"],
+      "tags": ["legal", "sla", "service-level"]
+    },
+    {
+      "code": "ACT-006",
+      "name": "Employment Agreement Review",
+      "description": "Review of offer letters, employment contracts, and contractor agreements. Extracts compensation, equity, IP assignment, non-compete, non-solicit, and severance provisions.",
+      "documentTypes": ["OfferLetter", "EmploymentContract", "ContractorAgreement"],
+      "keyExtractions": ["compensation", "equity", "IP-assignment", "non-compete", "non-solicit", "severance"],
+      "tags": ["legal", "employment", "HR"]
+    },
+    {
+      "code": "ACT-007",
+      "name": "Statement of Work Analysis",
+      "description": "Analysis of SOWs, work orders, task orders, and project orders. Extracts deliverables, milestones, acceptance criteria, fees, and change order provisions.",
+      "documentTypes": ["SOW", "WorkOrder", "TaskOrder", "ProjectOrder"],
+      "keyExtractions": ["deliverables", "milestones", "acceptance-criteria", "fees", "change-orders"],
+      "tags": ["legal", "sow", "project"]
+    },
+    {
+      "code": "ACT-008",
+      "name": "General Legal Document Review",
+      "description": "Review of any unclassified legal document. Performs document classification, identifies parties and dates, maps obligations, and generates a risk summary.",
+      "documentTypes": ["LegalDocument", "Unclassified"],
+      "keyExtractions": ["document-classification", "parties", "dates", "obligations", "risk-summary"],
+      "tags": ["legal", "general", "triage"]
+    }
+  ],
+
+  "skills": [
+    {
+      "code": "SKL-001",
+      "name": "Citation Extraction",
+      "description": "Cite every claim with [Section: X, Page Y] format",
+      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["citation", "sourcing", "evidence"]
+    },
+    {
+      "code": "SKL-002",
+      "name": "Risk Flagging",
+      "description": "Highlight clauses requiring legal review with [RISK: HIGH/MEDIUM/LOW] severity ratings",
+      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["risk", "flagging", "compliance"]
+    },
+    {
+      "code": "SKL-003",
+      "name": "Summary Generation",
+      "description": "Generate executive summary in 3-5 bullet points at start of response",
+      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-004", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["summary", "executive", "overview"]
+    },
+    {
+      "code": "SKL-004",
+      "name": "Date Extraction",
+      "description": "Extract and normalize all dates to ISO 8601 in a Key Dates table",
+      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-004", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["dates", "extraction", "normalization"]
+    },
+    {
+      "code": "SKL-005",
+      "name": "Party Identification",
+      "description": "Identify all parties with full legal names, roles, and contact details",
+      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["parties", "identification", "entities"]
+    },
+    {
+      "code": "SKL-006",
+      "name": "Obligation Mapping",
+      "description": "Map mutual obligations into a structured Party/Obligation/Condition/Deadline table",
+      "compatibleActions": ["ACT-001", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["obligations", "mapping", "structured"]
+    },
+    {
+      "code": "SKL-007",
+      "name": "Defined Terms",
+      "description": "Extract all defined terms into an alphabetical Defined Terms Glossary",
+      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["definitions", "glossary", "terms"]
+    },
+    {
+      "code": "SKL-008",
+      "name": "Financial Terms",
+      "description": "Extract monetary amounts, payment schedules, rates, and financial obligations",
+      "compatibleActions": ["ACT-001", "ACT-003", "ACT-004", "ACT-005", "ACT-007"],
+      "tags": ["financial", "monetary", "payment"]
+    },
+    {
+      "code": "SKL-009",
+      "name": "Termination Analysis",
+      "description": "Analyze termination triggers, notice periods, cure periods, and consequences",
+      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["termination", "notice", "cure"]
+    },
+    {
+      "code": "SKL-010",
+      "name": "Jurisdiction and Governing Law",
+      "description": "Identify applicable law, jurisdiction, and dispute resolution mechanism",
+      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["jurisdiction", "governing-law", "dispute-resolution"]
+    }
+  ],
+
+  "knowledge": [
+    {
+      "code": "KNW-001",
+      "name": "Common Contract Terms Glossary",
+      "description": "Definitions for 50+ standard contract terms (A-W) including acceptance, amendment, arbitration, assignment, breach, cap on liability, confidential information, force majeure, governing law, indemnification, IP, limitation of liability, representations and warranties, severability, termination, and waiver.",
+      "contentType": "Reference",
+      "tags": ["glossary", "contract", "definitions"]
+    },
+    {
+      "code": "KNW-002",
+      "name": "NDA Review Checklist",
+      "description": "20-item checklist for NDA review covering party identification, purpose, confidential information definition and scope, standard exclusions, standard of care, permitted use, permitted disclosure, required disclosures, agreement term, survival of obligations, return/destruction, injunctive relief, damages limitations, residuals clause, mutual vs. one-way structure, non-solicitation, and governing law.",
+      "contentType": "Reference",
+      "tags": ["checklist", "nda", "review"]
+    },
+    {
+      "code": "KNW-003",
+      "name": "Lease Agreement Standards",
+      "description": "Commercial lease standards covering base rent and escalation (fixed, CPI, fair market), operating expense structures (gross, NN, NNN, modified gross, full-service gross), controllable vs. uncontrollable expense caps, premises definition, permitted use, exclusive use rights, lease term, renewal/expansion/termination options, tenant improvement allowance, alterations, assignment and subletting, insurance requirements, indemnification, events of default, and holdover provisions.",
+      "contentType": "Reference",
+      "tags": ["lease", "commercial", "standards"]
+    },
+    {
+      "code": "KNW-004",
+      "name": "Invoice Processing Guide",
+      "description": "AP invoice processing guide covering invoice types (standard, recurring, progress billing, retainage, credit memo, pro forma, self-billing), required fields, three-way and two-way matching, matching tolerances, duplicate detection, vendor master file validation, PO validation, contract compliance, tax validation, exception handling with 10 exception codes, escalation matrix, payment terms (Net 30/60/90, 2/10 Net 30, EOM), and approval workflow with delegation rules.",
+      "contentType": "Reference",
+      "tags": ["invoice", "accounts-payable", "processing"]
+    },
+    {
+      "code": "KNW-005",
+      "name": "SLA Metrics Reference",
+      "description": "SLA/SLO/SLI definitions, availability tiers (99.0% through 99.999% with annual/monthly downtime), scheduled maintenance exclusions, response time/latency metrics (p50/p95/p99/p99.9), throughput, error rate targets, incident severity levels (P1-P4) with response time and resolution SLAs, data durability, RPO/RTO tiers, tiered service credit schedules, credit caps, measurement methodology, and monthly availability reporting.",
+      "contentType": "Reference",
+      "tags": ["sla", "metrics", "availability"]
+    },
+    {
+      "code": "KNW-006",
+      "name": "Employment Law Quick Reference",
+      "description": "US employment law fundamentals covering at-will employment and exceptions, employee vs. independent contractor classification (behavioral/financial/type of relationship tests, California ABC test), FLSA minimum wage and overtime, non-compete agreements (state-by-state enforceability), non-solicitation, DTSA immunity notice requirement, work made for hire, invention assignment and moonlighting protection statutes, FMLA, ADA, USERRA, WARN Act, separation agreements, and OWBPA requirements for ADEA releases.",
+      "contentType": "Reference",
+      "tags": ["employment", "labor-law", "compliance"]
+    },
+    {
+      "code": "KNW-007",
+      "name": "IP Assignment Clause Library",
+      "description": "Annotated IP assignment clauses including broad work product assignment, work-performed-for assignment, independent contractor work-for-hire and assignment, background IP definition and license-back, prior inventions exclusion schedule, AI/ML-specific model and training data assignment, open source compliance clause, moral rights waiver, future patents assignment with power of attorney, and moonlighting protection statute compliance.",
+      "contentType": "Reference",
+      "tags": ["IP", "assignment", "clauses"]
+    },
+    {
+      "code": "KNW-008",
+      "name": "Termination and Remedy Provisions",
+      "description": "Comprehensive termination and remedy reference covering termination for cause triggers (material breach, insolvency, breach of R&Ws, regulatory events), notice and cure periods, automatic vs. right-to-terminate, termination for convenience with standard notice periods, termination fees, post-termination transition assistance, return and destruction of data, survival of provisions, money damages types, mutual waiver of consequential damages with carve-outs, liquidated damages, injunctive relief, exclusive remedy provisions, and set-off rights.",
+      "contentType": "Reference",
+      "tags": ["termination", "remedies", "provisions"]
+    },
+    {
+      "code": "KNW-009",
+      "name": "Governing Law and Jurisdiction Guide",
+      "description": "Governing law and dispute resolution reference covering what governing law determines, common US law choices (Delaware, New York, California, Texas, Illinois), international choices (English law, CISG exclusion), conflict-of-law exclusions, exclusive vs. non-exclusive jurisdiction, arbitration (AAA/JAMS/ICC/LCIA/SIAC/ICDR), seat vs. venue, essential arbitration clause elements, carve-outs from arbitration, tiered dispute resolution, interim relief, New York Convention enforcement.",
+      "contentType": "Reference",
+      "tags": ["jurisdiction", "governing-law", "arbitration"]
+    },
+    {
+      "code": "KNW-010",
+      "name": "Legal Document Red Flags Catalog",
+      "description": "32 red flags across 10 categories with severity ratings covering liability/indemnification (uncapped indemnification, asymmetric indemnification), payment/financial (automatic escalation without cap, unilateral price change), termination (no T4C right, immediate acceleration), data/privacy (vendor data ownership claim), IP (broad work product ownership), contract structure (automatic renewal without notification, unilateral modification), dispute resolution, confidentiality (residuals clause), employment/personnel, and miscellaneous flags.",
+      "contentType": "Reference",
+      "tags": ["red-flags", "risk", "compliance"]
+    }
+  ],
+
+  "tools": [
+    {
+      "code": "TL-001",
+      "name": "DocumentSearch",
+      "handler": "DocumentSearchHandler",
+      "description": "Search knowledge base and document index for relevant content matching a query",
+      "tags": ["search", "rag", "knowledge"]
+    },
+    {
+      "code": "TL-002",
+      "name": "AnalysisRetrieval",
+      "handler": "AnalysisQueryHandler",
+      "description": "Retrieve previously computed analysis results for a specific document or analysis session",
+      "tags": ["retrieval", "analysis", "history"]
+    },
+    {
+      "code": "TL-003",
+      "name": "KnowledgeRetrieval",
+      "handler": "KnowledgeRetrievalHandler",
+      "description": "Retrieve specific knowledge source content by identifier or type from the knowledge store",
+      "tags": ["retrieval", "knowledge", "reference"]
+    },
+    {
+      "code": "TL-004",
+      "name": "TextRefinement",
+      "handler": "TextRefinementHandler",
+      "description": "Refine, reformat, or restructure a text section using AI-assisted editing",
+      "tags": ["refinement", "editing", "formatting"]
+    },
+    {
+      "code": "TL-005",
+      "name": "CitationExtractor",
+      "handler": "CitationExtractorHandler",
+      "description": "Extract and normalize citation references from analysis results and document text",
+      "tags": ["extraction", "citations", "references"]
+    },
+    {
+      "code": "TL-006",
+      "name": "SummaryGenerator",
+      "handler": "SummaryGeneratorHandler",
+      "description": "Generate structured summaries of document sections or complete documents",
+      "tags": ["summary", "generation", "condensation"]
+    },
+    {
+      "code": "TL-007",
+      "name": "RedFlagDetector",
+      "handler": "RedFlagDetectorHandler",
+      "description": "Detect risk indicators, problematic clauses, and compliance issues in document text",
+      "tags": ["risk", "detection", "compliance"]
+    },
+    {
+      "code": "TL-008",
+      "name": "PartyExtractor",
+      "handler": "PartyExtractorHandler",
+      "description": "Extract and normalize party information (people, organizations, roles) from document text",
+      "tags": ["extraction", "parties", "entities"]
+    }
+  ],
+
+  "models": [
+    {
+      "name": "gpt-4o",
+      "provider": "AzureOpenAI",
+      "contextWindow": 128000,
+      "costTier": "high",
+      "speedTier": "medium",
+      "recommendedFor": ["deep-analysis", "extraction", "legal-reasoning", "financial-calculation"],
+      "avoidFor": ["classification", "triage", "simple-summary"]
+    },
+    {
+      "name": "gpt-4o-mini",
+      "provider": "AzureOpenAI",
+      "contextWindow": 128000,
+      "costTier": "low",
+      "speedTier": "fast",
+      "recommendedFor": ["classification", "triage", "simple-summary", "condition-routing"],
+      "avoidFor": ["complex-reasoning", "detailed-extraction", "legal-reasoning"]
+    },
+    {
+      "name": "gpt-4-turbo",
+      "provider": "AzureOpenAI",
+      "contextWindow": 128000,
+      "costTier": "high",
+      "speedTier": "slow",
+      "recommendedFor": ["legacy-compatibility"],
+      "avoidFor": ["new-playbooks"]
+    }
+  ],
+
+  "modelSelectionRules": [
+    { "taskType": "classification", "model": "gpt-4o-mini", "reason": "Bounded decision with well-defined categories; speed over depth" },
+    { "taskType": "triage", "model": "gpt-4o-mini", "reason": "Binary or categorical decisions; speed matters more than depth" },
+    { "taskType": "deep-analysis", "model": "gpt-4o", "reason": "Multi-faceted analysis with nuanced reasoning requires full model" },
+    { "taskType": "extraction", "model": "gpt-4o", "reason": "Accurate extraction of structured data from unstructured text requires strong reasoning" },
+    { "taskType": "summarization-simple", "model": "gpt-4o-mini", "reason": "TL;DR and bullet summaries are well-handled by mini" },
+    { "taskType": "summarization-detailed", "model": "gpt-4o", "reason": "Comprehensive summaries with citations need full model" },
+    { "taskType": "legal-reasoning", "model": "gpt-4o", "reason": "Legal analysis requires nuanced interpretation and risk assessment" },
+    { "taskType": "financial-calculation", "model": "gpt-4o", "reason": "Financial computations and reconciliation require accuracy" },
+    { "taskType": "condition-routing", "model": "gpt-4o-mini", "reason": "Simple boolean or categorical checks" }
+  ],
+
+  "compositions": {
+    "PB-001": { "name": "Standard Contract Review", "action": "ACT-001", "skills": ["SKL-001", "SKL-002", "SKL-003"], "knowledge": ["KNW-001"], "tools": ["TL-001", "TL-002"] },
+    "PB-002": { "name": "NDA Deep Review", "action": "ACT-002", "skills": ["SKL-001", "SKL-004", "SKL-005"], "knowledge": ["KNW-002"], "tools": ["TL-001", "TL-002", "TL-007"] },
+    "PB-003": { "name": "Commercial Lease Analysis", "action": "ACT-003", "skills": ["SKL-003", "SKL-006"], "knowledge": ["KNW-003"], "tools": ["TL-001", "TL-002"] },
+    "PB-004": { "name": "Invoice Validation", "action": "ACT-004", "skills": ["SKL-004", "SKL-008"], "knowledge": ["KNW-004"], "tools": ["TL-001", "TL-003"] },
+    "PB-005": { "name": "SLA Compliance Review", "action": "ACT-005", "skills": ["SKL-002", "SKL-006"], "knowledge": ["KNW-005"], "tools": ["TL-001", "TL-002", "TL-007"] },
+    "PB-006": { "name": "Employment Agreement Review", "action": "ACT-006", "skills": ["SKL-005", "SKL-007", "SKL-009"], "knowledge": ["KNW-006", "KNW-007"], "tools": ["TL-001", "TL-002"] },
+    "PB-007": { "name": "Statement of Work Analysis", "action": "ACT-007", "skills": ["SKL-003", "SKL-006"], "knowledge": ["KNW-005"], "tools": ["TL-001", "TL-002"] },
+    "PB-008": { "name": "IP Assignment Review", "action": "ACT-001", "skills": ["SKL-007", "SKL-009"], "knowledge": ["KNW-007"], "tools": ["TL-001", "TL-002", "TL-008"] },
+    "PB-009": { "name": "Termination Risk Assessment", "action": "ACT-001", "skills": ["SKL-002", "SKL-009"], "knowledge": ["KNW-008"], "tools": ["TL-001", "TL-007"] },
+    "PB-010": { "name": "Quick Legal Scan", "action": "ACT-008", "skills": ["SKL-002", "SKL-010"], "knowledge": ["KNW-010"], "tools": ["TL-001", "TL-007"] }
+  }
+}

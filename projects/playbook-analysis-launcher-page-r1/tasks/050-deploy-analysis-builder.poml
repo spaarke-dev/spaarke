@@ -1,0 +1,38 @@
+<task id="050" project="playbook-analysis-launcher-page-r1">
+  <metadata>
+    <title>Deploy Analysis Builder Code Page to Dataverse</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>040, 041, 042, 043, 044</dependencies>
+    <blocks>054</blocks>
+    <tags>deploy, dataverse, code-page</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment with explicit steps</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy the Analysis Builder code page (dist/analysisbuilder.html) to Dataverse as web
+    resource sprk_analysisbuilder. Deploy updated command bar script.
+  </prompt>
+
+  <role>SPAARKE deployment engineer.</role>
+
+  <goal>Analysis Builder code page and updated command bar live in Dataverse dev environment.</goal>
+
+  <steps>
+    <step order="1">Build Analysis Builder: cd src/solutions/AnalysisBuilder &amp;&amp; npm run build</step>
+    <step order="2">Upload dist/analysisbuilder.html as Dataverse web resource sprk_analysisbuilder</step>
+    <step order="3">Upload updated sprk_analysis_commands.js as Dataverse web resource</step>
+    <step order="4">Publish customizations</step>
+    <step order="5">Verify "+New Analysis" opens the new code page dialog</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_analysisbuilder web resource deployed</criterion>
+    <criterion testable="true">sprk_analysis_commands.js updated in Dataverse</criterion>
+    <criterion testable="true">"+New Analysis" opens new code page (not old Custom Page)</criterion>
+  </acceptance-criteria>
+</task>
