@@ -1,4 +1,7 @@
 /**
+ * @deprecated Use types from @spaarke/auth shared library instead.
+ * Import { IAuthConfig, ITokenResult, TokenSource } from '@spaarke/auth';
+ *
  * Authentication Types for Analysis Workspace PCF
  *
  * These types define the authentication provider contract and related data structures

@@ -1,4 +1,15 @@
 /**
+ * @deprecated Use @spaarke/auth shared library instead.
+ * This file is retained for reference only. New code should use:
+ *   import { initAuth, getAuthProvider, authenticatedFetch } from '@spaarke/auth';
+ * See control/authInit.ts for the replacement initialization pattern.
+ *
+ * Scope reconciliation note:
+ *   - This file used api://<BFF_APP_ID>/SDAP.Access
+ *   - @spaarke/auth uses api://<BFF_APP_ID>/user_impersonation (standard)
+ *   - Both scopes are on the same App Registration; user_impersonation is canonical going forward.
+ *
+ * Original description:
  * MSAL Authentication Service for BFF API Access
  *
  * CRITICAL: Uses named scope api://<BFF_APP_ID>/SDAP.Access

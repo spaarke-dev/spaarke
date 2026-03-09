@@ -41,7 +41,7 @@ import { RichTextEditor } from "./RichTextEditor";
 import { SourceDocumentViewer } from "./SourceDocumentViewer";
 import { ResumeSessionDialog } from "./ResumeSessionDialog";
 import { useSseStream } from "../hooks/useSseStream";
-import { MsalAuthProvider, loginRequest } from "../services/auth";
+import { getAuthProvider } from "@spaarke/auth";
 import { SprkChat } from "@spaarke/ui-components/dist/components/SprkChat";
 import type { IChatSession } from "@spaarke/ui-components/dist/components/SprkChat";
 
@@ -374,8 +374,8 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     fileId,
     apiBaseUrl,
     webApi,
-    // Note: getAccessToken and isAuthReady props are available but not used
-    // Component uses internal MSAL auth provider instead
+    // isAuthReady is set by the parent (index.ts) once @spaarke/auth is initialized
+    isAuthReady = false,
     useLegacyChat = false,
     onWorkingDocumentChange,
     onChatHistoryChange,
@@ -423,9 +423,8 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     // Playbook info (loaded from analysis record)
     const [playbookId, setPlaybookId] = React.useState<string | null>(null);
 
-    // Auth state
+    // Auth state (uses @spaarke/auth shared library)
     const [isAuthInitialized, setIsAuthInitialized] = React.useState(false);
-    const authProviderRef = React.useRef<MsalAuthProvider | null>(null);
 
     // Ref to track current chatMessages for save operations (avoids stale closure)
     const chatMessagesRef = React.useRef<IChatMessage[]>([]);
@@ -441,31 +440,24 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     // Pending execution - stores analysis data when auth wasn't ready at load time
     const [pendingExecution, setPendingExecution] = React.useState<{ analysis: IAnalysis; docId: string } | null>(null);
 
-    // Initialize MSAL auth provider
+    // Check if @spaarke/auth is already initialized (by index.ts initializeAuth)
     React.useEffect(() => {
-        const initAuth = async () => {
-            try {
-                logInfo("AnalysisWorkspaceApp", "Initializing MSAL auth provider...");
-                const authProvider = MsalAuthProvider.getInstance();
-                await authProvider.initialize();
-                authProviderRef.current = authProvider;
-                setIsAuthInitialized(true);
-                logInfo("AnalysisWorkspaceApp", "MSAL auth initialized successfully");
-            } catch (err) {
-                logError("AnalysisWorkspaceApp", "Failed to initialize MSAL auth", err);
-                // Continue without auth - will fail on API calls
-                setIsAuthInitialized(true);
-            }
-        };
-        initAuth();
-    }, []);
-
-    // Function to get access token for API calls
-    const getAccessToken = React.useCallback(async (): Promise<string> => {
-        if (!authProviderRef.current) {
-            throw new Error("Auth provider not initialized");
+        try {
+            getAuthProvider(); // Will throw if not initialized
+            setIsAuthInitialized(true);
+            logInfo("AnalysisWorkspaceApp", "@spaarke/auth provider available");
+        } catch {
+            logError("AnalysisWorkspaceApp", "@spaarke/auth not yet initialized, waiting...");
+            // Auth may not be ready yet (async init in index.ts).
+            // The parent will re-render with isAuthReady=true once initializeAuth completes.
+            // Check props.isAuthReady on re-render.
         }
-        return authProviderRef.current.getToken(loginRequest.scopes);
+    }, [isAuthReady]);
+
+    // Function to get access token for API calls (via @spaarke/auth)
+    const getAccessToken = React.useCallback(async (): Promise<string> => {
+        const provider = getAuthProvider();
+        return provider.getAccessToken();
     }, []);
 
     // Acquire and refresh access token for SprkChat component (new chat system)
@@ -545,16 +537,15 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         logInfo("AnalysisWorkspaceApp", `Executing analysis for document ${docId} with action ${analysis._sprk_actionid_value}`);
 
         try {
-            // Get access token
+            // Get access token via @spaarke/auth
             let authHeaders: Record<string, string> = {};
-            if (authProviderRef.current) {
-                try {
-                    const token = await authProviderRef.current.getToken(loginRequest.scopes);
-                    authHeaders = { "Authorization": `Bearer ${token}` };
-                } catch (authErr) {
-                    logError("AnalysisWorkspaceApp", "Failed to acquire auth token for execute", authErr);
-                    throw new Error("Authentication failed. Please refresh and try again.");
-                }
+            try {
+                const provider = getAuthProvider();
+                const token = await provider.getAccessToken();
+                authHeaders = { "Authorization": `Bearer ${token}` };
+            } catch (authErr) {
+                logError("AnalysisWorkspaceApp", "Failed to acquire auth token for execute", authErr);
+                throw new Error("Authentication failed. Please refresh and try again.");
             }
 
             // Build request body matching AnalysisExecuteRequest

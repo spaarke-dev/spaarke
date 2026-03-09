@@ -38,7 +38,8 @@ import {
 import { AnalysisWorkspaceApp } from "./components/AnalysisWorkspaceApp";
 import { logInfo, logError } from "./utils/logger";
 import { getApiBaseUrl } from "./utils/environmentVariables";
-import { AuthService } from "./services/AuthService";
+import { initializeAuth } from "./authInit";
+import { getAuthProvider } from "@spaarke/auth";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme Utilities
@@ -122,8 +123,7 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<IIn
     // Environment variable loaded API URL
     private _apiBaseUrl: string = "";
 
-    // Authentication
-    private _authService: AuthService | null = null;
+    // Authentication (@spaarke/auth)
     private _isAuthReady: boolean = false;
     private _tenantId: string = "";
     private _clientAppId: string = "";
@@ -198,7 +198,9 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<IIn
     }
 
     /**
-     * Initialize MSAL authentication
+     * Initialize authentication via @spaarke/auth shared library.
+     * Replaces local AuthService with centralized auth provider.
+     * Scope reconciliation: uses user_impersonation (standard) instead of SDAP.Access.
      */
     private async initializeAuth(): Promise<void> {
         try {
@@ -218,13 +220,12 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<IIn
                 return;
             }
 
-            logInfo("AnalysisWorkspace", `Initializing MSAL with tenantId: ${this._tenantId}, clientAppId: ${this._clientAppId.substring(0, 8)}...`);
+            logInfo("AnalysisWorkspace", `Initializing @spaarke/auth with tenantId: ${this._tenantId}, clientAppId: ${this._clientAppId.substring(0, 8)}...`);
 
-            // Create and initialize AuthService
-            this._authService = new AuthService(this._tenantId, this._clientAppId, this._bffAppId);
-            await this._authService.initialize();
+            // Initialize via @spaarke/auth shared library
+            await initializeAuth(this._tenantId, this._clientAppId, this._bffAppId, this._apiBaseUrl);
             this._isAuthReady = true;
-            logInfo("AnalysisWorkspace", `MSAL initialized. Scope: ${this._authService.getScope()}`);
+            logInfo("AnalysisWorkspace", `@spaarke/auth initialized. Using user_impersonation scope.`);
 
             // Re-render with auth available
             this.renderComponent();
@@ -236,14 +237,12 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<IIn
     }
 
     /**
-     * Get access token for BFF API calls
-     * This is passed to the React component
+     * Get access token for BFF API calls.
+     * Uses @spaarke/auth getAuthProvider() for token acquisition.
      */
     private getAccessToken = async (): Promise<string> => {
-        if (!this._authService) {
-            throw new Error("Authentication not initialized");
-        }
-        return this._authService.getAccessToken();
+        const provider = getAuthProvider();
+        return provider.getAccessToken();
     };
 
     public updateView(context: ComponentFramework.Context<IInputs>): void {

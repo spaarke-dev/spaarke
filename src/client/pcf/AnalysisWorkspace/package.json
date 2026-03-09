@@ -29,6 +29,7 @@
     "marked": "^15.0.6"
   },
   "devDependencies": {
+    "@spaarke/auth": "file:../../shared/Spaarke.Auth",
     "@eslint/js": "^9.25.1",
     "@fluentui/react-components": "^9.54.0",
     "@fluentui/react-icons": "^2.0.311",

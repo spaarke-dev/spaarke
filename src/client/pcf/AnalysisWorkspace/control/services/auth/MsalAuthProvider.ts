@@ -1,3 +1,10 @@
+/**
+ * @deprecated Use @spaarke/auth shared library instead.
+ * This file is retained for reference only. New code should use:
+ *   import { initAuth, getAuthProvider, authenticatedFetch } from '@spaarke/auth';
+ * See control/authInit.ts for the replacement initialization pattern.
+ */
+
 import {
   PublicClientApplication,
   AccountInfo,
@@ -10,6 +17,7 @@ import { msalConfig, validateMsalConfig } from "./msalConfig";
 import { IAuthProvider, TokenCacheEntry } from "../../types/auth";
 
 /**
+ * @deprecated Use @spaarke/auth shared library instead.
  * MSAL Authentication Provider for Universal Dataset Grid
  *
  * Responsibilities:

@@ -1,6 +1,13 @@
+/**
+ * @deprecated Use @spaarke/auth shared library instead.
+ * Configuration is now handled via control/authInit.ts with IAuthConfig.
+ * See control/authInit.ts for the replacement pattern.
+ */
+
 import { Configuration, LogLevel } from "@azure/msal-browser";
 
 /**
+ * @deprecated Use @spaarke/auth shared library instead.
  * MSAL Configuration for SDAP Universal Dataset Grid
  *
  * This configuration enables SSO silent authentication in Dataverse PCF controls,
