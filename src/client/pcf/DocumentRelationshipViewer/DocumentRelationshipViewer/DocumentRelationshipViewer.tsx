@@ -20,8 +20,6 @@ import { DocumentFlowchart24Regular, Filter20Regular } from "@fluentui/react-ico
 import { IInputs } from "./generated/ManifestTypes";
 import { DocumentGraph } from "./components/DocumentGraph";
 import { useVisualizationApi, formatVisualizationError } from "./hooks/useVisualizationApi";
-import { MsalAuthProvider } from "./services/auth/MsalAuthProvider";
-import { loginRequest } from "./services/auth/msalConfig";
 import type { DocumentNode } from "./types/graph";
 import { RELATIONSHIP_TYPES, type RelationshipTypeKey } from "./types/api";
 
@@ -30,6 +28,9 @@ const CONTROL_VERSION = "1.0.31";
 
 /**
  * Props for the DocumentRelationshipViewer component
+ *
+ * MIGRATION NOTE: authProvider is no longer needed. Authentication is handled
+ * transparently by @spaarke/auth (initialized in index.ts via authInit.ts).
  */
 export interface IDocumentRelationshipViewerProps {
     /** PCF context for accessing parameters and platform features */
@@ -38,8 +39,6 @@ export interface IDocumentRelationshipViewerProps {
     notifyOutputChanged: () => void;
     /** Callback when user selects a document node */
     onDocumentSelect?: (documentId: string) => void;
-    /** MSAL authentication provider for API calls */
-    authProvider: MsalAuthProvider;
 }
 
 /**
@@ -177,7 +176,6 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
     context,
     notifyOutputChanged,
     onDocumentSelect,
-    authProvider,
 }) => {
     const styles = useStyles();
     const theme = resolveTheme(context);
@@ -198,30 +196,8 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
     // Relationship type filter state (empty array = all types)
     const [selectedRelationshipTypes, setSelectedRelationshipTypes] = React.useState<string[]>([]);
 
-    // Access token state for authenticated API calls
-    const [accessToken, setAccessToken] = React.useState<string | undefined>(undefined);
-    const [authError, setAuthError] = React.useState<string | null>(null);
-
-    // Acquire access token on mount and when auth provider changes
-    React.useEffect(() => {
-        const acquireToken = async () => {
-            try {
-                console.log("[DocumentRelationshipViewer] Acquiring access token...");
-                const token = await authProvider.getToken(loginRequest.scopes);
-                setAccessToken(token);
-                setAuthError(null);
-                console.log("[DocumentRelationshipViewer] Access token acquired successfully");
-            } catch (error) {
-                console.error("[DocumentRelationshipViewer] Failed to acquire token:", error);
-                setAuthError(error instanceof Error ? error.message : "Authentication failed");
-                setAccessToken(undefined);
-            }
-        };
-
-        void acquireToken();
-    }, [authProvider]);
-
-    // Fetch visualization data from API (only when we have a token)
+    // Fetch visualization data from API
+    // Authentication is handled transparently by authenticatedFetch() from @spaarke/auth
     const {
         nodes,
         edges,
@@ -232,12 +208,11 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
         apiBaseUrl,
         documentId,
         tenantId,
-        accessToken,
         threshold: 0.65,
         limit: 25,
         depth: 1,
         relationshipTypes: selectedRelationshipTypes.length > 0 ? selectedRelationshipTypes : undefined,
-        enabled: !!documentId && documentId.trim() !== "" && !!tenantId && !!accessToken,
+        enabled: !!documentId && documentId.trim() !== "" && !!tenantId,
     });
 
     // Get container dimensions for layout
@@ -322,11 +297,10 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
     // Check if we should show the placeholder (missing document or tenant)
     const showPlaceholder = !documentId || documentId.trim() === "";
     const showTenantMissing = documentId && !tenantId;
-    const showAuthenticating = !accessToken && !authError;
     // Check if we have measured dimensions
     const hasDimensions = dimensions !== null && dimensions.width > 0 && dimensions.height > 0;
-    // Format error message for display - auth errors take priority
-    const errorMessage = authError ?? (error ? formatVisualizationError(error) : null);
+    // Format error message for display
+    const errorMessage = error ? formatVisualizationError(error) : null;
 
     return (
         <FluentProvider theme={theme}>
@@ -377,11 +351,7 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
 
                 {/* Graph Container - fills available space */}
                 <div className={styles.graphContainer} ref={containerRef}>
-                    {showAuthenticating ? (
-                        <div className={styles.placeholder}>
-                            <Spinner size="large" label="Authenticating..." />
-                        </div>
-                    ) : isLoading ? (
+                    {isLoading ? (
                         <div className={styles.placeholder}>
                             <Spinner size="large" label="Loading relationships..." />
                         </div>

@@ -1,4 +1,10 @@
 /**
+ * @deprecated This file is deprecated and will be removed in a future version.
+ * Authentication is now handled by @spaarke/auth shared package.
+ * Use types from '@spaarke/auth' instead:
+ *   import type { IAuthConfig, ITokenResult } from '@spaarke/auth';
+ *
+ * --- Original description ---
  * Authentication Types for DocumentRelationshipViewer PCF
  *
  * These types define the authentication provider contract and related data structures

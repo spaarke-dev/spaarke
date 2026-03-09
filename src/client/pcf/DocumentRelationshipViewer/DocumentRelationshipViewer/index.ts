@@ -3,7 +3,7 @@ import {
     DocumentRelationshipViewer as DocumentRelationshipViewerComponent,
     IDocumentRelationshipViewerProps,
 } from "./DocumentRelationshipViewer";
-import { MsalAuthProvider } from "./services/auth/MsalAuthProvider";
+import { initializeAuth } from "./authInit";
 import * as React from "react";
 
 /**
@@ -11,6 +11,9 @@ import * as React from "react";
  *
  * Displays an interactive graph visualization of document relationships
  * based on vector similarity from Azure AI Search.
+ *
+ * Authentication is handled by @spaarke/auth (initialized via authInit.ts).
+ * API calls use authenticatedFetch() for transparent token management.
  *
  * Follows:
  * - ADR-006: PCF for all custom UI
@@ -22,15 +25,11 @@ export class DocumentRelationshipViewer
 {
     private notifyOutputChanged: () => void;
     private selectedDocumentId: string | undefined;
-    private authProvider: MsalAuthProvider;
-
-    constructor() {
-        // Initialize MSAL auth provider singleton
-        this.authProvider = MsalAuthProvider.getInstance();
-    }
+    private authInitialized = false;
 
     /**
      * Initialize the control instance.
+     * Sets up @spaarke/auth with configuration from PCF manifest parameters.
      */
     public init(
         context: ComponentFramework.Context<IInputs>,
@@ -39,10 +38,24 @@ export class DocumentRelationshipViewer
     ): void {
         this.notifyOutputChanged = notifyOutputChanged;
 
-        // Initialize MSAL asynchronously (don't block init)
-        void this.authProvider.initialize().catch((error) => {
-            console.error("[DocumentRelationshipViewer] MSAL initialization failed:", error);
-        });
+        // Extract auth configuration from manifest parameters
+        // These default to the dev environment values from the original msalConfig.ts
+        const tenantId = context.parameters.tenantId?.raw ?? "a221a95e-6abc-4434-aecc-e48338a1b2f2";
+        const clientAppId = (context.parameters as Record<string, { raw?: string }>).clientAppId?.raw
+            ?? "170c98e1-d486-4355-bcbe-170454e0207c";
+        const bffAppId = (context.parameters as Record<string, { raw?: string }>).bffAppId?.raw
+            ?? "1e40baad-e065-4aea-a8d4-4b7ab273458c";
+        const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? "https://spe-api-dev-67e2xz.azurewebsites.net";
+
+        // Initialize @spaarke/auth asynchronously (don't block init)
+        void initializeAuth(tenantId, clientAppId, bffAppId, apiBaseUrl)
+            .then(() => {
+                this.authInitialized = true;
+                console.info("[DocumentRelationshipViewer] @spaarke/auth initialized");
+            })
+            .catch((error) => {
+                console.error("[DocumentRelationshipViewer] @spaarke/auth initialization failed:", error);
+            });
     }
 
     /**
@@ -56,7 +69,6 @@ export class DocumentRelationshipViewer
             context,
             notifyOutputChanged: this.notifyOutputChanged,
             onDocumentSelect: this.handleDocumentSelect.bind(this),
-            authProvider: this.authProvider,
         };
 
         return React.createElement(DocumentRelationshipViewerComponent, props);

@@ -18,6 +18,14 @@
     <property name="tenantId" display-name-key="Tenant ID" description-key="Tenant identifier for API routing"
               of-type="SingleLine.Text" usage="input" required="false" />
 
+    <!-- Input: Client Application ID (for MSAL authentication via @spaarke/auth) -->
+    <property name="clientAppId" display-name-key="Client App ID" description-key="Azure AD Client Application ID for MSAL"
+              of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- Input: BFF Application ID (for scope construction via @spaarke/auth) -->
+    <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF Application ID for OAuth scope"
+              of-type="SingleLine.Text" usage="input" required="false" />
+
     <!-- Input: API Base URL -->
     <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL"
               of-type="SingleLine.Text" usage="input" required="false" />

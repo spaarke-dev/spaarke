@@ -12,6 +12,9 @@ import type { VisualizationQueryParams, GraphMetadata } from "../types/api";
 
 /**
  * Configuration options for the visualization API hook.
+ *
+ * MIGRATION NOTE: accessToken is no longer needed. Authentication is handled
+ * transparently by authenticatedFetch() from @spaarke/auth.
  */
 export interface UseVisualizationApiOptions {
     /** BFF API base URL */
@@ -20,8 +23,6 @@ export interface UseVisualizationApiOptions {
     documentId: string;
     /** Tenant ID for multi-tenant routing */
     tenantId: string;
-    /** Optional access token for authenticated requests */
-    accessToken?: string;
     /** Minimum similarity threshold (default: 0.65) */
     threshold?: number;
     /** Maximum documents per level (default: 25) */
@@ -75,7 +76,6 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
         apiBaseUrl,
         documentId,
         tenantId,
-        accessToken,
         threshold = 0.65,
         limit = 25,
         depth = 1,
@@ -130,7 +130,7 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
                 depth,
             });
 
-            const result = await service.getRelatedDocuments(documentId, queryParams, accessToken);
+            const result = await service.getRelatedDocuments(documentId, queryParams);
 
             console.log("[VisualizationApi] Received data:", {
                 nodeCount: result.nodes.length,
@@ -162,7 +162,7 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
         } finally {
             setIsLoading(false);
         }
-    }, [enabled, documentId, tenantId, service, queryParams, accessToken, threshold, limit, depth]);
+    }, [enabled, documentId, tenantId, service, queryParams, threshold, limit, depth]);
 
     // Fetch on mount and when dependencies change
     React.useEffect(() => {

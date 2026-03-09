@@ -1,6 +1,14 @@
 import { Configuration, LogLevel } from "@azure/msal-browser";
 
 /**
+ * @deprecated This file is deprecated and will be removed in a future version.
+ * Use @spaarke/auth instead:
+ *   import { initAuth } from '@spaarke/auth';
+ *   await initAuth({ clientId, authority, bffApiScope, bffBaseUrl, redirectUri });
+ *
+ * See authInit.ts for the migration wrapper.
+ *
+ * --- Original description ---
  * MSAL Configuration for DocumentRelationshipViewer PCF
  *
  * This configuration enables SSO silent authentication in Dataverse PCF controls,

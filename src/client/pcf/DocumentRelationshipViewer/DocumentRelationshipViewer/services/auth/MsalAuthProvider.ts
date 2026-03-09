@@ -10,6 +10,15 @@ import { msalConfig, validateMsalConfig } from "./msalConfig";
 import { IAuthProvider, TokenCacheEntry } from "../../types/auth";
 
 /**
+ * @deprecated This file is deprecated and will be removed in a future version.
+ * Use @spaarke/auth instead:
+ *   import { initAuth, authenticatedFetch } from '@spaarke/auth';
+ *   await initAuth({ clientId, authority, bffApiScope, bffBaseUrl });
+ *   const response = await authenticatedFetch('/api/ai/visualization/related/123');
+ *
+ * See authInit.ts for the migration wrapper.
+ *
+ * --- Original description ---
  * MSAL Authentication Provider for DocumentRelationshipViewer PCF
  *
  * Provides SSO authentication for the visualization API.

@@ -5,6 +5,7 @@
  * and mapping it to the PCF graph types.
  */
 
+import { authenticatedFetch } from '@spaarke/auth';
 import type {
     DocumentGraphResponse,
     ApiDocumentNode,
@@ -29,30 +30,24 @@ export class VisualizationApiService {
     /**
      * Fetch related documents for a given source document.
      *
+     * Uses authenticatedFetch() from @spaarke/auth for transparent token management.
+     * Token acquisition, caching, and 401 retry are handled by the shared auth library.
+     *
      * @param documentId - Source document GUID
      * @param params - Query parameters including tenantId
-     * @param accessToken - Optional Bearer token for authentication
      * @returns Graph data with nodes and edges for visualization
      */
     async getRelatedDocuments(
         documentId: string,
         params: VisualizationQueryParams,
-        accessToken?: string
     ): Promise<{ nodes: DocumentNode[]; edges: DocumentEdge[]; metadata: GraphMetadata }> {
         const url = this.buildUrl(documentId, params);
 
-        const headers: Record<string, string> = {
-            "Content-Type": "application/json",
-        };
-
-        if (accessToken) {
-            headers.Authorization = `Bearer ${accessToken}`;
-        }
-
-        const response = await fetch(url, {
+        const response = await authenticatedFetch(url, {
             method: "GET",
-            headers,
-            credentials: "include", // Include cookies for same-origin requests
+            headers: {
+                "Content-Type": "application/json",
+            },
         });
 
         if (!response.ok) {
