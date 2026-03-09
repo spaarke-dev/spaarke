@@ -1,4 +1,9 @@
 /**
+ * @deprecated Use @spaarke/auth (via authInit.ts) instead. This file is scheduled for removal.
+ * BFF base URL resolution is now handled by @spaarke/auth's resolveConfig().
+ */
+
+/**
  * BFF API base URL discovery for the AnalysisWorkspace Code Page.
  *
  * The workspace runs as an HTML web resource inside Dataverse — either

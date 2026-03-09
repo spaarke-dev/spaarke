@@ -20,7 +20,7 @@
  * @version 2.0.0 (Code Page migration)
  */
 
-import { getAccessToken } from "./authService";
+import { getAccessToken } from "./authInit";
 
 // ============================================================================
 // SSE Event Types

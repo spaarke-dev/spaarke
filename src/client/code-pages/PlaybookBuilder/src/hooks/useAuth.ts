@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { initializeAuth, getClientUrl, stopTokenRefresh, AuthError } from "../services/authService";
+import { initializeAuth, getClientUrl, stopTokenRefresh, AuthError } from "../services/authInit";
 
 export interface AuthState {
     isAuthenticated: boolean;

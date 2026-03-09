@@ -62,7 +62,7 @@ import {
     clearTokenCache,
     isXrmAvailable,
     AuthError,
-} from "./services/authService";
+} from "./services/authInit";
 import {
     detectContext,
     restoreSession,

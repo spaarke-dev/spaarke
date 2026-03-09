@@ -1,4 +1,10 @@
 /**
+ * @deprecated Use authInit.ts instead. This file is scheduled for removal.
+ * All token acquisition logic has been migrated to @spaarke/auth.
+ * Import from './authInit' for initializeAuth, getAccessToken, clearTokenCache.
+ */
+
+/**
  * Authentication Service for AnalysisWorkspace Code Page
  *
  * Acquires access tokens for the BFF API using a multi-strategy approach

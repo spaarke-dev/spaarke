@@ -34,7 +34,7 @@ import {
     initializeAuth,
     clearTokenCache,
     AuthError,
-} from "../services/authService";
+} from "../services/authInit";
 
 // ---------------------------------------------------------------------------
 // Constants

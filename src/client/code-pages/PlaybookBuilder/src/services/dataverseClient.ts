@@ -18,7 +18,7 @@
  * @see spec.md - PCF Coupling Points to Replace (11 Total)
  */
 
-import { getAccessToken, getClientUrl, isSameOriginDataverse } from "./authService";
+import { getAccessToken, getClientUrl, isSameOriginDataverse } from "./authInit";
 
 const LOG_PREFIX = "[PlaybookBuilder:DataverseClient]";
 

@@ -11,7 +11,7 @@
  */
 
 import { create } from "zustand";
-import { getAccessToken } from "../services/authService";
+import { getAccessToken } from "../services/authInit";
 
 // ============================================================================
 // Types

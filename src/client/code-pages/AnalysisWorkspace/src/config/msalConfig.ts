@@ -1,4 +1,9 @@
 /**
+ * @deprecated Use @spaarke/auth (via authInit.ts) instead. This file is scheduled for removal.
+ * MSAL configuration is now handled internally by @spaarke/auth.
+ */
+
+/**
  * MSAL Browser configuration for the AnalysisWorkspace Code Page.
  *
  * Reuses the same Azure AD app registration as the LegalWorkspace and

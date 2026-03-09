@@ -1,4 +1,9 @@
 /**
+ * @deprecated This hook still works but depends on AuthContext which now uses authInit.ts.
+ * No changes needed to this file — it delegates to AuthContext.
+ */
+
+/**
  * useAuth -- convenience hook for authentication state in AnalysisWorkspace
  *
  * Wraps useAuthContext() with a simplified return shape matching the task
