@@ -1,0 +1,37 @@
+{
+  "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
+  "playbook": {
+    "name": "Summarize File",
+    "description": "Summarizes one or more uploaded documents into structured sections: TL;DR, full summary, short summary (for email), per-file highlights (multi-file only), practice areas, mentioned parties, and calls to action. Output is rendered as a formatted page in the legal workspace with Next Steps actions (Work on Analysis, Send Email, Create Project).",
+    "isPublic": true,
+    "capabilities": ["analyze"],
+    "scopes": {
+      "actions": ["ACT-025"],
+      "skills": ["SKL-003", "SKL-005"],
+      "knowledge": [],
+      "tools": ["TL-001"]
+    }
+  },
+  "nodes": [
+    {
+      "name": "Summarize Documents",
+      "actionCode": "ACT-025",
+      "nodeType": "AIAnalysis",
+      "outputVariable": "fileSummary",
+      "model": "gpt-4o",
+      "positionX": 100,
+      "positionY": 200,
+      "dependsOn": [],
+      "configJson": {
+        "temperature": 0.3,
+        "responseFormat": "json_object"
+      },
+      "scopes": {
+        "skills": ["SKL-003", "SKL-005"],
+        "knowledge": [],
+        "tools": ["TL-001"]
+      }
+    }
+  ],
+  "edges": []
+}
