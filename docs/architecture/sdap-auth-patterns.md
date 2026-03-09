@@ -104,25 +104,43 @@ const token = await authProvider.getToken([
 
 ## Pattern 2: On-Behalf-Of (OBO) Token Exchange
 
-**When**: BFF API needs to call Graph API on behalf of user (file operations)
+**When**: BFF API needs to call Graph API on behalf of user (file operations, send-as-user email)
 
 ```csharp
-// GraphClientFactory.cs
-public async Task<GraphServiceClient> CreateClientAsync(string userAccessToken)
+// GraphClientFactory.cs — Graph SDK v5 with AzureIdentityAuthenticationProvider
+public async Task<GraphServiceClient> ForUserAsync(HttpContext ctx, CancellationToken ct = default)
 {
-    // Exchange user token for Graph token
-    var tokenResponse = await _confidentialClient.AcquireTokenOnBehalfOf(
-        scopes: new[] { "https://graph.microsoft.com/.default" },
-        userAssertion: new UserAssertion(userAccessToken)
+    // 1. Extract Bearer token from Authorization header
+    var userAccessToken = TokenHelper.ExtractBearerToken(ctx);
+
+    // 2. Check Redis cache first (55-min TTL, keyed by SHA256 hash)
+    var tokenHash = _tokenCache.ComputeTokenHash(userAccessToken);
+    var cachedToken = await _tokenCache.GetTokenAsync(tokenHash);
+    if (cachedToken != null)
+        return CreateGraphClientFromToken(cachedToken);  // Cache HIT (~5ms)
+
+    // 3. Cache MISS — OBO exchange (~200ms)
+    var result = await _cca.AcquireTokenOnBehalfOf(
+        new[] { "https://graph.microsoft.com/.default" },  // Always .default
+        new UserAssertion(userAccessToken)
     ).ExecuteAsync();
 
-    return new GraphServiceClient(
-        new DelegateAuthenticationProvider(request =>
-        {
-            request.Headers.Authorization = 
-                new AuthenticationHeaderValue("Bearer", tokenResponse.AccessToken);
-            return Task.CompletedTask;
-        }));
+    // 4. Cache and create client
+    await _tokenCache.SetTokenAsync(tokenHash, result.AccessToken, TimeSpan.FromMinutes(55));
+    return CreateGraphClientFromToken(result.AccessToken);
+}
+
+private GraphServiceClient CreateGraphClientFromToken(string accessToken)
+{
+    // SimpleTokenCredential wraps pre-acquired token as Azure.Core.TokenCredential
+    var tokenCredential = new SimpleTokenCredential(accessToken);
+    var authProvider = new AzureIdentityAuthenticationProvider(
+        tokenCredential,
+        scopes: new[] { "https://graph.microsoft.com/.default" }
+    );
+    // Named HttpClient with Polly resilience (retry, circuit breaker, timeout)
+    var httpClient = _httpClientFactory.CreateClient("GraphApiClient");
+    return new GraphServiceClient(httpClient, authProvider, "https://graph.microsoft.com/v1.0");
 }
 ```
 

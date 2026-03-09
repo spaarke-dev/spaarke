@@ -1,7 +1,7 @@
 # Resilience Pattern
 
 > **Domain**: BFF API / Fault Tolerance
-> **Last Validated**: 2025-12-25
+> **Last Validated**: 2026-03-09
 > **Source ADRs**: ADR-017
 
 ---
@@ -10,9 +10,22 @@
 
 | File | Purpose |
 |------|---------|
-| `src/server/api/Sprk.Bff.Api/Infrastructure/Http/ResilientHttpHandler.cs` | Polly policy handler |
+| `src/server/api/Sprk.Bff.Api/Infrastructure/Http/GraphHttpMessageHandler.cs` | **Graph API resilience** — Polly retry + circuit breaker + timeout (production) |
+| `src/server/api/Sprk.Bff.Api/Infrastructure/Http/ResilientHttpHandler.cs` | Generic Polly policy handler |
 | `src/server/api/Sprk.Bff.Api/Infrastructure/Extensions/HttpClientExtensions.cs` | HttpClient setup |
 | `src/server/api/Sprk.Bff.Api/Program.cs` | Policy registration |
+
+### Graph-Specific Resilience
+
+The `GraphHttpMessageHandler` is a `DelegatingHandler` registered with the named `"GraphApiClient"` HttpClient.
+All `GraphServiceClient` instances created by `GraphClientFactory` automatically use this handler.
+
+**Features**:
+- Retry with `Retry-After` header honoring (Graph 429 throttling)
+- Exponential backoff: `2^attempt × RetryBackoffSeconds`
+- Circuit breaker with `ICircuitBreakerRegistry` integration (named: `CircuitBreakerRegistry.MicrosoftGraph`)
+- Per-request timeout (configurable via `GraphResilienceOptions`)
+- Policy wrap order: Timeout → Retry → Circuit Breaker
 
 ---
 
@@ -218,6 +231,7 @@ var response = await _httpClient.GetAsync(url);
 
 - [Error Handling](error-handling.md) - Error response format
 - [Service Registration](service-registration.md) - HttpClient DI setup
+- [Graph SDK v5](../auth/graph-sdk-v5.md) - Graph client setup using resilient HttpClient
 
 ---
 
