@@ -1,0 +1,60 @@
+<task id="031" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Build FileUploadStep Component</title>
+    <phase>4</phase>
+    <tags>component, file-upload, fluent-ui</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>030</dependencies>
+    <parallel-group>B</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Build FileUploadStep component with drag-and-drop and progress tracking</goal>
+    <context>
+      FileUploadStep is the first step in the CreateDocumentDialog wizard. It allows users to select
+      files via drag-and-drop or file browser, validates file types and sizes, and shows progress bars
+      during upload. The component ports the existing FileUploadZone pattern from LegalWorkspace to
+      React 18 with Fluent UI v9 styling and implements the IWizardStepConfig interface for WizardShell
+      integration.
+    </context>
+    <constraints>
+      - MUST accept PDF, DOCX, XLSX files only (validate both MIME type and file extension)
+      - MUST enforce maximum file size of 10MB per file
+      - MUST show progress bars during upload
+      - MUST implement IWizardStepConfig interface for WizardShell integration
+      - MUST use Fluent UI v9 components exclusively per ADR-021
+      - MUST support drag-and-drop with visual feedback (drop zone highlight)
+      - MUST provide clear error messages for invalid files (wrong type, too large)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/FileUploadZone.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/WizardShell.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/wizardShellTypes.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read FileUploadZone.tsx from LegalWorkspace for drag-and-drop and file validation patterns</step>
+    <step>Read WizardShell.tsx and wizardShellTypes.ts for IWizardStepConfig interface requirements</step>
+    <step>Create src/client/code-pages/CreateDocument/src/components/FileUploadStep.tsx</step>
+    <step>Implement drag-and-drop zone with visual feedback (border highlight on dragOver, reset on dragLeave/drop)</step>
+    <step>Implement file validation: check MIME types (application/pdf, application/vnd.openxmlformats-officedocument.*) and extensions (.pdf, .docx, .xlsx), enforce 10MB max size</step>
+    <step>Implement progress tracking UI with Fluent v9 ProgressBar for each file</step>
+    <step>Wire up as IWizardStepConfig with canAdvance logic (at least one valid file selected)</step>
+  </steps>
+  <outputs>
+    <output>src/client/code-pages/CreateDocument/src/components/FileUploadStep.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Drag-and-drop zone accepts files with visual feedback on hover</criterion>
+    <criterion>File browser button allows manual file selection</criterion>
+    <criterion>Only PDF, DOCX, XLSX files accepted (validated by MIME type and extension)</criterion>
+    <criterion>Files exceeding 10MB are rejected with clear error message</criterion>
+    <criterion>Progress bars shown for each file during upload</criterion>
+    <criterion>Component implements IWizardStepConfig interface</criterion>
+    <criterion>canAdvance returns true only when at least one valid file is selected</criterion>
+    <criterion>Fluent UI v9 components used exclusively (no v8 or custom styling)</criterion>
+  </acceptance-criteria>
+</task>

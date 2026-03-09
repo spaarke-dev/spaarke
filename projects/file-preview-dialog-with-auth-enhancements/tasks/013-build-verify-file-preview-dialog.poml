@@ -1,0 +1,48 @@
+<task id="013" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Build and Verify FilePreviewDialog</title>
+    <phase>2</phase>
+    <tags>build, verification</tags>
+    <estimate>30-45 minutes</estimate>
+    <dependencies>011, 012</dependencies>
+    <parallel-group>A</parallel-group>
+    <rigor>STANDARD</rigor>
+  </metadata>
+  <prompt>
+    <goal>Build LegalWorkspace solution and verify FilePreviewDialog renders correctly with no compilation or lint errors</goal>
+    <context>
+      This is the Phase 2 verification gate. Tasks 010-012 created FilePreviewDialog.tsx and
+      filePreviewService.ts. This task ensures the full LegalWorkspace solution builds cleanly,
+      there are no TypeScript or lint errors, and the bundle size impact is acceptable. The dialog
+      is not yet integrated into any entry point (that happens in Phase 3), so this is a build-only
+      verification.
+    </context>
+    <constraints>
+      - MUST build without TypeScript errors
+      - MUST build without lint errors
+      - Bundle size increase should be minimal (dialog is lightweight)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/package.json</file>
+      <file>src/solutions/LegalWorkspace/tsconfig.json</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Run npm install in src/solutions/LegalWorkspace/ to ensure dependencies are current</step>
+    <step>Run npm run build (or equivalent build command) in LegalWorkspace</step>
+    <step>Verify no TypeScript compilation errors</step>
+    <step>Verify no lint errors (run lint if configured)</step>
+    <step>Check bundle size impact — compare output size before and after FilePreviewDialog addition</step>
+    <step>Verify FilePreviewDialog.tsx and filePreviewService.ts are included in build output</step>
+  </steps>
+  <outputs>
+    <output>Build verification log (clean build with no errors)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>LegalWorkspace builds successfully with no TypeScript errors</criterion>
+    <criterion>No lint errors in FilePreviewDialog.tsx or filePreviewService.ts</criterion>
+    <criterion>Bundle size increase is reasonable (dialog component is lightweight)</criterion>
+  </acceptance-criteria>
+</task>

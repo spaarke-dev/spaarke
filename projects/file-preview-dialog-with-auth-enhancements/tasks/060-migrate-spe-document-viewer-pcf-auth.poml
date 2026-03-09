@@ -1,0 +1,68 @@
+<task id="060" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Migrate SpeDocumentViewer PCF Auth to @spaarke/auth (Pilot)</title>
+    <phase>7</phase>
+    <tags>auth, migration, pcf, pilot</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>007</dependencies>
+    <parallel-group>E</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Replace SpeDocumentViewer PCF control auth with @spaarke/auth as a pilot migration, verifying React 16 compatibility — removing ~239 lines and simplifying BffClient.ts</goal>
+    <context>
+      SpeDocumentViewer is a PCF control that uses its own AuthService.ts (239 lines) and BffClient.ts
+      (~456 lines) for authentication and API communication. This is the pilot PCF migration — its
+      success validates the @spaarke/auth package works correctly in the PCF runtime environment
+      (React 16, platform-provided libraries, ComponentFramework context).
+
+      CRITICAL: PCF controls run in React 16/17 (platform-provided). The @spaarke/auth package must
+      not use any React 18 APIs (createRoot, useId, useSyncExternalStore, etc.) per ADR-022.
+      BffClient.ts should be refactored to use authenticatedFetch() instead of manually managing
+      token acquisition through the local AuthService.
+    </context>
+    <constraints>
+      - MUST verify React 16 compatibility of @spaarke/auth before proceeding (no createRoot, no React 18 APIs) per ADR-022
+      - MUST refactor BffClient.ts to use authenticatedFetch() instead of local AuthService
+      - MUST bump ControlManifest.Input.xml version after changes per PCF conventions
+      - MUST NOT break existing Dataverse form integration
+      - MUST NOT import React 18 APIs in PCF control
+      - MUST test in PCF dev harness before marking complete
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/SpeDocumentViewer/control/AuthService.ts</file>
+      <file>src/client/pcf/SpeDocumentViewer/control/BffClient.ts</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read current AuthService.ts (239 lines) and BffClient.ts (~456 lines) to understand auth flow</step>
+    <step>Verify @spaarke/auth package has no React 18 API usage (check for createRoot, useId, useSyncExternalStore)</step>
+    <step>Install @spaarke/auth as a dependency in SpeDocumentViewer package.json</step>
+    <step>Replace AuthService.ts with import { initAuth, authenticatedFetch } from '@spaarke/auth'</step>
+    <step>Refactor BffClient.ts to use authenticatedFetch() instead of calling local AuthService methods</step>
+    <step>Update control index.ts to call initAuth() during init lifecycle method</step>
+    <step>Remove AuthService.ts file</step>
+    <step>Bump version in ControlManifest.Input.xml</step>
+    <step>Build PCF control with npm run build and verify no errors</step>
+    <step>Test in PCF dev harness to verify functionality</step>
+  </steps>
+  <outputs>
+    <output>src/client/pcf/SpeDocumentViewer/package.json (updated with @spaarke/auth)</output>
+    <output>src/client/pcf/SpeDocumentViewer/control/BffClient.ts (refactored to use authenticatedFetch)</output>
+    <output>src/client/pcf/SpeDocumentViewer/control/index.ts (updated init)</output>
+    <output>src/client/pcf/SpeDocumentViewer/ControlManifest.Input.xml (version bumped)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>AuthService.ts (239 lines) deleted</criterion>
+    <criterion>BffClient.ts refactored to use authenticatedFetch() (significant simplification)</criterion>
+    <criterion>@spaarke/auth confirmed React 16 compatible (no React 18 APIs)</criterion>
+    <criterion>ControlManifest.Input.xml version bumped</criterion>
+    <criterion>PCF build compiles without errors</criterion>
+    <criterion>Control functions correctly in PCF dev harness</criterion>
+    <criterion>This pilot validates @spaarke/auth for all subsequent PCF migrations (Phase 8)</criterion>
+  </acceptance-criteria>
+</task>

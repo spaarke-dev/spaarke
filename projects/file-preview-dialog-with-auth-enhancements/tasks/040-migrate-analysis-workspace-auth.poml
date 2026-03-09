@@ -1,0 +1,63 @@
+<task id="040" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Migrate AnalysisWorkspace Code Page Auth to @spaarke/auth</title>
+    <phase>5</phase>
+    <tags>auth, migration, code-page</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>007</dependencies>
+    <parallel-group>C</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Replace AnalysisWorkspace code page auth with @spaarke/auth, removing ~768 lines of bespoke auth code</goal>
+    <context>
+      AnalysisWorkspace is a React 18 code page that currently has its own MSAL-based auth stack:
+      authService.ts (532 lines), msalConfig.ts (93 lines), bffConfig.ts (76 lines), and useAuth.ts (67 lines).
+      All of this is replaced by importing initAuth and authenticatedFetch from @spaarke/auth (~10 lines).
+      The code page uses authenticated calls for analysis APIs and streaming hooks that must continue
+      to work after migration.
+    </context>
+    <constraints>
+      - MUST use @spaarke/auth initAuth() and authenticatedFetch() as sole auth mechanism
+      - MUST NOT leave any direct MSAL imports or MSAL configuration in the code page
+      - MUST preserve all existing API call behavior (analysis APIs, streaming hooks)
+      - MUST verify build succeeds after migration
+      - MUST remove all old auth files completely (no dead code)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/services/authService.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/config/msalConfig.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useAuth.ts</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read current auth files: authService.ts (532 lines), msalConfig.ts (93 lines), bffConfig.ts (76 lines), useAuth.ts (67 lines)</step>
+    <step>Identify all consumers of the current auth (analysisApi, streaming hooks, any component using useAuth)</step>
+    <step>Install @spaarke/auth as a dependency in AnalysisWorkspace package.json</step>
+    <step>Replace auth initialization with import { initAuth, authenticatedFetch } from '@spaarke/auth' in the app entry point</step>
+    <step>Update all API service consumers to use authenticatedFetch() instead of the old authService methods</step>
+    <step>Update streaming hooks to use authenticatedFetch() for token acquisition</step>
+    <step>Remove old auth files: authService.ts, msalConfig.ts, bffConfig.ts, useAuth.ts</step>
+    <step>Remove @azure/msal-browser from direct dependencies if no longer needed</step>
+    <step>Build the code page and verify no TypeScript errors</step>
+    <step>Verify all imports resolve correctly and no dead references remain</step>
+  </steps>
+  <outputs>
+    <output>src/client/code-pages/AnalysisWorkspace/package.json (updated with @spaarke/auth)</output>
+    <output>src/client/code-pages/AnalysisWorkspace/src/index.tsx (updated auth init)</output>
+    <output>src/client/code-pages/AnalysisWorkspace/src/services/ (consumers updated)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>authService.ts (532 lines) deleted</criterion>
+    <criterion>msalConfig.ts (93 lines) deleted</criterion>
+    <criterion>bffConfig.ts (76 lines) deleted</criterion>
+    <criterion>useAuth.ts (67 lines) deleted</criterion>
+    <criterion>@spaarke/auth imported and initAuth() called at startup</criterion>
+    <criterion>All API calls use authenticatedFetch()</criterion>
+    <criterion>Build compiles without errors</criterion>
+    <criterion>Net line removal: ~768 lines replaced by ~10 lines</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,59 @@
+<task id="035" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Implement Document Record Creation Service</title>
+    <phase>4</phase>
+    <tags>service, dataverse</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>030</dependencies>
+    <parallel-group>B</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Implement documentRecordService.ts for Dataverse record creation and NavMap lookup</goal>
+    <context>
+      The document record service creates sprk_document records in Dataverse after files have been
+      uploaded to SPE. It uses Xrm.WebApi.createRecord (when running in Dataverse context) or
+      authenticatedFetch (when running standalone) to create the record. Relationship binding uses
+      NavMap lookups via GET /api/navmap/{entity}/{relationship}/lookup to resolve navigation
+      properties for associating the document with its parent entity (e.g., matter). The service
+      must handle the partial failure scenario where files uploaded successfully but record creation
+      fails.
+    </context>
+    <constraints>
+      - MUST create sprk_document record via Xrm.WebApi.createRecord or authenticatedFetch
+      - MUST use NavMap lookup (GET /api/navmap/{entity}/{relationship}/lookup) for relationship binding
+      - MUST use authenticatedFetch from @spaarke/auth for NavMap API calls
+      - MUST handle partial failure: file uploaded but record creation failed
+      - MUST NOT hard-code Dataverse entity schemas per ADR-012
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/UniversalQuickCreate/control/services/DocumentRecordService.ts</file>
+      <file>src/client/pcf/UniversalQuickCreate/control/services/NavMapClient.ts</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read existing DocumentRecordService.ts for record creation patterns and field mappings</step>
+    <step>Read NavMapClient.ts for NavMap API usage and relationship resolution patterns</step>
+    <step>Create src/client/code-pages/CreateDocument/src/services/documentRecordService.ts</step>
+    <step>Implement record creation using Xrm.WebApi.createRecord with sprk_document entity fields</step>
+    <step>Implement NavMap client using authenticatedFetch: GET /api/navmap/{entity}/{relationship}/lookup</step>
+    <step>Implement relationship binding via NavMap lookup results (bind document to parent entity)</step>
+    <step>Implement error handling for partial failure scenario (file uploaded, record failed)</step>
+    <step>Define TypeScript interfaces for record creation input and result</step>
+  </steps>
+  <outputs>
+    <output>src/client/code-pages/CreateDocument/src/services/documentRecordService.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>sprk_document record created via Xrm.WebApi.createRecord or authenticatedFetch</criterion>
+    <criterion>NavMap lookup resolves relationship navigation properties correctly</criterion>
+    <criterion>authenticatedFetch used for NavMap API calls</criterion>
+    <criterion>Partial failure scenario handled with clear error reporting</criterion>
+    <criterion>No hard-coded Dataverse entity schemas</criterion>
+    <criterion>TypeScript interfaces defined for record creation input and result</criterion>
+  </acceptance-criteria>
+</task>

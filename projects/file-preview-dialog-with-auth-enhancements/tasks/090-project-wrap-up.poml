@@ -1,0 +1,58 @@
+<task id="090" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Project Wrap-Up — Status Update, Lessons Learned, Archive</title>
+    <phase>wrap-up</phase>
+    <tags>documentation, cleanup</tags>
+    <estimate>1-2 hours</estimate>
+    <dependencies>022, 037, 042, 051, 074</dependencies>
+    <parallel-group>none</parallel-group>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Complete project wrap-up: update README status, verify graduation criteria, tally line removal, create lessons learned, finalize task index</goal>
+    <context>
+      All phases are complete. The @spaarke/auth shared package has been created and all code pages
+      and PCF controls have been migrated from bespoke MSAL auth implementations to the shared
+      package. The FilePreviewDialog component has been created. This task finalizes the project
+      by updating documentation, verifying all graduation criteria are met, and archiving the project.
+
+      Target line removal across all phases: ~8,149 lines of duplicated auth code replaced by a
+      single shared package.
+    </context>
+    <constraints>
+      - MUST verify all prior tasks are marked complete in TASK-INDEX.md
+      - MUST tally actual lines removed vs target (~8,149)
+      - MUST update project README.md status to Complete
+      - MUST create lessons-learned notes for future shared package extractions
+      - MUST run /repo-cleanup to validate repository structure
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/file-preview-dialog-with-auth-enhancements/README.md</file>
+      <file>projects/file-preview-dialog-with-auth-enhancements/tasks/TASK-INDEX.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Verify all tasks in TASK-INDEX.md are marked complete (all phases 1-8)</step>
+    <step>Update README.md project status from In Progress to Complete</step>
+    <step>Tally total lines removed across all migration tasks and compare to ~8,149 target</step>
+    <step>Verify all graduation criteria: @spaarke/auth package published, all code pages migrated, all PCF controls migrated, no bespoke MSAL auth remaining</step>
+    <step>Create notes/lessons-learned.md documenting patterns, pitfalls, and recommendations for future shared package extractions</step>
+    <step>Update TASK-INDEX.md — mark all tasks as complete</step>
+    <step>Run /repo-cleanup to validate repository structure and clean ephemeral files</step>
+  </steps>
+  <outputs>
+    <output>projects/file-preview-dialog-with-auth-enhancements/README.md (status updated)</output>
+    <output>projects/file-preview-dialog-with-auth-enhancements/tasks/TASK-INDEX.md (all tasks marked complete)</output>
+    <output>projects/file-preview-dialog-with-auth-enhancements/notes/lessons-learned.md (new)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>README.md status shows Complete</criterion>
+    <criterion>All tasks in TASK-INDEX.md marked with checkmark</criterion>
+    <criterion>Total lines removed tallied and documented</criterion>
+    <criterion>Graduation criteria verified: no bespoke MSAL auth remains in migrated modules</criterion>
+    <criterion>Lessons learned documented for future reference</criterion>
+    <criterion>/repo-cleanup passes without structural issues</criterion>
+  </acceptance-criteria>
+</task>

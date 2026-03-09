@@ -1,0 +1,66 @@
+<task id="005" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Implement initAuth API and Options</title>
+    <phase>1</phase>
+    <tags>auth, shared-package, api-surface</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>002, 003, 004</dependencies>
+    <parallel-group>none</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Create the public initAuth() API with options (proactiveRefresh, requireXrm) as the main entry point for @spaarke/auth</goal>
+    <context>
+      The initAuth() function is the single public entry point for consumers of @spaarke/auth.
+      It accepts an options object that controls behavior: proactiveRefresh enables a 4-minute
+      interval timer to keep tokens fresh before expiry, requireXrm guards against running in
+      environments without Xrm context (useful for PCF controls that need platform tokens).
+      The function wires up SpaarkeAuthProvider with all strategies and returns the authenticated
+      fetch function and token acquisition methods consumers need.
+    </context>
+    <constraints>
+      - MUST be the single public entry point for the package
+      - MUST accept optional IInitAuthOptions parameter
+      - proactiveRefresh MUST use 4-minute interval (tokens expire at 5 min)
+      - requireXrm MUST throw AuthError if Xrm context unavailable when set to true
+      - MUST return object with authenticatedFetch, acquireToken, and logout methods
+      - MUST be safe to call multiple times (singleton pattern internally)
+      - MUST clean up interval timer on logout
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/services/bffAuthProvider.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/services/authService.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read bffAuthProvider.ts initialization patterns for reference</step>
+    <step>Read AnalysisWorkspace authService.ts for alternative init patterns</step>
+    <step>Add IInitAuthOptions interface to types.ts (proactiveRefresh?: boolean, requireXrm?: boolean, scopes?: string[], clientId?: string)</step>
+    <step>Create src/client/shared/Spaarke.Auth/src/initAuth.ts</step>
+    <step>Implement singleton pattern: return existing instance if already initialized</step>
+    <step>Wire up SpaarkeAuthProvider with all 5 strategies based on options</step>
+    <step>Implement proactive refresh: setInterval at 4 minutes to silently re-acquire tokens</step>
+    <step>Implement requireXrm guard: check Xrm availability before proceeding, throw AuthError if missing</step>
+    <step>Return IAuthApi object with authenticatedFetch, acquireToken, logout methods</step>
+    <step>Implement logout: clear cache, clear bridge, clear interval, reset singleton</step>
+    <step>Update index.ts to export initAuth as primary API plus types</step>
+    <step>Verify build with tsc --noEmit</step>
+  </steps>
+  <outputs>
+    <output>src/client/shared/Spaarke.Auth/src/initAuth.ts</output>
+    <output>src/client/shared/Spaarke.Auth/src/types.ts (updated with IInitAuthOptions, IAuthApi)</output>
+    <output>src/client/shared/Spaarke.Auth/src/index.ts (updated exports)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>initAuth() is the single public entry point exported from @spaarke/auth</criterion>
+    <criterion>Options parameter is optional with sensible defaults</criterion>
+    <criterion>proactiveRefresh starts 4-minute interval timer when enabled</criterion>
+    <criterion>requireXrm throws AuthError when Xrm context unavailable</criterion>
+    <criterion>Multiple calls to initAuth() return same instance (singleton)</criterion>
+    <criterion>logout() cleans up all resources (cache, bridge, interval, singleton)</criterion>
+    <criterion>Returned IAuthApi has authenticatedFetch, acquireToken, and logout methods</criterion>
+    <criterion>TypeScript compiles without errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,73 @@
+<task id="006" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Unit Tests for @spaarke/auth Package</title>
+    <phase>1</phase>
+    <tags>auth, shared-package, testing</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>005</dependencies>
+    <parallel-group>none</parallel-group>
+    <rigor>STANDARD</rigor>
+  </metadata>
+  <prompt>
+    <goal>Write comprehensive unit tests for the @spaarke/auth package</goal>
+    <context>
+      The @spaarke/auth package is a foundational dependency for all Spaarke client apps.
+      Thorough unit tests are critical to ensure token acquisition strategies, authenticated
+      fetch, bridge utilities, and the initAuth API work correctly across all scenarios
+      including error cases, timeouts, and cross-origin restrictions.
+    </context>
+    <constraints>
+      - MUST use Jest as the test framework
+      - MUST mock fetch, MSAL, Xrm, and window.parent APIs
+      - MUST achieve at least 80% code coverage on core modules
+      - MUST test each strategy independently and the cascade behavior
+      - MUST test error scenarios (network failures, expired tokens, cross-origin blocks)
+      - MUST NOT make real HTTP or MSAL calls
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>tests/</file>
+      <file>src/client/shared/Spaarke.Auth/src/strategies/</file>
+      <file>src/client/shared/Spaarke.Auth/src/authenticatedFetch.ts</file>
+      <file>src/client/shared/Spaarke.Auth/src/tokenBridge.ts</file>
+      <file>src/client/shared/Spaarke.Auth/src/initAuth.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Set up Jest configuration for @spaarke/auth (jest.config.js, tsconfig for tests)</step>
+    <step>Create test/strategies/CacheStrategy.test.ts - test cache hit, miss, and expiry</step>
+    <step>Create test/strategies/BridgeStrategy.test.ts - test bridge read success and cross-origin failure</step>
+    <step>Create test/strategies/XrmStrategy.test.ts - test frame-walk success, cross-origin handling, no Xrm available</step>
+    <step>Create test/strategies/MsalSilentStrategy.test.ts - test ssoSilent success and interaction_required fallthrough</step>
+    <step>Create test/strategies/MsalPopupStrategy.test.ts - test popup success and user_cancelled</step>
+    <step>Create test/SpaarkeAuthProvider.test.ts - test cascade order (bridge first, popup last), stop on first success</step>
+    <step>Create test/tokenBridge.test.ts - test publish, read, clear, and cross-origin error handling</step>
+    <step>Create test/authenticatedFetch.test.ts - test Bearer injection, 401 retry with backoff, ProblemDetails parsing, non-2xx errors</step>
+    <step>Create test/initAuth.test.ts - test singleton behavior, proactiveRefresh interval, requireXrm guard, logout cleanup</step>
+    <step>Run jest --coverage and verify at least 80% coverage</step>
+    <step>Add test script to package.json</step>
+  </steps>
+  <outputs>
+    <output>src/client/shared/Spaarke.Auth/jest.config.js</output>
+    <output>src/client/shared/Spaarke.Auth/test/strategies/CacheStrategy.test.ts</output>
+    <output>src/client/shared/Spaarke.Auth/test/strategies/BridgeStrategy.test.ts</output>
+    <output>src/client/shared/Spaarke.Auth/test/strategies/XrmStrategy.test.ts</output>
+    <output>src/client/shared/Spaarke.Auth/test/strategies/MsalSilentStrategy.test.ts</output>
+    <output>src/client/shared/Spaarke.Auth/test/strategies/MsalPopupStrategy.test.ts</output>
+    <output>src/client/shared/Spaarke.Auth/test/SpaarkeAuthProvider.test.ts</output>
+    <output>src/client/shared/Spaarke.Auth/test/tokenBridge.test.ts</output>
+    <output>src/client/shared/Spaarke.Auth/test/authenticatedFetch.test.ts</output>
+    <output>src/client/shared/Spaarke.Auth/test/initAuth.test.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Jest configured and running for @spaarke/auth package</criterion>
+    <criterion>Each token acquisition strategy has independent unit tests</criterion>
+    <criterion>Strategy cascade tested: stops at first success, tries all on failure</criterion>
+    <criterion>authenticatedFetch tested: Bearer injection, 401 retry, ProblemDetails parsing</criterion>
+    <criterion>Token bridge tested: publish, read, clear, cross-origin handling</criterion>
+    <criterion>initAuth tested: singleton, proactiveRefresh, requireXrm, logout cleanup</criterion>
+    <criterion>All tests pass with at least 80% code coverage</criterion>
+    <criterion>No real HTTP or MSAL calls made during tests</criterion>
+  </acceptance-criteria>
+</task>

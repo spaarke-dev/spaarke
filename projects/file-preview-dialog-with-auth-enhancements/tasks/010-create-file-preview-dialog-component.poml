@@ -1,0 +1,68 @@
+<task id="010" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Create FilePreviewDialog Component</title>
+    <phase>2</phase>
+    <tags>fluent-ui, dialog, component</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>007</dependencies>
+    <parallel-group>A</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Create FilePreviewDialog.tsx with Fluent UI v9 Dialog shell, title bar, toolbar layout, and iframe preview area</goal>
+    <context>
+      FilePreviewDialog is the standardized file preview component for LegalWorkspace. It replaces
+      the ad-hoc popover preview in DocumentCard and the 3-button action pattern in FindSimilarResultsStep.
+      The dialog provides a consistent preview experience with a title bar showing the document name,
+      a toolbar with 4 action buttons (Open File, Open Record, Copy Link, Workspace Toggle), and an
+      iframe-based preview area. It uses Fluent UI v9 Dialog primitives and follows ADR-021.
+    </context>
+    <constraints>
+      - MUST use Fluent UI v9 Dialog/DialogSurface/DialogBody per ADR-021
+      - MUST NOT hard-code colors; use Fluent tokens for theming and dark mode support
+      - MUST use @spaarke/auth for authenticated API calls (via DocumentApiService)
+      - MUST sandbox iframe with allow-scripts allow-same-origin allow-forms allow-popups
+      - MUST handle loading, error, and success states gracefully
+      - MUST support ESC key to close dialog (Fluent Dialog default behavior)
+      - Dialog size: 85vw x 85vh, max-width 880px
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/solutions/LegalWorkspace/src/services/DocumentApiService.ts</file>
+      <file>.claude/patterns/webresource/custom-dialogs-in-dataverse.md</file>
+      <file>src/solutions/LegalWorkspace/src/components/RecordCards/DocumentCard.tsx</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read DocumentCard.tsx for existing preview pattern (popover + iframe approach)</step>
+    <step>Read DocumentApiService.ts for getDocumentPreviewUrl() signature and response shape</step>
+    <step>Create src/solutions/LegalWorkspace/src/components/FilePreview/ directory</step>
+    <step>Create FilePreviewDialog.tsx with IFilePreviewDialogProps interface: { open, documentId, documentName, onClose, isInWorkspace?, onWorkspaceFlagChanged? }</step>
+    <step>Implement Fluent UI v9 Dialog shell with DialogSurface sized at 85vw x 85vh (max 880px)</step>
+    <step>Implement title bar with document name and close button (DismissRegular icon)</step>
+    <step>Implement Toolbar layout with 4 ToolbarButton placeholders (Open File, Open Record, Copy Link, Workspace Toggle)</step>
+    <step>Implement preview iframe area with sandbox="allow-scripts allow-same-origin allow-forms allow-popups"</step>
+    <step>Add state management: previewUrl, isLoadingPreview, previewError, isPinned, isPinning, copySuccess</step>
+    <step>Add useEffect to fetch preview URL via DocumentApiService.getDocumentPreviewUrl() when dialog opens</step>
+    <step>Implement loading state with Fluent Spinner centered in preview area</step>
+    <step>Implement error state with error message and retry button</step>
+    <step>Verify TypeScript compiles without errors (tsc --noEmit)</step>
+  </steps>
+  <outputs>
+    <output>src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>FilePreviewDialog.tsx created with correct IFilePreviewDialogProps interface</criterion>
+    <criterion>Dialog renders at 85vw x 85vh with max-width 880px using Fluent UI v9</criterion>
+    <criterion>Title bar shows document name and close button</criterion>
+    <criterion>Toolbar renders 4 ToolbarButton placeholders</criterion>
+    <criterion>iframe preview area renders with correct sandbox attributes</criterion>
+    <criterion>Loading spinner shows while fetching preview URL</criterion>
+    <criterion>Error state displays with retry option on fetch failure</criterion>
+    <criterion>ESC key closes the dialog</criterion>
+    <criterion>TypeScript compiles without errors</criterion>
+  </acceptance-criteria>
+</task>

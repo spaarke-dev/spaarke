@@ -1,0 +1,63 @@
+<task id="003" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Implement Authenticated Fetch</title>
+    <phase>1</phase>
+    <tags>auth, shared-package, http-client</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>002</dependencies>
+    <parallel-group>none</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Implement authenticatedFetch() with 401 retry and RFC 7807 ProblemDetails parsing</goal>
+    <context>
+      The authenticatedFetch function wraps the native fetch API to automatically inject Bearer
+      tokens and handle authentication failures. When a 401 response is received, it retries
+      with a fresh token (up to 3 attempts with exponential backoff). All error responses are
+      parsed as RFC 7807 ProblemDetails when the content-type indicates application/problem+json.
+      This replaces the duplicated fetch logic in bffAuthProvider.ts and SemanticSearch's
+      handleApiResponse pattern.
+    </context>
+    <constraints>
+      - MUST inject Authorization: Bearer header on every request
+      - MUST retry on 401 with exponential backoff (max 3 attempts)
+      - MUST parse RFC 7807 ProblemDetails from application/problem+json responses
+      - MUST throw ApiError for non-2xx responses (after retry exhaustion for 401s)
+      - MUST throw AuthError when token acquisition fails completely
+      - MUST NOT modify request body or other headers
+      - MUST support all standard fetch options (method, body, headers, signal)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/services/bffAuthProvider.ts</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read bffAuthProvider.ts authenticatedFetch implementation for reference patterns</step>
+    <step>Read SemanticSearch handleApiResponse for RFC 7807 parsing patterns</step>
+    <step>Create src/client/shared/Spaarke.Auth/src/authenticatedFetch.ts</step>
+    <step>Implement Bearer header injection using SpaarkeAuthProvider.acquireToken()</step>
+    <step>Implement 401 retry logic with exponential backoff (delays: 1s, 2s, 4s; max 3 attempts)</step>
+    <step>Implement RFC 7807 ProblemDetails response parsing for application/problem+json content-type</step>
+    <step>Implement error handling: throw ApiError for non-2xx responses, AuthError for token failures</step>
+    <step>Add IProblemDetails interface to types.ts</step>
+    <step>Export authenticatedFetch from index.ts</step>
+    <step>Verify build with tsc --noEmit</step>
+  </steps>
+  <outputs>
+    <output>src/client/shared/Spaarke.Auth/src/authenticatedFetch.ts</output>
+    <output>src/client/shared/Spaarke.Auth/src/types.ts (updated with IProblemDetails)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>authenticatedFetch() injects Bearer token on all requests</criterion>
+    <criterion>401 responses trigger retry with fresh token (max 3 attempts, exponential backoff)</criterion>
+    <criterion>RFC 7807 ProblemDetails parsed from application/problem+json responses</criterion>
+    <criterion>ApiError thrown for non-2xx responses with ProblemDetails detail when available</criterion>
+    <criterion>AuthError thrown when token acquisition fails completely</criterion>
+    <criterion>Standard fetch options (method, body, headers, signal) pass through correctly</criterion>
+    <criterion>TypeScript compiles without errors</criterion>
+  </acceptance-criteria>
+</task>

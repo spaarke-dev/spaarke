@@ -1,0 +1,57 @@
+<task id="042" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Migrate SprkChatPane Code Page Auth to @spaarke/auth</title>
+    <phase>5</phase>
+    <tags>auth, migration, code-page</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>007</dependencies>
+    <parallel-group>C</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Replace SprkChatPane code page auth with @spaarke/auth, removing ~415 lines of bespoke auth code</goal>
+    <context>
+      SprkChatPane is a React 18 code page embedded in Dataverse forms that requires Xrm context
+      for proper authentication. The current auth stack includes authService.ts (353 lines) and
+      msalConfig.ts (62 lines). The @spaarke/auth package supports this requirement via
+      initAuth({ requireXrm: true }), which ensures Xrm global is available before initializing MSAL.
+    </context>
+    <constraints>
+      - MUST use initAuth({ requireXrm: true }) to ensure Xrm context availability
+      - MUST use authenticatedFetch() for all BFF API calls
+      - MUST NOT leave any direct MSAL imports in the code page
+      - MUST verify build succeeds after migration
+      - MUST remove all old auth files completely
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/SprkChatPane/src/services/authService.ts</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read current auth files: authService.ts (353 lines), msalConfig.ts (62 lines)</step>
+    <step>Identify all consumers of the current auth in SprkChatPane (chat API calls, streaming connections)</step>
+    <step>Install @spaarke/auth as a dependency in SprkChatPane package.json</step>
+    <step>Replace auth initialization with initAuth({ requireXrm: true }) to ensure Xrm availability</step>
+    <step>Update all API service consumers to use authenticatedFetch()</step>
+    <step>Remove old auth files: authService.ts, msalConfig.ts</step>
+    <step>Remove @azure/msal-browser from direct dependencies if no longer needed</step>
+    <step>Build the code page and verify no TypeScript errors</step>
+    <step>Verify Xrm requirement is properly enforced at startup</step>
+  </steps>
+  <outputs>
+    <output>src/client/code-pages/SprkChatPane/package.json (updated with @spaarke/auth)</output>
+    <output>src/client/code-pages/SprkChatPane/src/index.tsx (updated auth init)</output>
+    <output>src/client/code-pages/SprkChatPane/src/services/ (consumers updated)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>authService.ts (353 lines) deleted</criterion>
+    <criterion>msalConfig.ts (62 lines) deleted</criterion>
+    <criterion>@spaarke/auth imported with initAuth({ requireXrm: true })</criterion>
+    <criterion>All API calls use authenticatedFetch()</criterion>
+    <criterion>Build compiles without errors</criterion>
+    <criterion>Net line removal: ~415 lines replaced by ~10 lines</criterion>
+  </acceptance-criteria>
+</task>

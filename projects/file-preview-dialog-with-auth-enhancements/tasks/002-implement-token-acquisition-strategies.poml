@@ -1,0 +1,68 @@
+<task id="002" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Implement Token Acquisition Strategies</title>
+    <phase>1</phase>
+    <tags>auth, shared-package, token-acquisition</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>001</dependencies>
+    <parallel-group>none</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Implement the 5-strategy token acquisition cascade in @spaarke/auth</goal>
+    <context>
+      Token acquisition must try strategies in priority order: parent bridge (iframe token sharing),
+      in-memory cache, Xrm platform (frame-walk to find Xrm.Utility.getGlobalContext), MSAL ssoSilent,
+      and MSAL popup as last resort. This cascade ensures tokens are acquired with minimal user
+      disruption. The existing bffAuthProvider.ts in LegalWorkspace implements parts of this logic
+      but is tightly coupled to that solution. This task extracts and generalizes the pattern.
+    </context>
+    <constraints>
+      - MUST be React 16/17 compatible per ADR-022
+      - MUST NOT import PCF-specific APIs (ComponentFramework.*) per ADR-012
+      - Xrm frame-walk MUST handle cross-origin errors gracefully
+      - MSAL strategies MUST use @azure/msal-browser v3.x PublicClientApplication
+      - Each strategy MUST return ITokenResult or null (no throwing on expected failures)
+      - Strategy chain MUST stop at first successful result
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/services/bffAuthProvider.ts</file>
+      <file>.claude/patterns/auth/msal-client.md</file>
+      <file>.claude/patterns/auth/token-caching.md</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read bffAuthProvider.ts to understand existing token acquisition logic and strategy ordering</step>
+    <step>Read MSAL client pattern from .claude/patterns/auth/msal-client.md</step>
+    <step>Create src/client/shared/Spaarke.Auth/src/strategies/ directory</step>
+    <step>Define ITokenStrategy interface in strategies/types.ts with acquire(scopes: string[]): Promise&lt;ITokenResult | null&gt;</step>
+    <step>Implement BridgeStrategy in strategies/BridgeStrategy.ts - reads token from parent iframe bridge</step>
+    <step>Implement CacheStrategy in strategies/CacheStrategy.ts - reads from in-memory token cache with expiry check</step>
+    <step>Implement XrmStrategy in strategies/XrmStrategy.ts - frame-walks to find Xrm.Utility.getGlobalContext, acquires token via platform API</step>
+    <step>Implement MsalSilentStrategy in strategies/MsalSilentStrategy.ts - uses MSAL ssoSilent with login hint</step>
+    <step>Implement MsalPopupStrategy in strategies/MsalPopupStrategy.ts - uses MSAL acquireTokenPopup as fallback</step>
+    <step>Create SpaarkeAuthProvider.ts that chains all 5 strategies in priority order and returns first successful result</step>
+    <step>Export all strategies and SpaarkeAuthProvider from index.ts</step>
+    <step>Verify build with tsc --noEmit</step>
+  </steps>
+  <outputs>
+    <output>src/client/shared/Spaarke.Auth/src/strategies/types.ts</output>
+    <output>src/client/shared/Spaarke.Auth/src/strategies/BridgeStrategy.ts</output>
+    <output>src/client/shared/Spaarke.Auth/src/strategies/CacheStrategy.ts</output>
+    <output>src/client/shared/Spaarke.Auth/src/strategies/XrmStrategy.ts</output>
+    <output>src/client/shared/Spaarke.Auth/src/strategies/MsalSilentStrategy.ts</output>
+    <output>src/client/shared/Spaarke.Auth/src/strategies/MsalPopupStrategy.ts</output>
+    <output>src/client/shared/Spaarke.Auth/src/SpaarkeAuthProvider.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All 5 token acquisition strategies implemented with consistent interface</criterion>
+    <criterion>SpaarkeAuthProvider chains strategies in correct priority order</criterion>
+    <criterion>XrmStrategy handles cross-origin frame-walk errors without throwing</criterion>
+    <criterion>MSAL strategies use @azure/msal-browser v3.x PublicClientApplication</criterion>
+    <criterion>TypeScript compiles without errors</criterion>
+    <criterion>Each strategy returns ITokenResult or null (no throwing on expected failures)</criterion>
+  </acceptance-criteria>
+</task>

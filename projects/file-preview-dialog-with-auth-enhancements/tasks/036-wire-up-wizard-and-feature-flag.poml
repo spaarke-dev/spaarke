@@ -1,0 +1,62 @@
+<task id="036" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Wire Up Wizard Steps and Add Feature Flag</title>
+    <phase>4</phase>
+    <tags>integration, wizard, feature-flag</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>031, 032, 033, 034, 035</dependencies>
+    <parallel-group>B</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Wire up all wizard steps into WizardShell and add feature flag for parallel deployment</goal>
+    <context>
+      CreateDocumentDialog is the main dialog component that assembles all wizard steps (FileUploadStep,
+      DocumentDetailsStep, CreateDocumentNextStepsStep) into a WizardShell. The handleFinish callback
+      orchestrates the end-to-end flow: upload files to SPE, create Dataverse record, then show a
+      success screen. A feature flag (URL parameter or config-based) toggles between the new code page
+      dialog and the existing PCF-based creation flow, enabling parallel deployment and gradual rollout.
+      The pattern follows the existing CreateMatter WizardDialog.tsx implementation.
+    </context>
+    <constraints>
+      - MUST wire FileUploadStep, DocumentDetailsStep, NextStepsStep into WizardShell
+      - MUST implement handleFinish: upload files then create record then show success
+      - MUST add feature flag mechanism to toggle between code page and existing PCF
+      - MUST handle errors during finish (partial upload failure, record creation failure)
+      - MUST show success screen after successful completion
+      - MUST follow CreateMatter WizardDialog.tsx pattern for wizard assembly
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/WizardDialog.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/WizardShell.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/wizardShellTypes.ts</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read CreateMatter WizardDialog.tsx for exact wizard assembly and handleFinish pattern</step>
+    <step>Create src/client/code-pages/CreateDocument/src/CreateDocumentDialog.tsx</step>
+    <step>Wire FileUploadStep, DocumentDetailsStep, CreateDocumentNextStepsStep as WizardShell step configs</step>
+    <step>Implement handleFinish: call documentUploadService to upload files, then documentRecordService to create record</step>
+    <step>Implement success screen component showing completion message and next action buttons</step>
+    <step>Implement error handling during finish with user-friendly error messages and retry option</step>
+    <step>Add feature flag mechanism: check URL parameter (e.g., ?useCodePage=true) or environment config to toggle between code page and PCF</step>
+    <step>Update App.tsx to render CreateDocumentDialog</step>
+    <step>Build and verify all components wire together correctly</step>
+  </steps>
+  <outputs>
+    <output>src/client/code-pages/CreateDocument/src/CreateDocumentDialog.tsx</output>
+    <output>src/client/code-pages/CreateDocument/src/App.tsx (updated)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All three wizard steps render in correct order within WizardShell</criterion>
+    <criterion>handleFinish uploads files via documentUploadService then creates record via documentRecordService</criterion>
+    <criterion>Success screen displayed after successful completion</criterion>
+    <criterion>Error handling shows user-friendly messages for upload and record creation failures</criterion>
+    <criterion>Feature flag (URL parameter) toggles between code page and existing PCF flow</criterion>
+    <criterion>Wizard follows CreateMatter WizardDialog.tsx pattern</criterion>
+    <criterion>App.tsx renders CreateDocumentDialog as main content</criterion>
+  </acceptance-criteria>
+</task>

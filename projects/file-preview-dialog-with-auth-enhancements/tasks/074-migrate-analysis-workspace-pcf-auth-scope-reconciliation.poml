@@ -1,0 +1,82 @@
+<task id="074" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Migrate AnalysisWorkspace PCF Auth + Reconcile SDAP.Access vs user_impersonation Scope</title>
+    <phase>8</phase>
+    <tags>auth, migration, pcf, scope-reconciliation</tags>
+    <estimate>4-5 hours</estimate>
+    <dependencies>060</dependencies>
+    <parallel-group>F</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Replace AnalysisWorkspace PCF auth with @spaarke/auth and reconcile SDAP.Access vs user_impersonation scope — removing ~1,418 lines</goal>
+    <context>
+      AnalysisWorkspace PCF has the second-largest auth footprint: AuthService.ts (243 lines),
+      MsalAuthProvider.ts (793 lines), msalConfig.ts (337 lines), and auth.ts types (45 lines)
+      totaling ~1,418 lines. This is the most complex PCF migration because it uses a DIFFERENT
+      OAuth scope name (SDAP.Access) compared to other controls (user_impersonation).
+
+      CRITICAL INVESTIGATION REQUIRED: Before migrating, you must verify whether SDAP.Access and
+      user_impersonation are the same Azure AD permission (just different names/aliases) or genuinely
+      different permissions. If they are different, the @spaarke/auth default scope configuration
+      may need to be extended to support both.
+
+      The pilot migration (task 060) validated the general PCF migration pattern. This task adds
+      the scope reconciliation complexity on top.
+    </context>
+    <constraints>
+      - MUST investigate SDAP.Access vs user_impersonation scope BEFORE migrating
+      - MUST verify these scopes resolve to the same Azure AD permission, or handle both
+      - MUST follow the proven pilot pattern from task 060 for the auth migration itself
+      - MUST update all service consumers
+      - MUST remove all auth files after migration
+      - MUST bump ControlManifest.Input.xml version
+      - MUST document scope reconciliation findings for future reference
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/AnalysisWorkspace/control/services/AuthService.ts</file>
+      <file>src/client/pcf/AnalysisWorkspace/control/services/auth/MsalAuthProvider.ts</file>
+      <file>src/client/pcf/AnalysisWorkspace/control/services/auth/msalConfig.ts</file>
+      <file>src/client/pcf/AnalysisWorkspace/control/services/auth/auth.ts</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read current auth files: AuthService.ts (243 lines), MsalAuthProvider.ts (793 lines), msalConfig.ts (337 lines), auth.ts (45 lines)</step>
+    <step>Identify the SDAP.Access scope usage in msalConfig.ts and compare with user_impersonation scope used elsewhere</step>
+    <step>Investigate whether SDAP.Access and user_impersonation resolve to the same Azure AD app registration permission (check Azure AD app manifest or documentation)</step>
+    <step>If same permission: proceed with standard @spaarke/auth migration using default scope</step>
+    <step>If different permissions: configure @spaarke/auth to support the correct scope for this control</step>
+    <step>Install @spaarke/auth as a dependency</step>
+    <step>Replace AuthService and MsalAuthProvider with initAuth() using the reconciled scope configuration</step>
+    <step>Update all service consumers to use authenticatedFetch()</step>
+    <step>Remove all auth files: AuthService.ts, MsalAuthProvider.ts, msalConfig.ts, auth.ts, and auth/ directory</step>
+    <step>Remove @azure/msal-browser from direct dependencies if no longer needed</step>
+    <step>Document scope reconciliation findings in project notes</step>
+    <step>Bump version in ControlManifest.Input.xml</step>
+    <step>Build PCF control and verify no errors</step>
+  </steps>
+  <outputs>
+    <output>src/client/pcf/AnalysisWorkspace/package.json (updated with @spaarke/auth)</output>
+    <output>src/client/pcf/AnalysisWorkspace/control/index.ts (updated init)</output>
+    <output>src/client/pcf/AnalysisWorkspace/control/services/ (consumers updated, auth/ removed)</output>
+    <output>src/client/pcf/AnalysisWorkspace/ControlManifest.Input.xml (version bumped)</output>
+    <output>projects/file-preview-dialog-with-auth-enhancements/notes/scope-reconciliation.md (findings)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>SDAP.Access vs user_impersonation scope reconciliation documented</criterion>
+    <criterion>AuthService.ts (243 lines) deleted</criterion>
+    <criterion>MsalAuthProvider.ts (793 lines) deleted</criterion>
+    <criterion>msalConfig.ts (337 lines) deleted</criterion>
+    <criterion>auth.ts (45 lines) deleted</criterion>
+    <criterion>auth/ directory completely removed</criterion>
+    <criterion>Correct scope configured in @spaarke/auth initAuth() call</criterion>
+    <criterion>All consumers use authenticatedFetch()</criterion>
+    <criterion>ControlManifest.Input.xml version bumped</criterion>
+    <criterion>PCF build compiles without errors</criterion>
+    <criterion>Net line removal: ~1,418 lines</criterion>
+  </acceptance-criteria>
+</task>

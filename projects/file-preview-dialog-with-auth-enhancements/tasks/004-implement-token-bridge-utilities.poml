@@ -1,0 +1,56 @@
+<task id="004" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Implement Token Bridge Utilities</title>
+    <phase>1</phase>
+    <tags>auth, shared-package, iframe-bridge</tags>
+    <estimate>1-2 hours</estimate>
+    <dependencies>001</dependencies>
+    <parallel-group>pg-1a</parallel-group>
+    <rigor>STANDARD</rigor>
+  </metadata>
+  <prompt>
+    <goal>Implement token bridge for parent-to-child iframe token sharing</goal>
+    <context>
+      When Spaarke opens code pages or dialogs in iframes, the parent window (Dataverse form)
+      already has a valid token. Instead of forcing the child to re-authenticate, the parent
+      publishes its token via postMessage or a shared window property, and the child reads it.
+      This eliminates unnecessary MSAL redirects and popup prompts for embedded experiences.
+      The bridge functions (publishToken, readBridgeToken, clearBridgeToken) provide this
+      cross-frame token sharing capability.
+    </context>
+    <constraints>
+      - MUST handle cross-origin errors gracefully (try/catch around parent.postMessage)
+      - MUST validate token structure before accepting from bridge
+      - MUST NOT expose tokens to unrelated origins
+      - MUST support both postMessage and window property approaches
+      - MUST clear bridge tokens on explicit logout or tab close
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/services/bffAuthProvider.ts</file>
+      <file>docs/architecture/sdap-auth-patterns.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read bffAuthProvider.ts parent bridge logic for reference implementation</step>
+    <step>Create src/client/shared/Spaarke.Auth/src/tokenBridge.ts</step>
+    <step>Implement publishToken(token: ITokenResult): void - publishes token to child iframes via postMessage</step>
+    <step>Implement readBridgeToken(): ITokenResult | null - reads token from parent frame, handles cross-origin errors</step>
+    <step>Implement clearBridgeToken(): void - clears any bridged token references</step>
+    <step>Add origin validation to prevent token leaking to unrelated origins</step>
+    <step>Export bridge utilities from index.ts</step>
+    <step>Verify build with tsc --noEmit</step>
+  </steps>
+  <outputs>
+    <output>src/client/shared/Spaarke.Auth/src/tokenBridge.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>publishToken() sends token to child iframes via postMessage</criterion>
+    <criterion>readBridgeToken() reads token from parent frame without throwing on cross-origin</criterion>
+    <criterion>clearBridgeToken() clears all bridged token references</criterion>
+    <criterion>Cross-origin errors handled gracefully (returns null, does not throw)</criterion>
+    <criterion>Origin validation prevents token sharing with unrelated origins</criterion>
+    <criterion>TypeScript compiles without errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,57 @@
+<task id="071" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Migrate SemanticSearchControl PCF Auth to @spaarke/auth</title>
+    <phase>8</phase>
+    <tags>auth, migration, pcf</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>060</dependencies>
+    <parallel-group>F</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Replace SemanticSearchControl PCF auth with @spaarke/auth — removing ~480 lines</goal>
+    <context>
+      SemanticSearchControl is a PCF control with a class-based auth pattern: MsalAuthProvider.ts
+      (360 lines) and msalConfig.ts (120 lines). The pilot migration (task 060) validated the
+      @spaarke/auth pattern in PCF environments. This task applies the same proven approach.
+    </context>
+    <constraints>
+      - MUST follow the proven pilot pattern from task 060
+      - MUST update all service consumers
+      - MUST remove auth files after migration
+      - MUST bump ControlManifest.Input.xml version
+      - MUST verify build succeeds
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/auth/MsalAuthProvider.ts</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/auth/msalConfig.ts</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read current auth files: MsalAuthProvider.ts (360 lines), msalConfig.ts (120 lines)</step>
+    <step>Identify all consumers of MsalAuthProvider in the SemanticSearchControl</step>
+    <step>Install @spaarke/auth as a dependency</step>
+    <step>Replace MsalAuthProvider singleton with initAuth() call</step>
+    <step>Update all service consumers to use authenticatedFetch()</step>
+    <step>Remove auth files: MsalAuthProvider.ts, msalConfig.ts, and auth/ directory if empty</step>
+    <step>Remove @azure/msal-browser from direct dependencies if no longer needed</step>
+    <step>Bump version in ControlManifest.Input.xml</step>
+    <step>Build PCF control and verify no errors</step>
+  </steps>
+  <outputs>
+    <output>src/client/pcf/SemanticSearchControl/package.json (updated)</output>
+    <output>src/client/pcf/SemanticSearchControl/SemanticSearchControl/index.ts (updated)</output>
+    <output>src/client/pcf/SemanticSearchControl/ControlManifest.Input.xml (version bumped)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>MsalAuthProvider.ts (360 lines) deleted</criterion>
+    <criterion>msalConfig.ts (120 lines) deleted</criterion>
+    <criterion>All consumers use authenticatedFetch()</criterion>
+    <criterion>ControlManifest.Input.xml version bumped</criterion>
+    <criterion>PCF build compiles without errors</criterion>
+    <criterion>Net line removal: ~480 lines</criterion>
+  </acceptance-criteria>
+</task>

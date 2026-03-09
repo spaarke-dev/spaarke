@@ -1,0 +1,60 @@
+<task id="032" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Build DocumentDetailsStep Component</title>
+    <phase>4</phase>
+    <tags>component, form, fluent-ui, dataverse</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>030</dependencies>
+    <parallel-group>B</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Build DocumentDetailsStep with form fields for document metadata</goal>
+    <context>
+      DocumentDetailsStep is the second step in the CreateDocumentDialog wizard. It captures document
+      metadata including name, type, description, and client lookups. The form uses Fluent UI v9
+      components (Input, Combobox, Textarea, Field) and validates required fields before allowing the
+      user to advance to the next step. The pattern follows existing form implementations from
+      UniversalQuickCreate.
+    </context>
+    <constraints>
+      - MUST use Fluent UI v9 Input, Combobox, Textarea, and Field components per ADR-021
+      - MUST validate required fields (document name is required at minimum)
+      - MUST implement IWizardStepConfig interface with canAdvance validation
+      - MUST NOT hard-code Dataverse entity schemas per ADR-012
+      - MUST support dark mode through FluentProvider theme inheritance
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/UniversalQuickCreate/</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/wizardShellTypes.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Study existing UniversalQuickCreate form fields for form layout and validation patterns</step>
+    <step>Create src/client/code-pages/CreateDocument/src/components/DocumentDetailsStep.tsx</step>
+    <step>Implement document name field (Input, required)</step>
+    <step>Implement document type field (Combobox with predefined document types)</step>
+    <step>Implement description field (Textarea, optional)</step>
+    <step>Implement client lookup fields as needed</step>
+    <step>Implement field-level validation with error messages using Field component's validationMessage prop</step>
+    <step>Implement canAdvance logic: returns true only when all required fields are filled and valid</step>
+    <step>Wire up as IWizardStepConfig for WizardShell integration</step>
+  </steps>
+  <outputs>
+    <output>src/client/code-pages/CreateDocument/src/components/DocumentDetailsStep.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document name Input field present and marked as required</criterion>
+    <criterion>Document type Combobox with predefined type options</criterion>
+    <criterion>Description Textarea for optional free-text input</criterion>
+    <criterion>Client lookup fields functional</criterion>
+    <criterion>Required field validation prevents advancing without document name</criterion>
+    <criterion>Validation messages displayed using Fluent v9 Field validationMessage prop</criterion>
+    <criterion>Component implements IWizardStepConfig interface</criterion>
+    <criterion>All form components are Fluent UI v9 (no v8 mixing)</criterion>
+  </acceptance-criteria>
+</task>

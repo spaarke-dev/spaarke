@@ -1,0 +1,55 @@
+<task id="073" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Migrate EmailProcessingMonitor PCF Auth to @spaarke/auth</title>
+    <phase>8</phase>
+    <tags>auth, migration, pcf</tags>
+    <estimate>1-2 hours</estimate>
+    <dependencies>060</dependencies>
+    <parallel-group>F</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Replace EmailProcessingMonitor PCF auth with @spaarke/auth — removing ~212 lines</goal>
+    <context>
+      EmailProcessingMonitor is a PCF control with a simpler auth pattern: a single AuthService.ts
+      (212 lines). The pilot migration (task 060) validated the @spaarke/auth pattern in PCF
+      environments. This is a straightforward application of the proven migration approach.
+    </context>
+    <constraints>
+      - MUST follow the proven pilot pattern from task 060
+      - MUST update all service consumers
+      - MUST remove AuthService.ts after migration
+      - MUST bump ControlManifest.Input.xml version
+      - MUST verify build succeeds
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/EmailProcessingMonitor/control/AuthService.ts</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read current AuthService.ts (212 lines)</step>
+    <step>Identify all consumers of AuthService in the EmailProcessingMonitor control</step>
+    <step>Install @spaarke/auth as a dependency</step>
+    <step>Replace AuthService with initAuth() and authenticatedFetch() from @spaarke/auth</step>
+    <step>Update all service consumers to use authenticatedFetch()</step>
+    <step>Remove AuthService.ts file</step>
+    <step>Remove @azure/msal-browser from direct dependencies if no longer needed</step>
+    <step>Bump version in ControlManifest.Input.xml</step>
+    <step>Build PCF control and verify no errors</step>
+  </steps>
+  <outputs>
+    <output>src/client/pcf/EmailProcessingMonitor/package.json (updated)</output>
+    <output>src/client/pcf/EmailProcessingMonitor/control/index.ts (updated)</output>
+    <output>src/client/pcf/EmailProcessingMonitor/ControlManifest.Input.xml (version bumped)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>AuthService.ts (212 lines) deleted</criterion>
+    <criterion>All consumers use authenticatedFetch()</criterion>
+    <criterion>ControlManifest.Input.xml version bumped</criterion>
+    <criterion>PCF build compiles without errors</criterion>
+    <criterion>Net line removal: ~212 lines</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,59 @@
+<task id="041" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Migrate PlaybookBuilder Code Page Auth to @spaarke/auth</title>
+    <phase>5</phase>
+    <tags>auth, migration, code-page</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>007</dependencies>
+    <parallel-group>C</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Replace PlaybookBuilder code page auth with @spaarke/auth, removing ~444 lines of bespoke auth code</goal>
+    <context>
+      PlaybookBuilder is a React 18 code page with its own MSAL auth stack: authService.ts (331 lines),
+      msalConfig.ts (51 lines), and useAuth.ts (62 lines). This code page uses proactive 4-minute token
+      refresh to keep tokens warm during long editing sessions. The @spaarke/auth package supports this
+      via initAuth({ proactiveRefresh: true }).
+    </context>
+    <constraints>
+      - MUST use initAuth({ proactiveRefresh: true }) to preserve proactive 4-minute token refresh behavior
+      - MUST use authenticatedFetch() for all BFF API calls
+      - MUST NOT leave any direct MSAL imports in the code page
+      - MUST verify build succeeds after migration
+      - MUST remove all old auth files completely
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/PlaybookBuilder/src/services/authService.ts</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/config/msalConfig.ts</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read current auth files: authService.ts (331 lines), msalConfig.ts (51 lines), useAuth.ts (62 lines)</step>
+    <step>Identify all consumers of the current auth in PlaybookBuilder</step>
+    <step>Install @spaarke/auth as a dependency in PlaybookBuilder package.json</step>
+    <step>Replace auth initialization with initAuth({ proactiveRefresh: true }) to preserve 4-minute token refresh</step>
+    <step>Update all API service consumers to use authenticatedFetch()</step>
+    <step>Remove old auth files: authService.ts, msalConfig.ts, useAuth.ts</step>
+    <step>Remove @azure/msal-browser from direct dependencies if no longer needed</step>
+    <step>Build the code page and verify no TypeScript errors</step>
+    <step>Verify proactive refresh behavior is configured correctly</step>
+  </steps>
+  <outputs>
+    <output>src/client/code-pages/PlaybookBuilder/package.json (updated with @spaarke/auth)</output>
+    <output>src/client/code-pages/PlaybookBuilder/src/index.tsx (updated auth init)</output>
+    <output>src/client/code-pages/PlaybookBuilder/src/services/ (consumers updated)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>authService.ts (331 lines) deleted</criterion>
+    <criterion>msalConfig.ts (51 lines) deleted</criterion>
+    <criterion>useAuth.ts (62 lines) deleted</criterion>
+    <criterion>@spaarke/auth imported with initAuth({ proactiveRefresh: true })</criterion>
+    <criterion>All API calls use authenticatedFetch()</criterion>
+    <criterion>Build compiles without errors</criterion>
+    <criterion>Net line removal: ~444 lines replaced by ~10 lines</criterion>
+  </acceptance-criteria>
+</task>

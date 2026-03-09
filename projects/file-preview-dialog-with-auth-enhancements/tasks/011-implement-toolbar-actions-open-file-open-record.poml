@@ -1,0 +1,61 @@
+<task id="011" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Implement Open File and Open Record Toolbar Actions</title>
+    <phase>2</phase>
+    <tags>fluent-ui, toolbar, navigation</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>010</dependencies>
+    <parallel-group>A</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Implement Open File and Open Record toolbar actions in FilePreviewDialog</goal>
+    <context>
+      The FilePreviewDialog toolbar has 4 actions. This task implements the first two: Open File
+      (which opens the document for editing/viewing) and Open Record (which navigates to the
+      Dataverse record). Open File uses a lazy-fetch pattern — the open links are fetched on first
+      click, not on dialog open — to avoid unnecessary API calls. It cascades through desktop app,
+      web app, then download as fallback. Open Record uses the standard Xrm.Navigation.navigateTo
+      pattern to open the sprk_document entity record.
+    </context>
+    <constraints>
+      - MUST lazy-fetch open links on first click (not on dialog open) to minimize API calls
+      - MUST cascade: desktop app → web app → download (first available wins)
+      - MUST use DocumentApiService.getDocumentOpenLinks() for fetching links
+      - MUST use navigateToEntity for Open Record navigation
+      - MUST show loading indicator on Open File button during fetch
+      - MUST handle errors gracefully (toast or inline message)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/services/DocumentApiService.ts</file>
+      <file>src/solutions/LegalWorkspace/src/services/navigation.ts</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read DocumentApiService.ts for getDocumentOpenLinks() signature and response shape</step>
+    <step>Read navigation.ts for navigateToEntity helper and entity navigation pattern</step>
+    <step>Implement Open File click handler with lazy fetch of DocumentApiService.getDocumentOpenLinks()</step>
+    <step>Implement 3-tier cascade logic: try desktop URL first, fall back to web URL, then download URL</step>
+    <step>Add isLoadingOpenLinks state and show Spinner on Open File button during fetch</step>
+    <step>Cache open links after first fetch to avoid redundant API calls on subsequent clicks</step>
+    <step>Implement Open Record click handler using navigateToEntity({ action: 'openRecord', entityName: 'sprk_document', entityId: documentId })</step>
+    <step>Add error handling for both actions (catch and display user-friendly messages)</step>
+    <step>Verify TypeScript compiles without errors</step>
+  </steps>
+  <outputs>
+    <output>src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx (updated)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Open File button triggers lazy fetch of open links on first click</criterion>
+    <criterion>Open links cascade: desktop → web → download</criterion>
+    <criterion>Open links are cached after first fetch</criterion>
+    <criterion>Loading indicator shown on Open File button during fetch</criterion>
+    <criterion>Open Record navigates to sprk_document entity record</criterion>
+    <criterion>Errors are handled gracefully without crashing the dialog</criterion>
+    <criterion>TypeScript compiles without errors</criterion>
+  </acceptance-criteria>
+</task>

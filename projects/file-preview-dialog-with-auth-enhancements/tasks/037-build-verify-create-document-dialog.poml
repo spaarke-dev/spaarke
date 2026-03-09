@@ -1,0 +1,54 @@
+<task id="037" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Build and Verify CreateDocument Dialog End-to-End</title>
+    <phase>4</phase>
+    <tags>build, verification, code-page</tags>
+    <estimate>1-2 hours</estimate>
+    <dependencies>036</dependencies>
+    <parallel-group>B</parallel-group>
+    <rigor>STANDARD</rigor>
+  </metadata>
+  <prompt>
+    <goal>Build CreateDocument code page and verify end-to-end functionality</goal>
+    <context>
+      This is the final verification task for Phase 4. It ensures the CreateDocument code page builds
+      successfully via webpack, produces valid output HTML, and verifies that authenticatedFetch calls
+      work correctly with @spaarke/auth. The feature flag toggle between code page and existing PCF
+      is also verified. The build-webresource.ps1 inline step produces the final deployable HTML file.
+    </context>
+    <constraints>
+      - MUST produce a clean webpack build with no errors or warnings
+      - MUST verify output HTML is valid and self-contained
+      - MUST verify authenticatedFetch integration with @spaarke/auth works
+      - MUST verify feature flag toggles correctly between code page and PCF
+      - MUST run build-webresource.ps1 to produce final deployable artifact
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/CreateDocument/webpack.config.js</file>
+      <file>src/client/code-pages/CreateDocument/src/App.tsx</file>
+      <file>scripts/build-webresource.ps1</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Run webpack build for CreateDocument code page (npx webpack --mode production)</step>
+    <step>Verify output HTML file exists and contains bundled JavaScript</step>
+    <step>Verify authenticatedFetch calls use @spaarke/auth correctly (code review of built output)</step>
+    <step>Verify feature flag mechanism works: URL parameter toggles between code page and PCF modes</step>
+    <step>Run build-webresource.ps1 inline step to produce final deployable HTML artifact</step>
+    <step>Verify final HTML artifact is ready for Dataverse web resource deployment</step>
+  </steps>
+  <outputs>
+    <output>src/client/code-pages/CreateDocument/dist/ (webpack output)</output>
+    <output>Final inlined HTML web resource artifact</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Webpack build completes without errors</criterion>
+    <criterion>Output HTML contains all bundled JavaScript inline</criterion>
+    <criterion>authenticatedFetch calls reference @spaarke/auth correctly in built output</criterion>
+    <criterion>Feature flag URL parameter toggles behavior as expected</criterion>
+    <criterion>build-webresource.ps1 produces final deployable HTML artifact</criterion>
+    <criterion>No TypeScript compilation errors in the build</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,67 @@
+<task id="070" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Migrate UniversalDatasetGrid PCF Auth to @spaarke/auth</title>
+    <phase>8</phase>
+    <tags>auth, migration, pcf</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>060</dependencies>
+    <parallel-group>F</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Replace UniversalDatasetGrid PCF auth with @spaarke/auth — largest PCF auth removal at ~1,305 lines</goal>
+    <context>
+      UniversalDatasetGrid has the largest auth footprint of any PCF control: MsalAuthProvider.ts
+      (793 lines), msalConfig.ts (328 lines), and auth.ts types (184 lines) totaling ~1,305 lines.
+      This control is widely used across Dataverse forms and has multiple service consumers that
+      depend on MsalAuthProvider.getInstance() for token acquisition.
+
+      The pilot migration (task 060) validated that @spaarke/auth works in PCF environments.
+      This task applies the proven pattern to the largest auth codebase.
+    </context>
+    <constraints>
+      - MUST follow the proven pilot pattern from task 060 (SpeDocumentViewer)
+      - MUST update all service consumers that use MsalAuthProvider.getInstance()
+      - MUST remove the entire auth/ directory after migration
+      - MUST bump ControlManifest.Input.xml version
+      - MUST verify build succeeds with no TypeScript errors
+      - MUST NOT break any existing grid functionality
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/UniversalDatasetGrid/control/services/auth/MsalAuthProvider.ts</file>
+      <file>src/client/pcf/UniversalDatasetGrid/control/services/auth/msalConfig.ts</file>
+      <file>src/client/pcf/UniversalDatasetGrid/control/services/auth/auth.ts</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read current auth directory: MsalAuthProvider.ts (793 lines), msalConfig.ts (328 lines), auth.ts (184 lines)</step>
+    <step>Identify all service consumers of MsalAuthProvider.getInstance() across the control</step>
+    <step>Install @spaarke/auth as a dependency in UniversalDatasetGrid package.json</step>
+    <step>Replace MsalAuthProvider singleton with initAuth() call in control init</step>
+    <step>Update all service consumers to use authenticatedFetch() instead of MsalAuthProvider.getInstance().getToken()</step>
+    <step>Remove entire auth/ directory (MsalAuthProvider.ts, msalConfig.ts, auth.ts)</step>
+    <step>Remove @azure/msal-browser from direct dependencies if no longer needed</step>
+    <step>Bump version in ControlManifest.Input.xml</step>
+    <step>Build PCF control and verify no TypeScript errors</step>
+    <step>Verify all grid functionality preserved</step>
+  </steps>
+  <outputs>
+    <output>src/client/pcf/UniversalDatasetGrid/package.json (updated with @spaarke/auth)</output>
+    <output>src/client/pcf/UniversalDatasetGrid/control/index.ts (updated init)</output>
+    <output>src/client/pcf/UniversalDatasetGrid/control/services/ (consumers updated, auth/ removed)</output>
+    <output>src/client/pcf/UniversalDatasetGrid/ControlManifest.Input.xml (version bumped)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>MsalAuthProvider.ts (793 lines) deleted</criterion>
+    <criterion>msalConfig.ts (328 lines) deleted</criterion>
+    <criterion>auth.ts (184 lines) deleted</criterion>
+    <criterion>auth/ directory completely removed</criterion>
+    <criterion>All service consumers use authenticatedFetch()</criterion>
+    <criterion>ControlManifest.Input.xml version bumped</criterion>
+    <criterion>PCF build compiles without errors</criterion>
+    <criterion>Net line removal: ~1,305 lines</criterion>
+  </acceptance-criteria>
+</task>

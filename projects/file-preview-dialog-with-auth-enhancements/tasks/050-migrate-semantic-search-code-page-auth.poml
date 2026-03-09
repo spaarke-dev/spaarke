@@ -1,0 +1,74 @@
+<task id="050" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Migrate SemanticSearch Code Page Auth to @spaarke/auth</title>
+    <phase>6</phase>
+    <tags>auth, migration, code-page, environment-portability</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>007</dependencies>
+    <parallel-group>D</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Replace SemanticSearch code page class-based auth with @spaarke/auth, fix hardcoded tenant/URL, add parent token bridge support — removing ~301 lines</goal>
+    <context>
+      SemanticSearch uses a class-based singleton auth pattern (MsalAuthProvider) rather than the
+      function-based pattern used by AnalysisWorkspace and PlaybookBuilder. It also has critical
+      environment portability issues: hardcoded tenant ID and hardcoded redirect URI that prevent
+      deployment to non-dev environments.
+
+      The @spaarke/auth package fixes both issues:
+      - Uses 'organizations' authority instead of hardcoded tenant ID
+      - Uses window.location.origin instead of hardcoded redirect URI
+      - Supports parent token bridge (eliminates MSAL init when opened from LegalWorkspace)
+
+      Consumers include SemanticSearchApiService and RecordSearchApiService which use the
+      MsalAuthProvider singleton for token acquisition.
+    </context>
+    <constraints>
+      - MUST replace hardcoded tenant ID with 'organizations' authority via @spaarke/auth
+      - MUST replace hardcoded redirect URI with window.location.origin via @spaarke/auth
+      - MUST add parent token bridge support for when opened from LegalWorkspace
+      - MUST update SemanticSearchApiService and RecordSearchApiService consumers
+      - MUST NOT leave any direct MSAL imports or MsalAuthProvider references
+      - MUST verify build succeeds and environment portability is achieved
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/SemanticSearch/src/services/auth/MsalAuthProvider.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/services/auth/msalConfig.ts</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read current class-based auth: MsalAuthProvider.ts (235 lines), msalConfig.ts (66 lines)</step>
+    <step>Identify hardcoded tenant ID and redirect URI values in msalConfig.ts</step>
+    <step>Identify all consumers: SemanticSearchApiService, RecordSearchApiService, and any component using MsalAuthProvider.getInstance()</step>
+    <step>Install @spaarke/auth as a dependency in SemanticSearch package.json</step>
+    <step>Replace MsalAuthProvider singleton with initAuth() call at app startup</step>
+    <step>Update SemanticSearchApiService to use authenticatedFetch() instead of MsalAuthProvider.getInstance().getToken()</step>
+    <step>Update RecordSearchApiService to use authenticatedFetch() instead of MsalAuthProvider.getInstance().getToken()</step>
+    <step>Add parent token bridge configuration for LegalWorkspace integration</step>
+    <step>Remove old auth files: MsalAuthProvider.ts, msalConfig.ts, and auth/ directory if empty</step>
+    <step>Remove @azure/msal-browser from direct dependencies if no longer needed</step>
+    <step>Build the code page and verify no TypeScript errors</step>
+    <step>Verify no hardcoded tenant IDs or redirect URIs remain in codebase</step>
+  </steps>
+  <outputs>
+    <output>src/client/code-pages/SemanticSearch/package.json (updated with @spaarke/auth)</output>
+    <output>src/client/code-pages/SemanticSearch/src/index.tsx (updated auth init)</output>
+    <output>src/client/code-pages/SemanticSearch/src/services/SemanticSearchApiService.ts (updated)</output>
+    <output>src/client/code-pages/SemanticSearch/src/services/RecordSearchApiService.ts (updated)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>MsalAuthProvider.ts (235 lines) deleted</criterion>
+    <criterion>msalConfig.ts (66 lines) deleted</criterion>
+    <criterion>No hardcoded tenant ID remains in SemanticSearch code</criterion>
+    <criterion>No hardcoded redirect URI remains in SemanticSearch code</criterion>
+    <criterion>Parent token bridge support configured for LegalWorkspace integration</criterion>
+    <criterion>SemanticSearchApiService uses authenticatedFetch()</criterion>
+    <criterion>RecordSearchApiService uses authenticatedFetch()</criterion>
+    <criterion>Build compiles without errors</criterion>
+    <criterion>Net line removal: ~301 lines replaced by ~10 lines</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,50 @@
+<task id="033" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Build CreateDocumentNextStepsStep Component</title>
+    <phase>4</phase>
+    <tags>component, fluent-ui</tags>
+    <estimate>1-2 hours</estimate>
+    <dependencies>030</dependencies>
+    <parallel-group>B</parallel-group>
+    <rigor>STANDARD</rigor>
+  </metadata>
+  <prompt>
+    <goal>Build CreateDocumentNextStepsStep for optional follow-on actions after document creation</goal>
+    <context>
+      CreateDocumentNextStepsStep is the final step in the CreateDocumentDialog wizard. It presents
+      optional follow-on actions as checkboxes (e.g., "Open document after creation", "Create related
+      task", "Send notification"). This step implements isEarlyFinish on IWizardStepConfig, meaning
+      the user can finish the wizard from the previous step without visiting this step. The step is
+      always advanceable since all options are optional.
+    </context>
+    <constraints>
+      - MUST implement IWizardStepConfig interface with isEarlyFinish support
+      - MUST use Fluent UI v9 Checkbox components per ADR-021
+      - MUST allow finishing the wizard without selecting any follow-on actions
+      - All follow-on actions are optional (canAdvance always true)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/WizardShell.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/Wizard/wizardShellTypes.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read WizardShell.tsx and wizardShellTypes.ts for isEarlyFinish behavior and IWizardStepConfig interface</step>
+    <step>Create src/client/code-pages/CreateDocument/src/components/CreateDocumentNextStepsStep.tsx</step>
+    <step>Implement follow-on action checkboxes using Fluent v9 Checkbox (e.g., "Open document after creation", "Create related task")</step>
+    <step>Wire up as IWizardStepConfig with isEarlyFinish: true and canAdvance always returning true</step>
+  </steps>
+  <outputs>
+    <output>src/client/code-pages/CreateDocument/src/components/CreateDocumentNextStepsStep.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Component renders follow-on action checkboxes using Fluent v9 Checkbox</criterion>
+    <criterion>All checkboxes are optional (none selected by default)</criterion>
+    <criterion>Implements IWizardStepConfig with isEarlyFinish: true</criterion>
+    <criterion>canAdvance always returns true (step is never blocking)</criterion>
+    <criterion>Selected follow-on actions accessible via step data for handleFinish</criterion>
+  </acceptance-criteria>
+</task>

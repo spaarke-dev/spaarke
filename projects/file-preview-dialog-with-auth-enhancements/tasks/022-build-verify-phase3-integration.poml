@@ -1,0 +1,52 @@
+<task id="022" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Build and Verify Phase 3 Integration</title>
+    <phase>3</phase>
+    <tags>build, verification</tags>
+    <estimate>30-45 minutes</estimate>
+    <dependencies>020, 021</dependencies>
+    <parallel-group>A</parallel-group>
+    <rigor>STANDARD</rigor>
+  </metadata>
+  <prompt>
+    <goal>Build and verify all Phase 3 integrations to ensure FilePreviewDialog works from both entry points</goal>
+    <context>
+      Phase 3 integrated FilePreviewDialog into FindSimilarResultsStep (task 020) and DocumentCard
+      (task 021). This verification task ensures the full LegalWorkspace solution builds cleanly,
+      confirms the expected net code reduction (~140 lines removed from Popover + 3-button patterns),
+      and validates that both integration points correctly reference and open FilePreviewDialog.
+    </context>
+    <constraints>
+      - MUST build without TypeScript errors
+      - MUST build without lint errors
+      - Net code reduction should be approximately 140 lines (80 from DocumentCard + 60 from FindSimilar)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/package.json</file>
+      <file>src/solutions/LegalWorkspace/src/components/FindSimilar/FindSimilarResultsStep.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/RecordCards/DocumentCard.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Build LegalWorkspace solution (npm run build or equivalent)</step>
+    <step>Verify no TypeScript compilation errors across all modified files</step>
+    <step>Verify no lint errors in FindSimilarResultsStep.tsx, DocumentCard.tsx, FilePreviewDialog.tsx</step>
+    <step>Confirm FindSimilarResultsStep imports and renders FilePreviewDialog correctly</step>
+    <step>Confirm DocumentCard imports and renders FilePreviewDialog correctly</step>
+    <step>Verify net code reduction is approximately 140 lines (compare line counts before/after Phase 3)</step>
+    <step>Check that no unused imports or dead code remain in modified files</step>
+  </steps>
+  <outputs>
+    <output>Build verification log (clean build with no errors)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>LegalWorkspace builds successfully with no TypeScript errors</criterion>
+    <criterion>No lint errors in any modified files</criterion>
+    <criterion>FilePreviewDialog is correctly imported in both FindSimilarResultsStep and DocumentCard</criterion>
+    <criterion>Net code reduction of approximately 140 lines achieved</criterion>
+    <criterion>No unused imports or dead code in modified files</criterion>
+  </acceptance-criteria>
+</task>

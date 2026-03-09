@@ -1,0 +1,64 @@
+<task id="051" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Migrate DocumentRelationshipViewer Code Page Auth to @spaarke/auth</title>
+    <phase>6</phase>
+    <tags>auth, migration, code-page, environment-portability</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>007</dependencies>
+    <parallel-group>D</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Replace DocumentRelationshipViewer code page class-based auth with @spaarke/auth, fix hardcoded tenant/URL — removing ~300 lines</goal>
+    <context>
+      DocumentRelationshipViewer uses the same class-based MsalAuthProvider singleton pattern as
+      SemanticSearch, with the same environment portability issues (hardcoded tenant ID and redirect URI).
+      It also defines custom auth.ts types (IAuthProvider interface, 30 lines) that are no longer needed
+      when using @spaarke/auth.
+
+      The migration follows the same pattern as task 050 (SemanticSearch) — replace singleton with
+      initAuth(), update consumers, remove old files.
+    </context>
+    <constraints>
+      - MUST replace hardcoded tenant ID with 'organizations' authority via @spaarke/auth
+      - MUST replace hardcoded redirect URI with window.location.origin via @spaarke/auth
+      - MUST remove custom IAuthProvider interface (replaced by @spaarke/auth types)
+      - MUST NOT leave any direct MSAL imports or MsalAuthProvider references
+      - MUST verify build succeeds and environment portability is achieved
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/services/auth/MsalAuthProvider.ts</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/types/auth.ts</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read current auth files: MsalAuthProvider.ts (213 lines), msalConfig.ts (57 lines), auth.ts types (30 lines)</step>
+    <step>Identify hardcoded tenant ID and redirect URI values</step>
+    <step>Identify all consumers of MsalAuthProvider.getInstance() and IAuthProvider interface</step>
+    <step>Install @spaarke/auth as a dependency in DocumentRelationshipViewer package.json</step>
+    <step>Replace MsalAuthProvider singleton with initAuth() call at app startup</step>
+    <step>Update all service consumers to use authenticatedFetch()</step>
+    <step>Remove old auth files: MsalAuthProvider.ts, msalConfig.ts, auth.ts, and auth/ directory if empty</step>
+    <step>Remove @azure/msal-browser from direct dependencies if no longer needed</step>
+    <step>Build the code page and verify no TypeScript errors</step>
+    <step>Verify no hardcoded tenant IDs or redirect URIs remain</step>
+  </steps>
+  <outputs>
+    <output>src/client/code-pages/DocumentRelationshipViewer/package.json (updated with @spaarke/auth)</output>
+    <output>src/client/code-pages/DocumentRelationshipViewer/src/index.tsx (updated auth init)</output>
+    <output>src/client/code-pages/DocumentRelationshipViewer/src/services/ (consumers updated)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>MsalAuthProvider.ts (213 lines) deleted</criterion>
+    <criterion>msalConfig.ts (57 lines) deleted</criterion>
+    <criterion>auth.ts types (30 lines) deleted</criterion>
+    <criterion>No hardcoded tenant ID remains</criterion>
+    <criterion>No hardcoded redirect URI remains</criterion>
+    <criterion>All consumers use authenticatedFetch()</criterion>
+    <criterion>Build compiles without errors</criterion>
+    <criterion>Net line removal: ~300 lines replaced by ~10 lines</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,66 @@
+<task id="030" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Scaffold CreateDocumentDialog Code Page</title>
+    <phase>4</phase>
+    <tags>code-page, scaffolding, react-18</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>007</dependencies>
+    <parallel-group>B</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Create code page scaffolding for CreateDocumentDialog at src/client/code-pages/CreateDocument/</goal>
+    <context>
+      CreateDocumentDialog is a standalone React 18 code page that replaces the existing PCF-based
+      document creation workflow. It uses @spaarke/auth for authentication (initAuth() + authenticatedFetch())
+      and follows the same code page pattern established by AnalysisWorkspace and other existing code pages.
+      The dialog receives context via URL parameters (matterId, containerId) and renders inside a
+      FluentProvider with theme support.
+    </context>
+    <constraints>
+      - MUST use React 18 createRoot (bundled, not platform-provided) per ADR-006
+      - MUST use FluentProvider with webLightTheme/webDarkTheme per ADR-021
+      - MUST use @spaarke/auth initAuth() for authentication initialization
+      - MUST use authenticatedFetch() for all BFF API calls
+      - MUST read URL parameters for context (matterId, containerId)
+      - MUST follow existing code page webpack.config.js patterns
+      - MUST NOT use legacy JS webresources or jQuery per ADR-006
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/code-pages/AnalysisWorkspace/webpack.config.js</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/index.tsx</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/App.tsx</file>
+      <file>src/client/code-pages/AnalysisWorkspace/index.html</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Study existing code page structure (AnalysisWorkspace) for webpack.config.js, index.html, index.tsx, and App.tsx patterns</step>
+    <step>Create src/client/code-pages/CreateDocument/ directory structure with src/ subdirectory</step>
+    <step>Create webpack.config.js following AnalysisWorkspace pattern (HtmlWebpackPlugin, TypeScript loader, output config)</step>
+    <step>Create index.html template with root div and meta tags</step>
+    <step>Create src/index.tsx with React 18 createRoot, FluentProvider wrapping, URL parameter parsing for matterId and containerId</step>
+    <step>Create src/App.tsx with FluentProvider (webLightTheme/webDarkTheme), @spaarke/auth initAuth() call, loading state, and placeholder content</step>
+    <step>Verify build compiles without errors (npx webpack or npm run build)</step>
+  </steps>
+  <outputs>
+    <output>src/client/code-pages/CreateDocument/webpack.config.js</output>
+    <output>src/client/code-pages/CreateDocument/index.html</output>
+    <output>src/client/code-pages/CreateDocument/src/index.tsx</output>
+    <output>src/client/code-pages/CreateDocument/src/App.tsx</output>
+    <output>src/client/code-pages/CreateDocument/package.json</output>
+    <output>src/client/code-pages/CreateDocument/tsconfig.json</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Code page directory created at src/client/code-pages/CreateDocument/</criterion>
+    <criterion>webpack.config.js follows existing code page patterns</criterion>
+    <criterion>React 18 createRoot used in index.tsx (not ReactDOM.render)</criterion>
+    <criterion>FluentProvider wraps App with webLightTheme/webDarkTheme support</criterion>
+    <criterion>@spaarke/auth initAuth() called before rendering</criterion>
+    <criterion>URL parameters (matterId, containerId) parsed and passed to App</criterion>
+    <criterion>Build compiles without TypeScript errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,68 @@
+<task id="007" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Migrate LegalWorkspace to @spaarke/auth</title>
+    <phase>1</phase>
+    <tags>auth, migration, pcf, bff-api</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>006</dependencies>
+    <parallel-group>none</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Replace LegalWorkspace bffAuthProvider.ts with @spaarke/auth package</goal>
+    <context>
+      The LegalWorkspace solution currently has its own auth implementation spread across three
+      files: bffAuthProvider.ts (268 lines), msalConfig.ts (78 lines), and bffConfig.ts (84 lines).
+      This task replaces all three with the new @spaarke/auth package, reducing ~430 lines of
+      duplicated auth code to a few import statements and an initAuth() call. This is the first
+      consumer migration and validates that the @spaarke/auth API is correct and complete.
+    </context>
+    <constraints>
+      - MUST maintain identical runtime behavior (same token acquisition flow)
+      - MUST NOT break any existing LegalWorkspace functionality
+      - MUST remove all three legacy auth files after migration
+      - MUST update all imports across the LegalWorkspace solution
+      - MUST verify build succeeds after migration
+      - MUST preserve any environment-specific config (client IDs, scopes, redirect URIs)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/services/bffAuthProvider.ts</file>
+      <file>src/solutions/LegalWorkspace/src/services/msalConfig.ts</file>
+      <file>src/solutions/LegalWorkspace/src/services/bffConfig.ts</file>
+      <file>src/solutions/LegalWorkspace/src/services/DocumentApiService.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read all LegalWorkspace auth files to map current API surface used by consumers</step>
+    <step>Read DocumentApiService.ts to understand how bffAuthProvider is consumed</step>
+    <step>Identify all files importing from bffAuthProvider, msalConfig, or bffConfig</step>
+    <step>Install @spaarke/auth as a dependency in LegalWorkspace package.json</step>
+    <step>Update DocumentApiService.ts: replace bffAuthProvider imports with @spaarke/auth initAuth() and authenticatedFetch</step>
+    <step>Update any other files importing from legacy auth modules</step>
+    <step>Map existing msalConfig.ts settings to initAuth() options (clientId, scopes, redirect URI)</step>
+    <step>Map existing bffConfig.ts settings to environment config</step>
+    <step>Remove src/solutions/LegalWorkspace/src/services/bffAuthProvider.ts (268 lines)</step>
+    <step>Remove src/solutions/LegalWorkspace/src/services/msalConfig.ts (78 lines)</step>
+    <step>Remove src/solutions/LegalWorkspace/src/services/bffConfig.ts (84 lines)</step>
+    <step>Build LegalWorkspace and verify no compilation errors</step>
+    <step>Verify all imports resolve correctly</step>
+  </steps>
+  <outputs>
+    <output>src/solutions/LegalWorkspace/package.json (updated dependency)</output>
+    <output>src/solutions/LegalWorkspace/src/services/DocumentApiService.ts (updated imports)</output>
+    <output>src/solutions/LegalWorkspace/src/services/bffAuthProvider.ts (DELETED)</output>
+    <output>src/solutions/LegalWorkspace/src/services/msalConfig.ts (DELETED)</output>
+    <output>src/solutions/LegalWorkspace/src/services/bffConfig.ts (DELETED)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>LegalWorkspace uses @spaarke/auth instead of local auth files</criterion>
+    <criterion>All three legacy auth files removed (bffAuthProvider.ts, msalConfig.ts, bffConfig.ts)</criterion>
+    <criterion>~430 lines of duplicated auth code eliminated</criterion>
+    <criterion>DocumentApiService.ts uses initAuth() and authenticatedFetch from @spaarke/auth</criterion>
+    <criterion>No broken imports across the LegalWorkspace solution</criterion>
+    <criterion>LegalWorkspace builds without compilation errors</criterion>
+    <criterion>Runtime behavior identical to pre-migration (same token flow, same API calls)</criterion>
+  </acceptance-criteria>
+</task>

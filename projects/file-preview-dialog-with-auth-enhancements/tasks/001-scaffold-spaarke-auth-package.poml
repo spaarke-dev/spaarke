@@ -1,0 +1,62 @@
+<task id="001" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Scaffold @spaarke/auth Package</title>
+    <phase>1</phase>
+    <tags>auth, shared-package, foundation</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>none</dependencies>
+    <parallel-group>none</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Create the @spaarke/auth shared package scaffolding at src/client/shared/Spaarke.Auth/</goal>
+    <context>
+      This is the foundation package that all other phases depend on. It must follow the same
+      structure as the existing @spaarke/ui-components package at src/client/shared/Spaarke.UI.Components/.
+      The package provides auth token acquisition and authenticated HTTP calls for all Spaarke
+      client apps (code pages, PCF controls, custom pages).
+    </context>
+    <constraints>
+      - MUST be React 16/17 compatible (consumed by PCF controls) per ADR-022
+      - MUST NOT import any PCF-specific APIs (ComponentFramework.*) per ADR-012
+      - MUST NOT hard-code Dataverse entity schemas per ADR-012
+      - MUST use TypeScript with tsc build (matching @spaarke/ui-components pattern)
+      - Peer dependency on @azure/msal-browser v3.x
+      - Peer dependency on React >=16.14.0
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+      <file>src/client/shared/Spaarke.UI.Components/tsconfig.json</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read @spaarke/ui-components package structure for reference (package.json, tsconfig.json)</step>
+    <step>Create src/client/shared/Spaarke.Auth/package.json with name @spaarke/auth, peer deps for msal-browser and React</step>
+    <step>Create src/client/shared/Spaarke.Auth/tsconfig.json matching ui-components config</step>
+    <step>Create src/client/shared/Spaarke.Auth/src/types.ts with IAuthConfig, ITokenResult, TokenCacheEntry interfaces</step>
+    <step>Create src/client/shared/Spaarke.Auth/src/errors.ts with AuthError and ApiError classes</step>
+    <step>Create src/client/shared/Spaarke.Auth/src/config.ts with default config (multi-tenant authority, window.location.origin redirect, configurable via window globals)</step>
+    <step>Create src/client/shared/Spaarke.Auth/src/index.ts barrel export</step>
+    <step>Verify build with tsc --noEmit</step>
+  </steps>
+  <outputs>
+    <output>src/client/shared/Spaarke.Auth/package.json</output>
+    <output>src/client/shared/Spaarke.Auth/tsconfig.json</output>
+    <output>src/client/shared/Spaarke.Auth/src/index.ts</output>
+    <output>src/client/shared/Spaarke.Auth/src/types.ts</output>
+    <output>src/client/shared/Spaarke.Auth/src/errors.ts</output>
+    <output>src/client/shared/Spaarke.Auth/src/config.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Package scaffolding created at src/client/shared/Spaarke.Auth/</criterion>
+    <criterion>package.json has correct name, peer deps, and build script</criterion>
+    <criterion>TypeScript compiles without errors</criterion>
+    <criterion>Types exported: IAuthConfig, ITokenResult, AuthError, ApiError</criterion>
+  </acceptance-criteria>
+</task>

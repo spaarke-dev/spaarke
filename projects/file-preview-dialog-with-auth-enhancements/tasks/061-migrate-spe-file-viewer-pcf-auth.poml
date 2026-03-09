@@ -1,0 +1,60 @@
+<task id="061" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Migrate SpeFileViewer PCF Auth to @spaarke/auth (Pilot)</title>
+    <phase>7</phase>
+    <tags>auth, migration, pcf, pilot</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>007</dependencies>
+    <parallel-group>E</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Replace SpeFileViewer PCF control auth with @spaarke/auth as a pilot migration — removing ~239 lines</goal>
+    <context>
+      SpeFileViewer is a PCF control with an AuthService.ts (239 lines) that is an identical copy of
+      the SpeDocumentViewer auth implementation. This is the second pilot PCF migration, running in
+      parallel with task 060. The same migration pattern applies: replace AuthService with initAuth()
+      and authenticatedFetch() from @spaarke/auth.
+
+      Since the auth code is identical to SpeDocumentViewer, the migration follows the exact same
+      steps and validates the pattern is repeatable across PCF controls.
+    </context>
+    <constraints>
+      - MUST verify React 16 compatibility of @spaarke/auth in PCF environment per ADR-022
+      - MUST use authenticatedFetch() for all BFF API calls
+      - MUST bump ControlManifest.Input.xml version after changes
+      - MUST NOT break existing Dataverse form integration
+      - MUST NOT import React 18 APIs in PCF control
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/SpeFileViewer/control/AuthService.ts</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read current AuthService.ts (239 lines) to confirm identical pattern to SpeDocumentViewer</step>
+    <step>Install @spaarke/auth as a dependency in SpeFileViewer package.json</step>
+    <step>Replace AuthService usage with import { initAuth, authenticatedFetch } from '@spaarke/auth'</step>
+    <step>Update control index.ts to call initAuth() during init lifecycle method</step>
+    <step>Update any BFF client code to use authenticatedFetch()</step>
+    <step>Remove AuthService.ts file</step>
+    <step>Bump version in ControlManifest.Input.xml</step>
+    <step>Build PCF control with npm run build and verify no errors</step>
+    <step>Test in PCF dev harness to verify functionality</step>
+  </steps>
+  <outputs>
+    <output>src/client/pcf/SpeFileViewer/package.json (updated with @spaarke/auth)</output>
+    <output>src/client/pcf/SpeFileViewer/control/index.ts (updated init and auth)</output>
+    <output>src/client/pcf/SpeFileViewer/ControlManifest.Input.xml (version bumped)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>AuthService.ts (239 lines) deleted</criterion>
+    <criterion>@spaarke/auth imported and initAuth() called at control init</criterion>
+    <criterion>All API calls use authenticatedFetch()</criterion>
+    <criterion>ControlManifest.Input.xml version bumped</criterion>
+    <criterion>PCF build compiles without errors</criterion>
+    <criterion>Control functions correctly in PCF dev harness</criterion>
+  </acceptance-criteria>
+</task>

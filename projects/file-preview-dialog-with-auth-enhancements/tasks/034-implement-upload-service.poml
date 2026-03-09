@@ -1,0 +1,58 @@
+<task id="034" project="file-preview-dialog-with-auth-enhancements">
+  <metadata>
+    <title>Implement Document Upload Service</title>
+    <phase>4</phase>
+    <tags>service, auth, spe</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>030</dependencies>
+    <parallel-group>B</parallel-group>
+    <rigor>FULL</rigor>
+  </metadata>
+  <prompt>
+    <goal>Implement documentUploadService.ts using authenticatedFetch for SPE file upload</goal>
+    <context>
+      The document upload service handles uploading files to SharePoint Embedded containers via the
+      BFF API. It uses authenticatedFetch from @spaarke/auth to make authenticated PUT requests to
+      the existing /api/obo/containers/{containerId}/files/{path} endpoint. The service supports
+      multi-file upload orchestration with progress callbacks so the UI can display upload progress
+      per file. No server-side changes are needed as the BFF already exposes the required endpoints.
+    </context>
+    <constraints>
+      - MUST use authenticatedFetch() from @spaarke/auth for all API calls
+      - MUST call PUT /api/obo/containers/{containerId}/files/{path} for each file upload
+      - MUST provide progress callbacks for UI progress tracking
+      - MUST handle partial failures (some files succeed, some fail) gracefully
+      - MUST NOT require server-side changes (uses existing BFF endpoints)
+      - MUST support cancellation via AbortSignal
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/UniversalQuickCreate/control/services/MultiFileUploadService.ts</file>
+      <file>src/client/pcf/UniversalQuickCreate/control/services/FileUploadService.ts</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read existing MultiFileUploadService.ts and FileUploadService.ts for upload patterns and BFF endpoint usage</step>
+    <step>Create src/client/code-pages/CreateDocument/src/services/documentUploadService.ts</step>
+    <step>Implement single file upload function using authenticatedFetch('PUT /api/obo/containers/{containerId}/files/{path}')</step>
+    <step>Implement multi-file upload orchestration with per-file progress callbacks</step>
+    <step>Implement partial failure handling: track succeeded/failed files, report results</step>
+    <step>Add AbortSignal support for cancellation</step>
+    <step>Define TypeScript interfaces for upload results (IUploadResult, IUploadProgress)</step>
+  </steps>
+  <outputs>
+    <output>src/client/code-pages/CreateDocument/src/services/documentUploadService.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>authenticatedFetch used for all BFF API calls (no raw fetch)</criterion>
+    <criterion>PUT /api/obo/containers/{containerId}/files/{path} endpoint called correctly</criterion>
+    <criterion>Progress callbacks invoked per-file with percentage updates</criterion>
+    <criterion>Multi-file orchestration uploads files sequentially or in controlled parallel</criterion>
+    <criterion>Partial failures handled: succeeded files reported alongside failures</criterion>
+    <criterion>AbortSignal support enables upload cancellation</criterion>
+    <criterion>TypeScript interfaces defined for upload results and progress</criterion>
+  </acceptance-criteria>
+</task>
