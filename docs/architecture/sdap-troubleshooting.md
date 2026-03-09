@@ -743,6 +743,169 @@ $zip.Dispose()
 
 ---
 
+## Auth Testing Guide
+
+How to test and debug authentication flows in the SDAP system.
+
+### Getting Test Tokens
+
+#### Method 1: Browser Dev Tools (Quickest)
+
+1. Open a Dataverse form that loads a PCF control (e.g., a Matter form with SpeFileViewer)
+2. Open browser dev tools (F12) > Network tab
+3. Look for requests to `spe-api-dev-67e2xz.azurewebsites.net`
+4. Click a request and find the `Authorization: Bearer eyJ...` header
+5. Copy the token value (after "Bearer ")
+
+This token is valid for ~1 hour and can be used with `curl` or Postman.
+
+#### Method 2: MSAL Interactive Login (PowerShell)
+
+```powershell
+# Install MSAL module if needed
+Install-Module -Name MSAL.PS -Scope CurrentUser
+
+# Acquire token interactively (opens browser)
+$token = Get-MsalToken `
+  -ClientId "5175798e-f23e-41c3-b09b-7a90b9218189" `
+  -TenantId "a221a95e-6abc-4434-aecc-e48338a1b2f2" `
+  -Scopes "api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation" `
+  -RedirectUri "http://localhost"
+
+# Use the token
+$token.AccessToken | Set-Clipboard
+Write-Host "Token copied to clipboard (expires: $($token.ExpiresOn))"
+```
+
+#### Method 3: Client Credentials (S2S Token, No User Context)
+
+```powershell
+$body = @{
+    grant_type    = "client_credentials"
+    client_id     = "1e40baad-e065-4aea-a8d4-4b7ab273458c"
+    client_secret = "<API_CLIENT_SECRET>"
+    scope         = "https://spaarkedev1.crm.dynamics.com/.default"
+}
+
+$response = Invoke-RestMethod -Method Post `
+  -Uri "https://login.microsoftonline.com/a221a95e-6abc-4434-aecc-e48338a1b2f2/oauth2/v2.0/token" `
+  -Body $body
+
+$response.access_token | Set-Clipboard
+Write-Host "S2S token copied (expires in $($response.expires_in) seconds)"
+```
+
+### Verifying OBO Works Locally
+
+On-Behalf-Of (OBO) allows the BFF API to call downstream services (Graph, Dataverse) using the user's identity. To test locally:
+
+1. **Start the BFF API locally**:
+   ```bash
+   dotnet run --project src/server/api/Sprk.Bff.Api
+   ```
+
+2. **Get a user token** using Method 1 or 2 above (must be a delegated token, NOT client credentials).
+
+3. **Call a BFF endpoint that uses OBO**:
+   ```bash
+   curl -H "Authorization: Bearer <USER_TOKEN>" \
+     https://localhost:5001/api/documents
+   ```
+
+4. **Check logs for OBO success**:
+   Look for these log entries in the console output:
+   ```
+   [UAC-DIAG] Using OBO authentication for user context
+   [UAC-DIAG] Set OBO token on HttpClient authorization header
+   ```
+
+5. **If OBO fails**, check:
+   - `API_CLIENT_SECRET` is set in user secrets: `dotnet user-secrets list --project src/server/api/Sprk.Bff.Api`
+   - The user token was acquired with scope `api://1e40baad-.../user_impersonation` (not a client credentials token)
+   - The app registration has `Dynamics CRM > user_impersonation` delegated permission with admin consent
+
+### Checking JWT Claims
+
+Use [https://jwt.ms](https://jwt.ms) to decode and inspect tokens:
+
+1. Copy the token value (the `eyJ...` string)
+2. Paste it at https://jwt.ms
+3. Inspect the decoded claims
+
+**Key claims to check**:
+
+| Claim | What to Verify |
+|-------|---------------|
+| `aud` (audience) | Should match the expected API: `api://1e40baad-...` for BFF tokens, `https://spaarkedev1.crm.dynamics.com` for Dataverse tokens |
+| `iss` (issuer) | Should be `https://login.microsoftonline.com/a221a95e-.../v2.0` |
+| `exp` (expiration) | Unix timestamp -- convert to check if token is still valid |
+| `oid` (object ID) | The user's Azure AD object ID -- used for Dataverse user lookup |
+| `scp` (scopes) | Should include `user_impersonation` for delegated tokens |
+| `roles` | Present for application (S2S) tokens instead of `scp` |
+| `azp` (authorized party) | The client app that acquired the token (PCF app ID or Code Page app ID) |
+
+**Quick expiration check** (PowerShell):
+```powershell
+# Decode the token payload (middle segment)
+$token = "<paste-token-here>"
+$payload = $token.Split('.')[1]
+# Pad base64 if needed
+$padding = 4 - ($payload.Length % 4)
+if ($padding -ne 4) { $payload += '=' * $padding }
+$decoded = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)) | ConvertFrom-Json
+
+Write-Host "Audience: $($decoded.aud)"
+Write-Host "Expires:  $([DateTimeOffset]::FromUnixTimeSeconds($decoded.exp).LocalDateTime)"
+Write-Host "Scopes:   $($decoded.scp)"
+```
+
+### Testing with Expired Tokens
+
+To verify the API correctly rejects expired tokens:
+
+1. **Get a valid token** using any method above
+2. **Wait for it to expire** (default lifetime is 1 hour), OR use this approach:
+3. **Tamper with the token** to simulate expiration:
+   - Simply wait and reuse an old token after 1+ hour
+   - Or modify the `exp` claim (this will also break the signature, testing both expiry and signature validation)
+
+4. **Call the API with the expired token**:
+   ```bash
+   curl -v -H "Authorization: Bearer <EXPIRED_TOKEN>" \
+     https://spe-api-dev-67e2xz.azurewebsites.net/healthz
+   ```
+
+5. **Expected behavior**:
+   - API returns `401 Unauthorized`
+   - Response includes `WWW-Authenticate` header with error details
+   - Application Insights shows the rejection:
+     ```kusto
+     requests
+     | where resultCode == 401
+     | where timestamp > ago(1h)
+     | project timestamp, name, resultCode, customDimensions
+     | order by timestamp desc
+     ```
+
+6. **Verify PCF handles 401 gracefully**:
+   - PCF controls should attempt token refresh via MSAL when receiving 401
+   - If refresh fails, user should see a "Session expired, please refresh" message
+   - Check browser console for MSAL token refresh attempts
+
+### Auth Testing Checklist
+
+- [ ] Can acquire user token via browser dev tools
+- [ ] Can acquire user token via MSAL PowerShell
+- [ ] Can acquire S2S token via client credentials
+- [ ] OBO exchange works locally (BFF > Dataverse)
+- [ ] OBO exchange works in deployed environment
+- [ ] Expired tokens are rejected with 401
+- [ ] Invalid tokens (wrong audience) are rejected
+- [ ] PCF gracefully handles token expiration
+- [ ] jwt.ms shows correct claims for each token type
+
+---
+
 ## Related Articles
 
 - [sdap-overview.md](sdap-overview.md) - System architecture
@@ -756,3 +919,4 @@ $zip.Dispose()
 *Condensed from troubleshooting sections of architecture guide*
 *Email-to-Document issues added January 2026*
 *BFF API startup/deployment issues added February 2026*
+*Auth Testing Guide added March 2026*

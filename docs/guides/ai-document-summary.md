@@ -184,7 +184,7 @@ POST /api/ai/document-intelligence/analyze
 **How it works:**
 1. **Claim Extraction**: Extracts the Azure AD `oid` (Object ID) from the JWT token
 2. **Dataverse Lookup**: Queries Dataverse to find the user by `azureactivedirectoryobjectid`
-3. **Permission Check**: Calls `RetrievePrincipalAccess` to verify user has read access to the `sprk_document` record
+3. **Permission Check**: Verifies user has read access to the `sprk_document` record (dual-mode: `RetrievePrincipalAccess` in app-only contexts, direct query in OBO contexts)
 4. **Fail-Closed**: If any step fails, access is denied (security-first design)
 
 ### Claim Extraction Pattern

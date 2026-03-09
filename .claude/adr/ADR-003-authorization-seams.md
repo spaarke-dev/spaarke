@@ -84,6 +84,8 @@ public class TeamMembershipRule : IAuthorizationRule
 
 **Full ADR**: [docs/adr/ADR-003-lean-authorization-seams.md](../../docs/adr/ADR-003-lean-authorization-seams.md)
 
+**Update (2026-01-06)**: The initial rules list (ExplicitDenyRule, TeamMembershipRule, etc.) has been superseded by a single `OperationAccessRule` model backed by `OperationAccessPolicy`. See [UAC Access Control](../../docs/architecture/uac-access-control.md) for the current implementation.
+
 ---
 
-**Lines**: ~85
+**Lines**: ~90

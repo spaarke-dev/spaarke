@@ -2,14 +2,14 @@
 # Authentication Security Boundaries
 
 > **Source**: AUTHENTICATION-ARCHITECTURE.md
-> **Last Updated**: December 4, 2025
+> **Last Updated**: March 2026
 > **Applies To**: Security reviews, compliance audits, threat modeling
 
 ---
 
 ## TL;DR
 
-SDAP has 6 security trust boundaries: Browser↔Dataverse, Dataverse↔PCF, PCF↔BFF, BFF↔Azure AD, BFF↔Graph, BFF↔Dataverse. Each boundary requires specific token validation. User identity crosses 4 boundaries via delegated tokens; app identity used only for Dataverse metadata.
+SDAP has 7 security trust boundaries: Browser↔Dataverse, Dataverse↔PCF, PCF↔BFF, BFF↔Azure AD, BFF↔Graph, BFF↔Dataverse, Form Page↔Code Page Iframe. Each boundary requires specific token validation. User identity crosses 4 boundaries via delegated tokens; app identity used only for Dataverse metadata.
 
 ---
 
@@ -45,7 +45,7 @@ SDAP has 6 security trust boundaries: Browser↔Dataverse, Dataverse↔PCF, PCF�
 
 ---
 
-## Six Trust Boundaries
+## Seven Trust Boundaries
 
 ### Boundary 1: Browser ↔ Dataverse
 | Aspect | Detail |
@@ -94,6 +94,14 @@ SDAP has 6 security trust boundaries: Browser↔Dataverse, Dataverse↔PCF, PCF�
 | **Authentication** | App-only (ClientSecret) |
 | **Validation** | Dataverse Application User |
 | **Risk** | App has elevated permissions |
+
+### Boundary 7: Form Page ↔ Code Page Iframe
+| Aspect | Detail |
+|--------|--------|
+| **Protocol** | Same-origin DOM access |
+| **Authentication** | Parent-to-child token bridge (`window.__SPAARKE_BFF_TOKEN__`) |
+| **Key constraint** | Same-origin policy — child iframe must be on same Dataverse domain as parent |
+| **Token responsibility** | Parent acquires and shares; child validates expiry before use |
 
 ---
 
@@ -187,9 +195,10 @@ AI endpoints add additional authorization filters on top of the base security bo
 
 Validates user has read access to documents being analyzed:
 1. Extracts Azure AD `oid` claim from user JWT (Boundary 3)
-2. Uses ClientSecret auth to query Dataverse (Boundary 6)
-3. Calls `RetrievePrincipalAccess` to check user's document permissions
-4. Fail-closed: Denies access if any step fails
+2. Resolves permissions using dual-mode authorization:
+   - **App-only context** (service principal): Calls `RetrievePrincipalAccess`
+   - **OBO context** (user-delegated): Uses direct query pattern (`GET /sprk_documents({id})`) — `RetrievePrincipalAccess` does NOT work with OBO tokens (see [sdap-auth-patterns.md Pattern 5](sdap-auth-patterns.md))
+3. Fail-closed: Denies access if any step fails
 
 **Claim Extraction**: Must use `oid` claim (not `ClaimTypes.NameIdentifier`) because Dataverse queries `azureactivedirectoryobjectid`.
 

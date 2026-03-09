@@ -2,7 +2,7 @@
 
 > **Domain**: OAuth, OBO, Token Management, Access Control
 > **Source ADRs**: ADR-003, ADR-004, ADR-008, ADR-009
-> **Last Updated**: 2025-12-19
+> **Last Updated**: 2026-03-09
 
 ---
 
@@ -28,6 +28,8 @@ Load when:
 - ✅ **MUST** hash user tokens (SHA256) before using as cache keys
 - ✅ **MUST** use sessionStorage for client-side token cache (cleared on tab close)
 - ✅ **MUST** try silent token acquisition before popup/redirect
+- ✅ **MUST** use `organizations` authority for Code Page MSAL config (not hardcoded tenant)
+- ✅ **MUST** check parent token bridge (`window.parent.__SPAARKE_BFF_TOKEN__`) before MSAL initialization in child iframes
 
 ### Authorization Architecture (ADR-003)
 
@@ -47,6 +49,8 @@ Load when:
 - ❌ **MUST NOT** use localStorage for tokens (use sessionStorage)
 - ❌ **MUST NOT** skip MSAL initialization step in MSAL v3+
 - ❌ **MUST NOT** use friendly scope names (use `api://{GUID}/scope` format)
+- ❌ **MUST NOT** hardcode tenant ID in Code Page MSAL authority (use `organizations`)
+- ❌ **MUST NOT** initialize MSAL in child iframes without first checking parent token bridge
 
 ### Authorization Architecture (ADR-003)
 
@@ -96,7 +100,7 @@ if (!result.IsAllowed)
 }
 ```
 
-**Note**: Single rule model (`OperationAccessRule`) - Dataverse `RetrievePrincipalAccess` handles all permission computation including teams, roles, and sharing.
+**Note**: Single rule model (`OperationAccessRule`) - Dataverse handles all permission computation (teams, roles, sharing). Uses `RetrievePrincipalAccess` in app-only contexts; uses direct query pattern in OBO contexts because `RetrievePrincipalAccess` does NOT work with OBO tokens.
 
 **See**: [UAC Access Control Pattern](../patterns/auth/uac-access-control.md)
 
@@ -138,6 +142,7 @@ Examples:
 
 ---
 
-**Lines**: ~130
+**Lines**: ~140
 **Purpose**: Single-file reference for all authentication and authorization constraints
+**Last Updated**: 2026-03-09
 

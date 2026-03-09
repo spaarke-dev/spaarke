@@ -1,7 +1,7 @@
 # MSAL Client Pattern
 
 > **Domain**: OAuth / Client-Side Authentication
-> **Last Validated**: 2025-12-19
+> **Last Validated**: 2026-03-09
 > **Source ADRs**: ADR-006
 
 ---
@@ -221,6 +221,45 @@ private async initializeMsalAsync(): Promise<void> {
 
 ---
 
+## Authority Configuration
+
+| Context | Authority Pattern | Example |
+|---------|------------------|---------|
+| **PCF controls** | Hardcoded tenant ID | `https://login.microsoftonline.com/{TENANT_ID}` |
+| **Code Pages** (recommended) | `organizations` | `https://login.microsoftonline.com/organizations` |
+
+**Guidance**: Code Pages should use `organizations` authority for portability across tenants. PCF controls use hardcoded tenant because the Dataverse context provides the tenant. Some older Code Pages (SemanticSearch, DocumentRelationshipViewer) still hardcode tenant — this is tech debt to be resolved by the `@spaarke/auth` consolidation.
+
+---
+
+## Two Client App Registrations
+
+| Component | Client ID | App Name |
+|-----------|-----------|----------|
+| **PCF controls** | `5175798e-...` | Dataverse App |
+| **Code Pages** | `170c98e1-...` | DSM-SPE Dev 2 |
+
+Both are registered as known client applications on the BFF API app (`1e40baad`). See [auth-azure-resources.md](../../../docs/architecture/auth-azure-resources.md) for details.
+
+---
+
+## Parent-to-Child Token Bridge
+
+Code Pages opened as child iframes can skip MSAL initialization entirely by reading the parent's token:
+
+```typescript
+// Child iframe reads parent's token (~0.1ms vs ~500-1300ms for MSAL)
+const parentToken = window.parent?.__SPAARKE_BFF_TOKEN__;
+if (parentToken && !isTokenExpired(parentToken)) {
+    return parentToken;  // Use parent's token directly
+}
+// Fallback: initialize MSAL independently
+```
+
+See [sdap-auth-patterns.md Pattern 8](../../../docs/architecture/sdap-auth-patterns.md) for the complete pattern.
+
+---
+
 ## Key Points
 
 1. **Singleton pattern** - Only one MSAL instance per page
@@ -228,6 +267,8 @@ private async initializeMsalAsync(): Promise<void> {
 3. **Silent first** - Always try silent before popup
 4. **sessionStorage** - Cleared on tab close (security)
 5. **Handle redirects** - Call `handleRedirectPromise()` on init
+6. **Authority** - Use `organizations` for Code Pages, hardcoded tenant for PCF
+7. **Token bridge** - Check parent token before MSAL init in child iframes
 
 ---
 
@@ -235,7 +276,8 @@ private async initializeMsalAsync(): Promise<void> {
 
 - [OAuth Scopes](oauth-scopes.md) - Scope configuration
 - [Token Caching](token-caching.md) - Client-side caching
+- [Auth Patterns](../../../docs/architecture/sdap-auth-patterns.md) - Full auth pattern catalog
 
 ---
 
-**Lines**: ~125
+**Lines**: ~175

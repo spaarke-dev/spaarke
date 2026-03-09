@@ -1,7 +1,7 @@
 # Service Principal Authentication Pattern
 
 > **Domain**: OAuth / Service-to-Service Auth
-> **Last Validated**: 2025-12-25
+> **Last Validated**: 2026-03-09
 > **Source ADRs**: ADR-004, ADR-016
 
 ---

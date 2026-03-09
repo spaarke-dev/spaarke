@@ -1,7 +1,7 @@
 # UAC Access Control Pattern
 
 > **Domain**: Authorization, Permission Checking
-> **Lines**: ~80
+> **Lines**: ~115
 > **Full Reference**: [docs/architecture/uac-access-control.md](../../../docs/architecture/uac-access-control.md)
 
 ---
@@ -81,7 +81,7 @@ public enum AccessRights
 
 1. **Use `OperationAccessPolicy` operations** - Don't use generic `"read"` or `"write"`
 2. **Fail-closed** - Errors result in deny, never silent allow
-3. **Single rule model** - Dataverse `RetrievePrincipalAccess` handles all permission computation
+3. **Single rule model** - Dataverse handles all permission computation: `RetrievePrincipalAccess` in app-only contexts, direct query in OBO contexts (OBO tokens don't support `RetrievePrincipalAccess`)
 4. **Extract `oid` claim** - Use Azure AD Object ID for Dataverse user lookup
 
 ---

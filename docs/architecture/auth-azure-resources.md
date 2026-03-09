@@ -66,8 +66,28 @@ api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation
 
 **Known Client Applications** (for consent propagation):
 ```json
-"knownClientApplications": ["5175798e-f23e-41c3-b09b-7a90b9218189"]
+"knownClientApplications": [
+    "5175798e-f23e-41c3-b09b-7a90b9218189",
+    "170c98e1-d486-4355-bcbe-170454e0207c"
+]
 ```
+
+---
+
+### Why Two Client App Registrations?
+
+SDAP has two separate SPA app registrations that both acquire tokens for the BFF API:
+
+| App Registration | Client ID | Used By | SPA Redirect URI |
+|------------------|-----------|---------|------------------|
+| **Dataverse App** (PCF Client) | `5175798e-f23e-41c3-b09b-7a90b9218189` | PCF controls | `https://spaarkedev1.crm.dynamics.com` |
+| **DSM-SPE Dev 2** (Code Page Client) | `170c98e1-d486-4355-bcbe-170454e0207c` | Code Pages (HTML web resources) | Code page contexts (Dataverse environment origins) |
+
+Both are listed in `knownClientApplications` on the BFF API app (`1e40baad-e065-4aea-a8d4-4b7ab273458c`) to enable consent propagation.
+
+**Historical reason**: PCF controls were the original SPA client and used the Dataverse App registration with a redirect URI pointing to the Dataverse org URL. When Code Pages were introduced, they required their own app registration because SPA redirect URIs must differ per registration — Code Pages run in a different context (HTML web resources loaded as iframes) and needed separate redirect URI configuration.
+
+**Future**: The planned `@spaarke/auth` shared package will standardize token acquisition across PCF and Code Pages, potentially allowing consolidation to a single app registration.
 
 ---
 
@@ -231,13 +251,26 @@ TENANT_ID=a221a95e-6abc-4434-aecc-e48338a1b2f2
 
 ## Client Secrets Lifecycle
 
-**App Registration**: `1e40baad-e065-4aea-a8d4-4b7ab273458c` (BFF API App)
+### Client Secrets Inventory
 
-### Active Secrets
+Two app registrations have active client secrets used by the BFF API:
+
+| App Registration | Client ID | Secret Prefix | Expires | Purpose |
+|------------------|-----------|---------------|---------|---------|
+| **BFF API App** | `1e40baad-e065-4aea-a8d4-4b7ab273458c` | `l8b8Q~J` | 2027-12-18 | OBO token exchange (Graph, Dataverse), Playbook retrieval |
+| **DSM-SPE Dev 2** | `170c98e1-d486-4355-bcbe-170454e0207c` | `~Ac8Q~JGnsrv` | 2027-09-22 | Dataverse ServiceClient S2S auth (`AuthType=ClientSecret`) |
+
+### BFF API App Secrets (`1e40baad`)
 
 | Created | Expires | Description | First 5 chars | Used By | Status |
 |---------|---------|-------------|---------------|---------|--------|
 | 2025-12-18 | 2027-12-18 | Dataverse-Checkout-20251218 | `l8b8Q~J` | Graph (OBO), Dataverse (OBO), Playbooks | ✅ Active |
+
+### DSM-SPE Dev 2 Secrets (`170c98e1`)
+
+| Created | Expires | Description | First 5 chars | Used By | Status |
+|---------|---------|-------------|---------------|---------|--------|
+| 2025-09-29 | 2027-09-22 | BFF-API-ClientSecret | `~Ac8Q~JGnsrv` | Dataverse ServiceClient (S2S) | ✅ Active |
 
 ### Secret Storage Locations
 
@@ -537,6 +570,121 @@ pac admin list-service-principals --environment https://spaarkedev1.crm.dynamics
 # Test token acquisition (PowerShell)
 $token = az account get-access-token --resource api://1e40baad-e065-4aea-a8d4-4b7ab273458c
 ```
+
+---
+
+## Secret Rotation Procedure
+
+When a client secret approaches expiration or is compromised, follow this procedure to rotate it with minimal downtime.
+
+### Step 1: Identify Which Secret to Rotate
+
+Refer to the [Client Secrets Inventory](#client-secrets-inventory) above. Determine which app registration's secret needs rotation:
+
+| App Registration | Client ID | Current Secret Prefix | Expires |
+|------------------|-----------|----------------------|---------|
+| **BFF API App** | `1e40baad-e065-4aea-a8d4-4b7ab273458c` | `l8b8Q~J` | 2027-12-18 |
+| **DSM-SPE Dev 2** | `170c98e1-d486-4355-bcbe-170454e0207c` | `~Ac8Q~JGnsrv` | 2027-09-22 |
+
+### Step 2: Create New Secret in Azure AD
+
+```bash
+# Create a new client secret (valid for 24 months)
+az ad app credential reset \
+  --id <APP_CLIENT_ID> \
+  --append \
+  --display-name "Rotation-$(date +%Y%m%d)" \
+  --end-date $(date -d "+24 months" +%Y-%m-%dT%H:%M:%SZ)
+```
+
+**Important**: Copy the secret value immediately -- it is only shown once.
+
+### Step 3: Update Azure Key Vault
+
+```bash
+# Store the new secret in Key Vault
+az keyvault secret set \
+  --vault-name spaarke-spekvcert \
+  --name <SECRET_NAME> \
+  --value "<NEW_SECRET_VALUE>"
+```
+
+Secret names by app registration:
+
+| App Registration | Key Vault Secret Name |
+|------------------|-----------------------|
+| **BFF API App** (`1e40baad`) | `API-CLIENT-SECRET` |
+| **DSM-SPE Dev 2** (`170c98e1`) | `BFF-API-ClientSecret` |
+
+### Step 4: Update App Service Configuration
+
+If using direct App Service settings (not Key Vault references):
+
+```bash
+az webapp config appsettings set \
+  --name spe-api-dev-67e2xz \
+  --resource-group spe-infrastructure-westus2 \
+  --settings API_CLIENT_SECRET="<NEW_SECRET_VALUE>"
+```
+
+If using Key Vault references, the App Service will pick up the new secret automatically on next restart.
+
+### Step 5: Restart App Service
+
+The App Service must be restarted to pick up the new secret value:
+
+```bash
+az webapp restart \
+  --name spe-api-dev-67e2xz \
+  --resource-group spe-infrastructure-westus2
+```
+
+Allow 30-60 seconds for the app to fully restart.
+
+### Step 6: Verify the Rotation Worked
+
+```bash
+# Check health endpoint
+curl https://spe-api-dev-67e2xz.azurewebsites.net/healthz
+
+# Check Dataverse-specific health (if applicable)
+curl https://spe-api-dev-67e2xz.azurewebsites.net/healthz/dataverse
+
+# Check App Service logs for auth errors
+az webapp log tail --name spe-api-dev-67e2xz --resource-group spe-infrastructure-westus2
+```
+
+Expected results:
+- Health endpoint returns 200 "Healthy"
+- No `AADSTS` errors in logs
+- No `401` or `403` responses in Application Insights
+
+### Step 7: Remove Old Secret
+
+Once the new secret is confirmed working (wait at least 1 hour to ensure all cached tokens have expired):
+
+```bash
+# List credentials to find the old secret's key ID
+az ad app credential list --id <APP_CLIENT_ID> --query "[].{keyId:keyId, hint:hint, endDateTime:endDateTime}"
+
+# Remove the old secret by key ID
+az ad app credential delete --id <APP_CLIENT_ID> --key-id <OLD_KEY_ID>
+```
+
+### Step 8: Update Documentation
+
+Update the [Client Secrets Inventory](#client-secrets-inventory) section in this document with the new secret prefix, creation date, and expiration date.
+
+### Rotation Checklist
+
+- [ ] New secret created in Azure AD (with `--append` to avoid downtime)
+- [ ] New secret stored in Key Vault (`spaarke-spekvcert`)
+- [ ] App Service configuration updated (if using direct settings)
+- [ ] App Service restarted
+- [ ] Health check passes
+- [ ] No auth errors in logs for 1+ hour
+- [ ] Old secret removed from Azure AD
+- [ ] Documentation updated (this file)
 
 ---
 

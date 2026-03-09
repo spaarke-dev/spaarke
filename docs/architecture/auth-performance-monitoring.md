@@ -2,7 +2,7 @@
 # Authentication Performance & Monitoring
 
 > **Source**: AUTHENTICATION-ARCHITECTURE.md
-> **Last Updated**: December 4, 2025
+> **Last Updated**: March 2026
 > **Applies To**: Performance optimization, alerting, observability
 
 ---
@@ -33,6 +33,9 @@ Auth flow adds ~200-400ms latency (Azure AD OBO ~150ms, cold token ~100ms). Cach
 | PCF → BFF API Call | ~50ms | ~50ms |
 | BFF → Azure AD OBO | ~150ms | ~0ms (cached) |
 | BFF → Graph API | ~100-500ms | ~100-500ms |
+| Code Page ssoSilent | ~300-800ms (MSAL init + ssoSilent) | ~5ms (sessionStorage cache) |
+| Code Page with bridge | ~0.1ms (reads parent's token) | ~0.1ms |
+| Dataverse OBO exchange | ~200-500ms (Azure AD token exchange) | ~0ms (cached) |
 | **Total Auth Overhead** | ~300-400ms | ~55ms |
 
 ### Token Caching Impact

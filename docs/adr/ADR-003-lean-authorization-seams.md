@@ -99,3 +99,5 @@ Tenant-specific policies should be delivered as additional `IAuthorizationRule` 
 - [Auth Constraints](../../.claude/constraints/auth.md) - MUST/MUST NOT rules
 
 **When to load this full ADR**: Historical context, rule implementation details, exception policies.
+
+**Update (2026-01-06)**: The initial rules list (ExplicitDenyRule, TeamMembershipRule, etc.) has been superseded by a single `OperationAccessRule` model backed by `OperationAccessPolicy`. See `docs/architecture/uac-access-control.md` for current implementation.

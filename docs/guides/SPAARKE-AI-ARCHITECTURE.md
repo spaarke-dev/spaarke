@@ -1358,7 +1358,7 @@ AI endpoints use multiple authorization filters following ADR-008 (endpoint filt
 
 ### 7.1 AiAuthorizationFilter (Document-Level)
 
-Validates user has read access to documents being analyzed. Uses `DataverseAccessDataSource` to check Dataverse permissions via `RetrievePrincipalAccess`.
+Validates user has read access to documents being analyzed. Uses `DataverseAccessDataSource` to check Dataverse permissions (dual-mode: `RetrievePrincipalAccess` in app-only contexts, direct query in OBO contexts — see [sdap-auth-patterns.md Pattern 5](../../docs/architecture/sdap-auth-patterns.md)).
 
 ```csharp
 // Api/Filters/AiAuthorizationFilter.cs

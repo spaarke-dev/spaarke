@@ -1,7 +1,7 @@
 # Token Caching Pattern
 
 > **Domain**: OAuth / Token Management
-> **Last Validated**: 2025-12-19
+> **Last Validated**: 2026-03-09
 > **Source ADRs**: ADR-009
 
 ---

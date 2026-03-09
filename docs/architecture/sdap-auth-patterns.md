@@ -73,7 +73,7 @@ export class MsalAuthProvider {
                 redirectUri: "https://spaarkedev1.crm.dynamics.com"
             },
             cache: {
-                cacheLocation: 'localStorage'
+                cacheLocation: 'sessionStorage'
             }
         });
     }
@@ -97,6 +97,8 @@ const token = await authProvider.getToken([
 ```
 
 **Common Mistake**: Using friendly name `api://spe-bff-api/...` instead of full Application ID URI.
+
+> **Note**: Code Pages use a different client ID (`170c98e1-d486-4355-bcbe-170454e0207c`) — see Pattern 7.
 
 ---
 
@@ -745,6 +747,8 @@ AnalysisOrchestrationService     AppOnlyAnalysisService (planned)
 
 The user is already authenticated in Dataverse via Azure AD. The browser holds a valid session cookie for `login.microsoftonline.com`. MSAL's `ssoSilent()` opens a hidden iframe to the Azure AD authorize endpoint and uses the existing session to obtain a token — no user interaction required.
 
+> **Note**: PCF controls use a different client ID (`5175798e-f23e-41c3-b09b-7a90b9218189`) — see Pattern 1. Both registrations are listed in `knownClientApplications` on the BFF API app. See `docs/architecture/auth-azure-resources.md` "Why Two Client App Registrations?" for the historical reason.
+
 ### Token Acquisition Priority
 
 ```
@@ -794,6 +798,8 @@ export const BFF_API_SCOPE =
     "api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation";
 ```
 
+> **Authority best practice**: Use `https://login.microsoftonline.com/organizations` for Code Pages to ensure environment portability (works across Dataverse environments without code changes). Avoid `common` (allows personal Microsoft accounts). Older code pages (SemanticSearch, DocumentRelationshipViewer) currently hardcode the tenant ID (`https://login.microsoftonline.com/{tenantId}/v2.0`) -- this is a known tech debt item that will be resolved when migrating to the planned `@spaarke/auth` shared package.
+
 **Auth Service**: `src/client/code-pages/AnalysisWorkspace/src/services/authService.ts`
 
 ```typescript
@@ -841,6 +847,19 @@ async function acquireToken(): Promise<TokenCache> {
 }
 ```
 
+### Code Page Auth Matrix
+
+| Code Page | Client ID | Authority | Primary Strategy | Bridge Support | Auth Lines |
+|-----------|-----------|-----------|-----------------|----------------|------------|
+| LegalWorkspace | `170c98e1` | `organizations` | Bridge → MSAL ssoSilent | Yes | 268 |
+| AnalysisWorkspace | `170c98e1` | `organizations` | Xrm platform → MSAL ssoSilent | Yes | 532 |
+| PlaybookBuilder | `170c98e1` | `organizations` | Xrm platform → MSAL ssoSilent | Yes | 331 |
+| SprkChatPane | `170c98e1` | `organizations` | Xrm platform → MSAL ssoSilent | Yes | 353 |
+| SemanticSearch | `170c98e1` | **Hardcoded tenant** | MSAL acquireTokenSilent → popup | No | 235 |
+| DocumentRelationshipViewer | `170c98e1` | **Hardcoded tenant** | MSAL acquireTokenSilent → popup | No | 213 |
+
+> **Note**: SemanticSearch and DocumentRelationshipViewer have known tech debt: hardcoded authority and no bridge support. To be resolved in `@spaarke/auth` shared package.
+
 ### Reference Implementation
 
 The MSAL ssoSilent pattern originates from:
@@ -886,6 +905,68 @@ Known Client Applications (on BFF app):
 [AnalysisWorkspace:AuthService] MSAL initialized successfully
 [AnalysisWorkspace:AuthService] Token acquired via MSAL ssoSilent
 ```
+
+---
+
+## Pattern 8: Parent-to-Child Token Bridge
+
+> **Added**: March 2026
+> **Status**: Production (LegalWorkspace, AnalysisWorkspace)
+> **Use case**: Parent page passes its BFF token to a child code page opened as iframe dialog
+
+### When to Use
+
+When one authenticated page (PCF control, code page, or custom page) opens another code page as a child iframe/dialog via `Xrm.Navigation.navigateTo`. Instead of the child doing its own MSAL initialization (~500-1300ms), the parent shares its already-acquired token.
+
+### Flow
+
+```
+Parent (already authenticated)
+  1. Acquires BFF token via MSAL or Xrm platform
+  2. Sets: window.__SPAARKE_BFF_TOKEN__ = currentToken
+  3. Opens child via Xrm.Navigation.navigateTo({ pageType: 'webresource', ... })
+
+Child (iframe code page)
+  Token acquisition priority:
+  1. Check window.__SPAARKE_BFF_TOKEN__         → not found (own frame)
+  2. Check window.parent.__SPAARKE_BFF_TOKEN__  → FOUND! (~0.1ms)
+  3. (skipped) MSAL init + ssoSilent            → would be ~500-1300ms
+```
+
+### Performance Impact
+
+| Scenario | Token Acquisition Time |
+|----------|----------------------|
+| No bridge (MSAL ssoSilent) | ~500-1300ms |
+| With bridge (parent token) | ~0.1ms |
+
+### Security Considerations
+
+- Token lifetime: Child inherits parent's token expiry. If parent refreshes, child still has old token.
+- Same-origin only: `window.parent` access requires same origin (both in Dataverse domain).
+- No refresh mechanism: Child should fall back to MSAL ssoSilent if bridge token is expired.
+- Cleanup: Parent should clear `__SPAARKE_BFF_TOKEN__` on page unload.
+
+### Bridge Variables
+
+| Variable | Purpose | Set By |
+|----------|---------|--------|
+| `window.__SPAARKE_BFF_TOKEN__` | BFF API Bearer token | Parent page |
+| `window.__SPAARKE_BFF_BASE_URL__` | BFF API base URL | Parent page (optional) |
+| `window.__SPAARKE_MSAL_CLIENT_ID__` | MSAL client ID override | Parent page (optional) |
+
+### Current Implementations
+
+- **LegalWorkspace** (`bffAuthProvider.ts`): Reads bridge as 2nd priority (after in-memory cache)
+- **AnalysisWorkspace** (`authService.ts`): Reads bridge as part of Xrm platform strategies
+- **PlaybookBuilder** (`authService.ts`): Same as AnalysisWorkspace
+- **SprkChatPane** (`authService.ts`): Same as AnalysisWorkspace
+
+### Not Yet Implemented
+
+- SemanticSearch: Does NOT check parent bridge (always does full MSAL init)
+- DocumentRelationshipViewer: Does NOT check parent bridge
+- These will be fixed when migrating to `@spaarke/auth`
 
 ---
 

@@ -2,7 +2,7 @@
 
 > **Domain**: Authorization, Access Control, Permission Management
 > **Status**: Production-Ready
-> **Last Updated**: 2026-01-06
+> **Last Updated**: 2026-03-09
 > **Source ADRs**: ADR-003, ADR-008, ADR-009
 
 ---
@@ -18,7 +18,7 @@ The Unified Access Control (UAC) system provides granular, operation-level autho
 
 **Key Capabilities**:
 - Operation-level access control mapped 1:1 to Graph API operations (70+ operations)
-- Dataverse-backed permission resolution via `RetrievePrincipalAccess`
+- Dataverse-backed permission resolution via `RetrievePrincipalAccess` (app-only) or direct query (OBO contexts — see [sdap-auth-patterns.md Pattern 5](sdap-auth-patterns.md))
 - Fail-closed security (deny on errors or missing data)
 - Comprehensive audit logging with correlation IDs
 - Redis-backed caching with per-request memoization
@@ -185,7 +185,11 @@ The single authorization rule that handles all permission checks.
 3. Bitwise check: `(userRights & required) == required`
 4. Allow if all required rights present, deny otherwise
 
-**Why Single Rule?** The `DataverseAccessDataSource.GetUserAccessAsync()` calls Dataverse's `RetrievePrincipalAccess` function, which already computes the user's actual permissions considering:
+**Why Single Rule?** The `DataverseAccessDataSource.GetUserAccessAsync()` resolves permissions via Dataverse using a dual-mode approach:
+- **App-only context** (service principal): Calls `RetrievePrincipalAccess` directly
+- **OBO context** (user-delegated): Uses a direct query pattern (`GET /sprk_documents({id})`) because `RetrievePrincipalAccess` does NOT work with OBO tokens (see [sdap-auth-patterns.md Pattern 5](sdap-auth-patterns.md))
+
+Either way, Dataverse factors in the user's actual permissions considering:
 - Security Roles
 - Team Memberships
 - Business Units
@@ -198,7 +202,7 @@ The rule just checks if those computed permissions satisfy the operation require
 
 ### 4. DataverseAccessDataSource
 
-Queries Dataverse for user permissions using `RetrievePrincipalAccess`.
+Queries Dataverse for user permissions. Uses `RetrievePrincipalAccess` in app-only contexts, or direct query pattern in OBO contexts (see [sdap-auth-patterns.md Pattern 5](sdap-auth-patterns.md) for details).
 
 **Returns `AccessSnapshot`**:
 ```csharp
@@ -215,8 +219,10 @@ public class AccessSnapshot
 
 **Flow**:
 1. Map Azure AD OID → Dataverse systemuserid
-2. Call `RetrievePrincipalAccess` for the specific document
-3. Map Dataverse rights string to `AccessRights` flags
+2. Resolve permissions (dual-mode):
+   - App-only: Call `RetrievePrincipalAccess` for the specific document
+   - OBO: Direct query `GET /sprk_documents({id})` — success = Read access
+3. Map result to `AccessRights` flags
 4. Return snapshot (cached per-request)
 
 ---
