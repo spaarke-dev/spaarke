@@ -119,6 +119,7 @@ public static class CommunicationEndpoints
         BulkSendRequest request,
         CommunicationService communicationService,
         ILogger<CommunicationService> logger,
+        HttpContext context,
         CancellationToken ct)
     {
         // Validate request
@@ -181,12 +182,13 @@ public static class CommunicationEndpoints
                 CommunicationType = request.CommunicationType,
                 AttachmentDocumentIds = request.AttachmentDocumentIds,
                 ArchiveToSpe = request.ArchiveToSpe,
-                Associations = request.Associations
+                Associations = request.Associations,
+                SendMode = request.SendMode
             };
 
             try
             {
-                var sendResponse = await communicationService.SendAsync(individualRequest, httpContext: null, ct);
+                var sendResponse = await communicationService.SendAsync(individualRequest, httpContext: context, ct);
 
                 results.Add(new BulkSendResult
                 {
@@ -464,7 +466,7 @@ public static class CommunicationEndpoints
                     JobType = JobTypeIncomingCommunication,
                     SubjectId = messageId ?? notification.SubscriptionId ?? "unknown",
                     CorrelationId = correlationId,
-                    IdempotencyKey = $"IncomingComm:{notification.SubscriptionId}:{messageId}",
+                    IdempotencyKey = $"Communication:{messageId}:Process",
                     Payload = jobPayload,
                     MaxAttempts = 3
                 };

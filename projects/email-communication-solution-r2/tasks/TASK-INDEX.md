@@ -28,7 +28,7 @@
 | # | Task | Status | Depends On | Rigor |
 |---|------|--------|------------|-------|
 | 010 | Assess R1 OBO Send Implementation | ✅ | 005 | STANDARD |
-| 011 | Complete OBO Individual Send Path | 🔲 | 010 | FULL |
+| 011 | Complete OBO Individual Send Path | ✅ | 010 | FULL |
 | 012 | Communication Form Send Mode UX | 🔲 | 011 | FULL |
 | 013 | End-to-End Individual Send Test | 🔲 | 012 | STANDARD |
 
@@ -37,8 +37,8 @@
 | # | Task | Status | Depends On | Rigor |
 |---|------|--------|------------|-------|
 | 020 | Assess R1 Inbound Pipeline | ✅ | 005 | STANDARD |
-| 021 | Complete Graph Subscription Lifecycle | 🔲 | 020 | FULL |
-| 022 | Complete Webhook Endpoint | 🔲 | 020 | FULL |
+| 021 | Complete Graph Subscription Lifecycle | ✅ | 020 | FULL |
+| 022 | Complete Webhook Endpoint | ✅ | 020 | FULL |
 | 023 | Complete Incoming Communication Processor | 🔲 | 022 | FULL |
 | 024 | Implement Association Resolution | 🔲 | 023 | FULL |
 | 025 | Complete Backup Polling Service | 🔲 | 023 | FULL |

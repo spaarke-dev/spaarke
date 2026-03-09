@@ -15,6 +15,7 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
@@ -130,6 +131,17 @@ public class InboundPipelineTests
             })
             .Build();
         return config;
+    }
+
+    private static JobSubmissionService CreateMockJobSubmissionService()
+    {
+        var optionsMock = new Mock<IOptions<Sprk.Bff.Api.Configuration.ServiceBusOptions>>();
+        optionsMock.Setup(o => o.Value).Returns(new Sprk.Bff.Api.Configuration.ServiceBusOptions());
+        return new Mock<JobSubmissionService>(
+            MockBehavior.Loose,
+            optionsMock.Object,
+            Mock.Of<ILogger<JobSubmissionService>>(),
+            new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object).Object;
     }
 
     private static Message CreateGraphMessage(
@@ -915,6 +927,7 @@ public class InboundPipelineTests
         var sut = new InboundPollingBackupService(
             accountService,
             _graphClientFactoryMock.Object,
+            CreateMockJobSubmissionService(),
             Mock.Of<ILogger<InboundPollingBackupService>>());
 
         // Act
@@ -1010,6 +1023,7 @@ public class InboundPipelineTests
         var sut = new InboundPollingBackupService(
             accountService,
             _graphClientFactoryMock.Object,
+            CreateMockJobSubmissionService(),
             Mock.Of<ILogger<InboundPollingBackupService>>());
 
         // Act — Run two polling cycles to verify state tracking

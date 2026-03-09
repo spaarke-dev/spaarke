@@ -47,6 +47,13 @@ public sealed record BulkSendRequest
     public bool ArchiveToSpe { get; init; } = false;
 
     /// <summary>
+    /// Determines how emails are sent for all recipients in the batch.
+    /// SharedMailbox (default): sends via app-only auth through the configured shared mailbox.
+    /// User: sends as the authenticated user via OBO (On-Behalf-Of) flow.
+    /// </summary>
+    public SendMode SendMode { get; init; } = SendMode.SharedMailbox;
+
+    /// <summary>
     /// Entity associations for this communication (optional).
     /// Links each communication record to Dataverse entities (Matter, Project, Organization, etc.).
     /// Shared across all recipients.

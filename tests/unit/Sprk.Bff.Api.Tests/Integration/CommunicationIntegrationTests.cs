@@ -1754,9 +1754,18 @@ public class CommunicationIntegrationTests
             cacheMock.Object,
             Mock.Of<ILogger<CommunicationAccountService>>());
 
+        var sbOptionsMock = new Mock<IOptions<Sprk.Bff.Api.Configuration.ServiceBusOptions>>();
+        sbOptionsMock.Setup(o => o.Value).Returns(new Sprk.Bff.Api.Configuration.ServiceBusOptions());
+        var jobSubmissionMock = new Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>(
+            MockBehavior.Loose,
+            sbOptionsMock.Object,
+            Mock.Of<ILogger<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>>(),
+            new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+
         var pollingService = new InboundPollingBackupService(
             accountService,
             graphFactoryMock.Object,
+            jobSubmissionMock.Object,
             Mock.Of<ILogger<InboundPollingBackupService>>());
 
         // Act: start and immediately stop the service to trigger one poll cycle
