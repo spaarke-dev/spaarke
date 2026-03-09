@@ -144,7 +144,7 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
      * Load preview URL from BFF
      */
     private async loadPreview(): Promise<void> {
-        const { documentId, accessToken, correlationId } = this.props;
+        const { documentId, correlationId } = this.props;
 
         // Validate documentId
         if (!documentId || documentId.trim() === '') {
@@ -174,7 +174,6 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
             // Call BFF API - use view-url endpoint for real-time viewing (no cache)
             const response = await this.bffClient.getViewUrl(
                 documentId,
-                accessToken,
                 correlationId
             );
 
@@ -257,7 +256,7 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
      * Handle "Open in Desktop" button click
      */
     private handleEditInDesktop = async (): Promise<void> => {
-        const { documentId, accessToken, correlationId } = this.props;
+        const { documentId, correlationId } = this.props;
         const { documentInfo } = this.state;
 
         console.log(`[FilePreview] Open in Desktop clicked for: ${documentInfo?.name}`);
@@ -267,7 +266,6 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
         try {
             const response = await this.bffClient.getOpenLinks(
                 documentId,
-                accessToken,
                 correlationId
             );
 
@@ -301,7 +299,7 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
      * Handle "Open in Web" button click
      */
     private handleOpenInWeb = async (): Promise<void> => {
-        const { documentId, accessToken, correlationId } = this.props;
+        const { documentId, correlationId } = this.props;
         const { documentInfo } = this.state;
 
         console.log(`[FilePreview] Open in Web clicked for: ${documentInfo?.name}`);
@@ -311,7 +309,6 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
         try {
             const response = await this.bffClient.getOpenLinks(
                 documentId,
-                accessToken,
                 correlationId
             );
 

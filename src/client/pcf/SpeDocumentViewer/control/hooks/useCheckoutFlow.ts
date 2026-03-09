@@ -113,7 +113,6 @@ export function useCheckoutFlow({
         try {
             const response = await bffClient.current.checkout(
                 documentId,
-                accessToken,
                 correlationId
             );
 
@@ -150,7 +149,7 @@ export function useCheckoutFlow({
         } finally {
             setIsCheckoutLoading(false);
         }
-    }, [documentId, accessToken, correlationId, onCheckoutSuccess]);
+    }, [documentId, correlationId, onCheckoutSuccess]);
 
     /**
      * Check in document with optional comment
@@ -170,7 +169,6 @@ export function useCheckoutFlow({
         try {
             const response = await bffClient.current.checkIn(
                 documentId,
-                accessToken,
                 correlationId,
                 comment
             );
@@ -203,7 +201,7 @@ export function useCheckoutFlow({
         } finally {
             setIsCheckInLoading(false);
         }
-    }, [documentId, accessToken, correlationId, onCheckInSuccess]);
+    }, [documentId, correlationId, onCheckInSuccess]);
 
     /**
      * Discard changes and release lock
@@ -222,7 +220,6 @@ export function useCheckoutFlow({
         try {
             const response = await bffClient.current.discard(
                 documentId,
-                accessToken,
                 correlationId
             );
 
@@ -251,7 +248,7 @@ export function useCheckoutFlow({
         } finally {
             setIsDiscardLoading(false);
         }
-    }, [documentId, accessToken, correlationId, onDiscardSuccess]);
+    }, [documentId, correlationId, onDiscardSuccess]);
 
     /**
      * Clear error state

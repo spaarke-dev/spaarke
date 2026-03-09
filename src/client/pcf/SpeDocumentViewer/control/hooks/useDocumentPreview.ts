@@ -51,7 +51,7 @@ export interface UseDocumentPreviewResult extends UseDocumentPreviewState, UseDo
  *
  * @param documentId - The Dataverse document ID
  * @param bffApiUrl - Base URL for BFF API
- * @param accessToken - Bearer token for API calls
+ * @param accessToken - Bearer token for API calls (DEPRECATED: no longer used, kept for API compat)
  * @param correlationId - Correlation ID for request tracing
  */
 export function useDocumentPreview(
@@ -147,7 +147,6 @@ export function useDocumentPreview(
 
             const response: FilePreviewResponse = await bffClient.current.getViewUrl(
                 documentId,
-                accessToken,
                 correlationId
             );
 
@@ -185,7 +184,7 @@ export function useDocumentPreview(
                 error: error instanceof Error ? error.message : 'Failed to load document preview'
             }));
         }
-    }, [documentId, accessToken, correlationId, startIframeTimeout]);
+    }, [documentId, correlationId, startIframeTimeout]);
 
     /**
      * Handle iframe load success

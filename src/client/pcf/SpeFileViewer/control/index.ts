@@ -11,7 +11,7 @@
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import * as React from 'react';
 import { createRoot, Root } from 'react-dom/client';
-import { AuthService } from './AuthService';
+import { initializeAuth } from './authInit';
 import { FilePreview } from './FilePreview';
 import { FileViewerState } from './types';
 import { v4 as uuidv4 } from 'uuid';
@@ -105,11 +105,8 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
     // React root for rendering (React 19+)
     private root: Root | null = null;
 
-    // MSAL authentication service
-    private authService: AuthService | null = null;
-
-    // Current access token (cached)
-    private accessToken: string | null = null;
+    // Whether @spaarke/auth has been initialized
+    private authInitialized = false;
 
     // Configuration from manifest properties
     private bffApiUrl = '';
@@ -197,15 +194,10 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
                 bffApiUrl: this.bffApiUrl
             });
 
-            // Initialize MSAL auth service with both app IDs
-            this.authService = new AuthService(this.tenantId, this.clientAppId, this.bffAppId);
-            await this.authService.initialize();
-
-            console.log(`[SpeFileViewer] MSAL initialized. Scope: ${this.authService.getScope()}`);
-
-            // Acquire access token (needed for BFF calls)
-            this.accessToken = await this.authService.getAccessToken();
-            console.log('[SpeFileViewer] Access token acquired');
+            // Initialize @spaarke/auth (replaces local AuthService)
+            await initializeAuth(this.tenantId, this.clientAppId, this.bffAppId, this.bffApiUrl);
+            this.authInitialized = true;
+            console.log('[SpeFileViewer] @spaarke/auth initialized');
 
             // Create AbortController for this session (Task 022)
             this._abortController = new AbortController();
@@ -442,9 +434,9 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
     private renderControl(context: ComponentFramework.Context<IInputs>): void {
         const documentId = this.extractDocumentId(context);
 
-        // Check if we have access token
-        if (!this.accessToken) {
-            console.warn('[SpeFileViewer] No access token available, skipping render');
+        // Check if auth is initialized
+        if (!this.authInitialized) {
+            console.warn('[SpeFileViewer] Auth not initialized yet, skipping render');
             return;
         }
 
@@ -465,7 +457,6 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
             React.createElement(FilePreview, {
                 documentId: documentId,
                 bffApiUrl: this.bffApiUrl,
-                accessToken: this.accessToken,
                 correlationId: this.correlationId,
                 isDarkTheme: isDarkTheme,
                 onRefresh: () => {
@@ -530,8 +521,7 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
             this.root = null;
         }
 
-        // Clear tokens (optional - MSAL handles cleanup)
-        this.accessToken = null;
-        this.authService = null;
+        // Reset auth state
+        this.authInitialized = false;
     }
 }

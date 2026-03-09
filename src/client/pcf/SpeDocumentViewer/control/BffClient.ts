@@ -2,11 +2,17 @@
  * BFF API Client for SPE Document Operations
  *
  * Handles HTTP calls to Spaarke BFF API with:
- * - Bearer token authentication (from MSAL)
+ * - Bearer token authentication via @spaarke/auth (authenticatedFetch)
  * - Correlation ID tracking
  * - Check-out/Check-in workflow
  * - Delete operations
+ *
+ * MIGRATION NOTE: This client now uses authenticatedFetch() from @spaarke/auth
+ * instead of receiving accessToken as a parameter. Token acquisition, caching,
+ * and 401 retry logic are handled by the shared auth library.
  */
+
+import { authenticatedFetch, ApiError } from '@spaarke/auth';
 
 import {
     FilePreviewResponse,
@@ -20,7 +26,10 @@ import {
 } from './types';
 
 /**
- * BffClient encapsulates all HTTP communication with the BFF API
+ * BffClient encapsulates all HTTP communication with the BFF API.
+ *
+ * After migration to @spaarke/auth, this client no longer accepts accessToken
+ * parameters. Authentication is handled transparently by authenticatedFetch().
  */
 export class BffClient {
     private baseUrl: string;
@@ -36,27 +45,21 @@ export class BffClient {
      */
     public async getPreviewUrl(
         documentId: string,
-        accessToken: string,
         correlationId: string
     ): Promise<FilePreviewResponse> {
         const url = `${this.baseUrl}/api/documents/${documentId}/preview-url`;
 
         console.log(`[BffClient] GET ${url}`);
 
-        const response = await fetch(url, {
+        const response = await authenticatedFetch(url, {
             method: 'GET',
             headers: {
-                'Authorization': `Bearer ${accessToken}`,
                 'X-Correlation-Id': correlationId,
                 'Accept': 'application/json'
             },
             mode: 'cors',
             credentials: 'omit'
         });
-
-        if (!response.ok) {
-            await this.handleErrorResponse(response, correlationId);
-        }
 
         return await response.json() as FilePreviewResponse;
     }
@@ -71,14 +74,12 @@ export class BffClient {
      * Includes checkout status for showing lock indicators.
      *
      * @param documentId Document GUID
-     * @param accessToken Bearer token from MSAL
      * @param correlationId Correlation ID for distributed tracing
      * @returns FilePreviewResponse with view URL, metadata, and checkout status
      * @throws Error if API call fails
      */
     public async getViewUrl(
         documentId: string,
-        accessToken: string,
         correlationId: string
     ): Promise<FilePreviewResponse> {
         const url = `${this.baseUrl}/api/documents/${documentId}/view-url`;
@@ -87,21 +88,15 @@ export class BffClient {
         console.log(`[BffClient] Correlation ID: ${correlationId}`);
 
         try {
-            const response = await fetch(url, {
+            const response = await authenticatedFetch(url, {
                 method: 'GET',
                 headers: {
-                    'Authorization': `Bearer ${accessToken}`,
                     'X-Correlation-Id': correlationId,
                     'Accept': 'application/json'
                 },
                 mode: 'cors',
                 credentials: 'omit'
             });
-
-            // Handle non-2xx responses
-            if (!response.ok) {
-                await this.handleErrorResponse(response, correlationId);
-            }
 
             // Parse successful response
             const data = await response.json() as FilePreviewResponse;
@@ -114,6 +109,9 @@ export class BffClient {
             return data;
 
         } catch (error) {
+            if (error instanceof ApiError) {
+                this.handleApiError(error, correlationId);
+            }
             console.error('[BffClient] Request failed:', error);
             throw new Error(`Failed to get view URL: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -126,35 +124,38 @@ export class BffClient {
      */
     public async checkout(
         documentId: string,
-        accessToken: string,
         correlationId: string
     ): Promise<CheckoutResponse> {
         const url = `${this.baseUrl}/api/documents/${documentId}/checkout`;
 
         console.log(`[BffClient] POST ${url}`);
 
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'X-Correlation-Id': correlationId,
-                'Accept': 'application/json',
-                'Content-Type': 'application/json'
-            },
-            mode: 'cors',
-            credentials: 'omit'
-        });
+        try {
+            const response = await authenticatedFetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-Correlation-Id': correlationId,
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                },
+                mode: 'cors',
+                credentials: 'omit'
+            });
 
-        if (!response.ok) {
+            return await response.json() as CheckoutResponse;
+        } catch (error) {
             // Special handling for 409 Conflict (document locked)
-            if (response.status === 409) {
-                const errorBody = await response.json() as DocumentLockedError;
-                throw new DocumentLockedException(errorBody);
+            if (error instanceof ApiError && error.status === 409) {
+                const errorBody = error.problemDetails as unknown as DocumentLockedError;
+                if (errorBody) {
+                    throw new DocumentLockedException(errorBody);
+                }
             }
-            await this.handleErrorResponse(response, correlationId);
+            if (error instanceof ApiError) {
+                this.handleApiError(error, correlationId);
+            }
+            throw error;
         }
-
-        return await response.json() as CheckoutResponse;
     }
 
     /**
@@ -164,7 +165,6 @@ export class BffClient {
      */
     public async checkIn(
         documentId: string,
-        accessToken: string,
         correlationId: string,
         comment?: string
     ): Promise<CheckInResponse> {
@@ -172,24 +172,26 @@ export class BffClient {
 
         console.log(`[BffClient] POST ${url}`);
 
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'X-Correlation-Id': correlationId,
-                'Accept': 'application/json',
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ comment }),
-            mode: 'cors',
-            credentials: 'omit'
-        });
+        try {
+            const response = await authenticatedFetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-Correlation-Id': correlationId,
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ comment }),
+                mode: 'cors',
+                credentials: 'omit'
+            });
 
-        if (!response.ok) {
-            await this.handleErrorResponse(response, correlationId);
+            return await response.json() as CheckInResponse;
+        } catch (error) {
+            if (error instanceof ApiError) {
+                this.handleApiError(error, correlationId);
+            }
+            throw error;
         }
-
-        return await response.json() as CheckInResponse;
     }
 
     /**
@@ -199,30 +201,31 @@ export class BffClient {
      */
     public async discard(
         documentId: string,
-        accessToken: string,
         correlationId: string
     ): Promise<DiscardResponse> {
         const url = `${this.baseUrl}/api/documents/${documentId}/discard`;
 
         console.log(`[BffClient] POST ${url}`);
 
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'X-Correlation-Id': correlationId,
-                'Accept': 'application/json',
-                'Content-Type': 'application/json'
-            },
-            mode: 'cors',
-            credentials: 'omit'
-        });
+        try {
+            const response = await authenticatedFetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-Correlation-Id': correlationId,
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                },
+                mode: 'cors',
+                credentials: 'omit'
+            });
 
-        if (!response.ok) {
-            await this.handleErrorResponse(response, correlationId);
+            return await response.json() as DiscardResponse;
+        } catch (error) {
+            if (error instanceof ApiError) {
+                this.handleApiError(error, correlationId);
+            }
+            throw error;
         }
-
-        return await response.json() as DiscardResponse;
     }
 
     /**
@@ -232,34 +235,37 @@ export class BffClient {
      */
     public async deleteDocument(
         documentId: string,
-        accessToken: string,
         correlationId: string
     ): Promise<DeleteDocumentResponse> {
         const url = `${this.baseUrl}/api/documents/${documentId}`;
 
         console.log(`[BffClient] DELETE ${url}`);
 
-        const response = await fetch(url, {
-            method: 'DELETE',
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'X-Correlation-Id': correlationId,
-                'Accept': 'application/json'
-            },
-            mode: 'cors',
-            credentials: 'omit'
-        });
+        try {
+            const response = await authenticatedFetch(url, {
+                method: 'DELETE',
+                headers: {
+                    'X-Correlation-Id': correlationId,
+                    'Accept': 'application/json'
+                },
+                mode: 'cors',
+                credentials: 'omit'
+            });
 
-        if (!response.ok) {
+            return await response.json() as DeleteDocumentResponse;
+        } catch (error) {
             // Special handling for 409 Conflict (document locked)
-            if (response.status === 409) {
-                const errorBody = await response.json() as DocumentLockedError;
-                throw new DocumentLockedException(errorBody);
+            if (error instanceof ApiError && error.status === 409) {
+                const errorBody = error.problemDetails as unknown as DocumentLockedError;
+                if (errorBody) {
+                    throw new DocumentLockedException(errorBody);
+                }
             }
-            await this.handleErrorResponse(response, correlationId);
+            if (error instanceof ApiError) {
+                this.handleApiError(error, correlationId);
+            }
+            throw error;
         }
-
-        return await response.json() as DeleteDocumentResponse;
     }
 
     /**
@@ -269,29 +275,30 @@ export class BffClient {
      */
     public async getOpenLinks(
         documentId: string,
-        accessToken: string,
         correlationId: string
     ): Promise<OpenLinksResponse> {
         const url = `${this.baseUrl}/api/documents/${documentId}/open-links`;
 
         console.log(`[BffClient] GET ${url}`);
 
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'X-Correlation-Id': correlationId,
-                'Accept': 'application/json'
-            },
-            mode: 'cors',
-            credentials: 'omit'
-        });
+        try {
+            const response = await authenticatedFetch(url, {
+                method: 'GET',
+                headers: {
+                    'X-Correlation-Id': correlationId,
+                    'Accept': 'application/json'
+                },
+                mode: 'cors',
+                credentials: 'omit'
+            });
 
-        if (!response.ok) {
-            await this.handleErrorResponse(response, correlationId);
+            return await response.json() as OpenLinksResponse;
+        } catch (error) {
+            if (error instanceof ApiError) {
+                this.handleApiError(error, correlationId);
+            }
+            throw error;
         }
-
-        return await response.json() as OpenLinksResponse;
     }
 
     /**
@@ -300,12 +307,8 @@ export class BffClient {
      * Returns the URL to the download endpoint that proxies the file through
      * the BFF using app-only authentication. This works for all documents,
      * including those uploaded by background processes (email-to-document).
-     *
-     * Note: The caller should append the access token as a query parameter
-     * or use this URL with proper Authorization header.
      */
     public getDownloadUrl(documentId: string): string {
-        // Use the v1 documents API which has the download endpoint
         return `${this.baseUrl}/api/v1/documents/${documentId}/download`;
     }
 
@@ -320,7 +323,6 @@ export class BffClient {
      */
     public async downloadDocument(
         documentId: string,
-        accessToken: string,
         correlationId: string,
         filename?: string
     ): Promise<void> {
@@ -328,20 +330,14 @@ export class BffClient {
 
         console.log(`[BffClient] Download via ${url}`);
 
-        // Fetch the file as a blob
-        const response = await fetch(url, {
+        const response = await authenticatedFetch(url, {
             method: 'GET',
             headers: {
-                'Authorization': `Bearer ${accessToken}`,
                 'X-Correlation-Id': correlationId
             },
             mode: 'cors',
             credentials: 'omit'
         });
-
-        if (!response.ok) {
-            await this.handleErrorResponse(response, correlationId);
-        }
 
         // Get filename from Content-Disposition header if not provided
         const contentDisposition = response.headers.get('Content-Disposition');
@@ -374,38 +370,21 @@ export class BffClient {
     }
 
     /**
-     * Handle error responses from BFF API
+     * Map ApiError from @spaarke/auth to user-friendly error messages.
+     *
+     * @spaarke/auth's authenticatedFetch() throws ApiError for non-2xx responses
+     * with RFC 7807 ProblemDetails already parsed. This method maps the error
+     * codes from the BFF to user-friendly messages.
      */
-    private async handleErrorResponse(response: Response, correlationId: string): Promise<never> {
-        const responseText = await response.text();
-
-        // Diagnostic: log raw response to identify empty/HTML/non-JSON responses
-        console.warn(`[BffClient] Raw error response (${response.status}):`, {
-            contentType: response.headers.get('content-type'),
-            corsHeader: response.headers.get('access-control-allow-origin'),
-            bodyLength: responseText.length,
-            bodyPreview: responseText.substring(0, 500)
-        });
-
-        let errorBody: BffErrorResponse | null = null;
-
-        try {
-            errorBody = JSON.parse(responseText) as BffErrorResponse;
-        } catch {
-            // Non-JSON response
-            console.warn('[BffClient] Response is not JSON. Raw body:', responseText.substring(0, 1000));
-        }
-
-        const errorCode = errorBody?.extensions?.code as string | undefined;
-        const title = errorBody?.title || `HTTP ${response.status}`;
-        const detail = errorBody?.detail || '';
+    private handleApiError(error: ApiError, correlationId: string): never {
+        const problemDetails = error.problemDetails;
+        const errorCode = (problemDetails as Record<string, unknown>)?.extensions?.code as string | undefined;
 
         console.error('[BffClient] BFF API Error:', {
-            status: response.status,
+            status: error.status,
             code: errorCode,
-            title,
-            detail,
-            correlationId: errorBody?.correlationId || correlationId
+            message: error.message,
+            correlationId
         });
 
         // Map error codes to user-friendly messages
@@ -421,7 +400,7 @@ export class BffClient {
             case 'not_authorized':
                 throw new Error('You are not authorized to perform this action.');
             default:
-                switch (response.status) {
+                switch (error.status) {
                     case 401:
                         throw new Error('Authentication failed. Please refresh the page.');
                     case 403:
@@ -434,9 +413,9 @@ export class BffClient {
                     case 502:
                     case 503:
                     case 504:
-                        throw new Error(`Server error (${response.status}). Please try again later.`);
+                        throw new Error(`Server error (${error.status}). Please try again later.`);
                     default:
-                        throw new Error(detail || title || 'An unexpected error occurred.');
+                        throw new Error(error.message || 'An unexpected error occurred.');
                 }
         }
     }

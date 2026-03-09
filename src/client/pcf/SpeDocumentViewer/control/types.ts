@@ -214,8 +214,8 @@ export interface DocumentViewerProps {
     documentId: string;
     /** BFF base URL */
     bffApiUrl: string;
-    /** Access token from MSAL */
-    accessToken: string;
+    /** @deprecated No longer used. Auth is handled by @spaarke/auth authenticatedFetch(). Kept for API compatibility. */
+    accessToken?: string;
     /** Correlation ID for request tracking */
     correlationId: string;
     /** Dark mode state */

@@ -21,6 +21,7 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "@spaarke/auth": "file:../../shared/Spaarke.Auth",
     "@eslint/js": "^9.25.1",
     "@microsoft/eslint-plugin-power-apps": "^0.2.51",
     "@types/node": "^18.19.86",

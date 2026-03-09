@@ -233,7 +233,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
         console.log('[SpeDocumentViewer] Open in desktop clicked');
 
         try {
-            const response = await bffClient.current.getOpenLinks(documentId, accessToken, correlationId);
+            const response = await bffClient.current.getOpenLinks(documentId, correlationId);
 
             if (response.desktopUrl) {
                 // Open desktop app using protocol URL
@@ -244,7 +244,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
         } catch (err) {
             console.error('[SpeDocumentViewer] Get open links failed:', err);
         }
-    }, [documentId, accessToken, correlationId]);
+    }, [documentId, correlationId]);
 
     /**
      * Handle open in web button click - opens Office Online in new tab
@@ -256,7 +256,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
         console.log('[SpeDocumentViewer] Open in web clicked');
 
         try {
-            const response = await bffClient.current.getOpenLinks(documentId, accessToken, correlationId);
+            const response = await bffClient.current.getOpenLinks(documentId, correlationId);
 
             if (response.webUrl) {
                 // Open Office Online in new tab with security attributes
@@ -269,7 +269,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
         } finally {
             setIsOpenInWebLoading(false);
         }
-    }, [documentId, accessToken, correlationId]);
+    }, [documentId, correlationId]);
 
     /**
      * Handle download button click
@@ -286,14 +286,13 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
             // This works for documents that users don't have direct SPE permissions for
             await bffClient.current.downloadDocument(
                 documentId,
-                accessToken,
                 correlationId,
                 documentInfo?.name
             );
         } catch (err) {
             console.error('[SpeDocumentViewer] Download failed:', err);
         }
-    }, [documentId, accessToken, correlationId, documentInfo?.name]);
+    }, [documentId, correlationId, documentInfo?.name]);
 
     /**
      * Handle delete button click (after confirmation)
@@ -305,7 +304,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
         console.log('[SpeDocumentViewer] Delete confirmed');
 
         try {
-            await bffClient.current.deleteDocument(documentId, accessToken, correlationId);
+            await bffClient.current.deleteDocument(documentId, correlationId);
             console.log('[SpeDocumentViewer] Document deleted successfully');
 
             // Notify parent
@@ -316,7 +315,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
         } finally {
             setIsDeleteLoading(false);
         }
-    }, [documentId, accessToken, correlationId, onDeleted]);
+    }, [documentId, correlationId, onDeleted]);
 
     // Theme
     const theme = isDarkTheme ? webDarkTheme : webLightTheme;

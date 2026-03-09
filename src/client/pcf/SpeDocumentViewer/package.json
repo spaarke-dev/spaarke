@@ -18,6 +18,7 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "@spaarke/auth": "file:../../shared/Spaarke.Auth",
     "@eslint/js": "^9.25.1",
     "@fluentui/react-components": "^9.56.0",
     "@fluentui/react-icons": "^2.0.266",

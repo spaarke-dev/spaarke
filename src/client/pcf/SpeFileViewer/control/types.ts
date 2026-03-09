@@ -261,8 +261,8 @@ export interface FilePreviewProps {
     documentId: string;
     /** BFF base URL (e.g., "https://spe-api-dev-67e2xz.azurewebsites.net") */
     bffApiUrl: string;
-    /** Access token from MSAL (Bearer token for BFF API) */
-    accessToken: string;
+    /** @deprecated No longer used. Auth is handled by @spaarke/auth authenticatedFetch(). Kept for API compatibility. */
+    accessToken?: string;
     /** Correlation ID for request tracking */
     correlationId: string;
     /**

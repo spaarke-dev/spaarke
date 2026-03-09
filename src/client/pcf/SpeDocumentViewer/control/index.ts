@@ -11,7 +11,7 @@
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import * as React from 'react';
 import { createRoot, Root } from 'react-dom/client';
-import { AuthService } from './AuthService';
+import { initializeAuth } from './authInit';
 import { DocumentViewerApp } from './SpeDocumentViewer';
 import { DocumentViewerState } from './types';
 import { v4 as uuidv4 } from 'uuid';
@@ -91,8 +91,7 @@ function setupThemeListener(
 export class SpeDocumentViewer implements ComponentFramework.StandardControl<IInputs, IOutputs> {
     private container: HTMLDivElement;
     private root: Root | null = null;
-    private authService: AuthService | null = null;
-    private accessToken: string | null = null;
+    private authInitialized = false;
 
     // Configuration
     private bffApiUrl = '';
@@ -283,14 +282,10 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
                 showToolbar: this.showToolbar
             });
 
-            // Initialize MSAL
-            this.authService = new AuthService(this.tenantId, this.clientAppId, this.bffAppId);
-            await this.authService.initialize();
-            console.log(`[SpeDocumentViewer] MSAL initialized. Scope: ${this.authService.getScope()}`);
-
-            // Acquire access token
-            this.accessToken = await this.authService.getAccessToken();
-            console.log('[SpeDocumentViewer] Access token acquired');
+            // Initialize @spaarke/auth (replaces local AuthService)
+            await initializeAuth(this.tenantId, this.clientAppId, this.bffAppId, this.bffApiUrl);
+            this.authInitialized = true;
+            console.log('[SpeDocumentViewer] @spaarke/auth initialized');
 
             // Track initial document ID
             try {
@@ -420,8 +415,8 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
     private renderControl(context: ComponentFramework.Context<IInputs>): void {
         const documentId = this.extractDocumentId(context);
 
-        if (!this.accessToken) {
-            console.warn('[SpeDocumentViewer] No access token available');
+        if (!this.authInitialized) {
+            console.warn('[SpeDocumentViewer] Auth not initialized yet');
             return;
         }
 
@@ -437,7 +432,6 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
             React.createElement(DocumentViewerApp, {
                 documentId: documentId,
                 bffApiUrl: this.bffApiUrl,
-                accessToken: this.accessToken,
                 correlationId: this.correlationId,
                 isDarkTheme: isDarkTheme,
                 enableEdit: this.enableEdit,
@@ -487,7 +481,6 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
             this.root = null;
         }
 
-        this.accessToken = null;
-        this.authService = null;
+        this.authInitialized = false;
     }
 }

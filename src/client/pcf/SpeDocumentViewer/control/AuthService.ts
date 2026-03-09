@@ -1,4 +1,13 @@
 /**
+ * @deprecated This file is deprecated and will be removed in a future version.
+ * Use @spaarke/auth instead:
+ *   import { initAuth, authenticatedFetch } from '@spaarke/auth';
+ *   await initAuth({ clientId, authority, bffApiScope, bffBaseUrl });
+ *   const response = await authenticatedFetch('/api/documents/123/preview-url');
+ *
+ * See authInit.ts for the migration wrapper.
+ *
+ * --- Original description ---
  * MSAL Authentication Service for BFF API Access
  *
  * CRITICAL: Uses named scope api://<BFF_APP_ID>/SDAP.Access

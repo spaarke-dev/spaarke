@@ -2,15 +2,23 @@
  * BFF API Client for SPE File Operations
  *
  * Handles HTTP calls to Spaarke BFF API with:
- * - Bearer token authentication (from MSAL)
+ * - Bearer token authentication via @spaarke/auth (authenticatedFetch)
  * - Correlation ID tracking (X-Correlation-Id header)
  * - Error handling and logging
+ *
+ * MIGRATION NOTE: This client now uses authenticatedFetch() from @spaarke/auth
+ * instead of receiving accessToken as a parameter. Token acquisition, caching,
+ * and 401 retry logic are handled by the shared auth library.
  */
 
+import { authenticatedFetch, ApiError } from '@spaarke/auth';
 import { FilePreviewResponse, BffErrorResponse, OfficeUrlResponse, OpenLinksResponse } from './types';
 
 /**
- * BffClient encapsulates all HTTP communication with the BFF API
+ * BffClient encapsulates all HTTP communication with the BFF API.
+ *
+ * After migration to @spaarke/auth, this client no longer accepts accessToken
+ * parameters. Authentication is handled transparently by authenticatedFetch().
  */
 export class BffClient {
     private baseUrl: string;
@@ -29,14 +37,12 @@ export class BffClient {
      * Calls: GET /api/documents/{documentId}/preview-url
      *
      * @param documentId Document GUID
-     * @param accessToken Bearer token from MSAL
      * @param correlationId Correlation ID for distributed tracing
      * @returns FilePreviewResponse with preview URL and metadata
      * @throws Error if API call fails
      */
     public async getPreviewUrl(
         documentId: string,
-        accessToken: string,
         correlationId: string
     ): Promise<FilePreviewResponse> {
         const url = `${this.baseUrl}/api/documents/${documentId}/preview-url`;
@@ -45,23 +51,16 @@ export class BffClient {
         console.log(`[BffClient] Correlation ID: ${correlationId}`);
 
         try {
-            const response = await fetch(url, {
+            const response = await authenticatedFetch(url, {
                 method: 'GET',
                 headers: {
-                    'Authorization': `Bearer ${accessToken}`,
                     'X-Correlation-Id': correlationId,
                     'Accept': 'application/json'
                 },
-                mode: 'cors', // Required for cross-origin BFF calls
-                credentials: 'omit' // Don't send cookies (JWT only)
+                mode: 'cors',
+                credentials: 'omit'
             });
 
-            // Handle non-2xx responses
-            if (!response.ok) {
-                await this.handleErrorResponse(response, correlationId);
-            }
-
-            // Parse successful response
             const data = await response.json() as FilePreviewResponse;
 
             console.log(`[BffClient] Preview URL acquired for document: ${data.documentInfo.name}`);
@@ -74,7 +73,9 @@ export class BffClient {
             return data;
 
         } catch (error) {
-            // Network errors, JSON parse errors, etc.
+            if (error instanceof ApiError) {
+                this.handleApiError(error, correlationId);
+            }
             console.error('[BffClient] Request failed:', error);
             throw new Error(`Failed to get preview URL: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -85,30 +86,13 @@ export class BffClient {
      *
      * Calls: GET /api/documents/{documentId}/office
      *
-     * This method requests the Office Online editor URL from the BFF API.
-     * The BFF uses On-Behalf-Of (OBO) flow to call Microsoft Graph API
-     * with the user's permissions, ensuring security.
-     *
-     * @param documentId Document GUID (e.g., "550e8400-e29b-41d4-a716-446655440000")
-     * @param accessToken Bearer token from MSAL (user's access token)
+     * @param documentId Document GUID
      * @param correlationId Correlation ID for distributed tracing
      * @returns Promise<OfficeUrlResponse> with editor URL and permissions
-     * @throws Error if API call fails (network error, 4xx/5xx response)
-     *
-     * @example
-     * ```typescript
-     * const response = await bffClient.getOfficeUrl(
-     *     "550e8400-e29b-41d4-a716-446655440000",
-     *     accessToken,
-     *     "trace-abc-123"
-     * );
-     * console.log(response.officeUrl); // Office Online URL
-     * console.log(response.permissions.canEdit); // true or false
-     * ```
+     * @throws Error if API call fails
      */
     public async getOfficeUrl(
         documentId: string,
-        accessToken: string,
         correlationId: string
     ): Promise<OfficeUrlResponse> {
         const url = `${this.baseUrl}/api/documents/${documentId}/office`;
@@ -117,23 +101,16 @@ export class BffClient {
         console.log(`[BffClient] Correlation ID: ${correlationId}`);
 
         try {
-            const response = await fetch(url, {
+            const response = await authenticatedFetch(url, {
                 method: 'GET',
                 headers: {
-                    'Authorization': `Bearer ${accessToken}`,
                     'X-Correlation-Id': correlationId,
                     'Accept': 'application/json'
                 },
-                mode: 'cors', // Required for cross-origin BFF calls
-                credentials: 'omit' // Don't send cookies (JWT only)
+                mode: 'cors',
+                credentials: 'omit'
             });
 
-            // Handle non-2xx responses
-            if (!response.ok) {
-                await this.handleErrorResponse(response, correlationId);
-            }
-
-            // Parse successful response
             const data = await response.json() as OfficeUrlResponse;
 
             console.log(`[BffClient] Office URL acquired for document`);
@@ -150,7 +127,9 @@ export class BffClient {
             return data;
 
         } catch (error) {
-            // Network errors, JSON parse errors, etc.
+            if (error instanceof ApiError) {
+                this.handleApiError(error, correlationId);
+            }
             console.error('[BffClient] Request failed:', error);
             throw new Error(
                 `Failed to get Office URL: ${error instanceof Error ? error.message : String(error)}`
@@ -163,19 +142,13 @@ export class BffClient {
      *
      * Calls: GET /api/documents/{documentId}/open-links
      *
-     * Returns URLs for opening the document in:
-     * - Desktop Office app (Word, Excel, PowerPoint) via protocol handler
-     * - Web browser via SharePoint URL
-     *
      * @param documentId Document GUID
-     * @param accessToken Bearer token from MSAL
      * @param correlationId Correlation ID for distributed tracing
      * @returns OpenLinksResponse with desktop and web URLs
      * @throws Error if API call fails
      */
     public async getOpenLinks(
         documentId: string,
-        accessToken: string,
         correlationId: string
     ): Promise<OpenLinksResponse> {
         const url = `${this.baseUrl}/api/documents/${documentId}/open-links`;
@@ -184,10 +157,9 @@ export class BffClient {
         console.log(`[BffClient] Correlation ID: ${correlationId}`);
 
         try {
-            const response = await fetch(url, {
+            const response = await authenticatedFetch(url, {
                 method: 'GET',
                 headers: {
-                    'Authorization': `Bearer ${accessToken}`,
                     'X-Correlation-Id': correlationId,
                     'Accept': 'application/json'
                 },
@@ -195,12 +167,6 @@ export class BffClient {
                 credentials: 'omit'
             });
 
-            // Handle non-2xx responses
-            if (!response.ok) {
-                await this.handleErrorResponse(response, correlationId);
-            }
-
-            // Parse successful response
             const data = await response.json() as OpenLinksResponse;
 
             console.log(`[BffClient] Open links acquired for: ${data.fileName}`);
@@ -209,6 +175,9 @@ export class BffClient {
             return data;
 
         } catch (error) {
+            if (error instanceof ApiError) {
+                this.handleApiError(error, correlationId);
+            }
             console.error('[BffClient] Request failed:', error);
             throw new Error(
                 `Failed to get open links: ${error instanceof Error ? error.message : String(error)}`
@@ -217,97 +186,17 @@ export class BffClient {
     }
 
     /**
-     * Handle error responses from BFF API
-     *
-     * Maps stable error codes from BFF to user-friendly messages.
-     * Supports RFC 7807 Problem Details with custom error codes in extensions.
-     *
-     * @param response Fetch response object
-     * @param correlationId Correlation ID for error reporting
-     * @throws Error with detailed message
-     */
-    private async handleErrorResponse(response: Response, correlationId: string): Promise<never> {
-        const responseText = await response.text();
-        let errorBody: BffErrorResponse | null = null;
-
-        try {
-            // Try to parse as JSON (RFC 7807 Problem Details)
-            errorBody = JSON.parse(responseText) as BffErrorResponse;
-        } catch {
-            // Non-JSON response (unexpected)
-        }
-
-        // Extract error code from extensions (as per senior dev spec)
-        const errorCode = errorBody?.extensions?.code as string | undefined;
-        const title = errorBody?.title || `HTTP ${response.status}`;
-        const detail = errorBody?.detail || '';
-
-        console.error('[BffClient] BFF API Error:', {
-            status: response.status,
-            code: errorCode,
-            title: title,
-            detail: detail,
-            correlationId: errorBody?.correlationId || correlationId
-        });
-
-        // Map stable error codes to user-friendly messages (per senior dev spec)
-        switch (errorCode) {
-            case 'invalid_id':
-                throw new Error('Invalid document ID format. Please contact support.');
-
-            case 'document_not_found':
-                throw new Error('Document not found. It may have been deleted.');
-
-            case 'mapping_missing_drive':
-            case 'mapping_missing_item':
-                throw new Error('This file is still initializing. Please try again in a moment.');
-
-            case 'storage_not_found':
-                throw new Error('File has been removed from storage. Contact your administrator.');
-
-            case 'throttled_retry':
-                throw new Error('Service is temporarily busy. Please try again in a few seconds.');
-
-            default:
-                // Fall back to HTTP status code mapping
-                switch (response.status) {
-                    case 401:
-                        throw new Error('Authentication failed. Please refresh the page.');
-                    case 403:
-                        throw new Error('You do not have permission to access this file.');
-                    case 404:
-                        throw new Error('Document not found. It may have been deleted.');
-                    case 409:
-                        throw new Error('File is not ready for preview. Please try again shortly.');
-                    case 500:
-                    case 502:
-                    case 503:
-                    case 504:
-                        throw new Error(`Server error (${response.status}). Please try again later. Correlation ID: ${correlationId}`);
-                    default:
-                        throw new Error(detail || title || 'An unexpected error occurred.');
-                }
-        }
-    }
-
-    /**
      * Get view URL for a document (real-time, no cache)
      *
      * Calls: GET /api/documents/{documentId}/view-url
      *
-     * This endpoint uses driveItem webUrl instead of the Preview action,
-     * providing near real-time file viewing without the 30-60 second cache delay.
-     * Includes checkout status for showing lock indicators.
-     *
      * @param documentId Document GUID
-     * @param accessToken Bearer token from MSAL
      * @param correlationId Correlation ID for distributed tracing
      * @returns FilePreviewResponse with view URL, metadata, and checkout status
      * @throws Error if API call fails
      */
     public async getViewUrl(
         documentId: string,
-        accessToken: string,
         correlationId: string
     ): Promise<FilePreviewResponse> {
         const url = `${this.baseUrl}/api/documents/${documentId}/view-url`;
@@ -316,10 +205,9 @@ export class BffClient {
         console.log(`[BffClient] Correlation ID: ${correlationId}`);
 
         try {
-            const response = await fetch(url, {
+            const response = await authenticatedFetch(url, {
                 method: 'GET',
                 headers: {
-                    'Authorization': `Bearer ${accessToken}`,
                     'X-Correlation-Id': correlationId,
                     'Accept': 'application/json'
                 },
@@ -327,12 +215,6 @@ export class BffClient {
                 credentials: 'omit'
             });
 
-            // Handle non-2xx responses
-            if (!response.ok) {
-                await this.handleErrorResponse(response, correlationId);
-            }
-
-            // Parse successful response
             const data = await response.json() as FilePreviewResponse;
 
             console.log(`[BffClient] View URL acquired for document: ${data.documentInfo.name}`);
@@ -343,6 +225,9 @@ export class BffClient {
             return data;
 
         } catch (error) {
+            if (error instanceof ApiError) {
+                this.handleApiError(error, correlationId);
+            }
             console.error('[BffClient] Request failed:', error);
             throw new Error(`Failed to get view URL: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -352,26 +237,22 @@ export class BffClient {
      * Download a document
      *
      * Calls: GET /api/documents/{documentId}/content
-     * Returns download URL (not implemented in this phase - preview only)
      *
      * @param documentId Document GUID
-     * @param accessToken Bearer token from MSAL
      * @param correlationId Correlation ID for distributed tracing
      * @returns Download URL
      */
     public async getDownloadUrl(
         documentId: string,
-        accessToken: string,
         correlationId: string
     ): Promise<string> {
         const url = `${this.baseUrl}/api/documents/${documentId}/content`;
 
         console.log(`[BffClient] GET ${url}`);
 
-        const response = await fetch(url, {
+        const response = await authenticatedFetch(url, {
             method: 'GET',
             headers: {
-                'Authorization': `Bearer ${accessToken}`,
                 'X-Correlation-Id': correlationId,
                 'Accept': 'application/json'
             },
@@ -379,12 +260,8 @@ export class BffClient {
             credentials: 'omit'
         });
 
-        if (!response.ok) {
-            await this.handleErrorResponse(response, correlationId);
-        }
-
         const data = await response.json();
-        return data.downloadUrl; // BFF returns { downloadUrl: "..." }
+        return data.downloadUrl;
     }
 
     /**
@@ -401,6 +278,57 @@ export class BffClient {
             return response.ok;
         } catch {
             return false;
+        }
+    }
+
+    /**
+     * Map ApiError from @spaarke/auth to user-friendly error messages.
+     *
+     * @spaarke/auth's authenticatedFetch() throws ApiError for non-2xx responses
+     * with RFC 7807 ProblemDetails already parsed.
+     */
+    private handleApiError(error: ApiError, correlationId: string): never {
+        const problemDetails = error.problemDetails;
+        const errorCode = (problemDetails as Record<string, unknown>)?.extensions?.code as string | undefined;
+
+        console.error('[BffClient] BFF API Error:', {
+            status: error.status,
+            code: errorCode,
+            message: error.message,
+            correlationId
+        });
+
+        // Map stable error codes to user-friendly messages (per senior dev spec)
+        switch (errorCode) {
+            case 'invalid_id':
+                throw new Error('Invalid document ID format. Please contact support.');
+            case 'document_not_found':
+                throw new Error('Document not found. It may have been deleted.');
+            case 'mapping_missing_drive':
+            case 'mapping_missing_item':
+                throw new Error('This file is still initializing. Please try again in a moment.');
+            case 'storage_not_found':
+                throw new Error('File has been removed from storage. Contact your administrator.');
+            case 'throttled_retry':
+                throw new Error('Service is temporarily busy. Please try again in a few seconds.');
+            default:
+                switch (error.status) {
+                    case 401:
+                        throw new Error('Authentication failed. Please refresh the page.');
+                    case 403:
+                        throw new Error('You do not have permission to access this file.');
+                    case 404:
+                        throw new Error('Document not found. It may have been deleted.');
+                    case 409:
+                        throw new Error('File is not ready for preview. Please try again shortly.');
+                    case 500:
+                    case 502:
+                    case 503:
+                    case 504:
+                        throw new Error(`Server error (${error.status}). Please try again later. Correlation ID: ${correlationId}`);
+                    default:
+                        throw new Error(error.message || 'An unexpected error occurred.');
+                }
         }
     }
 }
