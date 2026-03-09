@@ -57,7 +57,7 @@ Many components already partially implemented:
 4. [ ] Association resolution links incoming to entities
 5. [ ] Admin manages accounts entirely via Dataverse UI
 6. [ ] Verification endpoint confirms mailbox access
-7. [ ] Missed webhooks caught by polling (< 15 min)
+7. [ ] Missed webhooks caught by polling (< 5 min)
 8. [ ] Inbound/outbound .eml archival to SPE with child attachments
 9. [ ] Server-Side Sync fully retired
 10. [ ] Legacy components deleted

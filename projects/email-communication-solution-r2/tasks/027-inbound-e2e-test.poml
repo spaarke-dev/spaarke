@@ -53,7 +53,7 @@
   <acceptance-criteria>
     <criterion testable="true">Inbound email creates communication record within 60 seconds</criterion>
     <criterion testable="true">Association resolution links to known entities</criterion>
-    <criterion testable="true">Backup polling catches missed messages within 15 minutes</criterion>
+    <criterion testable="true">Backup polling catches missed messages within 5 minutes</criterion>
     <criterion testable="true">Deduplication prevents double records</criterion>
   </acceptance-criteria>
 </task>

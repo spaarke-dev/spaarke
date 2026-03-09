@@ -511,12 +511,12 @@ Connect-ExchangeOnline
 Create a security group that will contain all mailboxes the BFF API is allowed to access:
 
 ```powershell
-New-DistributionGroup -Name "BFF-Mailbox-Access" -Type Security
+New-DistributionGroup -Name "SDAP Mailbox Access" -Type Security
 ```
 
 > **Note**: If the group already exists, skip this step. You can verify with:
 > ```powershell
-> Get-DistributionGroup -Identity "BFF-Mailbox-Access"
+> Get-DistributionGroup -Identity "SDAP Mailbox Access"
 > ```
 
 ### Step 3: Add Mailbox to Security Group
@@ -525,16 +525,16 @@ Add the shared mailbox(es) that the BFF API should be allowed to send from:
 
 ```powershell
 # Add the primary shared mailbox
-Add-DistributionGroupMember -Identity "BFF-Mailbox-Access" -Member "mailbox-central@spaarke.com"
+Add-DistributionGroupMember -Identity "SDAP Mailbox Access" -Member "mailbox-central@spaarke.com"
 
 # Add additional mailboxes as needed
-# Add-DistributionGroupMember -Identity "BFF-Mailbox-Access" -Member "noreply@spaarke.com"
+# Add-DistributionGroupMember -Identity "SDAP Mailbox Access" -Member "noreply@spaarke.com"
 ```
 
 Verify membership:
 
 ```powershell
-Get-DistributionGroupMember -Identity "BFF-Mailbox-Access" | Format-Table DisplayName, PrimarySmtpAddress
+Get-DistributionGroupMember -Identity "SDAP Mailbox Access" | Format-Table DisplayName, PrimarySmtpAddress
 ```
 
 ### Step 4: Create Application Access Policy
@@ -544,7 +544,7 @@ Restrict the BFF API app registration to only the mailboxes in the security grou
 ```powershell
 New-ApplicationAccessPolicy `
   -AppId "{API_APP_ID}" `
-  -PolicyScopeGroupId "BFF-Mailbox-Access" `
+  -PolicyScopeGroupId "SDAP Mailbox Access" `
   -AccessRight RestrictAccess `
   -Description "Restrict BFF to approved mailboxes"
 ```
@@ -575,7 +575,7 @@ To grant the BFF API access to a new shared mailbox:
 
 1. **Add the mailbox to the Exchange security group**:
    ```powershell
-   Add-DistributionGroupMember -Identity "BFF-Mailbox-Access" -Member "new-mailbox@spaarke.com"
+   Add-DistributionGroupMember -Identity "SDAP Mailbox Access" -Member "new-mailbox@spaarke.com"
    ```
 
 2. **Create a `sprk_communicationaccount` record in Dataverse** for the new mailbox so it appears in the Communication form sender dropdown.
@@ -754,7 +754,7 @@ Create `sprk_communicationaccount` records in Dataverse for each mailbox the BFF
    - **Email Address**: `mailbox-central@spaarke.com`
    - **Display Name**: "Spaarke Legal"
    - **Account Type**: Shared Account (100000000)
-   - **Send Enableds** (`sprk_sendenableds`): Yes
+   - **Send Enabled** (`sprk_sendenabled`): Yes
    - **Is Default Sender** (`sprk_isdefaultsender`): Yes
    - **Receive Enabled** (`sprk_receiveenabled`): Yes
    - **Auto Create Records** (`sprk_autocreaterecords`): Yes
@@ -802,7 +802,7 @@ Verify that `sprk_verificationstatus` updates to **Verified** (100000000) on the
 
 #### Outbound Shared Mailbox (Phase 6)
 - [ ] Communication account record exists for `mailbox-central@spaarke.com`
-- [ ] `sprk_sendenableds = Yes` and `sprk_isdefaultsender = Yes`
+- [ ] `sprk_sendenabled = Yes` and `sprk_isdefaultsender = Yes`
 - [ ] Send a test email via `POST /api/communications/send` — email delivered
 - [ ] Sender resolved from `sprk_communicationaccount` (not just appsettings.json)
 

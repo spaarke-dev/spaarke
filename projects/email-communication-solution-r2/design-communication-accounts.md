@@ -417,7 +417,7 @@ FOR EACH account:
 Reuse the `EmailPollingBackupService` pattern — a periodic timer that queries Graph for recent messages missed by the webhook:
 
 ```
-Every 15 minutes:
+Every 5 minutes:
     Query each receive-enabled mailbox
     GET /users/{email}/mailFolders/inbox/messages?$filter=receivedDateTime ge {lastPoll}
     For each message not already tracked (check sprk_graphmessageid):
@@ -846,14 +846,14 @@ Connect-ExchangeOnline -UserPrincipalName admin@spaarke.com
 
 # Create mail-enabled security group
 New-DistributionGroup `
-  -Name "SDAP Communication Accounts" `
+  -Name "SDAP Mailbox Access" `
   -Type "Security" `
-  -PrimarySmtpAddress "sdap-comm-accounts@spaarke.com" `
+  -PrimarySmtpAddress "sdap-mailbox-access@spaarke.com" `
   -ManagedBy "admin@spaarke.com"
 
 # Add mailbox-central@spaarke.com
 Add-DistributionGroupMember `
-  -Identity "SDAP Communication Accounts" `
+  -Identity "SDAP Mailbox Access" `
   -Member "mailbox-central@spaarke.com"
 ```
 
@@ -861,7 +861,7 @@ Add-DistributionGroupMember `
 
 ```powershell
 # Get the security group's object ID from Azure AD
-$groupId = (Get-AzureADGroup -SearchString "SDAP Communication Accounts").ObjectId
+$groupId = (Get-AzureADGroup -SearchString "SDAP Mailbox Access").ObjectId
 
 # Restrict BFF app to only this group's mailboxes
 New-ApplicationAccessPolicy `
@@ -890,7 +890,7 @@ When a new `sprk_communicationaccount` record is created in Dataverse:
 ```powershell
 # Add to the security group
 Add-DistributionGroupMember `
-  -Identity "SDAP Communication Accounts" `
+  -Identity "SDAP Mailbox Access" `
   -Member "new-mailbox@spaarke.com"
 
 # The application access policy automatically covers all group members
@@ -996,7 +996,7 @@ On `401 Unauthorized` from the BFF:
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Graph subscription webhook unreliable | Missed incoming emails | Backup polling service (every 15 min) |
+| Graph subscription webhook unreliable | Missed incoming emails | Backup polling service (every 5 min) |
 | Graph subscription expires (3-day max for mail) | Monitoring stops | `GraphSubscriptionManager` renews when < 24h remaining |
 | Exchange access policy propagation delay | Send/read fails for 30 min after setup | Verify with `Test-ApplicationAccessPolicy` before going live |
 | OBO token expired during individual send | User gets error | Clear error message: "Please refresh the page and try again" |
@@ -1029,7 +1029,7 @@ On `401 Unauthorized` from the BFF:
 4. **Association resolution**: Incoming email from known contact auto-linked to their Account/Contact record
 5. **Admin management**: Add/remove/configure communication accounts entirely through Dataverse UI
 6. **Verification**: Admin can click "Verify" on any account → confirms send and/or read access works
-7. **Resilience**: Missed webhooks caught by backup polling within 15 minutes
+7. **Resilience**: Missed webhooks caught by backup polling within 5 minutes
 8. **Inbound document archival**: Incoming email → `.eml` document archived to SPE → `sprk_document` record linked to `sprk_communication` via lookup
 9. **Inbound attachment processing**: Incoming email attachments → filtered → uploaded to SPE as child documents → AI analysis enqueued
 10. **Outbound document archival**: Sent email → `.eml` document archived to SPE → `sprk_document` record linked to `sprk_communication` → child attachment documents created

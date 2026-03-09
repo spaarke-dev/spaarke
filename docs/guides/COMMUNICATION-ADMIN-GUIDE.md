@@ -51,7 +51,7 @@ Navigate to the **Communication Accounts** entity in the model-driven app and cr
 
 | Field | Logical Name | Notes |
 |-------|-------------|-------|
-| Send Enableds | `sprk_sendenableds` | Set to **Yes** to allow outbound sending. Note the trailing 's' in the field name. |
+| Send Enabled | `sprk_sendenabled` | Set to **Yes** to allow outbound sending. |
 | Is Default Sender | `sprk_isdefaultsender` | Set to **Yes** if this is the fallback sender. Only ONE account should be the default. |
 
 **Receive Configuration**:
@@ -75,17 +75,17 @@ Save the record.
 
 If this is a new mailbox that the BFF API has not previously been granted access to, you must add it to the Exchange Application Access Policy security group.
 
-> **Skip this step** if the mailbox is already a member of the "BFF-Mailbox-Access" security group.
+> **Skip this step** if the mailbox is already a member of the "SDAP Mailbox Access" security group.
 
 ```powershell
 # Connect to Exchange Online
 Connect-ExchangeOnline
 
 # Add mailbox to the security group
-Add-DistributionGroupMember -Identity "BFF-Mailbox-Access" -Member "new-mailbox@spaarke.com"
+Add-DistributionGroupMember -Identity "SDAP Mailbox Access" -Member "new-mailbox@spaarke.com"
 
 # Verify membership
-Get-DistributionGroupMember -Identity "BFF-Mailbox-Access" | Format-Table DisplayName, PrimarySmtpAddress
+Get-DistributionGroupMember -Identity "SDAP Mailbox Access" | Format-Table DisplayName, PrimarySmtpAddress
 
 # Disconnect
 Disconnect-ExchangeOnline -Confirm:$false
@@ -169,7 +169,7 @@ The following fields are auto-populated by the system:
 
 | Display Name | Logical Name | Type | Default |
 |-------------|-------------|------|---------|
-| Send Enableds | `sprk_sendenableds` | Yes/No | No |
+| Send Enabled | `sprk_sendenabled` | Yes/No | No |
 | Is Default Sender | `sprk_isdefaultsender` | Yes/No | No |
 
 **Inbound Configuration**:
@@ -201,7 +201,7 @@ The following fields are auto-populated by the system:
 | Verification Status | `sprk_verificationstatus` | Choice |
 | Last Verified | `sprk_lastverified` | DateTime |
 
-> **Important field name note**: The send-enabled field is `sprk_sendenableds` (with a trailing 's'). This is the actual Dataverse logical name. Do not confuse with `sprk_sendenabled` (without the 's').
+> **Note**: The send-enabled field logical name is `sprk_sendenabled`.
 
 ---
 
@@ -260,13 +260,13 @@ Each communication account can reference its own Exchange security group via:
 - `sprk_securitygroupid` — The Azure AD group GUID
 - `sprk_securitygroupname` — Display name (informational only)
 
-This allows different accounts to be scoped to different security groups if needed. However, the most common pattern is a single "BFF-Mailbox-Access" security group containing all mailboxes.
+This allows different accounts to be scoped to different security groups if needed. However, the most common pattern is a single "SDAP Mailbox Access" security group containing all mailboxes.
 
 ### Graph API Permissions Required
 
 | Permission | Type | Purpose | Required When |
 |------------|------|---------|---------------|
-| `Mail.Send` | Application | Send email from shared/service mailboxes | Account has `sprk_sendenableds = Yes` and type is Shared or Service |
+| `Mail.Send` | Application | Send email from shared/service mailboxes | Account has `sprk_sendenabled = Yes` and type is Shared or Service |
 | `Mail.Read` | Application | Monitor mailbox for incoming email | Account has `sprk_receiveenabled = Yes` |
 | `Mail.Send` | Delegated | Send email as the authenticated user | Account type is User Account (OBO flow) |
 
@@ -283,11 +283,11 @@ See [COMMUNICATION-DEPLOYMENT-GUIDE.md](COMMUNICATION-DEPLOYMENT-GUIDE.md#exchan
 ### Scenario 1: Add a New Shared Mailbox for Outbound Only
 
 1. Create Exchange shared mailbox in Azure AD (or use existing)
-2. Add mailbox to "BFF-Mailbox-Access" security group
+2. Add mailbox to "SDAP Mailbox Access" security group
 3. Wait 30 minutes for Exchange policy propagation
 4. Create `sprk_communicationaccount` record:
    - Account Type: Shared Account (100000000)
-   - `sprk_sendenableds`: Yes
+   - `sprk_sendenabled`: Yes
    - `sprk_receiveenabled`: No
    - `sprk_isdefaultsender`: No (unless replacing the default)
 5. Run verification: `POST /api/communications/accounts/{id}/verify`
@@ -309,7 +309,7 @@ See [COMMUNICATION-DEPLOYMENT-GUIDE.md](COMMUNICATION-DEPLOYMENT-GUIDE.md#exchan
 2. User must have consented to the application (admin consent or individual consent)
 3. Create `sprk_communicationaccount` record:
    - Account Type: User Account (100000002)
-   - `sprk_sendenableds`: Yes
+   - `sprk_sendenabled`: Yes
    - `sprk_receiveenabled`: No (individual inbound is out of scope)
    - `sprk_isdefaultsender`: No
 4. User selects "My Mailbox" send mode on the Communication form
@@ -318,12 +318,12 @@ See [COMMUNICATION-DEPLOYMENT-GUIDE.md](COMMUNICATION-DEPLOYMENT-GUIDE.md#exchan
 ### Scenario 4: Decommission a Communication Account
 
 1. Open the `sprk_communicationaccount` record
-2. Set `sprk_sendenableds` to No
+2. Set `sprk_sendenabled` to No
 3. Set `sprk_receiveenabled` to No
 4. The `GraphSubscriptionManager` will stop renewing the webhook subscription
 5. Subscription will expire naturally after up to 3 days
 6. Optionally deactivate the record (set `statecode` to Inactive)
-7. Remove mailbox from "BFF-Mailbox-Access" security group if no longer needed
+7. Remove mailbox from "SDAP Mailbox Access" security group if no longer needed
 
 ---
 
@@ -351,7 +351,7 @@ See [COMMUNICATION-DEPLOYMENT-GUIDE.md](COMMUNICATION-DEPLOYMENT-GUIDE.md#exchan
 
 | Cause | Fix |
 |-------|-----|
-| Mailbox not in Exchange security group | Add to "BFF-Mailbox-Access" group; wait 30 minutes |
+| Mailbox not in Exchange security group | Add to "SDAP Mailbox Access" group; wait 30 minutes |
 | Exchange policy not yet propagated | Wait 30 minutes; re-run verification |
 | Mailbox does not exist in Azure AD | Verify mailbox exists: `Get-Mailbox -Identity "address@domain.com"` |
 | App registration missing permissions | Check `Mail.Send` (Application) and `Mail.Read` (Application) in Azure AD |
@@ -390,9 +390,9 @@ See [COMMUNICATION-DEPLOYMENT-GUIDE.md](COMMUNICATION-DEPLOYMENT-GUIDE.md#exchan
 | Cause | Fix |
 |-------|-----|
 | Missing `Mail.Send` application permission | Grant permission + admin consent |
-| Mailbox not in Exchange security group | Add to "BFF-Mailbox-Access" group; wait 30 minutes |
-| `sprk_sendenableds` not set to Yes | Update the account record |
-| Approved sender configuration not found | Ensure account record is active and `sprk_sendenableds = Yes` |
+| Mailbox not in Exchange security group | Add to "SDAP Mailbox Access" group; wait 30 minutes |
+| `sprk_sendenabled` not set to Yes | Update the account record |
+| Approved sender configuration not found | Ensure account record is active and `sprk_sendenabled = Yes` |
 | BFF Redis cache stale (5-min TTL) | Wait for cache expiry or restart API |
 
 ---

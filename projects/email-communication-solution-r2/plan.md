@@ -187,7 +187,7 @@
 - Flag unresolved as `sprk_associationstatus = Pending Review`
 
 3.6 **Complete Backup Polling Service**
-- Poll every 15 minutes per receive-enabled mailbox
+- Poll every 5 minutes per receive-enabled mailbox
 - Query Graph for messages since last poll
 - Deduplicate against already-processed messages
 - Enqueue missed messages
@@ -318,7 +318,7 @@ Phase 1 (A): Foundation — no dependencies
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | R1 code may not match R2 spec | Rework | Phase assessment tasks audit existing code first |
-| Graph subscription webhook unreliable | Missed emails | Backup polling (15 min) |
+| Graph subscription webhook unreliable | Missed emails | Backup polling (5 min) |
 | Graph subscription 3-day expiry | Monitoring stops | Auto-renewal in GraphSubscriptionManager |
 | Exchange access policy delay (30 min) | Send/read fails | Verify before go-live |
 | Large attachments exceed Graph limits | Missing documents | Individual failure isolation |

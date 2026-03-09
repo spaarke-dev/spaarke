@@ -13,6 +13,12 @@
     Audit all existing R1 communication account code to determine what's complete,
     what needs modification, and what gaps remain vs the R2 spec. This assessment
     drives all subsequent Phase A tasks.
+
+    CRITICAL FIELD NAME FIXES REQUIRED (confirmed by owner):
+    1. sprk_sendenableds → sprk_sendenabled (all code uses wrong trailing 's')
+    2. sprk_communiationtype → sprk_communicationtype (all code uses old typo)
+    These Dataverse fields were corrected. All source code, tests, and web resources
+    using the old names MUST be updated as part of this assessment or Task 003.
   </prompt>
 
   <role>Senior .NET developer performing code audit</role>

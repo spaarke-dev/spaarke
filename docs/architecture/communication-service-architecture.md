@@ -451,7 +451,7 @@ After upload, creates a `sprk_document` record:
 | Field | Type | Description |
 |-------|------|-------------|
 | `sprk_name` | String(200) | Auto-generated: "Email: {subject}" |
-| `sprk_communiationtype` | OptionSet | Email, TeamsMessage, SMS, Notification |
+| `sprk_communicationtype` | OptionSet | Email, TeamsMessage, SMS, Notification |
 | `statuscode` | OptionSet | Draft(1), Queued, Send, Delivered, Failed, Bounded, Recalled |
 | `statecode` | OptionSet | Active(0), Inactive(1) |
 | `sprk_direction` | OptionSet | Incoming(0), Outgoing(1) |

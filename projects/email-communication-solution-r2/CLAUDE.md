@@ -45,6 +45,17 @@ Unified Communication Service: Dataverse-managed mailbox accounts, Graph subscri
 - **Per-environment webhook secret** in config (not Key Vault per-account)
 - **Best-effort document archival** — communication record is critical path
 
+## ⚠️ CRITICAL: Dataverse Field Name Corrections
+
+**These fields were renamed in Dataverse. All R1 code still uses the OLD names and MUST be updated:**
+
+| Old Name (in code) | Correct Name (in Dataverse) | Affected Files |
+|---------------------|---------------------------|----------------|
+| `sprk_sendenableds` | `sprk_sendenabled` | CommunicationAccountService.cs, MailboxVerificationService.cs, sprk_communication_send.js, 6+ test files |
+| `sprk_communiationtype` | `sprk_communicationtype` | CommunicationService.cs, IncomingCommunicationProcessor.cs, sprk_communication_send.js, CommunicationType.cs, 2+ test files |
+
+**Security Group Name**: Use "SDAP Mailbox Access" (not "BFF-Mailbox-Access")
+
 ## Existing R1 Code to Assess
 
 Critical: Many components already exist from R1. Every phase starts with an assessment task.

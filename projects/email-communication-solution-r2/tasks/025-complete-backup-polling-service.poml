@@ -11,7 +11,7 @@
 
   <prompt>
     Complete CommunicationPollingBackupService (InboundPollingBackupService) that polls
-    Graph every 15 minutes for each receive-enabled mailbox. Query for messages since last poll.
+    Graph every 5 minutes for each receive-enabled mailbox. Query for messages since last poll.
     Deduplicate against already-processed messages. Enqueue missed messages as
     ProcessIncomingCommunication jobs.
   </prompt>
@@ -19,7 +19,7 @@
   <role>Senior .NET developer</role>
 
   <goal>
-    Backup polling service catches messages missed by webhooks within 15 minutes.
+    Backup polling service catches messages missed by webhooks within 5 minutes.
   </goal>
 
   <knowledge>
@@ -33,7 +33,7 @@
   </knowledge>
 
   <constraints>
-    <constraint source="project">Poll every 15 minutes</constraint>
+    <constraint source="project">Poll every 5 minutes</constraint>
     <constraint source="project">Query: GET /users/{email}/mailFolders/inbox/messages?$filter=receivedDateTime ge {lastPoll}</constraint>
     <constraint source="project">Deduplicate: check sprk_graphmessageid before enqueue</constraint>
   </constraints>
@@ -41,7 +41,7 @@
   <steps>
     <step order="1" name="Review Existing Service">Read InboundPollingBackupService.cs.</step>
     <step order="2" name="Complete Polling Logic">
-      Timer every 15 min. For each receive-enabled account, query Graph for recent messages.
+      Timer every 5 min. For each receive-enabled account, query Graph for recent messages.
       Check if already processed (Redis key or Dataverse lookup). Enqueue if new.
     </step>
     <step order="3" name="Write Tests">Test polling logic, dedup, error handling.</step>
@@ -54,7 +54,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Polls every 15 minutes per receive-enabled account</criterion>
+    <criterion testable="true">Polls every 5 minutes per receive-enabled account</criterion>
     <criterion testable="true">Queries Graph for messages since last poll</criterion>
     <criterion testable="true">Deduplicates against already-processed messages</criterion>
     <criterion testable="true">Enqueues missed messages as ProcessIncomingCommunication jobs</criterion>

@@ -65,7 +65,7 @@ Replace the fragmented email infrastructure (appsettings.json-only approved send
    - Acceptance: `GraphSubscriptionManager` BackgroundService creates subscriptions for receive-enabled accounts; renews when < 24h remaining (max 3-day lifetime); recreates on failure
 
 7. **FR-07**: Backup polling for missed webhooks
-   - Acceptance: If webhook fails, `CommunicationPollingBackupService` catches missed messages within 15 minutes via Graph query
+   - Acceptance: If webhook fails, `CommunicationPollingBackupService` catches missed messages within 5 minutes via Graph query
 
 8. **FR-08**: Association resolution for incoming email
    - Acceptance: Incoming email auto-linked to entities via priority cascade: (1) email thread In-Reply-To, (2) sender contact/account match, (3) subject line pattern match, (4) mailbox context
@@ -92,7 +92,7 @@ Replace the fragmented email infrastructure (appsettings.json-only approved send
 
 - **NFR-01**: Graph webhook response time < 3 seconds (Graph requires < 3s for subscription notifications)
 - **NFR-02**: Email processing (webhook → communication record) < 30 seconds end-to-end
-- **NFR-03**: Backup polling interval ≤ 15 minutes
+- **NFR-03**: Backup polling interval ≤ 5 minutes
 - **NFR-04**: Redis idempotency keys retained 7 days; processing locks 5 minutes
 - **NFR-05**: All components must support multi-tenant deployment (no hardcoded tenant IDs, mailbox addresses, or environment-specific config)
 - **NFR-06**: Document archival is best-effort (non-fatal) — communication record creation is the critical path
@@ -191,7 +191,7 @@ Replace the fragmented email infrastructure (appsettings.json-only approved send
 3. Create `POST /api/communications/incoming-webhook` endpoint (validate + enqueue)
 4. Create `IncomingCommunicationProcessor` job handler
 5. Implement association resolution (thread → sender → subject → mailbox context)
-6. Create `CommunicationPollingBackupService` (15-minute interval)
+6. Create `CommunicationPollingBackupService` (5-minute interval)
 7. Create incoming communication views in Dataverse
 8. Test end-to-end: send email → webhook → communication record
 
@@ -390,7 +390,7 @@ For multi-tenant deployment, Graph subscription `clientState` secrets should use
 4. [ ] Association resolution: incoming from known contact → auto-linked - Verify: send from known contact, check associations
 5. [ ] Admin management: CRUD on `sprk_communicationaccount` via Dataverse UI - Verify: create/edit/deactivate records
 6. [ ] Verification: click Verify → confirms send/read access → updates status - Verify: run against configured mailbox
-7. [ ] Resilience: missed webhooks caught by polling within 15 min - Verify: disable webhook, send email, verify polling catches it
+7. [ ] Resilience: missed webhooks caught by polling within 5 min - Verify: disable webhook, send email, verify polling catches it
 8. [ ] Inbound archival: incoming → .eml to SPE → `sprk_document` linked to `sprk_communication` - Verify: check SPE + Dataverse records
 9. [ ] Attachment processing: incoming attachments → filtered → SPE child documents → AI analysis enqueued - Verify: send email with attachments, check child documents
 10. [ ] Outbound archival: sent email → .eml to SPE → linked document + child attachments - Verify: send email, check SPE + Dataverse
@@ -436,7 +436,7 @@ For multi-tenant deployment, Graph subscription `clientState` secrets should use
 
 - **Attachment extraction**: Always-on for initial implementation (controlled via `sprk_processingrules` later if needed)
 - **Graph subscription lifetime**: 3-day maximum for mail resources; renew at < 24h remaining
-- **Polling interval**: 15 minutes for backup polling service
+- **Polling interval**: 5 minutes for backup polling service
 - **Single Graph API call**: Use `$expand=attachments` to fetch message + attachments in one call
 - **Pre-launch**: No migration of existing data, no backward compatibility, clean cutover
 
