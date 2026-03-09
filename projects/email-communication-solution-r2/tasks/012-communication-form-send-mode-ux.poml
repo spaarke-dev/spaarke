@@ -1,7 +1,7 @@
 <task id="ECS-012" project="Email Communication Solution R2">
   <metadata>
     <title>Communication Form Send Mode UX</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>2 - Individual User Outbound (Phase B)</phase>
     <tags>webresource, frontend</tags>

@@ -1818,6 +1818,28 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return results.Entities.ToArray();
     }
 
+    public async Task<bool> ExistsCommunicationByGraphMessageIdAsync(string graphMessageId, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Checking if sprk_communication exists for GraphMessageId: {GraphMessageId}", graphMessageId);
+
+        var query = new QueryExpression("sprk_communication")
+        {
+            ColumnSet = new ColumnSet("sprk_communicationid"),
+            TopCount = 1
+        };
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("sprk_graphmessageid", ConditionOperator.Equal, graphMessageId));
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+
+        var exists = results.Entities.Count > 0;
+        _logger.LogDebug(
+            "Dedup check for GraphMessageId {GraphMessageId}: exists={Exists}",
+            graphMessageId, exists);
+
+        return exists;
+    }
+
     public void Dispose()
     {
         if (!_disposed)

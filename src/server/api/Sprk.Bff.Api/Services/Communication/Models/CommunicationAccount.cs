@@ -20,6 +20,9 @@ public sealed class CommunicationAccount
     public string? MonitorFolder { get; init; }
     public bool AutoCreateRecords { get; init; }
 
+    /// <summary>Maps to Dataverse field sprk_archiveincomingoptin. Defaults to true if not set.</summary>
+    public bool? ArchiveIncomingOptIn { get; init; }
+
     /// <summary>Graph subscription ID. Null means no subscription configured.</summary>
     public string? SubscriptionId { get; init; }
 

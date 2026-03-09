@@ -147,6 +147,9 @@ public sealed class CommunicationAccountService
             ReceiveEnabled = entity.GetAttributeValue<bool>("sprk_receiveenabled"),
             MonitorFolder = entity.GetAttributeValue<string>("sprk_monitorfolder"),
             AutoCreateRecords = entity.GetAttributeValue<bool>("sprk_autocreaterecords"),
+            ArchiveIncomingOptIn = entity.Contains("sprk_archiveincomingoptin")
+                ? entity.GetAttributeValue<bool?>("sprk_archiveincomingoptin")
+                : null,
             SubscriptionId = entity.GetAttributeValue<string>("sprk_subscriptionid"),
             SubscriptionExpiry = entity.Contains("sprk_subscriptionexpiry")
                 ? entity.GetAttributeValue<DateTime?>("sprk_subscriptionexpiry")

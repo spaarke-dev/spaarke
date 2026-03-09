@@ -475,4 +475,13 @@ public interface IDataverseService
     /// <param name="ct">Cancellation token</param>
     /// <returns>Array of Entity objects with requested attributes</returns>
     Task<Entity[]> QueryCommunicationAccountsAsync(string filter, string select, CancellationToken ct = default);
+
+    /// <summary>
+    /// Check if a sprk_communication record exists with the given Graph message ID.
+    /// Used for deduplication before creating incoming communication records.
+    /// </summary>
+    /// <param name="graphMessageId">The Graph message ID to check</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>True if a record with this sprk_graphmessageid already exists</returns>
+    Task<bool> ExistsCommunicationByGraphMessageIdAsync(string graphMessageId, CancellationToken ct = default);
 }

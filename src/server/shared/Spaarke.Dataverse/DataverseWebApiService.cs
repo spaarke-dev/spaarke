@@ -1846,4 +1846,11 @@ public class DataverseWebApiService : IDataverseService
             "QueryCommunicationAccountsAsync is implemented in DataverseServiceClientImpl. " +
             "Configure DI to use ServiceClient implementation for communication account queries.");
     }
+
+    public Task<bool> ExistsCommunicationByGraphMessageIdAsync(string graphMessageId, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "ExistsCommunicationByGraphMessageIdAsync is implemented in DataverseServiceClientImpl. " +
+            "Configure DI to use ServiceClient implementation for communication dedup queries.");
+    }
 }

@@ -162,19 +162,30 @@ public sealed class IncomingCommunicationProcessor
             }
         }
 
-        // ── Step 6: Archive .eml to SPE (best-effort) ────────────────────────────
-        try
+        // ── Step 6: Archive .eml to SPE (best-effort, if opt-in) ─────────────────
+        // Default to archiving if ArchiveIncomingOptIn is not set (null) or is true.
+        if (account?.ArchiveIncomingOptIn != false)
         {
-            await ArchiveEmlAsync(message, mailboxEmail, communicationId, ct);
+            try
+            {
+                await ArchiveEmlAsync(message, mailboxEmail, communicationId, ct);
+            }
+            catch (Exception ex)
+            {
+                // Archival failure is non-fatal
+                _logger.LogWarning(
+                    ex,
+                    "EML archival failed (non-fatal) | CommunicationId: {CommunicationId}, " +
+                    "GraphMessageId: {GraphMessageId}",
+                    communicationId, graphMessageId);
+            }
         }
-        catch (Exception ex)
+        else
         {
-            // Archival failure is non-fatal
-            _logger.LogWarning(
-                ex,
-                "EML archival failed (non-fatal) | CommunicationId: {CommunicationId}, " +
-                "GraphMessageId: {GraphMessageId}",
-                communicationId, graphMessageId);
+            _logger.LogInformation(
+                "EML archival skipped: ArchiveIncomingOptIn is disabled for account {Mailbox} | " +
+                "CommunicationId: {CommunicationId}",
+                mailboxEmail, communicationId);
         }
 
         // ── Step 7: Optionally mark message as read in Graph ─────────────────────
@@ -206,26 +217,29 @@ public sealed class IncomingCommunicationProcessor
     /// Checks if a sprk_communication record already exists with the given Graph message ID.
     /// Uses QueryByAttribute for efficient server-side filtering.
     /// </summary>
-    private Task<bool> ExistsByGraphMessageIdAsync(string graphMessageId, CancellationToken ct)
+    private async Task<bool> ExistsByGraphMessageIdAsync(string graphMessageId, CancellationToken ct)
     {
         // Deduplication strategy (multi-layer):
         //   Layer 1: In-memory ConcurrentDictionary in webhook endpoint (same-process dedup)
         //   Layer 2: ServiceBus IdempotencyKey (cross-process dedup)
-        //   Layer 3: Dataverse duplicate detection rule on sprk_graphmessageid (if configured)
-        //
-        // IDataverseService doesn't expose a generic RetrieveMultiple for sprk_communication.
-        // Adding a query method is out of scope for this task (Task 072).
-        // The existing multi-layer dedup is sufficient for preventing duplicate records.
-        //
-        // Future enhancement: add QueryCommunicationByGraphMessageIdAsync to IDataverseService
-        // for a Dataverse-level dedup check before record creation.
+        //   Layer 3: Dataverse query on sprk_graphmessageid (this method)
+        //   Layer 4: Dataverse duplicate detection rule on sprk_graphmessageid (if configured)
 
-        _logger.LogDebug(
-            "Dedup check for GraphMessageId {GraphMessageId}: relying on multi-layer dedup " +
-            "(webhook cache, ServiceBus idempotency, Dataverse rules)",
-            graphMessageId);
-
-        return Task.FromResult(false);
+        try
+        {
+            return await _dataverseService.ExistsCommunicationByGraphMessageIdAsync(graphMessageId, ct);
+        }
+        catch (Exception ex)
+        {
+            // If the Dataverse query fails, log and return false to allow processing.
+            // Other dedup layers (webhook cache, ServiceBus idempotency) still protect against duplicates.
+            _logger.LogWarning(
+                ex,
+                "Dataverse dedup check failed for GraphMessageId {GraphMessageId}; " +
+                "falling back to other dedup layers",
+                graphMessageId);
+            return false;
+        }
     }
 
     /// <summary>
@@ -292,6 +306,7 @@ public sealed class IncomingCommunicationProcessor
             ["sprk_body"] = bodyContent,
             ["sprk_graphmessageid"] = graphMessageId,
             ["sprk_sentat"] = message.ReceivedDateTime?.UtcDateTime ?? DateTime.UtcNow,
+            ["sprk_receivedat"] = message.ReceivedDateTime?.UtcDateTime ?? DateTime.UtcNow,
 
             // IMPORTANT: Do NOT set any regarding fields.
             // Association resolution (sprk_regardingmatter, sprk_regardingorganization,
