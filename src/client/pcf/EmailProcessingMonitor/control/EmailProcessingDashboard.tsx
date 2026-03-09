@@ -40,6 +40,7 @@ import {
     Filter24Regular,
     Clock24Regular
 } from './icons';
+import { authenticatedFetch } from '@spaarke/auth';
 import { EmailProcessingStats } from './types';
 
 // ============================================================================
@@ -150,7 +151,8 @@ const useStyles = makeStyles({
 
 interface EmailProcessingDashboardProps {
     bffApiUrl: string;
-    accessToken: string;
+    /** @deprecated No longer used. Auth is handled by @spaarke/auth authenticatedFetch(). Kept for API compatibility. */
+    accessToken?: string;
     isDarkTheme: boolean;
     refreshIntervalSeconds: number;
     version: string;
@@ -163,7 +165,6 @@ interface EmailProcessingDashboardProps {
 
 export const EmailProcessingDashboard: React.FC<EmailProcessingDashboardProps> = ({
     bffApiUrl,
-    accessToken,
     isDarkTheme,
     refreshIntervalSeconds,
     version,
@@ -176,20 +177,15 @@ export const EmailProcessingDashboard: React.FC<EmailProcessingDashboardProps> =
     const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
     const refreshTimerRef = useRef<number | null>(null);
 
-    // Fetch stats from BFF API
+    // Fetch stats from BFF API using @spaarke/auth authenticatedFetch
     const fetchStats = useCallback(async () => {
         try {
-            const response = await fetch(`${bffApiUrl}/api/admin/email-processing/stats`, {
+            const response = await authenticatedFetch(`${bffApiUrl}/api/admin/email-processing/stats`, {
                 method: 'GET',
                 headers: {
-                    'Authorization': `Bearer ${accessToken}`,
                     'Content-Type': 'application/json',
                 }
             });
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
 
             const data = await response.json() as EmailProcessingStats;
             setStats(data);
@@ -202,7 +198,7 @@ export const EmailProcessingDashboard: React.FC<EmailProcessingDashboardProps> =
         } finally {
             setLoading(false);
         }
-    }, [bffApiUrl, accessToken, onError]);
+    }, [bffApiUrl, onError]);
 
     // Initial fetch and auto-refresh setup
     useEffect(() => {

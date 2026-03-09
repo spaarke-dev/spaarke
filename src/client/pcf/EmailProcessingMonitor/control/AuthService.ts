@@ -1,4 +1,14 @@
 /**
+ * @deprecated This file is deprecated and will be removed in a future version.
+ * Use @spaarke/auth instead:
+ *   import { initAuth, authenticatedFetch } from '@spaarke/auth';
+ *   await initAuth({ clientId, authority, bffApiScope, bffBaseUrl });
+ *   const response = await authenticatedFetch('/api/admin/email-processing/stats');
+ *
+ * See authInit.ts for the migration wrapper.
+ *
+ * ---
+ * Original description:
  * MSAL Authentication Service for BFF API Access
  *
  * CRITICAL: Uses named scope api://<BFF_APP_ID>/SDAP.Access
@@ -19,6 +29,8 @@ import {
 } from '@azure/msal-browser';
 
 /**
+ * @deprecated Use @spaarke/auth instead. See authInit.ts for migration pattern.
+ *
  * AuthService handles MSAL token acquisition for BFF API calls
  *
  * Architecture:

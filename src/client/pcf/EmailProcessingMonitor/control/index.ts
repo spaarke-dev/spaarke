@@ -15,7 +15,7 @@
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
-import { AuthService } from './AuthService';
+import { initializeAuth } from './authInit';
 import { EmailProcessingDashboard } from './EmailProcessingDashboard';
 import { MonitorState } from './types';
 
@@ -108,11 +108,8 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
     // Track if React has been mounted (for React 16 API)
     private isReactMounted = false;
 
-    // MSAL authentication service
-    private authService: AuthService | null = null;
-
-    // Current access token (cached)
-    private accessToken: string | null = null;
+    // Whether @spaarke/auth has been initialized
+    private authInitialized = false;
 
     // Configuration from manifest properties
     private bffApiUrl = '';
@@ -190,15 +187,10 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
                 refreshIntervalSeconds: this.refreshIntervalSeconds
             });
 
-            // Initialize MSAL auth service
-            this.authService = new AuthService(this.tenantId, this.clientAppId, this.bffAppId);
-            await this.authService.initialize();
-
-            console.log(`[EmailProcessingMonitor] MSAL initialized. Scope: ${this.authService.getScope()}`);
-
-            // Acquire access token
-            this.accessToken = await this.authService.getAccessToken();
-            console.log('[EmailProcessingMonitor] Access token acquired');
+            // Initialize @spaarke/auth (replaces local AuthService)
+            await initializeAuth(this.tenantId, this.clientAppId, this.bffAppId, this.bffApiUrl);
+            this.authInitialized = true;
+            console.log('[EmailProcessingMonitor] @spaarke/auth initialized');
 
             // Set up theme listener for global theme changes
             this._cleanupThemeListener = setupThemeListener(
@@ -299,8 +291,8 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
      * Render the React EmailProcessingDashboard component
      */
     private renderControl(context: ComponentFramework.Context<IInputs>): void {
-        if (!this.accessToken) {
-            console.warn('[EmailProcessingMonitor] No access token available, skipping render');
+        if (!this.authInitialized) {
+            console.warn('[EmailProcessingMonitor] Auth not initialized, skipping render');
             return;
         }
 
@@ -313,7 +305,6 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
         ReactDOM.render(
             React.createElement(EmailProcessingDashboard, {
                 bffApiUrl: this.bffApiUrl,
-                accessToken: this.accessToken,
                 isDarkTheme: isDarkTheme,
                 refreshIntervalSeconds: this.refreshIntervalSeconds,
                 version: this.VERSION,
@@ -373,8 +364,7 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
             this.isReactMounted = false;
         }
 
-        // Clear tokens
-        this.accessToken = null;
-        this.authService = null;
+        // Clear auth state
+        this.authInitialized = false;
     }
 }
