@@ -1474,6 +1474,158 @@ public class PromptSchemaRendererTests
         nnIdx.Should().BeLessThan(refIdx, "N:N scope skill context should appear before $ref-resolved skill");
     }
 
+    // -- Template parameter substitution tests --
+
+    [Fact]
+    public void Jps_TemplateParameter_SubstitutedInTaskField()
+    {
+        // Arrange — JPS with {{documentType}} in the task field
+        var jps = """
+        {
+            "$schema": "https://spaarke.com/schemas/prompt/v1",
+            "$version": 1,
+            "instruction": {
+                "task": "Analyze this {{documentType}} for compliance issues."
+            }
+        }
+        """;
+
+        var parameters = new Dictionary<string, object?>
+        {
+            { "documentType", "contract" }
+        };
+
+        // Act
+        var result = _sut.Render(jps, null, null, null, parameters, null);
+
+        // Assert
+        result.Format.Should().Be(PromptFormat.JsonPromptSchema);
+        result.PromptText.Should().Contain("Analyze this contract for compliance issues.");
+        result.PromptText.Should().NotContain("{{documentType}}");
+    }
+
+    [Fact]
+    public void Jps_TemplateParameter_NoParameters_PlaceholderLeftAsIs()
+    {
+        // Arrange — JPS with {{documentType}} but no parameters provided
+        var jps = """
+        {
+            "$schema": "https://spaarke.com/schemas/prompt/v1",
+            "$version": 1,
+            "instruction": {
+                "task": "Analyze this {{documentType}} for compliance issues."
+            }
+        }
+        """;
+
+        // Act — null parameters
+        var result = _sut.Render(jps, null, null, null, null, null);
+
+        // Assert — placeholder remains untouched
+        result.Format.Should().Be(PromptFormat.JsonPromptSchema);
+        result.PromptText.Should().Contain("{{documentType}}");
+    }
+
+    [Fact]
+    public void Jps_TemplateParameter_ParametersButNoPlaceholders_TextUnchanged()
+    {
+        // Arrange — JPS with no placeholders, parameters provided anyway
+        var jps = """
+        {
+            "$schema": "https://spaarke.com/schemas/prompt/v1",
+            "$version": 1,
+            "instruction": {
+                "task": "Analyze this document for compliance issues."
+            }
+        }
+        """;
+
+        var parameters = new Dictionary<string, object?>
+        {
+            { "documentType", "contract" }
+        };
+
+        // Act
+        var result = _sut.Render(jps, null, null, null, parameters, null);
+
+        // Assert — text is unchanged
+        result.Format.Should().Be(PromptFormat.JsonPromptSchema);
+        result.PromptText.Should().Contain("Analyze this document for compliance issues.");
+    }
+
+    [Fact]
+    public void Jps_TemplateParameter_MultipleParameters_AllSubstituted()
+    {
+        // Arrange — JPS with multiple placeholders in role, task, context, and constraints
+        var jps = """
+        {
+            "$schema": "https://spaarke.com/schemas/prompt/v1",
+            "$version": 1,
+            "instruction": {
+                "role": "You are a {{role}} specialist.",
+                "task": "Review the {{documentType}} from {{clientName}}.",
+                "context": "The client operates in the {{industry}} sector.",
+                "constraints": [
+                    "Focus on {{jurisdiction}} regulations.",
+                    "Flag any {{riskLevel}} risk items."
+                ]
+            }
+        }
+        """;
+
+        var parameters = new Dictionary<string, object?>
+        {
+            { "role", "legal" },
+            { "documentType", "contract" },
+            { "clientName", "Acme Corp" },
+            { "industry", "healthcare" },
+            { "jurisdiction", "EU" },
+            { "riskLevel", "high" }
+        };
+
+        // Act
+        var result = _sut.Render(jps, null, null, null, parameters, null);
+
+        // Assert — all placeholders substituted across all instruction fields
+        var text = result.PromptText;
+        text.Should().Contain("You are a legal specialist.");
+        text.Should().Contain("Review the contract from Acme Corp.");
+        text.Should().Contain("The client operates in the healthcare sector.");
+        text.Should().Contain("Focus on EU regulations.");
+        text.Should().Contain("Flag any high risk items.");
+
+        // No unresolved placeholders remain
+        text.Should().NotContain("{{");
+        text.Should().NotContain("}}");
+    }
+
+    [Fact]
+    public void Jps_TemplateParameter_NullValue_ReplacedWithEmptyString()
+    {
+        // Arrange — parameter value is null
+        var jps = """
+        {
+            "$schema": "https://spaarke.com/schemas/prompt/v1",
+            "$version": 1,
+            "instruction": {
+                "task": "Analyze the {{documentType}} document."
+            }
+        }
+        """;
+
+        var parameters = new Dictionary<string, object?>
+        {
+            { "documentType", null }
+        };
+
+        // Act
+        var result = _sut.Render(jps, null, null, null, parameters, null);
+
+        // Assert — null value becomes empty string
+        result.PromptText.Should().Contain("Analyze the  document.");
+        result.PromptText.Should().NotContain("{{documentType}}");
+    }
+
     // -- Helpers --
 
     /// <summary>

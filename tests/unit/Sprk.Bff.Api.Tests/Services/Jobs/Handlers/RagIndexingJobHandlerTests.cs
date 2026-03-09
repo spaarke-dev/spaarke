@@ -45,7 +45,7 @@ public class RagIndexingJobHandlerTests
 
         var analysisOptions = Options.Create(new AnalysisOptions
         {
-            SharedIndexName = "spaarke-knowledge-shared"
+            SharedIndexName = "spaarke-knowledge-index-v2"
         });
 
         // RagTelemetry is a concrete class — create a real instance.

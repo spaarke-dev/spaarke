@@ -1,8 +1,11 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Xunit;
+
+#pragma warning disable CS0618 // Type or member is obsolete
 
 namespace Sprk.Bff.Api.Tests.Services.Ai;
 
@@ -30,7 +33,12 @@ public sealed class DateExtractorHandlerTests
                     ? Array.Empty<TextChunk>()
                     : new List<TextChunk> { new() { Content = text, Index = 0, StartPosition = 0, EndPosition = text.Length } });
 
-        _handler = new DateExtractorHandler(_openAiClientMock.Object, _textChunkingServiceMock.Object, _loggerMock.Object);
+        _handler = new DateExtractorHandler(
+            _openAiClientMock.Object,
+            _textChunkingServiceMock.Object,
+            Options.Create(new ModelSelectorOptions()),
+            new PromptSchemaRenderer(Mock.Of<ILogger<PromptSchemaRenderer>>()),
+            _loggerMock.Object);
     }
 
     #region Handler Properties Tests

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Tools;
@@ -31,7 +32,12 @@ public class SummaryHandlerTests
                     ? Array.Empty<TextChunk>()
                     : new List<TextChunk> { new() { Content = text, Index = 0, StartPosition = 0, EndPosition = text.Length } });
 
-        _handler = new SummaryHandler(_openAiClientMock.Object, _textChunkingServiceMock.Object, _loggerMock.Object);
+        _handler = new SummaryHandler(
+            _openAiClientMock.Object,
+            _textChunkingServiceMock.Object,
+            Options.Create(new ModelSelectorOptions()),
+            new PromptSchemaRenderer(Mock.Of<ILogger<PromptSchemaRenderer>>()),
+            _loggerMock.Object);
     }
 
     #region Handler Properties Tests

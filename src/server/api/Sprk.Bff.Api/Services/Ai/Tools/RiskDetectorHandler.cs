@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai.Tools;
 
@@ -20,6 +22,7 @@ namespace Sprk.Bff.Api.Services.Ai.Tools;
 /// - includeRecommendations: Whether to include mitigation recommendations (default: true)
 /// </para>
 /// </remarks>
+[Obsolete("Use GenericAnalysisHandler with JPS configuration. See jps-conversions/risk-detector.json.")]
 public sealed class RiskDetectorHandler : IAnalysisToolHandler
 {
     private const string HandlerIdValue = "RiskDetectorHandler";
@@ -29,6 +32,8 @@ public sealed class RiskDetectorHandler : IAnalysisToolHandler
 
     private readonly IOpenAiClient _openAiClient;
     private readonly ITextChunkingService _textChunkingService;
+    private readonly ModelSelectorOptions _modelSelectorOptions;
+    private readonly PromptSchemaRenderer _promptSchemaRenderer;
     private readonly ILogger<RiskDetectorHandler> _logger;
 
     /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
@@ -73,10 +78,14 @@ public sealed class RiskDetectorHandler : IAnalysisToolHandler
     public RiskDetectorHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
+        IOptions<ModelSelectorOptions> modelSelectorOptions,
+        PromptSchemaRenderer promptSchemaRenderer,
         ILogger<RiskDetectorHandler> logger)
     {
         _openAiClient = openAiClient;
         _textChunkingService = textChunkingService;
+        _modelSelectorOptions = modelSelectorOptions.Value;
+        _promptSchemaRenderer = promptSchemaRenderer;
         _logger = logger;
     }
 
@@ -154,6 +163,68 @@ public sealed class RiskDetectorHandler : IAnalysisToolHandler
                 "Starting risk detection for analysis {AnalysisId}, document {DocumentId}",
                 context.AnalysisId, context.Document.DocumentId);
 
+            // JPS format check: if ActionSystemPrompt is JPS, delegate to PromptSchemaRenderer
+            // and use GenericAnalysisHandler-style execution instead of legacy prompt building.
+            if (!string.IsNullOrWhiteSpace(context.ActionSystemPrompt) && IsJpsFormat(context.ActionSystemPrompt))
+            {
+                _logger.LogInformation(
+                    "ActionSystemPrompt is JPS format for analysis {AnalysisId} — delegating to PromptSchemaRenderer",
+                    context.AnalysisId);
+
+                var rendered = _promptSchemaRenderer.Render(
+                    context.ActionSystemPrompt,
+                    context.SkillContext,
+                    context.KnowledgeContext,
+                    context.Document?.ExtractedText,
+                    context.TemplateParameters,
+                    context.DownstreamNodes,
+                    context.AdditionalKnowledge,
+                    context.AdditionalSkills
+                );
+
+                var jpsPrompt = rendered.PromptText;
+                var inputTokens = EstimateTokens(jpsPrompt);
+                string response;
+
+                if (rendered.JsonSchema != null)
+                {
+                    var schemaBinaryData = BinaryData.FromString(rendered.JsonSchema.ToJsonString());
+                    var schemaName = rendered.SchemaName ?? "risk_detector_response";
+
+                    response = await _openAiClient.GetStructuredCompletionRawAsync(
+                        jpsPrompt,
+                        schemaBinaryData,
+                        schemaName,
+                        cancellationToken: cancellationToken);
+                }
+                else
+                {
+                    response = await _openAiClient.GetCompletionAsync(jpsPrompt, cancellationToken: cancellationToken);
+                }
+
+                var outputTokens = EstimateTokens(response);
+                stopwatch.Stop();
+
+                return ToolResult.Ok(
+                    HandlerId,
+                    tool.Id,
+                    tool.Name,
+                    JsonSerializer.Deserialize<object>(response) ?? (object)response,
+                    response,
+                    1.0,
+                    new ToolExecutionMetadata
+                    {
+                        StartedAt = startedAt,
+                        CompletedAt = DateTimeOffset.UtcNow,
+                        InputTokens = inputTokens,
+                        OutputTokens = outputTokens,
+                        ModelCalls = 1,
+                        ModelName = "gpt-4o-mini"
+                    });
+            }
+
+            // Legacy path: fall through to existing prompt-building logic
+
             // Parse configuration
             var config = ParseConfiguration(tool.Configuration);
             var documentText = context.Document.ExtractedText;
@@ -199,7 +270,7 @@ public sealed class RiskDetectorHandler : IAnalysisToolHandler
                 InputTokens = totalInputTokens,
                 OutputTokens = totalOutputTokens,
                 ModelCalls = chunks.Count,
-                ModelName = "gpt-4o-mini"
+                ModelName = _modelSelectorOptions.ToolHandlerModel
             };
 
             var resultData = new RiskDetectionResult
@@ -494,6 +565,15 @@ public sealed class RiskDetectorHandler : IAnalysisToolHandler
     private static int EstimateTokens(string text)
     {
         return (int)Math.Ceiling(text.Length / 4.0);
+    }
+
+    /// <summary>
+    /// Detects whether a raw prompt string is in JPS format.
+    /// Matches the same detection logic as <see cref="PromptSchemaRenderer"/>.
+    /// </summary>
+    private static bool IsJpsFormat(string rawPrompt)
+    {
+        return rawPrompt.TrimStart().StartsWith('{') && rawPrompt.Contains("\"$schema\"");
     }
 }
 

@@ -1,0 +1,91 @@
+{
+  "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
+  "playbook": {
+    "name": "Create New Project Pre-Fill",
+    "description": "Extracts key Project fields from uploaded legal documents to pre-fill the Create New Project wizard. Returns a flat JSON with display names for projectName, projectDescription, projectTypeName, practiceAreaName, assignedAttorneyName, assignedParalegalName, assignedOutsideCounselName, and confidence score. Frontend resolves display names to Dataverse lookup GUIDs via fuzzy matching.",
+    "isPublic": true,
+    "capabilities": ["analyze"],
+    "scopes": {
+      "actions": ["ACT-008"],
+      "skills": ["SKL-003", "SKL-005"],
+      "knowledge": [],
+      "tools": ["TL-001", "TL-008"]
+    }
+  },
+  "nodes": [
+    {
+      "name": "Extract Project Fields",
+      "actionCode": "ACT-008",
+      "nodeType": "AIAnalysis",
+      "outputVariable": "projectFields",
+      "model": "gpt-4o",
+      "positionX": 100,
+      "positionY": 200,
+      "dependsOn": [],
+      "configJson": {
+        "temperature": 0.2,
+        "responseFormat": "json_object",
+        "extractionSchema": {
+          "projectName": {
+            "type": "string",
+            "description": "A concise descriptive name for the project. Should capture the key purpose or engagement type.",
+            "constraint": "Maximum 10 words"
+          },
+          "projectDescription": {
+            "type": "string",
+            "description": "Brief narrative describing the project scope, key parties, subject matter, and objectives.",
+            "constraint": "Maximum 500 words"
+          },
+          "projectTypeName": {
+            "type": "string",
+            "description": "The type of project (e.g., Litigation, Corporate Transaction, Regulatory Compliance). Must match a value in the project type lookup table. Use proper case, full official name.",
+            "constraint": "Must match a value in sprk_mattertype_ref"
+          },
+          "practiceAreaName": {
+            "type": "string",
+            "description": "The practice area (e.g., Employment Law, Corporate Law, Intellectual Property). Must match a value in the practice area lookup table.",
+            "constraint": "Must match a value in sprk_practicearea_ref"
+          },
+          "assignedAttorneyName": {
+            "type": "string",
+            "description": "Full name of the primary attorney as it would appear in the contact directory (e.g., 'Jane Smith', not 'J. Smith').",
+            "constraint": "Full name from sprk_contact"
+          },
+          "assignedParalegalName": {
+            "type": "string",
+            "description": "Full name of the assigned paralegal as it would appear in the contact directory.",
+            "constraint": "Full name from sprk_contact"
+          },
+          "assignedOutsideCounselName": {
+            "type": "string",
+            "description": "Full legal name of the outside counsel organization (e.g., 'Wilson & Partners LLP', not 'Wilson').",
+            "constraint": "Full organization name from sprk_organization"
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Overall extraction confidence from 0.0 to 1.0. Set lower if document content is ambiguous or fields are inferred rather than explicitly stated.",
+            "constraint": "0.0 to 1.0"
+          }
+        },
+        "extractionRules": [
+          "Return display names only — never return Dataverse GUIDs or record IDs",
+          "Omit fields rather than guess — if a field cannot be extracted with reasonable confidence, leave it out of the JSON entirely",
+          "Use exact display names when possible — the frontend fuzzy-matches against Dataverse lookup tables",
+          "For assignedAttorneyName and assignedParalegalName, use full names as they would appear in a contact directory",
+          "For assignedOutsideCounselName, use the full legal entity name including suffixes (LLP, LLC, etc.)",
+          "The confidence score should reflect how many fields were extractable and how certain the extractions are"
+        ],
+        "parameters": {
+          "entity_type": "project",
+          "extraction_mode": "pre-fill"
+        }
+      },
+      "scopes": {
+        "skills": ["SKL-003", "SKL-005"],
+        "knowledge": [],
+        "tools": ["TL-001", "TL-008"]
+      }
+    }
+  ],
+  "edges": []
+}

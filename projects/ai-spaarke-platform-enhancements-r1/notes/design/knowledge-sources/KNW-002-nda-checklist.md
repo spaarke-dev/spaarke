@@ -3,6 +3,8 @@
 > **External ID**: KNW-002
 > **Content Type**: Reference
 > **Tenant**: system
+> **Domain**: legal
+> **Keywords**: NDA, non-disclosure, confidentiality, review, checklist
 > **Created**: 2026-02-23
 > **Task**: AIPL-032
 

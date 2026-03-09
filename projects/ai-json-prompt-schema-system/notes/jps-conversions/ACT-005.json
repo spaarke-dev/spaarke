@@ -122,6 +122,11 @@
     "$knowledge": [
       { "$ref": "knowledge:sla-standards", "as": "reference" },
       { "$ref": "knowledge:standard-contract-terms", "as": "definitions" }
+    ],
+    "$skills": [
+      { "$ref": "skill:SLA Analysis" },
+      { "$ref": "skill:Risk Assessment" },
+      { "$ref": "skill:Obligation Mapping" }
     ]
   },
 

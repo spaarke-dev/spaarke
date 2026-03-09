@@ -63,6 +63,7 @@ src/server/api/Sprk.Bff.Api/
 │   ├── HandlerEndpoints.cs          # Tool handler discovery
 │   ├── SemanticSearchEndpoints.cs   # RAG search
 │   ├── RagEndpoints.cs              # RAG pipeline
+│   ├── AdminKnowledgeEndpoints.cs    # Admin: index/delete reference knowledge
 │   ├── ModelEndpoints.cs            # Model/deployment management
 │   ├── VisualizationEndpoints.cs    # Data visualization
 │   └── RecordMatchEndpoints.cs      # Record matching
@@ -78,10 +79,14 @@ src/server/api/Sprk.Bff.Api/
 │   ├── Prompts/                     # System prompt definitions
 │   ├── Testing/                     # Playbook test infrastructure
 │   ├── Visualization/              # Chart/visualization generation
+│   ├── ReferenceIndexingService.cs   # Golden reference knowledge indexing
+│   ├── ReferenceRetrievalService.cs  # L1 reference knowledge retrieval
 │   ├── PromptSchemaRenderer.cs      # JPS → prompt text + JSON Schema
 │   └── LookupChoicesResolver.cs     # $choices Dataverse pre-resolution
 ├── Models/Ai/                       # DTOs and request/response models (~37 files)
-│   └── SemanticSearch/              # Search-specific models
+│   ├── SemanticSearch/              # Search-specific models
+│   ├── ReferenceSearchResult.cs      # Reference retrieval response models
+│   └── KnowledgeRetrievalConfig.cs   # Per-action knowledge retrieval settings
 └── BackgroundWorkers/               # Background processing
 
 src/client/code-pages/
@@ -944,9 +949,12 @@ PlaybookOrchestrationService.ExecutePlaybookAsync()
   │   │   ├── Step 7d: Route to INodeExecutor via NodeExecutorRegistry[ActionType]:
   │   │   │   │
   │   │   │   ├── AiAnalysisNodeExecutor (ActionType 0-2):
+  │   │   │   │   ├── L1 Reference Retrieval: SearchReferencesAsync (if knowledge sources linked)
+  │   │   │   │   ├── L2 Document Context: RagService search (if includeDocumentContext=true)
+  │   │   │   │   ├── L3 Entity Context: RecordSearchService (if includeEntityContext=true)
   │   │   │   │   ├── Pre-resolve $choices: LookupChoicesResolver.ResolveFromJpsAsync()
   │   │   │   │   │   └── Queries Dataverse for lookup/optionset/multiselect/boolean values
-  │   │   │   │   ├── Build prompt: Action.SystemPrompt + Skills + Knowledge + Document
+  │   │   │   │   ├── Build prompt: Action.SystemPrompt + Skills + L1/L2/L3 Knowledge + Document
   │   │   │   │   ├── Template substitution: {{variable}} from PreviousOutputs
   │   │   │   │   ├── PromptSchemaRenderer: JPS → prompt text + JSON Schema (with $choices → enum)
   │   │   │   │   ├── Resolve tool handler (ToolHandlerRegistry)
@@ -1135,6 +1143,8 @@ System prompt: `Prompts/PlaybookBuilderSystemPrompt.cs`
 - `ISemanticSearchService` / `SemanticSearchService` -- Azure AI Search queries
 - `IEmbeddingCache` / `EmbeddingCache` -- Redis-backed embedding cache (ADR-009)
 - `IFileIndexingService` / `FileIndexingService` -- Document indexing
+- `ReferenceIndexingService` -- Index knowledge sources into spaarke-rag-references
+- `ReferenceRetrievalService` -- Query golden reference index for L1 knowledge
 
 **Search flow**:
 
@@ -1151,8 +1161,44 @@ Query → EmbeddingCache (Redis) → Azure OpenAI (embedding)
                               Semantic reranking → Results
 ```
 
-**Search index**: `spaarke-knowledge-index` (1536-dim embeddings, HNSW, cosine similarity)
+**Search indexes**:
+- `spaarke-knowledge-index-v2` -- Customer documents (3072-dim, HNSW, cosine)
+- `spaarke-rag-references` -- Golden reference knowledge (3072-dim, HNSW, cosine)
+- `discovery-index` -- Discovery chunks (3072-dim)
+
 **Multi-tenant isolation**: OData filter on `tenantId`
+
+### Knowledge-Augmented Execution (R3)
+
+The execution pipeline retrieves tiered knowledge before calling the LLM:
+
+```
+AiAnalysisNodeExecutor.ExecuteAsync()
+  │
+  ├── L1: ReferenceRetrievalService.SearchReferencesAsync()
+  │   └── Queries spaarke-rag-references (curated domain knowledge)
+  │   └── Filtered by playbook's N:N knowledge source IDs
+  │
+  ├── L2: IRagService.SearchAsync() (optional, includeDocumentContext=true)
+  │   └── Queries spaarke-knowledge-index-v2 (similar customer docs)
+  │   └── Excludes current document, scoped by parentEntity
+  │
+  ├── L3: IRecordSearchService (optional, includeEntityContext=true)
+  │   └── Queries spaarke-records-index (business entity metadata)
+  │
+  └── Merge: L1 + L2 + L3 → KnowledgeContext → Prompt assembly
+```
+
+**Configuration** via `KnowledgeRetrievalConfig` in action's ConfigJson:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `mode` | `auto` | `auto` (retrieve if sources linked), `always`, `never` |
+| `topK` | 5 | Max reference chunks to retrieve (1-20) |
+| `includeDocumentContext` | false | Enable L2 similar document retrieval |
+| `includeEntityContext` | false | Enable L3 business entity context |
+
+**Result caching**: Redis-based, key `sdap:rag-ref:{tenantId}:{queryHash}:{sourceIdsHash}:{topK}`, 10-minute TTL.
 
 ### Export & Delivery
 
@@ -1173,13 +1219,24 @@ Query → EmbeddingCache (Redis) → Azure OpenAI (embedding)
 
 | Service | Resource Name (Dev) | Purpose |
 |---------|--------------------|---------|
-| Azure OpenAI | `spaarke-openai-dev` | LLM completions + embeddings |
+| Azure OpenAI | `spaarke-openai-dev` | LLM completions + embeddings (`gpt-4o-mini` deployed, `gpt-4o` planned) |
 | Azure AI Search | `spaarke-search-dev` | Vector + hybrid search |
 | Document Intelligence | `spaarke-docintel-dev` | PDF/image text extraction |
 | Azure Redis Cache | -- | Embedding cache, search result cache |
 | Azure Service Bus | -- | Background job queuing |
 | Azure Key Vault | `spaarke-spekvcert` | Secrets management |
 | Azure App Service | `spe-api-dev-67e2xz` | BFF API hosting |
+
+### Model Selection (R3)
+
+Model names are configured via `ModelSelectorOptions`, not hardcoded:
+
+| Property | Default | Usage |
+|----------|---------|-------|
+| `DefaultModel` | `gpt-4o` | GenericAnalysisHandler (playbook AI nodes) |
+| `ToolHandlerModel` | `gpt-4o-mini` | Built-in tool handlers (classification, extraction) |
+
+**Resolution chain**: Node ConfigJson `ModelDeploymentId` → `ModelSelector.SelectModel(operationType)` → `ModelSelectorOptions.DefaultModel`
 
 ### AI Foundry (Future Infrastructure)
 

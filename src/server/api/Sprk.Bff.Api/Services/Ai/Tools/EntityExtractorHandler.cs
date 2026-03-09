@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai.Tools;
 
@@ -20,6 +22,7 @@ namespace Sprk.Bff.Api.Services.Ai.Tools;
 /// - chunkSize: Characters per chunk for large docs (default: 8000)
 /// </para>
 /// </remarks>
+[Obsolete("Use GenericAnalysisHandler with JPS configuration.")]
 public sealed class EntityExtractorHandler : IAnalysisToolHandler
 {
     private const string HandlerIdValue = "EntityExtractorHandler";
@@ -29,6 +32,8 @@ public sealed class EntityExtractorHandler : IAnalysisToolHandler
 
     private readonly IOpenAiClient _openAiClient;
     private readonly ITextChunkingService _textChunkingService;
+    private readonly ModelSelectorOptions _modelSelectorOptions;
+    private readonly PromptSchemaRenderer _promptSchemaRenderer;
     private readonly ILogger<EntityExtractorHandler> _logger;
 
     /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
@@ -68,10 +73,14 @@ public sealed class EntityExtractorHandler : IAnalysisToolHandler
     public EntityExtractorHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
+        IOptions<ModelSelectorOptions> modelSelectorOptions,
+        PromptSchemaRenderer promptSchemaRenderer,
         ILogger<EntityExtractorHandler> logger)
     {
         _openAiClient = openAiClient;
         _textChunkingService = textChunkingService;
+        _modelSelectorOptions = modelSelectorOptions.Value;
+        _promptSchemaRenderer = promptSchemaRenderer;
         _logger = logger;
     }
 
@@ -139,6 +148,20 @@ public sealed class EntityExtractorHandler : IAnalysisToolHandler
         AnalysisTool tool,
         CancellationToken cancellationToken)
     {
+        // JPS delegation: if ActionSystemPrompt is in JPS format, delegate to
+        // PromptSchemaRenderer and run through the generic AI path instead of
+        // the legacy hardcoded prompt below.
+        if (!string.IsNullOrWhiteSpace(context.ActionSystemPrompt) &&
+            context.ActionSystemPrompt.TrimStart().StartsWith('{') &&
+            context.ActionSystemPrompt.Contains("\"$schema\""))
+        {
+            _logger.LogInformation(
+                "EntityExtractorHandler delegating to PromptSchemaRenderer for JPS prompt, analysis {AnalysisId}",
+                context.AnalysisId);
+
+            return await ExecuteViaJpsAsync(context, tool, cancellationToken);
+        }
+
         var stopwatch = Stopwatch.StartNew();
         var startedAt = DateTimeOffset.UtcNow;
 
@@ -200,7 +223,7 @@ public sealed class EntityExtractorHandler : IAnalysisToolHandler
                 InputTokens = totalInputTokens,
                 OutputTokens = totalOutputTokens,
                 ModelCalls = chunks.Count,
-                ModelName = "gpt-4o-mini"
+                ModelName = _modelSelectorOptions.ToolHandlerModel
             };
 
             // Build result
@@ -247,6 +270,132 @@ public sealed class EntityExtractorHandler : IAnalysisToolHandler
         catch (Exception ex)
         {
             _logger.LogError(ex, "Entity extraction failed for analysis {AnalysisId}", context.AnalysisId);
+            return ToolResult.Error(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                $"Entity extraction failed: {ex.Message}",
+                ToolErrorCodes.InternalError,
+                new ToolExecutionMetadata
+                {
+                    StartedAt = startedAt,
+                    CompletedAt = DateTimeOffset.UtcNow
+                });
+        }
+    }
+
+    /// <summary>
+    /// Executes entity extraction using the JPS-rendered prompt via PromptSchemaRenderer.
+    /// This path is used when the ActionSystemPrompt contains JPS JSON, enabling
+    /// the same handler to work with both legacy hardcoded prompts and JPS definitions.
+    /// </summary>
+    private async Task<ToolResult> ExecuteViaJpsAsync(
+        ToolExecutionContext context,
+        AnalysisTool tool,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var startedAt = DateTimeOffset.UtcNow;
+
+        try
+        {
+            var rendered = _promptSchemaRenderer.Render(
+                context.ActionSystemPrompt,
+                context.SkillContext,
+                context.KnowledgeContext,
+                context.Document?.ExtractedText,
+                context.TemplateParameters,
+                context.DownstreamNodes,
+                context.AdditionalKnowledge,
+                context.AdditionalSkills
+            );
+
+            var prompt = rendered.PromptText;
+            var inputTokens = EstimateTokens(prompt);
+            var useStructuredOutput = rendered.JsonSchema != null;
+
+            string response;
+            if (useStructuredOutput)
+            {
+                var schemaBinaryData = BinaryData.FromString(rendered.JsonSchema!.ToJsonString());
+                var schemaName = rendered.SchemaName ?? "entity_extraction_response";
+
+                response = await _openAiClient.GetStructuredCompletionRawAsync(
+                    prompt,
+                    schemaBinaryData,
+                    schemaName,
+                    cancellationToken: cancellationToken);
+            }
+            else
+            {
+                response = await _openAiClient.GetCompletionAsync(
+                    prompt,
+                    cancellationToken: cancellationToken);
+            }
+
+            var outputTokens = EstimateTokens(response);
+            stopwatch.Stop();
+
+            // Parse response as generic JSON result
+            object resultData;
+            double confidence = 0.8;
+            try
+            {
+                var jsonNode = System.Text.Json.Nodes.JsonNode.Parse(response);
+                if (jsonNode is System.Text.Json.Nodes.JsonObject jsonObj &&
+                    jsonObj.TryGetPropertyValue("confidence", out var confNode))
+                {
+                    confidence = Math.Clamp(confNode?.GetValue<double>() ?? 0.8, 0.0, 1.0);
+                }
+                resultData = jsonNode!;
+            }
+            catch (JsonException)
+            {
+                resultData = new { rawResponse = response };
+                confidence = 0.5;
+            }
+
+            var executionMetadata = new ToolExecutionMetadata
+            {
+                StartedAt = startedAt,
+                CompletedAt = DateTimeOffset.UtcNow,
+                InputTokens = inputTokens,
+                OutputTokens = outputTokens,
+                ModelCalls = 1,
+                ModelName = "gpt-4o"
+            };
+
+            _logger.LogInformation(
+                "JPS entity extraction complete for {AnalysisId} in {Duration}ms",
+                context.AnalysisId, stopwatch.ElapsedMilliseconds);
+
+            return ToolResult.Ok(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                resultData,
+                response,
+                confidence,
+                executionMetadata);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("JPS entity extraction cancelled for analysis {AnalysisId}", context.AnalysisId);
+            return ToolResult.Error(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                "Entity extraction was cancelled.",
+                ToolErrorCodes.Cancelled,
+                new ToolExecutionMetadata
+                {
+                    StartedAt = startedAt,
+                    CompletedAt = DateTimeOffset.UtcNow
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "JPS entity extraction failed for analysis {AnalysisId}", context.AnalysisId);
             return ToolResult.Error(
                 HandlerId,
                 tool.Id,

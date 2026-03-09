@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="011" project="jps-server-rollout">
+  <metadata>
+    <title>Add GetKnowledgeByNameAsync and GetSkillByNameAsync to IScopeResolverService</title>
+    <phase>2</phase>
+    <tags>bff-api, api</tags>
+    <estimate>2h</estimate>
+    <dependencies>001</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Extend IScopeResolverService with two new methods to look up knowledge and skill records by name instead of ID. These methods will support dynamic ref resolution from JPS documents.</goal>
+    <context>
+      The JPS ref resolution workflow extracts knowledge and skill names from JPS JSON.
+      To resolve these names to actual Dataverse records, IScopeResolverService needs to support name-based lookups.
+      The existing service has methods like GetKnowledgeAsync(knowledgeId) and GetSkillAsync(skillId) for ID-based lookups.
+      The new methods GetKnowledgeByNameAsync(name) and GetSkillByNameAsync(name) will execute OData $filter queries to find records by name field.
+      This enables dynamic scope resolution without pre-registering refs in the analysis context.
+    </context>
+    <constraints>
+      - Follow ADR-010 (DI minimalism) — reuse existing dependencies
+      - Use OData $filter=sprk_name eq '{name}' queries with parameterized filters (no string concatenation)
+      - Return null if record not found (match existing GetKnowledgeAsync pattern)
+      - Use Redis caching where applicable (ADR-014)
+      - Methods should be async to avoid blocking
+      - Follow existing code style and patterns in ScopeResolverService.cs
+      - Performance: name lookups should have similar latency to ID lookups via caching
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>projects/jps-server-rollout/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read IScopeResolverService.cs to understand the interface contract and existing method signatures (GetKnowledgeAsync, GetSkillAsync)</step>
+    <step order="2">Read ScopeResolverService.cs to understand the implementation pattern for ID-based lookups and OData query construction</step>
+    <step order="3">Add method signature to IScopeResolverService:
+      - GetKnowledgeByNameAsync(string name) -> Task&lt;ResolvedKnowledgeRef?&gt;
+      - GetSkillByNameAsync(string name) -> Task&lt;ResolvedSkillRef?&gt;
+    </step>
+    <step order="4">Implement GetKnowledgeByNameAsync in ScopeResolverService:
+      - Use OData $filter=sprk_name eq '{name}' to query Dataverse
+      - Use parameterized filter (no string concatenation)
+      - Apply Redis caching with key like "scope:knowledge:name:{name}"
+      - Return first result or null if not found
+    </step>
+    <step order="5">Implement GetSkillByNameAsync in ScopeResolverService:
+      - Use OData $filter=sprk_name eq '{name}' to query Dataverse
+      - Use parameterized filter (no string concatenation)
+      - Apply Redis caching with key like "scope:skill:name:{name}"
+      - Return first result or null if not found
+    </step>
+    <step order="6">Add XML documentation comments to both methods (interface and implementation)</step>
+    <step order="7">Build the project: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+    <step order="8">Run unit tests: `dotnet test src/server/api/Sprk.Bff.Api.Tests/` to ensure no regressions</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs</output>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>GetKnowledgeByNameAsync method added to IScopeResolverService interface</criterion>
+    <criterion>GetSkillByNameAsync method added to IScopeResolverService interface</criterion>
+    <criterion>Both methods implemented in ScopeResolverService using OData $filter=sprk_name eq '{name}'</criterion>
+    <criterion>OData filters are parameterized (no string concatenation)</criterion>
+    <criterion>Methods return null when record not found</criterion>
+    <criterion>Redis caching is applied for name lookups</criterion>
+    <criterion>XML documentation is present and clear</criterion>
+    <criterion>Project builds successfully</criterion>
+    <criterion>Existing tests pass (no regressions)</criterion>
+  </acceptance-criteria>
+</task>

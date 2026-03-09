@@ -1,0 +1,65 @@
+<task id="AIRA-031" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Fix Hardcoded Model Selection in GenericAnalysisHandler</title>
+    <phase>4</phase>
+    <estimate>3h</estimate>
+    <tags>bff-api, ai</tags>
+    <dependencies>none</dependencies>
+    <parallel-group>G</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Replace hardcoded `ModelName = "gpt-4o"` in GenericAnalysisHandler with a model resolution chain: node-level override → ModelSelector routing → global default.</goal>
+    <context>
+      GenericAnalysisHandler currently ignores the ModelSelector service and context.ModelDeploymentId. The ModelSelector has operation-type routing (classification→gpt-4o-mini, reasoning→o1-mini, generation→gpt-4o) but it's only used by BuilderService. This fix wires it into playbook execution.
+    </context>
+    <constraints>
+      - Resolution chain: context.ModelDeploymentId → ModelSelector.SelectModel(operationType) → options.DefaultModel
+      - Must not break existing playbooks (if no node override and no operationType, falls through to default)
+      - Verify ModelSelector operation type routing is correct
+      - Update all tool handlers that hardcode model names (not just GenericAnalysisHandler)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      .claude/adr/ADR-013-ai-architecture.md
+      .claude/constraints/ai.md
+      docs/guides/SPAARKE-AI-ARCHITECTURE.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read `Services/Ai/Handlers/GenericAnalysisHandler.cs` — find the hardcoded ModelName assignment</step>
+    <step>Read `Services/Ai/ModelSelector.cs` — understand operation-type routing and available types</step>
+    <step>Search all tool handlers for hardcoded model names: `grep -r "ModelName = " Services/Ai/`</step>
+    <step>Implement model resolution chain in GenericAnalysisHandler:
+      ```
+      ModelName = context.ModelDeploymentId
+          ?? _modelSelector.SelectModel(context.OperationType)
+          ?? _options.DefaultModel
+      ```</step>
+    <step>Apply same pattern to any other handlers with hardcoded models</step>
+    <step>Verify ModelSelector.SelectModel returns correct models per OperationType enum</step>
+    <step>Write unit tests for the resolution chain (each level of fallback)</step>
+    <step>Test: run a classification action → should use gpt-4o-mini; run analysis → should use gpt-4o</step>
+  </steps>
+
+  <tools>Bash, Read, Write, Edit, Glob, Grep</tools>
+
+  <outputs>
+    <output>GenericAnalysisHandler using model resolution chain</output>
+    <output>All handlers updated (no more hardcoded model names)</output>
+    <output>Unit tests for model resolution</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No hardcoded model names in any handler</criterion>
+    <criterion>Model resolution chain works: node override → ModelSelector → default</criterion>
+    <criterion>Classification tasks route to gpt-4o-mini</criterion>
+    <criterion>Analysis tasks route to gpt-4o</criterion>
+    <criterion>Existing playbooks work unchanged (default fallback)</criterion>
+    <criterion>Unit tests pass</criterion>
+    <criterion>dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

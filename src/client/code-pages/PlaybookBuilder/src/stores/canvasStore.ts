@@ -38,6 +38,9 @@ const generateNodeId = (): string =>
 // Store interface
 // ---------------------------------------------------------------------------
 
+/** Snapshot of N:N scopes at load time, keyed by canvas node ID. */
+type InitialScopeMap = Map<string, { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] }>;
+
 interface CanvasState {
     // State
     nodes: PlaybookNode[];
@@ -45,6 +48,8 @@ interface CanvasState {
     selectedNodeId: string | null;
     isDirty: boolean;
     lastSavedJson: string | null;
+    /** N:N scopes as they were when the canvas loaded — used to detect external changes on save */
+    initialNodeScopes: InitialScopeMap;
 
     // Node actions
     setNodes: (nodes: PlaybookNode[]) => void;
@@ -67,6 +72,8 @@ interface CanvasState {
 
     // Persistence
     loadFromCanvasJson: (json: string) => void;
+    mergeNodeScopes: (scopeMap: InitialScopeMap) => void;
+    getInitialNodeScopes: () => InitialScopeMap;
     exportToCanvasJson: () => string;
     markSaved: () => void;
     markDirty: () => void;
@@ -88,6 +95,7 @@ const initialState = {
     selectedNodeId: null as string | null,
     isDirty: false,
     lastSavedJson: null as string | null,
+    initialNodeScopes: new Map() as InitialScopeMap,
 };
 
 // ---------------------------------------------------------------------------
@@ -246,6 +254,32 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
             console.error("[CanvasStore] Failed to parse canvas JSON:", error);
         }
     },
+
+    mergeNodeScopes: (scopeMap) => {
+        const { nodes } = get();
+        let merged = 0;
+        const updatedNodes = nodes.map((node) => {
+            const scopes = scopeMap.get(node.id);
+            if (!scopes) return node;
+            merged++;
+            return {
+                ...node,
+                data: {
+                    ...node.data,
+                    skillIds: scopes.skillIds,
+                    knowledgeIds: scopes.knowledgeIds,
+                    toolIds: scopes.toolIds,
+                },
+            };
+        });
+        // Store both the merged nodes and the initial scope snapshot.
+        // The snapshot is used at save time to distinguish "user removed a scope"
+        // from "scope was added externally after canvas loaded".
+        set({ nodes: updatedNodes, initialNodeScopes: new Map(scopeMap) });
+        console.info(`[CanvasStore] Merged N:N scopes into ${merged} nodes`);
+    },
+
+    getInitialNodeScopes: () => get().initialNodeScopes,
 
     exportToCanvasJson: (): string => {
         const { nodes, edges } = get();

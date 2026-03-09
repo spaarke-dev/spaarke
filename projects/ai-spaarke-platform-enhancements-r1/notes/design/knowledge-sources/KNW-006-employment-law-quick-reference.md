@@ -3,6 +3,8 @@
 > **External ID**: KNW-006
 > **Content Type**: Reference
 > **Tenant**: system
+> **Domain**: employment
+> **Keywords**: employment, labor law, hiring, compliance, benefits, termination
 > **Created**: 2026-02-23
 > **Task**: AIPL-032
 

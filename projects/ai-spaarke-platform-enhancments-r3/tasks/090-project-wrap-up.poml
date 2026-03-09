@@ -1,0 +1,48 @@
+<task id="AIRA-090" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <phase>wrap-up</phase>
+    <estimate>2h</estimate>
+    <tags>documentation, cleanup</tags>
+    <dependencies>050</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Close the R3 project cleanly: update status, document lessons learned, archive ephemeral files, run repo-cleanup.</goal>
+    <context>
+      All implementation phases complete and deployed. This task closes the project and prepares handoff to post-deployment-work.md Phase 5 evaluation.
+    </context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      .claude/constraints/api.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Update README.md status to "Complete"</step>
+    <step>Create notes/lessons-learned.md with key insights</step>
+    <step>Archive ephemeral project files (notes/debug, notes/spikes)</step>
+    <step>Update TASK-INDEX.md with all tasks marked complete</step>
+    <step>Run /repo-cleanup for repository hygiene</step>
+    <step>Update post-deployment-work.md to note that R3 is complete and Phase 5 evaluation can now measure knowledge-augmented quality</step>
+    <step>Final commit with all wrap-up changes</step>
+  </steps>
+
+  <tools>Bash, Read, Write, Edit</tools>
+
+  <outputs>
+    <output>README.md updated to Complete</output>
+    <output>Lessons learned documented</output>
+    <output>Repository cleaned</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README.md shows status: Complete</criterion>
+    <criterion>All tasks in TASK-INDEX.md marked complete</criterion>
+    <criterion>Lessons learned documented</criterion>
+    <criterion>Repository hygiene passed</criterion>
+  </acceptance-criteria>
+</task>

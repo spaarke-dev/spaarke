@@ -3,6 +3,8 @@
 > **External ID**: KNW-001
 > **Content Type**: Reference
 > **Tenant**: system
+> **Domain**: legal
+> **Keywords**: contract, terminology, glossary, definitions, agreement, commercial
 > **Created**: 2026-02-23
 > **Task**: AIPL-032
 

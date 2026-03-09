@@ -19,7 +19,7 @@ Tokens use the format `#{TOKEN_NAME}#` which is compatible with Azure DevOps and
 | `#{SERVICE_BUS_QUEUE_NAME}#` | Service Bus queue name | `sdap-jobs` |
 | `#{AI_SUMMARIZE_MODEL}#` | OpenAI model for summarization | `gpt-4o-mini` |
 | `#{AI_SEARCH_INDEX_NAME}#` | AI Search index for records | `spaarke-records-index` |
-| `#{SHARED_KNOWLEDGE_INDEX_NAME}#` | AI Search index for RAG knowledge | `spaarke-knowledge-shared` |
+| `#{SHARED_KNOWLEDGE_INDEX_NAME}#` | AI Search index for RAG knowledge | `spaarke-knowledge-index-v2` |
 | `#{DEPLOYMENT_ENVIRONMENT}#` | Environment name | `Development`, `Test`, `Production` |
 | `#{CUSTOMER_TENANT_ID}#` | Customer tenant for cross-tenant (or null) | `null` or GUID |
 | `#{RECORD_MATCHING_ENABLED}#` | Enable record matching (boolean) | `true` or `false` |
@@ -93,7 +93,7 @@ REDIS_INSTANCE_NAME=sdap-dev:
 SERVICE_BUS_QUEUE_NAME=sdap-jobs
 AI_SUMMARIZE_MODEL=gpt-4o-mini
 AI_SEARCH_INDEX_NAME=spaarke-records-index
-SHARED_KNOWLEDGE_INDEX_NAME=spaarke-knowledge-shared
+SHARED_KNOWLEDGE_INDEX_NAME=spaarke-knowledge-index-v2
 DEPLOYMENT_ENVIRONMENT=Development
 CUSTOMER_TENANT_ID=null
 RECORD_MATCHING_ENABLED=false

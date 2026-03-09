@@ -66,7 +66,7 @@ public class AnalysisOptions
     /// Index name for shared RAG deployment (Model 1).
     /// All customers share this index with tenant filtering.
     /// </summary>
-    public string SharedIndexName { get; set; } = "spaarke-knowledge-shared";
+    public string SharedIndexName { get; set; } = "spaarke-knowledge-index-v2";
 
     /// <summary>
     /// Tenant filter field in shared index.

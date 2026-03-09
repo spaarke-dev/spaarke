@@ -27,7 +27,7 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///  12. AddScoped&lt;ChatHistoryManager&gt;                    — ADR-010 (AIPL-052) — Scoped: message history + summarisation
 /// Plus 1 framework registration: AddHttpClient&lt;LlamaParseClient&gt; (not counted per ADR-010)
 ///
-/// DI count after: 99 (2 new scoped services added in AIPL-052; see ADR-010 and NFR-10).
+/// DI count after: 100 (ReferenceRetrievalService added in AIRA-013; see ADR-010 and NFR-10).
 ///
 /// Prerequisites (must already be registered before calling AddAiModule):
 /// - <c>ITextExtractor</c> — registered in Program.cs when <c>DocumentIntelligence:Enabled = true</c>
@@ -128,6 +128,21 @@ public static class AiModule
         // Requires: ITextChunkingService, IRagService, SearchIndexClient,
         //           IOpenAiClient, IOptions<AiSearchOptions>.
         services.AddSingleton<RagIndexingPipeline>();
+
+        // ReferenceIndexingService — concrete singleton per ADR-010 (AIRA-011).
+        // Indexes golden reference knowledge sources into spaarke-rag-references index.
+        // 512-token chunks, 100-token overlap, 3072-dim embeddings.
+        // Called by AdminKnowledgeEndpoints (admin-only, not Service Bus).
+        // Requires: ITextChunkingService, SearchIndexClient, IOpenAiClient,
+        //           IScopeResolverService, IOptions<AiSearchOptions>.
+        services.AddSingleton<ReferenceIndexingService>();
+
+        // ReferenceRetrievalService — concrete singleton per ADR-010 (AIRA-013).
+        // Queries spaarke-rag-references index for golden reference knowledge using
+        // hybrid search (keyword + vector + semantic reranking).
+        // Parallel retrieval path to RagService (which queries customer documents).
+        // Requires: SearchIndexClient, IOpenAiClient, IEmbeddingCache, IOptions<AiSearchOptions>.
+        services.AddSingleton<ReferenceRetrievalService>();
 
         // SprkChatAgentFactory — singleton per ADR-010 (AIPL-051).
         // Creates SprkChatAgent instances per session.  Singleton is safe because

@@ -1,0 +1,89 @@
+{
+  "taxonomy": "Due Diligence Checklist",
+  "version": "1.0",
+  "workstreams": [
+    {
+      "id": "DD-WS-01",
+      "name": "Corporate Governance",
+      "items": [
+        { "id": "DD-01-01", "check": "Certificate of incorporation and amendments", "priority": "critical" },
+        { "id": "DD-01-02", "check": "Bylaws and operating agreements", "priority": "critical" },
+        { "id": "DD-01-03", "check": "Board and committee minutes - 3 years", "priority": "high" },
+        { "id": "DD-01-04", "check": "Shareholder agreements and voting trusts", "priority": "high" },
+        { "id": "DD-01-05", "check": "Stock option plans and grants", "priority": "medium" },
+        { "id": "DD-01-06", "check": "Capitalization table and share classes", "priority": "critical" },
+        { "id": "DD-01-07", "check": "Subsidiaries and organizational chart", "priority": "high" }
+      ]
+    },
+    {
+      "id": "DD-WS-02",
+      "name": "Financial",
+      "items": [
+        { "id": "DD-02-01", "check": "Audited financial statements - 3 years", "priority": "critical" },
+        { "id": "DD-02-02", "check": "Interim financial statements", "priority": "high" },
+        { "id": "DD-02-03", "check": "Revenue recognition policies", "priority": "high" },
+        { "id": "DD-02-04", "check": "Accounts receivable aging", "priority": "medium" },
+        { "id": "DD-02-05", "check": "Debt schedules and loan agreements", "priority": "critical" },
+        { "id": "DD-02-06", "check": "Tax returns and assessments - 3 years", "priority": "high" },
+        { "id": "DD-02-07", "check": "Contingent liabilities and guarantees", "priority": "critical" }
+      ]
+    },
+    {
+      "id": "DD-WS-03",
+      "name": "Employment",
+      "items": [
+        { "id": "DD-03-01", "check": "Executive employment agreements", "priority": "critical" },
+        { "id": "DD-03-02", "check": "Employee benefit plans", "priority": "high" },
+        { "id": "DD-03-03", "check": "Non-compete and non-solicitation agreements", "priority": "high" },
+        { "id": "DD-03-04", "check": "Pending or threatened employment litigation", "priority": "critical" },
+        { "id": "DD-03-05", "check": "Employee handbook and policies", "priority": "medium" },
+        { "id": "DD-03-06", "check": "WARN Act compliance history", "priority": "medium" }
+      ]
+    },
+    {
+      "id": "DD-WS-04",
+      "name": "Intellectual Property",
+      "items": [
+        { "id": "DD-04-01", "check": "Patent portfolio and applications", "priority": "critical" },
+        { "id": "DD-04-02", "check": "Trademark registrations", "priority": "high" },
+        { "id": "DD-04-03", "check": "Copyright registrations", "priority": "medium" },
+        { "id": "DD-04-04", "check": "License agreements - inbound and outbound", "priority": "critical" },
+        { "id": "DD-04-05", "check": "Trade secret protection measures", "priority": "high" },
+        { "id": "DD-04-06", "check": "IP assignment agreements from employees and contractors", "priority": "critical" },
+        { "id": "DD-04-07", "check": "Open source software usage and compliance", "priority": "high" }
+      ]
+    },
+    {
+      "id": "DD-WS-05",
+      "name": "Real Estate",
+      "items": [
+        { "id": "DD-05-01", "check": "Lease agreements and amendments", "priority": "high" },
+        { "id": "DD-05-02", "check": "Property ownership documents", "priority": "critical" },
+        { "id": "DD-05-03", "check": "Environmental assessments - Phase I and II", "priority": "high" },
+        { "id": "DD-05-04", "check": "Zoning compliance", "priority": "medium" }
+      ]
+    },
+    {
+      "id": "DD-WS-06",
+      "name": "Litigation and Regulatory",
+      "items": [
+        { "id": "DD-06-01", "check": "Pending and threatened litigation", "priority": "critical" },
+        { "id": "DD-06-02", "check": "Regulatory investigations or inquiries", "priority": "critical" },
+        { "id": "DD-06-03", "check": "Consent decrees and settlement agreements", "priority": "high" },
+        { "id": "DD-06-04", "check": "Insurance coverage and claims history", "priority": "high" },
+        { "id": "DD-06-05", "check": "Compliance program documentation", "priority": "medium" }
+      ]
+    },
+    {
+      "id": "DD-WS-07",
+      "name": "Commercial Contracts",
+      "items": [
+        { "id": "DD-07-01", "check": "Material customer contracts", "priority": "critical" },
+        { "id": "DD-07-02", "check": "Material vendor and supplier contracts", "priority": "high" },
+        { "id": "DD-07-03", "check": "Change of control provisions", "priority": "critical" },
+        { "id": "DD-07-04", "check": "Most favored nation clauses", "priority": "high" },
+        { "id": "DD-07-05", "check": "Exclusivity and non-compete arrangements", "priority": "high" }
+      ]
+    }
+  ]
+}

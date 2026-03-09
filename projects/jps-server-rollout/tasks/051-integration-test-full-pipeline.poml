@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="051" project="jps-server-rollout">
+  <metadata>
+    <title>Integration test for full JPS pipeline: JPS → resolve → render → OpenAI mock → structured output</title>
+    <phase>5</phase>
+    <tags>testing</tags>
+    <estimate>4h</estimate>
+    <dependencies>038</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Write comprehensive integration tests for the complete JPS pipeline from JSON input through resolution, rendering, mock OpenAI call, and structured output parsing. Validate end-to-end behavior with realistic test cases.</goal>
+    <context>
+      The full JPS pipeline consists of:
+      1. JPS JSON input (loaded from Dataverse Action)
+      2. ScopeResolverService resolves $ref to actual scope objects
+      3. PromptSchemaRenderer renders JPS to PromptSchema format
+      4. GenericAnalysisHandler calls OpenAI with rendered prompt
+      5. Response is parsed to structured output (JSON/XML)
+
+      Integration tests should mock OpenAI, verify each step's output, and validate end-to-end correctness.
+      Test cases should cover:
+      - Simple single-step analysis (no nested nodes, no choices)
+      - Multi-step workflow with $ref resolution
+      - Choice resolution with context-dependent branches
+      - Template parameter substitution
+      - Error cases (missing refs, malformed JPS)
+    </context>
+    <constraints>
+      - Use xUnit and Moq for test framework and mocking
+      - Mock OpenAI responses (don't call real API)
+      - Use realistic JPS examples from projects/ai-json-prompt-schema-system/notes/jps-conversions/
+      - Follow .claude/constraints/testing.md for test structure
+      - Follow .claude/patterns/testing/integration-tests.md for patterns
+      - Each test should verify specific pipeline stages
+      - Use snapshots for expected output validation (optional but recommended)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>projects/jps-server-rollout/CLAUDE.md</file>
+      <file>projects/ai-json-prompt-schema-system/notes/jps-conversions/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing Sprk.Bff.Api.Tests project structure and test patterns</step>
+    <step order="2">Create new test class PromptSchemaIntegrationTests.cs in tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</step>
+    <step order="3">Set up test fixtures:
+      - Create mock Dataverse queries for scopes (skills, knowledge, tools)
+      - Create mock OpenAI responses for various action types
+      - Load sample JPS JSON from projects/ai-json-prompt-schema-system/notes/jps-conversions/
+    </step>
+    <step order="4">Write integration tests covering:
+      - Test 1: Simple action (clause-analyzer) → resolve → render → OpenAI call → verify prompt format
+      - Test 2: Action with choice resolution → verify correct branch selected
+      - Test 3: Action with template parameters → verify substitution in rendered prompt
+      - Test 4: Action with scope references → verify scopes resolved from Dataverse
+      - Test 5: Action with nested nodes → verify multi-step orchestration
+      - Test 6: Error case: missing scope → verify graceful fallback
+      - Test 7: Error case: invalid JPS format → verify error handling
+    </step>
+    <step order="5">For each test, verify pipeline stages:
+      - Scope resolution output (resolved scopes have expected content)
+      - Prompt rendering output (JPS → PromptSchema conversion)
+      - Rendered prompt contains expected substitutions and scope data
+      - OpenAI call parameters match rendered prompt
+      - Response parsing produces expected structured output
+    </step>
+    <step order="6">Add snapshot tests or assertion helpers for complex output validation</step>
+    <step order="7">Run tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "*Integration*"`</step>
+    <step order="8">Build project and verify no regressions: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet test)</tool>
+    <tool>Bash(dotnet build)</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PromptSchemaIntegrationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Integration test class created with comprehensive test cases</criterion>
+    <criterion>Tests cover simple action, choice resolution, template params, scope refs</criterion>
+    <criterion>Tests cover nested nodes and error cases</criterion>
+    <criterion>Mock OpenAI responses realistic and configurable</criterion>
+    <criterion>Each test verifies multiple pipeline stages</criterion>
+    <criterion>Sample JPS data from projects/ai-json-prompt-schema-system/ used</criterion>
+    <criterion>Tests use xUnit and Moq frameworks</criterion>
+    <criterion>Tests follow .claude/constraints/testing.md patterns</criterion>
+    <criterion>All integration tests pass</criterion>
+    <criterion>No regressions in existing tests</criterion>
+  </acceptance-criteria>
+</task>

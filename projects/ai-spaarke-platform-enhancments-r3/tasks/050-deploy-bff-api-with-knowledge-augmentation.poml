@@ -1,0 +1,53 @@
+<task id="AIRA-050" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Deploy BFF API with Knowledge Augmentation</title>
+    <phase>deploy</phase>
+    <estimate>2h</estimate>
+    <tags>deployment, bff-api, azure</tags>
+    <dependencies>020, 021, 022, 023, 024, 031</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Deploy the updated BFF API to Azure App Service with all knowledge-augmented execution changes, model selection fix, and new admin endpoints.</goal>
+    <context>
+      This deployment includes: ReferenceIndexingService, admin knowledge endpoints, knowledge-augmented AiAnalysisNodeExecutor, model resolution chain, and knowledge retrieval caching. Use the bff-deploy skill.
+    </context>
+    <constraints>
+      - Use scripts/Deploy-BffApi.ps1
+      - Verify dotnet build + dotnet test pass before deploying
+      - Update App Service configuration with new index name if needed
+      - Smoke test after deployment
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      .claude/constraints/azure-deployment.md
+      docs/guides/AI-DEPLOYMENT-GUIDE.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Run `dotnet build` and `dotnet test` — ensure 0 errors</step>
+    <step>Use bff-deploy skill to deploy to Azure App Service</step>
+    <step>Update App Service config if any new settings needed (reference index name, etc.)</step>
+    <step>Smoke test: hit /healthz endpoint</step>
+    <step>Smoke test: call POST /api/admin/knowledge/index-references to verify new endpoint works</step>
+    <step>Smoke test: trigger a playbook execution and verify knowledge retrieval occurs</step>
+  </steps>
+
+  <tools>Bash, Read</tools>
+
+  <outputs>
+    <output>BFF API deployed with all R3 changes</output>
+    <output>Smoke test results documented</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>API deployed and healthy (/healthz returns 200)</criterion>
+    <criterion>Admin knowledge endpoints accessible</criterion>
+    <criterion>Playbook execution uses knowledge retrieval</criterion>
+    <criterion>Model selection uses resolution chain (not hardcoded)</criterion>
+  </acceptance-criteria>
+</task>

@@ -48,7 +48,7 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
 
     private const string TestTenantId = "kb-test-tenant-abc";
     private const string TestDocumentId = "doc-00000000-0000-0001";
-    private const string KnowledgeIndexName = "knowledge-index";
+    private const string KnowledgeIndexName = "spaarke-knowledge-index-v2";
     private const string DiscoveryIndexName = "discovery-index";
 
     public KnowledgeBaseEndpointsTests(KnowledgeBaseTestFixture fixture)
@@ -349,7 +349,7 @@ public class KnowledgeBaseTestFixture : WebApplicationFactory<Program>
         builder.UseSetting("Cors:AllowedOrigins", "https://localhost:3000");
         builder.UseSetting("AzureAiSearch:Endpoint", "https://test-search.search.windows.net");
         builder.UseSetting("AzureAiSearch:ApiKey", "test-api-key");
-        builder.UseSetting("AzureAiSearch:KnowledgeIndexName", "knowledge-index");
+        builder.UseSetting("AzureAiSearch:KnowledgeIndexName", "spaarke-knowledge-index-v2");
         builder.UseSetting("AzureAiSearch:DiscoveryIndexName", "discovery-index");
         builder.UseSetting("AzureOpenAI:Endpoint", "https://test.openai.azure.com/");
         builder.UseSetting("AzureOpenAI:ApiKey", "test-api-key");

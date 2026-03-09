@@ -1,5 +1,8 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
+using System.Text.Json.Nodes;
+using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai.Tools;
 
@@ -20,6 +23,7 @@ namespace Sprk.Bff.Api.Services.Ai.Tools;
 /// - maxItems: Maximum financial items to return (default: 100)
 /// </para>
 /// </remarks>
+[Obsolete("Use GenericAnalysisHandler with JPS configuration. See jps-server-rollout project.")]
 public sealed class FinancialCalculatorHandler : IAnalysisToolHandler
 {
     private const string HandlerIdValue = "FinancialCalculatorHandler";
@@ -29,6 +33,8 @@ public sealed class FinancialCalculatorHandler : IAnalysisToolHandler
 
     private readonly IOpenAiClient _openAiClient;
     private readonly ITextChunkingService _textChunkingService;
+    private readonly ModelSelectorOptions _modelSelectorOptions;
+    private readonly PromptSchemaRenderer _promptSchemaRenderer;
     private readonly ILogger<FinancialCalculatorHandler> _logger;
 
     /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
@@ -72,10 +78,14 @@ public sealed class FinancialCalculatorHandler : IAnalysisToolHandler
     public FinancialCalculatorHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
+        IOptions<ModelSelectorOptions> modelSelectorOptions,
+        PromptSchemaRenderer promptSchemaRenderer,
         ILogger<FinancialCalculatorHandler> logger)
     {
         _openAiClient = openAiClient;
         _textChunkingService = textChunkingService;
+        _modelSelectorOptions = modelSelectorOptions.Value;
+        _promptSchemaRenderer = promptSchemaRenderer;
         _logger = logger;
     }
 
@@ -142,6 +152,13 @@ public sealed class FinancialCalculatorHandler : IAnalysisToolHandler
         AnalysisTool tool,
         CancellationToken cancellationToken)
     {
+        // JPS format detection: if ActionSystemPrompt is JPS, delegate to PromptSchemaRenderer
+        // and bypass legacy chunking logic entirely.
+        if (IsJpsFormat(context.ActionSystemPrompt))
+        {
+            return await ExecuteViaJpsAsync(context, tool, cancellationToken);
+        }
+
         var stopwatch = Stopwatch.StartNew();
         var startedAt = DateTimeOffset.UtcNow;
 
@@ -204,7 +221,7 @@ public sealed class FinancialCalculatorHandler : IAnalysisToolHandler
                 InputTokens = totalInputTokens,
                 OutputTokens = totalOutputTokens,
                 ModelCalls = chunks.Count,
-                ModelName = "gpt-4o-mini"
+                ModelName = _modelSelectorOptions.ToolHandlerModel
             };
 
             var resultData = new FinancialAnalysisResult
@@ -255,6 +272,156 @@ public sealed class FinancialCalculatorHandler : IAnalysisToolHandler
         catch (Exception ex)
         {
             _logger.LogError(ex, "Financial analysis failed for analysis {AnalysisId}", context.AnalysisId);
+            return ToolResult.Error(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                $"Financial analysis failed: {ex.Message}",
+                ToolErrorCodes.InternalError,
+                new ToolExecutionMetadata
+                {
+                    StartedAt = startedAt,
+                    CompletedAt = DateTimeOffset.UtcNow
+                });
+        }
+    }
+
+    /// <summary>
+    /// Detects whether a raw prompt string is JPS format.
+    /// </summary>
+    private static bool IsJpsFormat(string? rawPrompt)
+    {
+        return !string.IsNullOrWhiteSpace(rawPrompt)
+            && rawPrompt.TrimStart().StartsWith("{")
+            && rawPrompt.Contains("\"$schema\"");
+    }
+
+    /// <summary>
+    /// Executes financial analysis using the JPS-rendered prompt via PromptSchemaRenderer,
+    /// following the same pattern as GenericAnalysisHandler.
+    /// </summary>
+    private async Task<ToolResult> ExecuteViaJpsAsync(
+        ToolExecutionContext context,
+        AnalysisTool tool,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var startedAt = DateTimeOffset.UtcNow;
+
+        try
+        {
+            _logger.LogInformation(
+                "Starting JPS-based financial analysis for analysis {AnalysisId}, document {DocumentId}",
+                context.AnalysisId, context.Document.DocumentId);
+
+            var rendered = _promptSchemaRenderer.Render(
+                context.ActionSystemPrompt,
+                context.SkillContext,
+                context.KnowledgeContext,
+                context.Document?.ExtractedText,
+                context.TemplateParameters,
+                context.DownstreamNodes,
+                context.AdditionalKnowledge,
+                context.AdditionalSkills
+            );
+
+            var prompt = rendered.PromptText;
+            var inputTokens = EstimateTokens(prompt);
+            var useStructuredOutput = rendered.JsonSchema != null;
+
+            _logger.LogDebug(
+                "Executing JPS financial analysis, format: {Format}, structuredOutput: {StructuredOutput}, estimated tokens: {Tokens}",
+                rendered.Format, useStructuredOutput, inputTokens);
+
+            string response;
+            if (useStructuredOutput)
+            {
+                var schemaBinaryData = BinaryData.FromString(rendered.JsonSchema!.ToJsonString());
+                var schemaName = rendered.SchemaName ?? "financial_analysis";
+
+                response = await _openAiClient.GetStructuredCompletionRawAsync(
+                    prompt,
+                    schemaBinaryData,
+                    schemaName,
+                    cancellationToken: cancellationToken);
+            }
+            else
+            {
+                response = await _openAiClient.GetCompletionAsync(
+                    prompt,
+                    cancellationToken: cancellationToken);
+            }
+
+            var outputTokens = EstimateTokens(response);
+            stopwatch.Stop();
+
+            // Parse response as generic JSON (same approach as GenericAnalysisHandler)
+            object resultData;
+            double confidence = 0.8;
+
+            try
+            {
+                var jsonResult = JsonSerializer.Deserialize<JsonNode>(response.Trim());
+                if (jsonResult is JsonObject resultObj)
+                {
+                    if (resultObj.TryGetPropertyValue("confidence", out var confNode))
+                    {
+                        confidence = Math.Clamp(confNode?.GetValue<double>() ?? 0.8, 0.0, 1.0);
+                    }
+                    resultData = jsonResult;
+                }
+                else
+                {
+                    resultData = new { rawResponse = response };
+                }
+            }
+            catch (JsonException)
+            {
+                resultData = new { rawResponse = response, parseError = true };
+                confidence = 0.5;
+            }
+
+            var executionMetadata = new ToolExecutionMetadata
+            {
+                StartedAt = startedAt,
+                CompletedAt = DateTimeOffset.UtcNow,
+                InputTokens = inputTokens,
+                OutputTokens = outputTokens,
+                ModelCalls = 1,
+                ModelName = "gpt-4o"
+            };
+
+            _logger.LogInformation(
+                "JPS financial analysis complete for {AnalysisId} in {Duration}ms",
+                context.AnalysisId, stopwatch.ElapsedMilliseconds);
+
+            return ToolResult.Ok(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                resultData,
+                response,
+                confidence,
+                executionMetadata);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("JPS financial analysis cancelled for analysis {AnalysisId}", context.AnalysisId);
+            return ToolResult.Error(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                "Financial analysis was cancelled.",
+                ToolErrorCodes.Cancelled,
+                new ToolExecutionMetadata
+                {
+                    StartedAt = startedAt,
+                    CompletedAt = DateTimeOffset.UtcNow
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "JPS financial analysis failed for analysis {AnalysisId}", context.AnalysisId);
             return ToolResult.Error(
                 HandlerId,
                 tool.Id,

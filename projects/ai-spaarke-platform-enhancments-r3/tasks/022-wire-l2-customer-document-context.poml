@@ -1,0 +1,57 @@
+<task id="AIRA-022" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Wire Optional L2 Customer Document Context</title>
+    <phase>3</phase>
+    <estimate>3h</estimate>
+    <tags>bff-api, ai-search</tags>
+    <dependencies>020</dependencies>
+    <parallel-group>F</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>When `includeDocumentContext = true` on an action node, also query `spaarke-knowledge-index-v2` for similar customer document chunks and inject them as supplementary context.</goal>
+    <context>
+      L2 provides context from similar documents the system has analyzed before. This uses the existing RagService against the main customer document index. It's optional per action because not all analyses benefit.
+    </context>
+    <constraints>
+      - Query spaarke-knowledge-index-v2 (existing RagService methods)
+      - Filter by tenantId + optionally parentEntityId (same matter/project)
+      - Inject as "Similar documents previously analyzed" section in prompt
+      - Must not return the document being analyzed (exclude current documentId)
+      - Off by default (includeDocumentContext = false)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      .claude/adr/ADR-013-ai-architecture.md
+      .claude/adr/ADR-009-redis-caching.md
+      .claude/constraints/ai.md
+      docs/guides/RAG-ARCHITECTURE.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read existing RagService to identify the right query method for customer document search</step>
+    <step>Add L2 retrieval path in AiAnalysisNodeExecutor — only when includeDocumentContext=true</step>
+    <step>Build semantic query from document content, filter by tenantId and parentEntityId</step>
+    <step>Exclude current document's chunks from results</step>
+    <step>Inject results as "Previously Analyzed Documents" section in prompt</step>
+    <step>Write unit tests for L2 retrieval (enabled and disabled)</step>
+  </steps>
+
+  <tools>Bash, Read, Write, Edit, Grep</tools>
+
+  <outputs>
+    <output>L2 customer document context retrieval in execution pipeline</output>
+    <output>Unit tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>When includeDocumentContext=true, similar document chunks from knowledge-v2 appear in prompt</criterion>
+    <criterion>Current document excluded from results</criterion>
+    <criterion>When disabled (default), no L2 retrieval occurs</criterion>
+    <criterion>Unit tests pass</criterion>
+    <criterion>dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

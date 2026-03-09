@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="014" project="jps-server-rollout">
+  <metadata>
+    <title>Wire GenericAnalysisHandler to pass resolved refs to PromptSchemaRenderer</title>
+    <phase>2</phase>
+    <tags>bff-api</tags>
+    <estimate>1h</estimate>
+    <dependencies>012, 013</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Update GenericAnalysisHandler to pass context.AdditionalKnowledge and context.AdditionalSkills to PromptSchemaRenderer.Render() in both the standard and streaming execution paths.</goal>
+    <context>
+      GenericAnalysisHandler is responsible for orchestrating the rendering of the system prompt using PromptSchemaRenderer.Render().
+      Currently, it passes null for the additionalKnowledge and additionalSkills parameters.
+      With the new JPS ref resolution workflow, these parameters should be populated with the resolved refs from context.AdditionalKnowledge and context.AdditionalSkills.
+      This is a simple parameter plumbing task that connects the resolved refs to the renderer.
+      The change occurs in two places: the standard execution path and the streaming execution path within GenericAnalysisHandler.
+    </context>
+    <constraints>
+      - Replace null with context.AdditionalKnowledge in the PromptSchemaRenderer.Render() call (standard path)
+      - Replace null with context.AdditionalSkills in the PromptSchemaRenderer.Render() call (standard path)
+      - Make the same changes in the streaming execution path
+      - No logic changes, purely parameter passing
+      - Follow existing code style and patterns
+      - No new dependencies or DI registrations
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/tool-execution-context.md</file>
+      <file>projects/jps-server-rollout/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read GenericAnalysisHandler.cs to understand the current structure and PromptSchemaRenderer.Render() calls</step>
+    <step order="2">Locate the PromptSchemaRenderer.Render() call in the standard execution path (around line 249-250 based on task description)</step>
+    <step order="3">Replace the null parameter for additionalKnowledge with context.AdditionalKnowledge</step>
+    <step order="4">Replace the null parameter for additionalSkills with context.AdditionalSkills</step>
+    <step order="5">Locate the PromptSchemaRenderer.Render() call in the streaming execution path</step>
+    <step order="6">Make the same parameter replacements in the streaming path</step>
+    <step order="7">Build the project: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+    <step order="8">Run unit tests: `dotnet test src/server/api/Sprk.Bff.Api.Tests/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PromptSchemaRenderer.Render() in standard path receives context.AdditionalKnowledge instead of null</criterion>
+    <criterion>PromptSchemaRenderer.Render() in standard path receives context.AdditionalSkills instead of null</criterion>
+    <criterion>PromptSchemaRenderer.Render() in streaming path receives context.AdditionalKnowledge instead of null</criterion>
+    <criterion>PromptSchemaRenderer.Render() in streaming path receives context.AdditionalSkills instead of null</criterion>
+    <criterion>No other logic changes in GenericAnalysisHandler</criterion>
+    <criterion>Project builds successfully</criterion>
+    <criterion>Existing tests pass (no regressions)</criterion>
+  </acceptance-criteria>
+</task>

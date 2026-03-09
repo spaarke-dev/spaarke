@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Models.Ai.SemanticSearch;
+using Sprk.Bff.Api.Services.Ai.Schemas;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 
 namespace Sprk.Bff.Api.Services.Ai.Tools;
@@ -34,13 +36,19 @@ public sealed class SemanticSearchToolHandler : IAnalysisToolHandler
     private const int MaxLimit = 50;
 
     private readonly ISemanticSearchService _searchService;
+    private readonly IOpenAiClient _openAiClient;
+    private readonly PromptSchemaRenderer _promptSchemaRenderer;
     private readonly ILogger<SemanticSearchToolHandler> _logger;
 
     public SemanticSearchToolHandler(
         ISemanticSearchService searchService,
+        IOpenAiClient openAiClient,
+        PromptSchemaRenderer promptSchemaRenderer,
         ILogger<SemanticSearchToolHandler> logger)
     {
         _searchService = searchService;
+        _openAiClient = openAiClient;
+        _promptSchemaRenderer = promptSchemaRenderer;
         _logger = logger;
     }
 
@@ -128,6 +136,13 @@ public sealed class SemanticSearchToolHandler : IAnalysisToolHandler
         AnalysisTool tool,
         CancellationToken cancellationToken)
     {
+        // JPS format detection: if ActionSystemPrompt is JPS, execute search then
+        // delegate prompt rendering to PromptSchemaRenderer with search results as template parameters.
+        if (IsJpsFormat(context.ActionSystemPrompt))
+        {
+            return await ExecuteViaJpsAsync(context, tool, cancellationToken);
+        }
+
         var stopwatch = Stopwatch.StartNew();
         var startedAt = DateTimeOffset.UtcNow;
 
@@ -236,6 +251,241 @@ public sealed class SemanticSearchToolHandler : IAnalysisToolHandler
                     CompletedAt = DateTimeOffset.UtcNow
                 });
         }
+    }
+
+    /// <summary>
+    /// Detects whether a raw prompt string is JPS format.
+    /// </summary>
+    private static bool IsJpsFormat(string? rawPrompt)
+    {
+        return !string.IsNullOrWhiteSpace(rawPrompt)
+            && rawPrompt.TrimStart().StartsWith("{")
+            && rawPrompt.Contains("\"$schema\"");
+    }
+
+    /// <summary>
+    /// Executes semantic search using custom Azure AI Search integration, then delegates
+    /// prompt rendering to PromptSchemaRenderer with search results injected as template parameters.
+    /// </summary>
+    private async Task<ToolResult> ExecuteViaJpsAsync(
+        ToolExecutionContext context,
+        AnalysisTool tool,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var startedAt = DateTimeOffset.UtcNow;
+
+        try
+        {
+            _logger.LogInformation(
+                "Starting JPS-based semantic search for analysis {AnalysisId}, tenant {TenantId}",
+                context.AnalysisId, context.TenantId);
+
+            // Step 1: Execute Azure AI Search (preserve existing custom logic)
+            var config = ParseConfiguration(tool.Configuration!);
+            var limit = Math.Clamp(config.Limit ?? DefaultLimit, 1, MaxLimit);
+            var searchRequest = BuildSearchRequest(config, limit);
+
+            SemanticSearchResponse response;
+            try
+            {
+                response = await _searchService.SearchAsync(
+                    searchRequest,
+                    context.TenantId,
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Graceful fallback: empty results on search error
+                _logger.LogWarning(ex,
+                    "Search failed for JPS analysis {AnalysisId}, proceeding with empty results",
+                    context.AnalysisId);
+                response = new SemanticSearchResponse
+                {
+                    Results = Array.Empty<SearchResult>(),
+                    Metadata = new SearchMetadata()
+                };
+            }
+
+            // Step 2: Format search results for template injection
+            var searchResultsJson = FormatSearchResultsForTemplate(response);
+
+            // Step 3: Build template parameters with search results
+            var templateParameters = context.TemplateParameters != null
+                ? new Dictionary<string, object?>(context.TemplateParameters)
+                : new Dictionary<string, object?>();
+
+            templateParameters["searchResults"] = searchResultsJson;
+            templateParameters["searchQuery"] = config.Query ?? string.Empty;
+            templateParameters["totalResults"] = response.Metadata.TotalResults;
+            templateParameters["searchDurationMs"] = response.Metadata.SearchDurationMs;
+
+            // Step 4: Render prompt via PromptSchemaRenderer
+            var rendered = _promptSchemaRenderer.Render(
+                context.ActionSystemPrompt,
+                context.SkillContext,
+                context.KnowledgeContext,
+                context.Document?.ExtractedText,
+                templateParameters,
+                context.DownstreamNodes,
+                context.AdditionalKnowledge,
+                context.AdditionalSkills
+            );
+
+            var prompt = rendered.PromptText;
+            var inputTokens = EstimateTokens(prompt);
+            var useStructuredOutput = rendered.JsonSchema != null;
+
+            _logger.LogDebug(
+                "Executing JPS semantic search, format: {Format}, structuredOutput: {StructuredOutput}, searchResults: {ResultCount}, estimated tokens: {Tokens}",
+                rendered.Format, useStructuredOutput, response.Metadata.ReturnedResults, inputTokens);
+
+            // Step 5: Call AI model with rendered prompt
+            string aiResponse;
+            if (useStructuredOutput)
+            {
+                var schemaBinaryData = BinaryData.FromString(rendered.JsonSchema!.ToJsonString());
+                var schemaName = rendered.SchemaName ?? "semantic_search_analysis";
+
+                aiResponse = await _openAiClient.GetStructuredCompletionRawAsync(
+                    prompt,
+                    schemaBinaryData,
+                    schemaName,
+                    cancellationToken: cancellationToken);
+            }
+            else
+            {
+                aiResponse = await _openAiClient.GetCompletionAsync(
+                    prompt,
+                    cancellationToken: cancellationToken);
+            }
+
+            var outputTokens = EstimateTokens(aiResponse);
+            stopwatch.Stop();
+
+            // Step 6: Parse AI response
+            object resultData;
+            double confidence = 0.8;
+
+            try
+            {
+                var jsonResult = JsonSerializer.Deserialize<JsonNode>(aiResponse.Trim());
+                if (jsonResult is JsonObject resultObj)
+                {
+                    if (resultObj.TryGetPropertyValue("confidence", out var confNode))
+                    {
+                        confidence = Math.Clamp(confNode?.GetValue<double>() ?? 0.8, 0.0, 1.0);
+                    }
+                    resultData = jsonResult;
+                }
+                else
+                {
+                    resultData = new { rawResponse = aiResponse };
+                }
+            }
+            catch (JsonException)
+            {
+                resultData = new { rawResponse = aiResponse, parseError = true };
+                confidence = 0.5;
+            }
+
+            // Adjust confidence based on search result quality
+            if (response.Results.Count > 0)
+            {
+                var searchConfidence = CalculateConfidence(response);
+                confidence = (confidence + searchConfidence) / 2.0;
+            }
+
+            var executionMetadata = new ToolExecutionMetadata
+            {
+                StartedAt = startedAt,
+                CompletedAt = DateTimeOffset.UtcNow,
+                InputTokens = inputTokens,
+                OutputTokens = outputTokens,
+                ModelCalls = 2, // 1 embedding (search) + 1 completion
+                ModelName = "gpt-4o"
+            };
+
+            _logger.LogInformation(
+                "JPS semantic search complete for {AnalysisId}: {ResultCount} search results, AI analysis in {Duration}ms",
+                context.AnalysisId, response.Metadata.ReturnedResults, stopwatch.ElapsedMilliseconds);
+
+            return ToolResult.Ok(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                resultData,
+                aiResponse,
+                confidence,
+                executionMetadata);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("JPS semantic search cancelled for analysis {AnalysisId}", context.AnalysisId);
+            return ToolResult.Error(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                "Semantic search was cancelled.",
+                ToolErrorCodes.Cancelled,
+                new ToolExecutionMetadata
+                {
+                    StartedAt = startedAt,
+                    CompletedAt = DateTimeOffset.UtcNow
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "JPS semantic search failed for analysis {AnalysisId}", context.AnalysisId);
+            return ToolResult.Error(
+                HandlerId,
+                tool.Id,
+                tool.Name,
+                $"Semantic search failed: {ex.Message}",
+                ToolErrorCodes.InternalError,
+                new ToolExecutionMetadata
+                {
+                    StartedAt = startedAt,
+                    CompletedAt = DateTimeOffset.UtcNow
+                });
+        }
+    }
+
+    /// <summary>
+    /// Formats search results into a JSON string suitable for template parameter injection.
+    /// </summary>
+    private static string FormatSearchResultsForTemplate(SemanticSearchResponse response)
+    {
+        if (response.Results.Count == 0)
+        {
+            return "[]";
+        }
+
+        var results = response.Results.Select(r => new
+        {
+            documentId = r.DocumentId,
+            name = r.Name,
+            documentType = r.DocumentType,
+            fileType = r.FileType,
+            score = r.CombinedScore,
+            highlights = r.Highlights,
+            parentEntityType = r.ParentEntityType,
+            parentEntityName = r.ParentEntityName
+        });
+
+        return JsonSerializer.Serialize(results, new JsonSerializerOptions
+        {
+            WriteIndented = false,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        });
+    }
+
+    /// <summary>
+    /// Estimate token count for a text string.
+    /// </summary>
+    private static int EstimateTokens(string text)
+    {
+        return (int)Math.Ceiling(text.Length / 4.0);
     }
 
     /// <summary>

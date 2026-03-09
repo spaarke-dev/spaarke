@@ -1,0 +1,43 @@
+<task id="AIRA-040" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Document Embedding Strategy</title>
+    <phase>5</phase>
+    <estimate>1h</estimate>
+    <tags>documentation</tags>
+    <dependencies>none</dependencies>
+    <parallel-group>I</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Document the current embedding strategy, model choices, dimension configuration, and caching approach for all indexes.</goal>
+    <context>
+      Currently using text-embedding-3-large (3072-dim) as primary and text-embedding-3-small (1536-dim) as deprecated legacy. Redis caching with 7-day TTL and SHA256 content hashing. This needs formal documentation.
+    </context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      docs/guides/RAG-ARCHITECTURE.md
+      docs/guides/RAG-CONFIGURATION.md
+      .claude/constraints/ai.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Review current embedding configuration in code and Azure resources</step>
+    <step>Create `docs/guides/AI-EMBEDDING-STRATEGY.md` covering: models, dimensions, caching, per-index configuration</step>
+    <step>Include decision rationale for text-embedding-3-large over alternatives</step>
+    <step>Document cost implications per index</step>
+  </steps>
+
+  <tools>Read, Write, Grep</tools>
+
+  <outputs>
+    <output>`docs/guides/AI-EMBEDDING-STRATEGY.md`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Strategy document covers all indexes with embedding config</criterion>
+    <criterion>Includes model, dimensions, caching, and cost info</criterion>
+  </acceptance-criteria>
+</task>

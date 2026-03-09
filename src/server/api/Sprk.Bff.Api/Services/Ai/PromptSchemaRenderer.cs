@@ -92,7 +92,7 @@ public sealed class PromptSchemaRenderer
 
         if (IsJpsFormat(rawPrompt))
         {
-            return RenderJps(rawPrompt, skillContext, knowledgeContext, documentText, downstreamNodes, additionalKnowledge, additionalSkills, preResolvedLookupChoices);
+            return RenderJps(rawPrompt, skillContext, knowledgeContext, documentText, templateParameters, downstreamNodes, additionalKnowledge, additionalSkills, preResolvedLookupChoices);
         }
 
         // Flat text legacy path — return rawPrompt as-is.
@@ -122,6 +122,7 @@ public sealed class PromptSchemaRenderer
         string? skillContext,
         string? knowledgeContext,
         string? documentText,
+        Dictionary<string, object?>? templateParameters,
         IReadOnlyList<DownstreamNodeInfo>? downstreamNodes,
         IReadOnlyList<ResolvedKnowledgeRef>? additionalKnowledge,
         IReadOnlyList<ResolvedSkillRef>? additionalSkills,
@@ -143,6 +144,25 @@ public sealed class PromptSchemaRenderer
             {
                 PromptText = rawPrompt,
                 Format = PromptFormat.FlatText
+            };
+        }
+
+        // Apply {{key}} template parameter substitution to instruction fields.
+        if (templateParameters is { Count: > 0 })
+        {
+            schema = schema with
+            {
+                Instruction = schema.Instruction with
+                {
+                    Role = ApplyTemplateParameters(schema.Instruction.Role, templateParameters),
+                    Task = ApplyTemplateParameters(schema.Instruction.Task, templateParameters),
+                    Context = ApplyTemplateParameters(schema.Instruction.Context, templateParameters),
+                    Constraints = schema.Instruction.Constraints is { Count: > 0 }
+                        ? schema.Instruction.Constraints
+                            .Select(c => ApplyTemplateParameters(c, templateParameters))
+                            .ToArray()
+                        : schema.Instruction.Constraints
+                }
             };
         }
 
@@ -795,6 +815,27 @@ public sealed class PromptSchemaRenderer
             sections[heading] = list;
         }
         return list;
+    }
+
+    /// <summary>
+    /// Substitutes <c>{{key}}</c> placeholders in <paramref name="text"/> with values
+    /// from <paramref name="parameters"/>. This is a simple string-replace approach
+    /// (not full Handlebars) used for JPS instruction-field parameter injection.
+    /// </summary>
+    /// <param name="text">The template text that may contain <c>{{key}}</c> placeholders.</param>
+    /// <param name="parameters">Key-value pairs to substitute. Null values become empty strings.</param>
+    /// <returns>The text with all matching placeholders replaced, or an empty string if input is null/empty.</returns>
+    private static string ApplyTemplateParameters(string? text, Dictionary<string, object?>? parameters)
+    {
+        if (string.IsNullOrEmpty(text) || parameters is null || parameters.Count == 0)
+            return text ?? string.Empty;
+
+        var result = text;
+        foreach (var (key, value) in parameters)
+        {
+            result = result.Replace($"{{{{{key}}}}}", value?.ToString() ?? string.Empty);
+        }
+        return result;
     }
 
     /// <summary>

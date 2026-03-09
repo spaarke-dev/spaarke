@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="036" project="jps-server-rollout">
+  <metadata>
+    <title>Convert SummaryHandler to thin JPS consumer preserving config-driven format</title>
+    <phase>4</phase>
+    <tags>bff-api, refactor</tags>
+    <estimate>2h</estimate>
+    <dependencies>014, 022</dependencies>
+    <parallel-group>thin-wrapper</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Convert SummaryHandler to a thin wrapper that supports both JPS and legacy paths. Preserve config-driven format option (e.g., bullet points vs. narrative). Inject format options as template parameters into JPS rendering.</goal>
+    <context>
+      SummaryHandler (Services/Ai/Tools/SummaryHandler.cs) contains config-driven logic: the summary format (bullet points, narrative, table) is driven by ConfigJson settings.
+      This task converts it to a thin wrapper that:
+      1. Parses format configuration from ConfigJson (existing logic)
+      2. Detects if context.ActionSystemPrompt is JPS format
+      3. If JPS: inject format options as template parameters, call PromptSchemaRenderer.Render()
+      4. If legacy: use existing code path
+    </context>
+    <constraints>
+      - Keep SummaryHandler class and DI registration
+      - Preserve config parsing logic
+      - Implement dual-path logic: JPS (new) and legacy (fallback)
+      - Inject format options as template parameters
+      - Maintain backward compatibility
+      - Follow ADR-010 (DI minimalism)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>projects/jps-server-rollout/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SummaryHandler.cs to understand config-driven format logic</step>
+    <step order="2">Identify configuration options (format types, style settings) extracted from ConfigJson</step>
+    <step order="3">Implement dual-path logic:
+      - Parse format configuration (existing code)
+      - Check if context.ActionSystemPrompt is JPS format
+      - If JPS: add format options to template parameters, call PromptSchemaRenderer.Render()
+      - If legacy: use existing prompt building
+    </step>
+    <step order="4">Create test cases for both paths with various format configurations</step>
+    <step order="5">Build the project: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+    <step order="6">Run tests including SummaryHandler tests: `dotnet test src/server/api/Sprk.Bff.Api.Tests/ --filter "*Summary*"`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SummaryHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SummaryHandler kept as thin wrapper</criterion>
+    <criterion>Config parsing logic preserved</criterion>
+    <criterion>Dual-path logic implemented: JPS and legacy fallback</criterion>
+    <criterion>Format options injected as template parameters in JPS path</criterion>
+    <criterion>Test cases cover all format configurations on both paths</criterion>
+    <criterion>Project builds successfully</criterion>
+    <criterion>All tests pass (including backward compatibility)</criterion>
+  </acceptance-criteria>
+</task>

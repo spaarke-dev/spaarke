@@ -121,6 +121,11 @@
     "$knowledge": [
       { "$ref": "knowledge:lease-standard-provisions", "as": "reference" },
       { "$ref": "knowledge:commercial-lease-benchmarks", "as": "definitions" }
+    ],
+    "$skills": [
+      { "$ref": "skill:Lease Review" },
+      { "$ref": "skill:Financial Terms" },
+      { "$ref": "skill:Date Extraction" }
     ]
   },
 

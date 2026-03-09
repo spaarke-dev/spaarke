@@ -1,13 +1,14 @@
 # Spaarke AI Architecture
 
-> **Version**: 1.8
-> **Date**: January 20, 2026
-> **Status**: Production (R3 Phases 1-5 Complete + Document Visualization + Semantic Search R1)
+> **Version**: 1.9
+> **Date**: March 4, 2026
+> **Status**: Production (R3 Phases 1-5 Complete + Document Visualization + Semantic Search R1 + JPS Pipeline)
 > **Author**: Spaarke Engineering
 > **Related**: [SPAARKE-AI-STRATEGY.md](../../reference/architecture/SPAARKE-AI-STRATEGY.md)
 > **R3 Updates**: RAG Foundation, Analysis Orchestration, Export Services, Monitoring/Resilience, Security
 > **2026-01-12**: Document Relationship Visualization module added (3072-dim vectors, orphan file support)
 > **2026-01-20**: Semantic Search Foundation R1 - Hybrid search API with entity scoping
+> **2026-03-04**: JSON Prompt Schema (JPS) Pipeline - Structured prompt format replacing flat text
 
 ---
 
@@ -3461,6 +3462,163 @@ Spaarke.UI.Components/src/components/SprkChat/
 
 ---
 
+## 19. JSON Prompt Schema (JPS) Pipeline (2026-03-04)
+
+JSON Prompt Schema (JPS) replaces flat-text prompts with a structured, composable JSON format for all playbook actions. JPS definitions live in the `sprk_systemprompt` column of `sprk_aiaction` records. Legacy flat-text prompts remain fully supported via automatic format detection.
+
+### 19.1 Pipeline Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        JPS Processing Pipeline                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  sprk_aiaction.sprk_systemprompt (JSON or flat text)                        │
+│         │                                                                   │
+│         ▼                                                                   │
+│  Format Detection (IsJpsFormat)                                             │
+│  ──────────────────────────────                                             │
+│  Starts with '{' AND contains "$schema" → JPS path                          │
+│  Otherwise → flat-text legacy path (unchanged)                              │
+│         │                                                                   │
+│    ┌────┴────┐                                                              │
+│    ▼         ▼                                                              │
+│  JPS Path    Legacy Path (pass-through)                                     │
+│    │                                                                        │
+│    ▼                                                                        │
+│  1. Override Merge (PromptSchemaOverrideMerger)                             │
+│     ConfigJson.promptSchemaOverride merged into base schema                 │
+│         │                                                                   │
+│         ▼                                                                   │
+│  2. Scope Resolution (ScopeResolverService)                                 │
+│     Parallel Dataverse queries for skills, knowledge, tools by ID           │
+│         │                                                                   │
+│         ▼                                                                   │
+│  3. Named $ref Resolution (JpsRefResolver → IScopeResolverService)          │
+│     Extract knowledge:{name} and skill:{name} refs from scopes section      │
+│     Resolve against Dataverse by name (GetKnowledgeByNameAsync, etc.)       │
+│         │                                                                   │
+│         ▼                                                                   │
+│  4. Template Parameter Substitution                                         │
+│     {{paramName}} replaced from ConfigJson.templateParameters               │
+│         │                                                                   │
+│         ▼                                                                   │
+│  5. $choices Resolution                                                     │
+│     output.fields[].enum populated from downstream node display names       │
+│         │                                                                   │
+│         ▼                                                                   │
+│  6. PromptSchemaRenderer.Render()                                           │
+│     Assembles instruction, scopes, input, output, examples → prompt text    │
+│     Generates JSON Schema for structuredOutput if enabled                   │
+│         │                                                                   │
+│         ▼                                                                   │
+│  RenderedPrompt → OpenAI (via OpenAiClient)                                 │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 19.2 Format Detection
+
+Format detection is duplicated in both `PromptSchemaRenderer` and `AiAnalysisNodeExecutor` for independent decision-making:
+
+```csharp
+private static bool IsJpsFormat(string rawPrompt)
+{
+    return rawPrompt.TrimStart().StartsWith('{') && rawPrompt.Contains("\"$schema\"");
+}
+```
+
+If JPS parsing fails, the renderer falls back to flat-text with a warning log. This ensures backward compatibility for malformed definitions.
+
+### 19.3 Key Components
+
+| Component | Type | Purpose |
+|-----------|------|---------|
+| `PromptSchemaRenderer` | DI service | Renders JPS JSON + runtime context into assembled prompt text |
+| `JpsRefResolver` | Static class | Extracts `knowledge:{name}` and `skill:{name}` refs from JPS `scopes` (no DI per ADR-010) |
+| `PromptSchemaOverrideMerger` | Static class | Merges `promptSchemaOverride` from ConfigJson into base JPS schema (no DI per ADR-010) |
+| `ScopeResolverService` | DI service | Resolves skills, knowledge, and tools by ID or name from Dataverse |
+| `AiAnalysisNodeExecutor` | DI service | Central wiring point — orchestrates the full pipeline for each node |
+| `GenericAnalysisHandler` | DI service | Default handler consuming JPS prompts via the renderer |
+
+### 19.4 Override Merge
+
+Playbook nodes can customize a shared Action's JPS definition without duplicating it. The `promptSchemaOverride` in a node's `ConfigJson` is merged into the base schema before rendering:
+
+- **instruction fields** (role, task, context, constraints): Override replaces base values. Use `"$clear"` in constraints to replace the entire array rather than appending.
+- **output.fields**: Override fields replace base fields by name; new fields are appended.
+- **Shallow merge**: Only top-level JPS sections are merged, not deeply nested structures.
+
+### 19.5 Named $ref Resolution
+
+JPS `scopes` sections can reference knowledge and skills by name rather than by GUID:
+
+```json
+{
+  "scopes": {
+    "$knowledge": [
+      { "$ref": "knowledge:contract-law-basics" }
+    ],
+    "$skills": [
+      { "$ref": "skill:entity-extraction" }
+    ]
+  }
+}
+```
+
+`JpsRefResolver.ExtractKnowledgeRefs()` and `ExtractSkillRefs()` parse these references. The `AiAnalysisNodeExecutor` then resolves each name against Dataverse via `IScopeResolverService.GetKnowledgeByNameAsync()` and `GetSkillByNameAsync()`. Resolved content is passed to the renderer as `additionalKnowledge` and `additionalSkills` parameters.
+
+### 19.6 Template Parameters
+
+JPS instruction fields support `{{paramName}}` placeholders that are substituted at render time from `ConfigJson.templateParameters`:
+
+```json
+// ConfigJson on the playbook node
+{
+  "templateParameters": {
+    "jurisdiction": "Delaware",
+    "analysisDepth": "comprehensive"
+  }
+}
+```
+
+The renderer replaces `{{jurisdiction}}` with `"Delaware"` in the assembled prompt. Unresolved placeholders remain as-is (no error) to support incremental authoring.
+
+### 19.7 $choices Resolution
+
+Output fields with `"$choices"` in their enum array are dynamically populated from downstream playbook nodes. The `AiAnalysisNodeExecutor` passes `DownstreamNodeInfo[]` to the renderer, which replaces `"$choices"` with display names from connected nodes. This enables dynamic routing decisions based on playbook structure.
+
+### 19.8 Handler Migration Strategy
+
+Nine specialized handlers were migrated from hardcoded prompts to JPS:
+
+| Strategy | Handlers | Approach |
+|----------|----------|----------|
+| **Consolidated** | 5 prompt-only handlers (clause analyzer, entity extractor, document classifier, risk assessor, key terms extractor) | Removed; `GenericAnalysisHandler` serves these via JPS definitions |
+| **Thin Wrapper** | 4 handlers with custom logic (document profiler, summarizer, comparison handler, compliance checker) | Retained as thin wrappers with JPS dual-path: use JPS when available, fall back to hardcoded prompt |
+
+The dual-path pattern in thin wrappers:
+
+```csharp
+// Simplified pattern — actual handler code varies
+var prompt = context.ActionSystemPrompt;
+if (IsJpsFormat(prompt))
+{
+    // JPS path: renderer handles everything
+    return await _genericHandler.ExecuteAsync(context, ct);
+}
+// Legacy path: hardcoded prompt construction (backward compatible)
+return await ExecuteLegacyAsync(context, ct);
+```
+
+### 19.9 Structured Output
+
+When `output.structuredOutput` is `true` in the JPS definition, the renderer generates a JSON Schema from the `output.fields` array and sets it on the `RenderedPrompt`. The OpenAI client uses this for structured output mode, ensuring the model returns valid JSON matching the schema.
+
+For the complete JPS authoring reference, see [JPS Authoring Guide](JPS-AUTHORING-GUIDE.md).
+
+---
+
 ## Related Documents
 
 - [SPAARKE-AI-STRATEGY.md](../../reference/architecture/SPAARKE-AI-STRATEGY.md) - Strategic context, Microsoft Foundry, use cases
@@ -3471,13 +3629,15 @@ Spaarke.UI.Components/src/components/SprkChat/
 - [RAG Architecture](RAG-ARCHITECTURE.md) - RAG pipeline, indexing, and Semantic Search API details
 - [AI Search & Visualization Module](../../projects/ai-azure-search-module/README.md) - Project documentation
 - [Playbook Builder Full-Screen Setup](PLAYBOOK-BUILDER-FULLSCREEN-SETUP.md) - PCF control deployment and AI Assistant usage
+- [JPS Authoring Guide](JPS-AUTHORING-GUIDE.md) - Practical guide for creating JPS prompt definitions
 
 ---
 
 *Document Owner: Spaarke Engineering*
-*Last Updated: February 24, 2026*
+*Last Updated: March 4, 2026*
 *R3 Updates: RAG Deployment Models (Section 8), Knowledge Index Schema (Section 9.2), Tool Framework (Section 10), Playbook System (Section 11), Export Services (Section 12)*
 *2026-01-12: Document Relationship Visualization (Section 16)*
 *2026-01-19: Playbook Builder AI Assistant Scope Patterns (Section 17)*
 *2026-01-20: Semantic Search Foundation R1 - See [RAG-ARCHITECTURE.md](RAG-ARCHITECTURE.md#semantic-search-api) for details*
 *2026-02-24: SprkChat System — Conversational AI with RAG Scoping (Section 18)*
+*2026-03-04: JSON Prompt Schema (JPS) Pipeline (Section 19)*

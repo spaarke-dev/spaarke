@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="054" project="jps-server-rollout">
+  <metadata>
+    <title>Verify all flat-text playbooks work unchanged with new JPS pipeline</title>
+    <phase>5</phase>
+    <tags>testing</tags>
+    <estimate>3h</estimate>
+    <dependencies>051</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Write comprehensive backward compatibility tests ensuring that existing flat-text playbooks (pre-JPS format) continue to work unchanged with the new JPS-aware pipeline. Verify no breaking changes to legacy prompt format.</goal>
+    <context>
+      Before JPS, analysis actions used flat-text prompts stored directly in actionSystemPrompt field.
+      The new JPS pipeline must support both JPS and legacy flat-text prompts via format detection.
+      Legacy playbooks should:
+      - Still load and execute without modification
+      - Use legacy prompt path (not JPS path)
+      - Produce identical or near-identical results
+      - Not require conversion or data migration
+
+      This task validates backward compatibility across:
+      - Clause analysis actions (converted to JPS, but legacy mode must work)
+      - Document classification (thin wrapper supporting JPS + legacy)
+      - Summary generation (thin wrapper supporting JPS + legacy)
+      - Semantic search (thin wrapper supporting JPS + legacy)
+      - Clause comparison (thin wrapper supporting JPS + legacy)
+    </context>
+    <constraints>
+      - Use existing flat-text prompts from current database or fixtures
+      - Test detection logic (IsJpsFormat() or equivalent)
+      - Verify legacy path invoked for non-JPS prompts
+      - Compare output with pre-JPS behavior (expected to match or be compatible)
+      - No modifications to legacy data required
+      - Follow .claude/constraints/testing.md
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>projects/jps-server-rollout/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Identify existing flat-text prompts used in production or test data</step>
+    <step order="2">Create test class BackwardCompatibilityTests.cs in tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</step>
+    <step order="3">Write tests for each legacy handler type:
+      - Test 1: Clause analyzer flat-text prompt → legacy path used → output valid
+      - Test 2: Document classifier flat-text prompt → legacy path used → RAG examples injected
+      - Test 3: Summary flat-text prompt → legacy path used → format options applied
+      - Test 4: Semantic search flat-text prompt → legacy path used → search results injected
+      - Test 5: Clause comparison flat-text prompt → legacy path used → document pairs included
+    </step>
+    <step order="4">For each test:
+      - Load legacy flat-text prompt from fixture or database
+      - Verify format detection identifies as non-JPS
+      - Execute analysis action
+      - Verify legacy code path used (not JPS path)
+      - Verify output is valid and complete (mock OpenAI call validates prompt format)
+    </step>
+    <step order="5">Test mixed scenarios:
+      - Test 6: Legacy prompt with template parameters (should not attempt substitution or handle gracefully)
+      - Test 7: Legacy prompt with ConfigJson override (override should apply)
+    </step>
+    <step order="6">Run backward compatibility tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "*BackwardCompatibility*"`</step>
+    <step order="7">Run full test suite to ensure no regressions: `dotnet test src/server/api/Sprk.Bff.Api.Tests/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/BackwardCompatibilityTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Test class created for backward compatibility validation</criterion>
+    <criterion>Tests cover all legacy handler types (clause, classifier, summary, search, comparison)</criterion>
+    <criterion>Tests verify format detection correctly identifies legacy prompts</criterion>
+    <criterion>Tests verify legacy code path used (not JPS path)</criterion>
+    <criterion>Tests verify output is valid and complete</criterion>
+    <criterion>Tests cover mixed scenarios (legacy + overrides, legacy + template params)</criterion>
+    <criterion>All backward compatibility tests pass</criterion>
+    <criterion>No regressions in full test suite</criterion>
+  </acceptance-criteria>
+</task>

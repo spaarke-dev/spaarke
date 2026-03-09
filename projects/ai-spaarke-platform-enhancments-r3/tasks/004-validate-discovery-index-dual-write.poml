@@ -1,0 +1,54 @@
+<task id="AIRA-004" project="ai-spaarke-platform-enhancments-r3">
+  <metadata>
+    <title>Validate Discovery-Index Dual-Write</title>
+    <phase>1</phase>
+    <estimate>2h</estimate>
+    <tags>ai-search, bff-api, validation</tags>
+    <dependencies>none</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Verify and fix the dual-write in `RagIndexingPipeline` so documents index to both `spaarke-knowledge-index-v2` AND `discovery-index`. Trigger re-indexing to populate discovery-index.</goal>
+    <context>
+      RagIndexingPipeline has dual-write code that should write to both indexes, but discovery-index has 0 documents. Either the config is wrong or the dual-write is broken.
+    </context>
+    <constraints>
+      - Do not break existing knowledge-v2 indexing while debugging
+      - Follow ADR-013 patterns for AI service operations
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      docs/guides/RAG-ARCHITECTURE.md
+      docs/guides/RAG-CONFIGURATION.md
+      .claude/adr/ADR-013-ai-architecture.md
+      .claude/constraints/ai.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read `Services/Ai/RagIndexingPipeline.cs` to trace the dual-write code path</step>
+    <step>Check `AiSearchOptions.DiscoveryIndexName` configuration in appsettings and App Service settings</step>
+    <step>Test by re-indexing a single document and checking both indexes for new chunks</step>
+    <step>If broken: fix the pipeline code and test again</step>
+    <step>If config issue: update App Service configuration and test</step>
+    <step>Once working: trigger re-index of all existing documents to populate discovery-index</step>
+    <step>Verify document count in discovery-index matches or is proportional to knowledge-v2</step>
+  </steps>
+
+  <tools>Bash, Read, Edit, Grep</tools>
+
+  <outputs>
+    <output>Discovery-index populated with documents</output>
+    <output>Dual-write verified working</output>
+    <output>Any config or code fixes applied</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>discovery-index has document count > 0</criterion>
+    <criterion>Re-indexing a document writes chunks to both indexes</criterion>
+    <criterion>No regression in knowledge-v2 indexing</criterion>
+  </acceptance-criteria>
+</task>

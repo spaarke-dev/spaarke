@@ -263,6 +263,32 @@ public interface IScopeResolverService
 
     #endregion
 
+    #region Name-Based Lookups
+
+    /// <summary>
+    /// Look up a knowledge source by name.
+    /// Uses OData $filter query to find the first matching record.
+    /// </summary>
+    /// <param name="name">The knowledge source name to search for.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Knowledge definition or null if not found.</returns>
+    Task<AnalysisKnowledge?> GetKnowledgeByNameAsync(
+        string name,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Look up a skill by name.
+    /// Uses OData $filter query to find the first matching record.
+    /// </summary>
+    /// <param name="name">The skill name to search for.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Skill definition or null if not found.</returns>
+    Task<AnalysisSkill?> GetSkillByNameAsync(
+        string name,
+        CancellationToken cancellationToken);
+
+    #endregion
+
     #region Lookup Queries
 
     /// <summary>

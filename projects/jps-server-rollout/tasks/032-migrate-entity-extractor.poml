@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="032" project="jps-server-rollout">
+  <metadata>
+    <title>Consolidate EntityExtractorHandler into GenericAnalysisHandler + JPS</title>
+    <phase>4</phase>
+    <tags>bff-api, refactor</tags>
+    <estimate>2h</estimate>
+    <dependencies>014, 022</dependencies>
+    <parallel-group>consolidation</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Remove EntityExtractorHandler and migrate its functionality to GenericAnalysisHandler by creating a JPS JSON definition for the entity extraction action. Update tool configuration to route to GenericAnalysisHandler.</goal>
+    <context>
+      EntityExtractorHandler (Services/Ai/Tools/EntityExtractorHandler.cs) follows the same consolidation pattern as prior handlers.
+      This task consolidates it following the approach established in tasks 030 and 031.
+    </context>
+    <constraints>
+      - Follow .claude/patterns/ai/analysis-scopes.md for JPS structure
+      - Ensure JPS JSON matches the prompt behavior of the original handler
+      - Update tool configuration atomically
+      - Follow ADR-010 (DI minimalism)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>projects/jps-server-rollout/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EntityExtractorHandler.cs to understand its logic and prompt construction</step>
+    <step order="2">Extract the prompt template and configuration</step>
+    <step order="3">Create JPS JSON file (projects/ai-json-prompt-schema-system/notes/jps-conversions/entity-extractor.json)</step>
+    <step order="4">Search codebase for references to EntityExtractorHandler</step>
+    <step order="5">Update tool configuration to route to GenericAnalysisHandler</step>
+    <step order="6">Remove EntityExtractorHandler class or mark as [Obsolete]</step>
+    <step order="7">Remove DI registration</step>
+    <step order="8">Build the project: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+    <step order="9">Run all tests: `dotnet test src/server/api/Sprk.Bff.Api.Tests/`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet build)</tool>
+    <tool>Bash(dotnet test)</tool>
+    <tool>Grep</tool>
+  </tools>
+
+  <outputs>
+    <output>projects/ai-json-prompt-schema-system/notes/jps-conversions/entity-extractor.json</output>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/EntityExtractorHandler.cs</output>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/ToolFrameworkExtensions.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>EntityExtractorHandler logic extracted to JPS JSON</criterion>
+    <criterion>JPS JSON created and follows analysis-scopes pattern</criterion>
+    <criterion>Tool configuration updated to route to GenericAnalysisHandler</criterion>
+    <criterion>EntityExtractorHandler removed or deprecated</criterion>
+    <criterion>DI registration removed</criterion>
+    <criterion>No other code references EntityExtractorHandler</criterion>
+    <criterion>Project builds successfully</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

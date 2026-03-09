@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="050" project="jps-server-rollout">
+  <metadata>
+    <title>Create PowerShell script to seed Dataverse Action records with JPS JSON</title>
+    <phase>5</phase>
+    <tags>deploy, documentation</tags>
+    <estimate>2h</estimate>
+    <dependencies>030, 031, 032, 033, 034</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Create a PowerShell script that updates Dataverse Action records (sprk_systemprompt field) with JPS JSON definitions. Seed all 9 migrated actions using the JPS conversion examples as source data.</goal>
+    <context>
+      Consolidation tasks 030-034 create JPS JSON files for 5 actions (clause-analyzer, date-extractor, entity-extractor, risk-detector, financial-calculator).
+      Thin-wrapper tasks 035-038 preserve 4 handlers (document-classifier, summary, semantic-search, clause-comparison) in dual-mode (JPS + legacy fallback).
+      This task creates a PowerShell deployment script that:
+      1. Connects to Dataverse using pac CLI or Web API
+      2. For each of the 9 actions, updates sprk_systemprompt with the JPS JSON
+      3. Handles errors gracefully (missing records, validation errors)
+      4. Provides rollback capability (optional: backup before overwrite)
+
+      Source data: 9 JPS JSON files in projects/ai-json-prompt-schema-system/notes/jps-conversions/
+    </context>
+    <constraints>
+      - Use PowerShell Core (cross-platform compatible)
+      - Use pac CLI for authentication (preferred) or Dataverse Web API
+      - Support configuration: target environment (dev/test/prod), tenant, credentials
+      - Implement error handling and logging
+      - Create backup of existing values (optional)
+      - Idempotent: safe to run multiple times
+      - Do NOT commit credentials to script; use secure storage or environment variables
+      - Follow ADR-004 (idempotent) and ADR-015 (no prompt logging)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-004-async-job-contract.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-no-prompt-logging.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>projects/jps-server-rollout/CLAUDE.md</file>
+      <file>projects/ai-json-prompt-schema-system/notes/jps-conversions/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review the 9 JPS JSON files in projects/ai-json-prompt-schema-system/notes/jps-conversions/ to understand their structure</step>
+    <step order="2">Create PowerShell script structure:
+      - Parameter block: environment, tenant, optional credentials
+      - Function to authenticate (pac CLI or Web API)
+      - Function to read JPS JSON from files
+      - Function to update sprk_systemprompt field on Action records
+      - Error handling and logging
+    </step>
+    <step order="3">Map JPS file names to Dataverse Action record identifiers:
+      - clause-analyzer.json → clauses analyzer action (find by name or ID)
+      - date-extractor.json → date extractor action
+      - entity-extractor.json → entity extractor action
+      - risk-detector.json → risk detector action
+      - financial-calculator.json → financial calculator action
+      - document-classifier.json → document classifier action
+      - summary.json → summary action
+      - semantic-search.json → semantic search action
+      - clause-comparison.json → clause comparison action
+    </step>
+    <step order="4">Implement script logic:
+      - Authenticate to Dataverse
+      - For each JPS file:
+        - Read JSON content
+        - Find corresponding Action record by name
+        - Backup existing sprk_systemprompt (optional)
+        - Update field with new JPS JSON
+        - Log success/failure
+    </step>
+    <step order="5">Add safety features:
+      - WhatIf parameter to preview changes without applying
+      - Confirmation prompt before bulk updates
+      - Rollback capability (restore from backup)
+    </step>
+    <step order="6">Create script documentation:
+      - Usage examples (run against dev, test, prod)
+      - Prerequisite checks (pac CLI installed, authenticated)
+      - Troubleshooting guide
+    </step>
+    <step order="7">Test script against dev environment to verify:
+      - Authentication works
+      - All 9 actions found
+      - sprk_systemprompt field updated correctly
+      - Logging is clear and useful
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Bash(pac)</tool>
+  </tools>
+
+  <outputs>
+    <output>infrastructure/scripts/Seed-JpsActions.ps1</output>
+    <output>infrastructure/scripts/Seed-JpsActions-README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PowerShell script created and syntactically valid</criterion>
+    <criterion>Authenticates to Dataverse (pac CLI or Web API)</criterion>
+    <criterion>Reads all 9 JPS JSON files from source directory</criterion>
+    <criterion>Maps JPS files to Dataverse Action records</criterion>
+    <criterion>Updates sprk_systemprompt field for all 9 actions</criterion>
+    <criterion>Error handling for missing records, validation errors</criterion>
+    <criterion>Optional backup functionality</criterion>
+    <criterion>Idempotent (safe to run multiple times)</criterion>
+    <criterion>WhatIf and confirmation prompts for safety</criterion>
+    <criterion>Logging shows clear success/failure per action</criterion>
+    <criterion>Script documented with usage examples</criterion>
+    <criterion>Tested against dev environment successfully</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="053" project="jps-server-rollout">
+  <metadata>
+    <title>Test override merge end-to-end with ConfigJson.promptSchemaOverride</title>
+    <phase>5</phase>
+    <tags>testing</tags>
+    <estimate>2h</estimate>
+    <dependencies>051</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>Write integration tests for end-to-end override merge behavior, verifying that ConfigJson.promptSchemaOverride correctly overrides JPS instruction fields and that merged results are used in OpenAI calls.</goal>
+    <context>
+      AnalysisNode ConfigJson can include promptSchemaOverride field with partial overrides:
+      { "promptSchemaOverride": { "instruction": { "role": "custom-role" } } }
+
+      The framework should merge these overrides with JPS-rendered instruction, allowing runtime customization.
+      This task validates end-to-end override behavior:
+      - Override single field (e.g., role) → merged with JPS instruction
+      - Override multiple fields → all merged correctly
+      - Override nested structure (e.g., constraints array) → deep merge
+      - No override → original JPS instruction used
+      - Invalid override → graceful fallback to JPS instruction
+    </context>
+    <constraints>
+      - Test ConfigJson override extraction (already implemented in task 010)
+      - Test JPS rendering (task 023)
+      - Test merge logic (verify correct field precedence)
+      - Test that merged instruction is used in OpenAI call
+      - Follow .claude/constraints/testing.md for test structure
+      - Use realistic overrides that would be useful in practice
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>projects/jps-server-rollout/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review override merge implementation in AiAnalysisNodeExecutor or PromptSchemaRenderer</step>
+    <step order="2">Understand override precedence (override > JPS template > defaults)</step>
+    <step order="3">Create test class OverrideMergeTests.cs in tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</step>
+    <step order="4">Write integration tests:
+      - Test 1: No override → JPS instruction used in OpenAI call
+      - Test 2: Override role only → role replaced, other fields from JPS
+      - Test 3: Override instruction (multiple fields) → all overrides merged
+      - Test 4: Override constraints (array) → deep merge
+      - Test 5: Override with template parameters → params applied to both JPS and override
+      - Test 6: Invalid override → fallback to JPS instruction
+      - Test 7: Empty override → no change to JPS instruction
+    </step>
+    <step order="5">For each test, verify:
+      - Override extracted from ConfigJson
+      - JPS rendered from definition
+      - Merge applied correctly
+      - Merged instruction passed to OpenAI mock
+    </step>
+    <step order="6">Run tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "*OverrideMerge*"`</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Bash(dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/OverrideMergeTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Test class created for override merge behavior</criterion>
+    <criterion>Tests cover no override, single field override, multiple field override</criterion>
+    <criterion>Tests cover nested structure override and deep merge</criterion>
+    <criterion>Tests verify merged instruction used in OpenAI calls</criterion>
+    <criterion>Tests cover invalid override and empty override cases</criterion>
+    <criterion>Realistic overrides matching use cases included</criterion>
+    <criterion>All override merge tests pass</criterion>
+  </acceptance-criteria>
+</task>

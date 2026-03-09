@@ -1,0 +1,65 @@
+<task id="051" project="ai-json-prompt-schema-system">
+  <metadata>
+    <title>Fix N:N Scope Tables Not Syncing to Canvas</title>
+    <phase>3</phase>
+    <tags>frontend, backend, bug-fix, canvas, dataverse</tags>
+    <estimate>2h</estimate>
+    <dependencies>013</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Ensure the Playbook Builder canvas always reflects the actual N:N relationship tables for scope associations (skills, knowledge, tools). Changes made to N:N tables must be visible in the canvas, and canvas changes must write to N:N tables.</goal>
+    <context>
+      The Playbook Builder canvas maintains scope associations (which skills, knowledge, and tools
+      are linked to each node) but these are NOT in sync with the actual Dataverse N:N relationship
+      tables. Two symptoms observed:
+
+      1. Playbooks created via Deploy-Playbook.ps1 (which writes directly to N:N tables) do not
+         show their scope associations in the canvas UI — the canvas appears empty.
+      2. Playbooks that had scope associations set up via the canvas UI had broken N:N tables
+         when the canvas stored state differently than the actual relationships.
+
+      Root cause hypothesis: The canvas stores scope associations in its own JSON state
+      (likely sprk_canvaslayoutjson or node sprk_configjson) and reads from that on load,
+      rather than reading from the actual N:N relationship tables.
+
+      The N:N relationships involved:
+      - Node → Skill: sprk_playbooknode_skill → sprk_analysisskills
+      - Node → Knowledge: sprk_playbooknode_knowledge → sprk_analysisknowledges
+      - Node → Tool: sprk_playbooknode_tool → sprk_analysistools
+      - Playbook → Action: sprk_analysisplaybook_action → sprk_analysisactions
+      - Playbook → Skill: sprk_playbook_skill → sprk_analysisskills
+      - Playbook → Knowledge: sprk_playbook_knowledge → sprk_analysisknowledges
+      - Playbook → Tool: sprk_playbook_tool → sprk_analysistools
+
+      Important constraint: The system only allows ONE tool per node. The canvas must enforce this.
+    </context>
+    <constraints>
+      <constraint>N:N relationship tables must be the source of truth for scope associations</constraint>
+      <constraint>Canvas must READ scope associations from N:N tables on load, not from cached JSON</constraint>
+      <constraint>Canvas must WRITE scope associations to N:N tables on save (associate/disassociate)</constraint>
+      <constraint>Canvas JSON (canvaslayoutjson) should store layout/position data only, not scope state</constraint>
+      <constraint>One tool per node constraint must be enforced in both canvas UI and N:N writes</constraint>
+    </constraints>
+  </prompt>
+
+  <steps>
+    <step>Investigate how the canvas currently loads scope associations — trace from PlaybookCanvas load through to the data source (JSON vs N:N query)</step>
+    <step>Investigate how the canvas currently saves scope associations — trace from canvas save through to the data target</step>
+    <step>Identify the gap: where does the canvas read/write its own JSON instead of N:N tables</step>
+    <step>Update canvas load to query N:N relationships via Dataverse Web API ($expand or separate queries)</step>
+    <step>Update canvas save to associate/disassociate N:N relationships via Dataverse Web API</step>
+    <step>Remove scope association data from canvaslayoutjson (keep only layout: positions, edges)</step>
+    <step>Test: create scope associations via N:N directly, reload canvas — verify they appear</step>
+    <step>Test: change scope associations in canvas, query N:N tables — verify they match</step>
+    <step>Test: verify one-tool-per-node constraint is enforced</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Canvas shows correct scope associations after loading from N:N tables</criterion>
+    <criterion>Canvas saves produce correct N:N associations in Dataverse</criterion>
+    <criterion>Playbooks created via Deploy-Playbook.ps1 render correctly in canvas with all scopes visible</criterion>
+    <criterion>One tool per node enforced in UI</criterion>
+    <criterion>Round-trip test: canvas save → reload → same state</criterion>
+  </acceptance-criteria>
+</task>
