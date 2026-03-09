@@ -29,7 +29,7 @@ export interface IActionCardConfig {
  *   - "create-new-project"        → Analysis Builder, intent "new-project" (task 025)
  *   - "assign-to-counsel"         → Analysis Builder, intent "assign-counsel" (task 025)
  *   - "summarize-new-files"        → Summarize Files wizard (dedicated dialog)
- *   - "search-document-files"     → Analysis Builder, intent "document-search" (task 025)
+ *   - "find-similar"              → Find Similar wizard (dedicated dialog)
  *   - "send-email-message"        → Analysis Builder, intent "email-compose" (task 025)
  *   - "schedule-new-meeting"      → Analysis Builder, intent "meeting-schedule" (task 025)
  *
@@ -62,10 +62,10 @@ export const ACTION_CARD_CONFIGS: IActionCardConfig[] = [
     ariaLabel: "Summarize new files using AI",
   },
   {
-    id: "search-document-files",
-    label: "Search Document Files",
+    id: "find-similar",
+    label: "Find Similar",
     icon: SearchRegular,
-    ariaLabel: "Search across all document files",
+    ariaLabel: "Find similar documents, matters, and projects",
   },
   {
     id: "send-email-message",

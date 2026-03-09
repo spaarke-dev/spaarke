@@ -236,21 +236,33 @@ export const SummaryResultsStep: React.FC<ISummaryResultsStepProps> = ({
             <Text size={400} weight="semibold">File-by-File Highlights</Text>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
-            {result.fileHighlights.map((file, idx) => (
-              <div key={idx} className={styles.fileCard}>
-                <div className={styles.fileHeader}>
-                  <Text size={300} weight="semibold">{file.fileName}</Text>
-                  <Badge appearance="outline" size="small">{file.documentType}</Badge>
+            {result.fileHighlights.map((file, idx) => {
+              if (!file || !file.fileName) return null;
+              return (
+                <div key={idx} className={styles.fileCard}>
+                  <div className={styles.fileHeader}>
+                    <Text size={300} weight="semibold">{file.fileName}</Text>
+                    {file.documentType && (
+                      <Badge appearance="outline" size="small">{file.documentType}</Badge>
+                    )}
+                  </div>
+                  {file.summary && (
+                    <Text size={200} className={styles.paragraph}>
+                      {file.summary}
+                    </Text>
+                  )}
+                  {Array.isArray(file.highlights) && file.highlights.length > 0 && (
+                    <ul className={styles.bulletList}>
+                      {file.highlights.map((h, hIdx) => (
+                        <li key={hIdx}>
+                          <Text size={200}>{h}</Text>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
-                <ul className={styles.bulletList}>
-                  {file.highlights.map((h, hIdx) => (
-                    <li key={hIdx}>
-                      <Text size={200}>{h}</Text>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}

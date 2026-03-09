@@ -2,10 +2,17 @@
  * SummarizeFilesDialog.tsx
  * Multi-step wizard dialog for "Summarize New File(s)".
  *
- * Uses WizardShell with 3 steps:
- *   0 — Upload file(s)       (FileUploadZone + UploadedFileList — reused from CreateMatter)
- *   1 — Run Analysis          (SummaryResultsStep — AI-generated summary display)
- *   2 — Next Steps            (SummaryNextStepsStep — action cards)
+ * Uses WizardShell with 3 static steps + dynamic follow-on steps:
+ *   0 — Upload file(s)       (FileUploadZone + UploadedFileList)
+ *   1 — Run Analysis          (SummaryResultsStep — AI-generated summary)
+ *   2 — Next Steps            (SummaryNextStepsStep — card selection)
+ *   3+ — Follow-on steps:
+ *        - Send Email          (SummarizeSendEmailStep)
+ *        - Create Project      (SummarizeCreateProjectStep)
+ *        - Work on Analysis    (SummarizeAnalysisStep)
+ *
+ * Dynamic steps are injected/removed via shellRef.current.addDynamicStep()
+ * / removeDynamicStep(), mirroring the CreateMatter/WizardDialog pattern.
  */
 import * as React from 'react';
 import {
@@ -20,6 +27,7 @@ import { CheckmarkCircleFilled } from '@fluentui/react-icons';
 
 import { WizardShell } from '../Wizard/WizardShell';
 import type {
+  IWizardShellHandle,
   IWizardStepConfig,
   IWizardSuccessConfig,
 } from '../Wizard/wizardShellTypes';
@@ -27,12 +35,32 @@ import type {
 import type { IUploadedFile, IFileValidationError } from '../CreateMatter/wizardTypes';
 import { FileUploadZone } from '../CreateMatter/FileUploadZone';
 import { UploadedFileList } from '../CreateMatter/UploadedFileList';
+import { searchUsersAsLookup } from '../CreateMatter/matterService';
 
 import { SummaryResultsStep } from './SummaryResultsStep';
-import { SummaryNextStepsStep } from './SummaryNextStepsStep';
+import {
+  SummaryNextStepsStep,
+  FOLLOW_ON_STEP_ID_MAP,
+  FOLLOW_ON_STEP_LABEL_MAP,
+  FOLLOW_ON_CANONICAL_ORDER,
+} from './SummaryNextStepsStep';
 import type { SummaryActionId } from './SummaryNextStepsStep';
+import {
+  SummarizeSendEmailStep,
+  buildSummaryEmailSubject,
+  buildSummaryEmailBody,
+} from './SummarizeSendEmailStep';
+import { SummarizeCreateProjectStep } from './SummarizeCreateProjectStep';
+import { SummarizeAnalysisStep } from './SummarizeAnalysisStep';
 import { runSummarize } from './summarizeService';
 import type { ISummarizeResult, SummarizeStatus } from './summarizeTypes';
+import type { ICreateProjectFormState } from '../CreateProject/projectFormTypes';
+import { EMPTY_PROJECT_FORM } from '../CreateProject/projectFormTypes';
+import { ProjectService } from '../CreateProject/projectService';
+import { navigateToEntity } from '../../utils/navigation';
+import { getBffBaseUrl } from '../../config/bffConfig';
+import { authenticatedFetch } from '../../services/bffAuthProvider';
+import type { IWebApi } from '../../types/xrm';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -41,10 +69,12 @@ import type { ISummarizeResult, SummarizeStatus } from './summarizeTypes';
 export interface ISummarizeFilesDialogProps {
   open: boolean;
   onClose: () => void;
+  /** PCF WebApi for Dataverse operations. */
+  webApi?: IWebApi;
 }
 
 // ---------------------------------------------------------------------------
-// File state reducer (reuses pattern from CreateMatter WizardDialog)
+// File state reducer
 // ---------------------------------------------------------------------------
 
 interface IFileState {
@@ -117,8 +147,10 @@ const useStyles = makeStyles({
 export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
   open,
   onClose,
+  webApi,
 }) => {
   const styles = useStyles();
+  const shellRef = React.useRef<IWizardShellHandle>(null);
 
   // ── File state ────────────────────────────────────────────────────────
   const [fileState, fileDispatch] = React.useReducer(fileReducer, {
@@ -134,7 +166,16 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
 
   // ── Next Steps state ──────────────────────────────────────────────────
   const [selectedActions, setSelectedActions] = React.useState<SummaryActionId[]>([]);
-  const [includeFullSummary, setIncludeFullSummary] = React.useState(true);
+  const [includeShortSummary, setIncludeShortSummary] = React.useState(false);
+
+  // ── Send Email state ──────────────────────────────────────────────────
+  const [emailTo, setEmailTo] = React.useState('');
+  const [emailSubject, setEmailSubject] = React.useState('');
+  const [emailBody, setEmailBody] = React.useState('');
+
+  // ── Create Project state ──────────────────────────────────────────────
+  const [projectFormValues, setProjectFormValues] = React.useState<ICreateProjectFormState>({ ...EMPTY_PROJECT_FORM });
+  const [projectFormValid, setProjectFormValid] = React.useState(false);
 
   // ── Reset on open ─────────────────────────────────────────────────────
   React.useEffect(() => {
@@ -144,22 +185,37 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       setSummarizeResult(null);
       setSummarizeError(null);
       setSelectedActions([]);
-      setIncludeFullSummary(true);
+      setIncludeShortSummary(false);
+      setEmailTo('');
+      setEmailSubject('');
+      setEmailBody('');
+      setProjectFormValues({ ...EMPTY_PROJECT_FORM });
+      setProjectFormValid(false);
     }
     return () => {
       abortControllerRef.current?.abort();
     };
   }, [open]);
 
-  // ── Refs for handleFinish (avoids stale closures) ─────────────────────
+  // ── Refs for dynamic step closures (prevents stale closure bug) ───────
   const summarizeResultRef = React.useRef(summarizeResult);
   summarizeResultRef.current = summarizeResult;
   const selectedActionsRef = React.useRef(selectedActions);
   selectedActionsRef.current = selectedActions;
-  const includeFullSummaryRef = React.useRef(includeFullSummary);
-  includeFullSummaryRef.current = includeFullSummary;
+  const includeShortSummaryRef = React.useRef(includeShortSummary);
+  includeShortSummaryRef.current = includeShortSummary;
   const fileStateRef = React.useRef(fileState);
   fileStateRef.current = fileState;
+  const emailToRef = React.useRef(emailTo);
+  emailToRef.current = emailTo;
+  const emailSubjectRef = React.useRef(emailSubject);
+  emailSubjectRef.current = emailSubject;
+  const emailBodyRef = React.useRef(emailBody);
+  emailBodyRef.current = emailBody;
+  const projectFormValuesRef = React.useRef(projectFormValues);
+  projectFormValuesRef.current = projectFormValues;
+  const projectFormValidRef = React.useRef(projectFormValid);
+  projectFormValidRef.current = projectFormValid;
 
   // ── File handlers ─────────────────────────────────────────────────────
   const handleFilesAccepted = React.useCallback(
@@ -179,11 +235,16 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     [],
   );
 
+  // ── Stable search callback ────────────────────────────────────────────
+  const handleSearchUsers = React.useCallback(
+    (query: string) => webApi ? searchUsersAsLookup(webApi, query) : Promise.resolve([]),
+    [webApi]
+  );
+
   // ── Run analysis ──────────────────────────────────────────────────────
   const runAnalysis = React.useCallback(async () => {
     if (fileState.uploadedFiles.length === 0) return;
 
-    // Abort any previous in-flight request
     abortControllerRef.current?.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -217,20 +278,213 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     setSummarizeError(null);
   }, [fileState.uploadedFiles.length]);
 
+  // ── Skip handler for follow-on steps ────────────────────────────────
+  // Deselecting the action removes the dynamic step, causing the shell
+  // to advance to the next remaining step automatically.
+  const handleSkipAction = React.useCallback(
+    (actionId: SummaryActionId) => {
+      setSelectedActions((prev) => prev.filter((a) => a !== actionId));
+    },
+    []
+  );
+
+  // ── Sync dynamic steps with selected action cards (via shellRef) ──────
+  const prevSelectedActionsRef = React.useRef<SummaryActionId[]>([]);
+
+  React.useEffect(() => {
+    const prev = prevSelectedActionsRef.current;
+    const next = selectedActions;
+
+    // Add newly selected follow-on steps
+    next.forEach((actionId) => {
+      if (!prev.includes(actionId)) {
+        const stepId = FOLLOW_ON_STEP_ID_MAP[actionId];
+        const stepLabel = FOLLOW_ON_STEP_LABEL_MAP[actionId];
+
+        const dynamicConfig: IWizardStepConfig = {
+          id: stepId,
+          label: stepLabel,
+          canAdvance: () => {
+            if (stepId === 'followon-send-email') {
+              return emailToRef.current.trim() !== '' &&
+                emailSubjectRef.current.trim() !== '' &&
+                emailBodyRef.current.trim() !== '';
+            }
+            if (stepId === 'followon-create-project') {
+              return projectFormValidRef.current;
+            }
+            return true; // work-on-analysis has no hard requirement
+          },
+          footerActions: (
+            <Button
+              appearance="subtle"
+              onClick={() => handleSkipAction(actionId)}
+            >
+              Skip
+            </Button>
+          ),
+          renderContent: () => {
+            if (stepId === 'followon-send-email') {
+              return (
+                <SummarizeSendEmailStep
+                  emailTo={emailToRef.current}
+                  onEmailToChange={setEmailTo}
+                  emailSubject={emailSubjectRef.current}
+                  onEmailSubjectChange={setEmailSubject}
+                  emailBody={emailBodyRef.current}
+                  onEmailBodyChange={setEmailBody}
+                  onSearchUsers={handleSearchUsers}
+                  includeShortSummary={includeShortSummaryRef.current}
+                  onIncludeShortSummaryChange={setIncludeShortSummary}
+                />
+              );
+            }
+            if (stepId === 'followon-create-project') {
+              return (
+                <SummarizeCreateProjectStep
+                  webApi={webApi!}
+                  uploadedFiles={fileStateRef.current.uploadedFiles}
+                  onValidChange={setProjectFormValid}
+                  onFormValues={setProjectFormValues}
+                  initialFormValues={projectFormValuesRef.current}
+                />
+              );
+            }
+            if (stepId === 'followon-work-on-analysis') {
+              return (
+                <SummarizeAnalysisStep
+                  webApi={webApi!}
+                />
+              );
+            }
+            return <Text size={300}>{stepLabel}</Text>;
+          },
+        };
+
+        shellRef.current?.addDynamicStep(dynamicConfig, FOLLOW_ON_CANONICAL_ORDER);
+      }
+    });
+
+    // Remove deselected follow-on steps
+    prev.forEach((actionId) => {
+      if (!next.includes(actionId)) {
+        shellRef.current?.removeDynamicStep(FOLLOW_ON_STEP_ID_MAP[actionId]);
+      }
+    });
+
+    prevSelectedActionsRef.current = next;
+  }, [selectedActions, webApi, handleSearchUsers, handleSkipAction]);
+
+  // ── Pre-fill email fields when send-email is selected ─────────────────
+  React.useEffect(() => {
+    if (
+      selectedActions.includes('send-email') &&
+      summarizeResult &&
+      !emailSubject
+    ) {
+      setEmailSubject(buildSummaryEmailSubject());
+      setEmailBody(
+        buildSummaryEmailBody(
+          summarizeResult.summary,
+          summarizeResult.shortSummary,
+          includeShortSummary,
+        )
+      );
+    }
+  }, [selectedActions, summarizeResult, emailSubject, includeShortSummary]);
+
+  // ── Update email body when short summary toggle changes ───────────────
+  React.useEffect(() => {
+    if (selectedActions.includes('send-email') && summarizeResult) {
+      setEmailBody(
+        buildSummaryEmailBody(
+          summarizeResult.summary,
+          summarizeResult.shortSummary,
+          includeShortSummary,
+        )
+      );
+    }
+  // Only re-run when the toggle changes, not on every render
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [includeShortSummary]);
+
   // ── handleFinish ──────────────────────────────────────────────────────
   const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig> => {
-    const currentResult = summarizeResultRef.current;
-    const currentActions = selectedActionsRef.current;
+    const currentSelectedActions = selectedActionsRef.current;
+    const currentEmailTo = emailToRef.current;
+    const currentEmailSubject = emailSubjectRef.current;
+    const currentEmailBody = emailBodyRef.current;
+    const currentProjectFormValues = projectFormValuesRef.current;
 
-    // Log the selected actions for now — actual integration will be done in follow-up tasks
-    console.info('[SummarizeFilesDialog] Finish with actions:', currentActions);
-    if (currentResult) {
-      console.info('[SummarizeFilesDialog] Summary result available, confidence:', currentResult.confidence);
+    const completedActions: string[] = [];
+    const warnings: string[] = [];
+    let createdProjectId: string | undefined;
+    let createdProjectName: string | undefined;
+
+    // ── Send Email via BFF ────────────────────────────────────────────
+    if (currentSelectedActions.includes('send-email') && currentEmailTo.trim()) {
+      try {
+        const bffBaseUrl = getBffBaseUrl();
+        const response = await authenticatedFetch(
+          `${bffBaseUrl}/api/communications/send`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              to: currentEmailTo.split(/[;,]/).map((a: string) => a.trim()).filter(Boolean),
+              subject: currentEmailSubject,
+              body: currentEmailBody,
+              bodyFormat: 'Text',
+            }),
+          }
+        );
+
+        if (response.ok) {
+          completedActions.push('Email sent');
+        } else {
+          const errorText = await response.text().catch(() => 'Unknown error');
+          warnings.push(`Email failed: ${errorText}`);
+        }
+      } catch (err) {
+        warnings.push(`Email failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      }
     }
 
-    const actionLabels = currentActions.length > 0
-      ? currentActions.join(', ')
-      : 'None selected';
+    // ── Create Project via Dataverse ──────────────────────────────────
+    if (currentSelectedActions.includes('create-project') && webApi) {
+      try {
+        const service = new ProjectService(webApi);
+        const result = await service.createProject(currentProjectFormValues);
+
+        if (result.success) {
+          completedActions.push(`Project "${result.projectName}" created`);
+          createdProjectId = result.projectId;
+          createdProjectName = result.projectName;
+        } else {
+          warnings.push(`Project creation failed: ${result.errorMessage}`);
+        }
+      } catch (err) {
+        warnings.push(`Project creation failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      }
+    }
+
+    // ── Work on Analysis — handled inline (user clicks card) ─────────
+    if (currentSelectedActions.includes('work-on-analysis')) {
+      completedActions.push('Analysis step viewed');
+    }
+
+    const actionSummary = completedActions.length > 0
+      ? completedActions.join(', ')
+      : 'No follow-on actions';
+
+    const viewProject = createdProjectId ? () => {
+      navigateToEntity({
+        action: 'openRecord',
+        entityName: 'sprk_project',
+        entityId: createdProjectId!,
+      });
+      onClose();
+    } : undefined;
 
     return {
       icon: (
@@ -239,19 +493,31 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
           style={{ color: tokens.colorPaletteGreenForeground1 }}
         />
       ),
-      title: 'Summary Complete',
+      title: warnings.length > 0 ? 'Summary Complete (with warnings)' : 'Summary Complete',
       body: (
         <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-          Your file summary is ready. Selected follow-up actions: {actionLabels}.
+          Your file summary is ready. {actionSummary}.
         </Text>
       ),
       actions: (
-        <Button appearance="secondary" onClick={onClose}>
-          Close
-        </Button>
+        <>
+          {viewProject && (
+            <Button
+              appearance="primary"
+              onClick={viewProject}
+              aria-label={`View project: ${createdProjectName}`}
+            >
+              View Project
+            </Button>
+          )}
+          <Button appearance="secondary" onClick={onClose}>
+            Close
+          </Button>
+        </>
       ),
+      warnings,
     };
-  }, [onClose]);
+  }, [webApi, onClose]);
 
   // ── Step configurations ───────────────────────────────────────────────
 
@@ -314,7 +580,6 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
           // Auto-trigger analysis on first render of this step
           if (!analysisAttemptedRef.current && summarizeStatus === 'idle') {
             analysisAttemptedRef.current = true;
-            // Use microtask to avoid setState during render
             Promise.resolve().then(() => runAnalysis());
           }
 
@@ -334,13 +599,13 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
         id: 'next-steps',
         label: 'Next Steps',
         canAdvance: () => true,
-        isEarlyFinish: () => true,
+        isEarlyFinish: () => selectedActions.length === 0,
         renderContent: () => (
           <SummaryNextStepsStep
             selectedActions={selectedActions}
             onSelectionChange={setSelectedActions}
-            includeFullSummary={includeFullSummary}
-            onIncludeFullSummaryChange={setIncludeFullSummary}
+            includeShortSummary={includeShortSummary}
+            onIncludeShortSummaryChange={setIncludeShortSummary}
           />
         ),
       },
@@ -352,7 +617,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       summarizeResult,
       summarizeError,
       selectedActions,
-      includeFullSummary,
+      includeShortSummary,
       styles,
       handleFilesAccepted,
       handleValidationErrors,
@@ -366,6 +631,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
 
   return (
     <WizardShell
+      ref={shellRef}
       open={open}
       title="Summarize New File(s)"
       ariaLabel="Summarize New File(s)"
