@@ -1,0 +1,49 @@
+<task id="ECS-032" project="Email Communication Solution R2">
+  <metadata>
+    <title>Update sprk_document Entity Schema (Communication Lookup)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>4 - Email-to-Document Migration (Phase E)</phase>
+    <tags>dataverse</tags>
+    <dependencies>ECS-027</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Add sprk_communication lookup field to sprk_document entity (links archived .eml documents
+    to communication records). Remove sprk_email lookup field (pre-launch clean cutover).
+    Update forms and views to show new lookup.
+  </prompt>
+
+  <role>Dataverse solution developer</role>
+
+  <goal>
+    sprk_document entity has sprk_communication lookup instead of sprk_email.
+    Forms and views updated.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>projects/email-communication-solution-r2/design-communication-accounts.md</file>
+      <file>.claude/constraints/data.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Add Lookup">Add sprk_communication lookup to sprk_document entity.</step>
+    <step order="2" name="Remove Lookup">Remove sprk_email lookup (pre-launch, clean cutover).</step>
+    <step order="3" name="Update Forms">Show sprk_communication on document forms where sprk_email was.</step>
+    <step order="4" name="Update Views">Update email-related views to use new lookup.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">Dataverse schema changes documentation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_communication lookup exists on sprk_document</criterion>
+    <criterion testable="true">sprk_email lookup removed from sprk_document</criterion>
+    <criterion testable="true">Forms display new lookup</criterion>
+  </acceptance-criteria>
+</task>

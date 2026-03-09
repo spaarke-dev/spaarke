@@ -1,0 +1,62 @@
+<task id="ECS-036" project="Email Communication Solution R2">
+  <metadata>
+    <title>Rename EmailTelemetry and Consolidate Configuration</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>4 - Email-to-Document Migration (Phase E)</phase>
+    <tags>bff-api, cleanup</tags>
+    <dependencies>ECS-035</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Rename EmailTelemetry to CommunicationTelemetry, update all metric/event names.
+    Consolidate any remaining email-specific configuration into CommunicationOptions.
+    Delete Dataverse entities: sprk_emailprocessingrule, sprk_approvedsender from solution.
+    Document Server-Side Sync retirement steps.
+  </prompt>
+
+  <role>Senior .NET developer</role>
+
+  <goal>
+    Telemetry renamed, config consolidated, Dataverse entities marked for deletion,
+    SSS retirement documented.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Rename Telemetry">
+      Rename EmailTelemetry.cs → CommunicationTelemetry.cs.
+      Update event/metric names. Update all references.
+    </step>
+    <step order="2" name="Consolidate Config">
+      Merge remaining email config into CommunicationOptions.
+    </step>
+    <step order="3" name="Mark Entities for Deletion">
+      Document: sprk_emailprocessingrule and sprk_approvedsender entities to remove from solution.
+      Document: Dataverse Service Endpoint (email webhook) to delete.
+    </step>
+    <step order="4" name="Document SSS Retirement">
+      Add retirement steps to deployment guide: disable SSS mailbox configuration.
+    </step>
+    <step order="5" name="Build and Test">dotnet build and dotnet test.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Telemetry/CommunicationTelemetry.cs</output>
+    <output type="docs">docs/guides/COMMUNICATION-DEPLOYMENT-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Telemetry renamed with updated event names</criterion>
+    <criterion testable="true">No references to EmailTelemetry remain</criterion>
+    <criterion testable="true">Retirement steps documented</criterion>
+    <criterion testable="true">dotnet build passes</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,93 @@
+<task id="ECS-033" project="Email Communication Solution R2">
+  <metadata>
+    <title>Integrate Document Archival into Inbound Pipeline</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>4 - Email-to-Document Migration (Phase E)</phase>
+    <tags>bff-api, graph</tags>
+    <dependencies>ECS-030, ECS-031, ECS-032</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Integrate document archival into IncomingCommunicationProcessor. After creating the
+    sprk_communication record: check sprk_ArchiveIncomingOptIn, convert Graph message to .eml
+    via GraphMessageToEmlConverter, upload to SPE, create sprk_document with sprk_communication
+    lookup, process attachments as child documents via GraphAttachmentAdapter + AttachmentFilterService,
+    enqueue AI analysis. Document archival is best-effort (non-fatal).
+  </prompt>
+
+  <role>Senior .NET developer</role>
+
+  <goal>
+    Inbound emails produce archived .eml documents in SPE with child attachment documents,
+    all linked to sprk_communication records. AI analysis enqueued for each.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>projects/email-communication-solution-r2/design-communication-accounts.md</file>
+      <file>.claude/adr/ADR-005-flat-storage.md</file>
+      <file>.claude/adr/ADR-007-spefilestore-facade.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-005">Flat storage in SPE</constraint>
+    <constraint source="ADR-007">All SPE operations via SpeFileStore</constraint>
+    <constraint source="project">Best-effort archival — failures don't fail the communication record</constraint>
+    <constraint source="project">Check sprk_ArchiveIncomingOptIn before archiving</constraint>
+    <constraint source="project">SPE path: /communications/{communicationId:N}/{filename}.eml</constraint>
+    <constraint source="project">Individual attachment failures isolated</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Check Archive Opt-In">
+      Read sprk_ArchiveIncomingOptIn from communication account. Skip if false.
+    </step>
+    <step order="2" name="Convert to EML">
+      Call GraphMessageToEmlConverter.ConvertAsync(graphMessage).
+    </step>
+    <step order="3" name="Upload EML to SPE">
+      Upload via SpeFileStore to /communications/{communicationId:N}/{filename}.eml.
+    </step>
+    <step order="4" name="Create Document Record">
+      Create sprk_document with sprk_communication lookup, sprk_documenttype = Email,
+      sprk_isemailarchive = true, email metadata fields.
+    </step>
+    <step order="5" name="Process Attachments">
+      Map Graph FileAttachments via GraphAttachmentAdapter.
+      Filter via AttachmentFilterService.
+      Upload each to SPE, create child sprk_document records.
+    </step>
+    <step order="6" name="Enqueue AI Analysis">
+      Enqueue AppOnlyDocumentAnalysis job for .eml and each attachment.
+    </step>
+    <step order="7" name="Error Handling">
+      Wrap archival in try/catch. Log failures but don't throw — communication record is critical path.
+    </step>
+    <step order="8" name="Write Tests">
+      Test full pipeline, opt-out scenario, archival failure isolation.
+    </step>
+    <step order="9" name="Build and Test">dotnet build and dotnet test.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Inbound email → .eml uploaded to SPE → sprk_document with sprk_communication lookup</criterion>
+    <criterion testable="true">Attachments processed as child documents</criterion>
+    <criterion testable="true">AI analysis enqueued for .eml and attachments</criterion>
+    <criterion testable="true">Archival opt-out respected (sprk_ArchiveIncomingOptIn = No → skip)</criterion>
+    <criterion testable="true">Archival failure does not fail communication record creation</criterion>
+    <criterion testable="true">Individual attachment failures isolated</criterion>
+    <criterion testable="true">All tests pass</criterion>
+  </acceptance-criteria>
+</task>

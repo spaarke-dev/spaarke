@@ -1,0 +1,62 @@
+<task id="ECS-037" project="Email Communication Solution R2">
+  <metadata>
+    <title>End-to-End Document Archival Test (Inbound + Outbound)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>4 - Email-to-Document Migration (Phase E)</phase>
+    <tags>testing, deploy</tags>
+    <dependencies>ECS-036</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Deploy and test the complete document archival pipeline for both inbound and outbound.
+    Verify: .eml archived to SPE, sprk_document linked to sprk_communication, child attachment
+    documents created, AI analysis enqueued. Verify no Dataverse email activities created.
+    Verify legacy components fully removed.
+  </prompt>
+
+  <role>QA engineer</role>
+
+  <goal>Complete archival pipeline verified. SSS retirement confirmed. Test report created.</goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Deploy">Build and deploy BFF.</step>
+    <step order="2" name="Test Inbound Archival">
+      Send email to monitored mailbox. Verify: communication record → .eml in SPE →
+      sprk_document with lookup → child attachments → AI analysis enqueued.
+    </step>
+    <step order="3" name="Test Outbound Archival">
+      Send email from Communication form. Verify same archival chain.
+    </step>
+    <step order="4" name="Test Archive Opt-Out">
+      Set sprk_ArchiveIncomingOptIn = No. Verify no archival.
+    </step>
+    <step order="5" name="Verify No SSS Activity">
+      Confirm no Dataverse email activity records created.
+    </step>
+    <step order="6" name="Verify Legacy Cleanup">
+      Grep for deleted class names. Confirm no references.
+    </step>
+    <step order="7" name="Document">Create test report.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r2/notes/research/phase-e-e2e-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Inbound archival produces .eml + child docs + AI jobs</criterion>
+    <criterion testable="true">Outbound archival produces .eml + child docs + AI jobs</criterion>
+    <criterion testable="true">Archive opt-out works correctly</criterion>
+    <criterion testable="true">No Dataverse email activities created</criterion>
+    <criterion testable="true">No references to deleted legacy classes</criterion>
+  </acceptance-criteria>
+</task>

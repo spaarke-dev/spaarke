@@ -1,0 +1,63 @@
+<task id="ECS-034" project="Email Communication Solution R2">
+  <metadata>
+    <title>Enhance Outbound Email Archival</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>4 - Email-to-Document Migration (Phase E)</phase>
+    <tags>bff-api</tags>
+    <dependencies>ECS-032</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Enhance CommunicationService.SendAsync() outbound archival: check sprk_ArchiveOutgoingOptIn,
+    link existing .eml archive to sprk_communication via new lookup, process outbound attachments
+    as child documents, enqueue AI analysis. Best-effort — send is critical path.
+  </prompt>
+
+  <role>Senior .NET developer</role>
+
+  <goal>
+    Outbound emails produce archived .eml documents linked to sprk_communication
+    with child attachment documents and AI analysis enqueued.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/adr/ADR-005-flat-storage.md</file>
+      <file>.claude/adr/ADR-007-spefilestore-facade.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Check Archive Opt-In">Read sprk_ArchiveOutgoingOptIn. Skip if false.</step>
+    <step order="2" name="Link Document to Communication">
+      Set sprk_communication lookup on existing .eml document record.
+    </step>
+    <step order="3" name="Process Outbound Attachments">
+      Create child sprk_document records for outbound email attachments.
+    </step>
+    <step order="4" name="Enqueue AI Analysis">
+      Enqueue for .eml and each attachment.
+    </step>
+    <step order="5" name="Write Tests">Test outbound archival, opt-out, failure isolation.</step>
+    <step order="6" name="Build and Test">dotnet build and dotnet test.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Outbound .eml linked to sprk_communication via lookup</criterion>
+    <criterion testable="true">Child attachment documents created</criterion>
+    <criterion testable="true">AI analysis enqueued</criterion>
+    <criterion testable="true">Archive opt-out respected</criterion>
+    <criterion testable="true">Send still works if archival fails (best-effort)</criterion>
+    <criterion testable="true">All tests pass</criterion>
+  </acceptance-criteria>
+</task>

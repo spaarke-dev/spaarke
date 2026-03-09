@@ -1,0 +1,83 @@
+<task id="ECS-003" project="Email Communication Solution R2">
+  <metadata>
+    <title>Complete ApprovedSenderValidator Migration to sprk_communicationaccount</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1 - Communication Account Entity (Phase A)</phase>
+    <tags>bff-api, auth</tags>
+    <dependencies>ECS-001</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Ensure ApprovedSenderValidator queries sprk_communicationaccount (not sprk_approvedsender).
+    Rename QueryApprovedSendersAsync to QueryCommunicationAccountsAsync. Update filter to
+    sprk_sendenabled eq true AND statecode eq 0. Retain appsettings.json as bootstrap fallback.
+    Update Redis cache keys. Update all tests.
+  </prompt>
+
+  <role>Senior .NET developer familiar with Minimal APIs and Dataverse</role>
+
+  <goal>
+    ApprovedSenderValidator reads from sprk_communicationaccount with correct field mapping,
+    falls back to appsettings.json, and all existing tests pass with updated assertions.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/adr/ADR-009-redis-first-caching.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-009">Use Redis for sender cache with short TTL</constraint>
+    <constraint source="ADR-010">Register concretes by default</constraint>
+    <constraint source="project">Retain appsettings.json fallback for bootstrap</constraint>
+    <constraint source="project">Multi-tenant: no hardcoded mailbox addresses</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Audit Current Implementation">
+      Read ApprovedSenderValidator.cs and IDataverseService query method.
+      Identify current entity name, field mappings, cache strategy.
+    </step>
+    <step order="2" name="Update Query Method">
+      Rename to QueryCommunicationAccountsAsync.
+      Update OData filter: sprk_sendenabled eq true AND statecode eq 0.
+      Map: sprk_emailaddress → Email, sprk_displayname → DisplayName, sprk_isdefaultsender → IsDefault.
+    </step>
+    <step order="3" name="Update Cache Keys">
+      Update Redis cache key prefix from approved-senders to communication-accounts.
+    </step>
+    <step order="4" name="Verify Fallback">
+      Ensure appsettings.json ApprovedSenders section still works as fallback.
+      Merge priority: Dataverse records take precedence over config.
+    </step>
+    <step order="5" name="Update Tests">
+      Update all tests referencing old method names and entity names.
+      Add test for fallback scenario (no Dataverse records → uses config).
+    </step>
+    <step order="6" name="Build and Test">
+      Run dotnet build and dotnet test to verify all passes.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ApprovedSenderValidator.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Query uses sprk_communicationaccount entity name</criterion>
+    <criterion testable="true">Method renamed to QueryCommunicationAccountsAsync</criterion>
+    <criterion testable="true">Filter includes sprk_sendenabled eq true AND statecode eq 0</criterion>
+    <criterion testable="true">appsettings.json fallback works when no Dataverse records exist</criterion>
+    <criterion testable="true">All existing tests pass</criterion>
+    <criterion testable="true">dotnet build succeeds with no warnings</criterion>
+  </acceptance-criteria>
+</task>

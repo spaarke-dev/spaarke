@@ -1,0 +1,76 @@
+<task id="ECS-024" project="Email Communication Solution R2">
+  <metadata>
+    <title>Implement Association Resolution for Incoming Email</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>3 - Inbound Shared Mailbox Monitoring (Phase C)</phase>
+    <tags>bff-api</tags>
+    <dependencies>ECS-023</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Implement the association resolution cascade for incoming emails. Priority:
+    (1) Email thread via In-Reply-To header → find existing sprk_communication with matching graphMessageId,
+    (2) Sender email → match to contact.emailaddress1 or account email,
+    (3) Subject line patterns → regex match matter numbers (MAT-\d+),
+    (4) Mailbox context → purpose-specific associations.
+    Flag unresolved as sprk_associationstatus = Pending Review.
+    Simple binary matching — no AI integration.
+  </prompt>
+
+  <role>Senior .NET developer</role>
+
+  <goal>
+    Incoming emails automatically linked to entities via priority cascade.
+    Unresolved associations flagged for manual review.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review Existing Association Service">
+      Read EmailAssociationService.cs — check if reusable.
+    </step>
+    <step order="2" name="Implement Thread Matching">
+      Check In-Reply-To/References headers → find existing communication record.
+      Copy associations from parent communication.
+    </step>
+    <step order="3" name="Implement Sender Matching">
+      Query Dataverse for contact/account matching sender email.
+    </step>
+    <step order="4" name="Implement Subject Pattern Matching">
+      Regex match matter numbers, project references in subject line.
+    </step>
+    <step order="5" name="Flag Unresolved">
+      Set sprk_associationstatus = Pending Review for no-match cases.
+    </step>
+    <step order="6" name="Integrate into Processor">
+      Call association resolution from IncomingCommunicationProcessor after record creation.
+    </step>
+    <step order="7" name="Write Tests">
+      Test each resolution level and the cascade priority.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ (association resolver)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Thread matching resolves via In-Reply-To header</criterion>
+    <criterion testable="true">Sender matching links to known contacts/accounts</criterion>
+    <criterion testable="true">Subject pattern matching catches matter numbers</criterion>
+    <criterion testable="true">Unresolved flagged as Pending Review</criterion>
+    <criterion testable="true">Priority cascade: thread > sender > subject > context</criterion>
+    <criterion testable="true">All tests pass</criterion>
+  </acceptance-criteria>
+</task>

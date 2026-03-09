@@ -1,0 +1,63 @@
+<task id="ECS-005" project="Email Communication Solution R2">
+  <metadata>
+    <title>End-to-End Outbound Shared Mailbox Test</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1 - Communication Account Entity (Phase A)</phase>
+    <tags>testing, bff-api, deploy</tags>
+    <dependencies>ECS-003</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Deploy updated BFF and test outbound email sending end-to-end using
+    sprk_communicationaccount as the config source. Verify the full send pipeline
+    works: Communication form → BFF → Graph sendMail → sprk_communication record.
+  </prompt>
+
+  <role>QA engineer performing integration testing</role>
+
+  <goal>
+    Verified outbound shared mailbox send works with Dataverse-managed accounts.
+    Test report documenting results.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Build and Deploy">
+      Build BFF API. Deploy to dev environment.
+    </step>
+    <step order="2" name="Verify Account Config">
+      Confirm sprk_communicationaccount record exists for test mailbox.
+      Confirm sprk_sendenabled = true.
+    </step>
+    <step order="3" name="Send Test Email">
+      Use Communication form or direct API call to send email.
+      Verify email received by recipient.
+    </step>
+    <step order="4" name="Verify Records">
+      Check sprk_communication record created with correct fields.
+      Check config was sourced from Dataverse (not just appsettings.json).
+    </step>
+    <step order="5" name="Document Results">
+      Create test report in notes/research/.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r2/notes/research/phase-a-e2e-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Email sent successfully from shared mailbox</criterion>
+    <criterion testable="true">sprk_communication record created in Dataverse</criterion>
+    <criterion testable="true">Config sourced from sprk_communicationaccount entity</criterion>
+  </acceptance-criteria>
+</task>

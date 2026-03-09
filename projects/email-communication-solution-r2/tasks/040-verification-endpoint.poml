@@ -1,0 +1,74 @@
+<task id="ECS-040" project="Email Communication Solution R2">
+  <metadata>
+    <title>Create Mailbox Verification Endpoint</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>5 - Verification and Admin UX (Phase D)</phase>
+    <tags>bff-api</tags>
+    <dependencies>ECS-037</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Create POST /api/communications/accounts/{id}/verify endpoint that tests connectivity
+    and permissions for a communication account. Test send access (try sending test email
+    or listing mailbox) and test read access (try reading inbox). Update sprk_verificationstatus,
+    sprk_lastverified, and sprk_verificationmessage on the account record.
+  </prompt>
+
+  <role>Senior .NET developer</role>
+
+  <goal>
+    Verification endpoint confirms mailbox access works and updates Dataverse record
+    with verification results.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problem-details.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-008">Use endpoint filter for authorization</constraint>
+    <constraint source="ADR-019">Return ProblemDetails for errors</constraint>
+    <constraint source="project">Update Dataverse fields with result</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Create Endpoint">
+      POST /api/communications/accounts/{id}/verify with authorization filter.
+    </step>
+    <step order="2" name="Implement Verification Logic">
+      If send-enabled: try Graph mailbox access check.
+      If receive-enabled: try reading inbox folders.
+      Capture success/failure and error details.
+    </step>
+    <step order="3" name="Update Dataverse">
+      Set sprk_verificationstatus, sprk_lastverified, sprk_verificationmessage.
+    </step>
+    <step order="4" name="Write Tests">
+      Test success, Graph failure, permission denied, account not found.
+    </step>
+    <step order="5" name="Build and Test">dotnet build and dotnet test.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Endpoint tests mailbox connectivity</criterion>
+    <criterion testable="true">Verification status updated in Dataverse</criterion>
+    <criterion testable="true">ProblemDetails returned on failure</criterion>
+    <criterion testable="true">All tests pass</criterion>
+  </acceptance-criteria>
+</task>

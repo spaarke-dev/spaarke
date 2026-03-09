@@ -1,0 +1,66 @@
+<task id="ECS-012" project="Email Communication Solution R2">
+  <metadata>
+    <title>Communication Form Send Mode UX</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2 - Individual User Outbound (Phase B)</phase>
+    <tags>webresource, frontend</tags>
+    <dependencies>ECS-011</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Update the Communication form web resource to support send mode selection.
+    Add dropdown/toggle for "Send from" with options: shared mailbox (dropdown of
+    enabled accounts) and "My mailbox" (sends as authenticated user). Must use
+    @spaarke/auth for BFF API calls.
+  </prompt>
+
+  <role>Frontend developer with Dataverse web resource experience</role>
+
+  <goal>
+    Communication form allows user to choose send mode (shared or individual)
+    before sending. Uses @spaarke/auth for authenticated API calls to BFF.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="project">Must use @spaarke/auth for all API calls</constraint>
+    <constraint source="ADR-021">Use Fluent UI v9 components if applicable</constraint>
+    <constraint source="project">Multi-tenant: fetch available accounts from BFF, not hardcoded</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Find Web Resource">
+      Locate the Communication send web resource (sprk_communication_send.js or similar).
+    </step>
+    <step order="2" name="Add Send Mode UI">
+      Add dropdown/toggle for send mode selection.
+      Fetch send-enabled accounts from BFF API.
+    </step>
+    <step order="3" name="Update API Call">
+      Pass sendMode in request body. Include bearer token via authenticatedFetch.
+    </step>
+    <step order="4" name="Test">
+      Verify both modes work in form context.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">Web resource file(s) for Communication form</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">User can select "Send as me" or shared mailbox</criterion>
+    <criterion testable="true">Shared mailbox dropdown populated from BFF API</criterion>
+    <criterion testable="true">@spaarke/auth used for API authentication</criterion>
+    <criterion testable="true">SendMode correctly passed in request payload</criterion>
+  </acceptance-criteria>
+</task>

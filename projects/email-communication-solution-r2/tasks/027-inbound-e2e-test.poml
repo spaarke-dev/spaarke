@@ -1,0 +1,59 @@
+<task id="ECS-027" project="Email Communication Solution R2">
+  <metadata>
+    <title>End-to-End Inbound Monitoring Test</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>3 - Inbound Shared Mailbox Monitoring (Phase C)</phase>
+    <tags>testing, deploy</tags>
+    <dependencies>ECS-025, ECS-024, ECS-026</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Deploy and test inbound monitoring end-to-end. Send email to monitored mailbox →
+    verify webhook fires → communication record created → associations resolved →
+    backup polling catches missed messages.
+  </prompt>
+
+  <role>QA engineer</role>
+
+  <goal>Full inbound pipeline verified working. Test report created.</goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Deploy">Build and deploy BFF with Graph subscription support.</step>
+    <step order="2" name="Verify Subscription">
+      Check GraphSubscriptionManager created subscription for test mailbox.
+    </step>
+    <step order="3" name="Test Webhook">
+      Send email to monitored mailbox. Verify webhook fires and communication record created.
+    </step>
+    <step order="4" name="Test Association">
+      Send from known contact. Verify auto-linked.
+    </step>
+    <step order="5" name="Test Backup Polling">
+      Verify polling catches messages if webhook missed.
+    </step>
+    <step order="6" name="Test Deduplication">
+      Verify same message via webhook and polling creates only one record.
+    </step>
+    <step order="7" name="Document">Create test report.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r2/notes/research/phase-c-e2e-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Inbound email creates communication record within 60 seconds</criterion>
+    <criterion testable="true">Association resolution links to known entities</criterion>
+    <criterion testable="true">Backup polling catches missed messages within 15 minutes</criterion>
+    <criterion testable="true">Deduplication prevents double records</criterion>
+  </acceptance-criteria>
+</task>

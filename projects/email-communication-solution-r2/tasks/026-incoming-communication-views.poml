@@ -1,0 +1,41 @@
+<task id="ECS-026" project="Email Communication Solution R2">
+  <metadata>
+    <title>Create Incoming Communication Dataverse Views</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>3 - Inbound Shared Mailbox Monitoring (Phase C)</phase>
+    <tags>dataverse</tags>
+    <dependencies>ECS-023</dependencies>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    Create Dataverse views for incoming communications: All Incoming, Pending Review
+    (unresolved associations), By Mailbox, Recent (last 7 days).
+  </prompt>
+
+  <role>Dataverse solution developer</role>
+
+  <goal>Views created for admin visibility into incoming email processing.</goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/constraints/data.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create Views">
+      Create views filtering on sprk_direction = Incoming, association status, mailbox.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="docs">Dataverse view definitions</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Views filter by direction, association status, and mailbox</criterion>
+  </acceptance-criteria>
+</task>

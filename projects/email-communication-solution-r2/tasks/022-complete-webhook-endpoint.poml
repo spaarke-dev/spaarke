@@ -1,0 +1,82 @@
+<task id="ECS-022" project="Email Communication Solution R2">
+  <metadata>
+    <title>Complete Communication Webhook Endpoint</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>3 - Inbound Shared Mailbox Monitoring (Phase C)</phase>
+    <tags>bff-api</tags>
+    <dependencies>ECS-020</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Complete the POST /api/communications/incoming-webhook endpoint that receives
+    Graph subscription notifications. Must handle subscription validation handshake,
+    validate clientState, extract message metadata, and enqueue ProcessIncomingCommunication
+    job to Service Bus. Response must be less than 3 seconds.
+  </prompt>
+
+  <role>Senior .NET developer familiar with Microsoft Graph webhooks</role>
+
+  <goal>
+    Webhook endpoint correctly handles Graph notification lifecycle (validation + notifications),
+    enqueues jobs for processing, and responds within 3 seconds.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problem-details.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="Graph API">Must return 202 within 3 seconds</constraint>
+    <constraint source="Graph API">Must handle validation token handshake (return validationToken)</constraint>
+    <constraint source="ADR-004">Enqueue job with idempotency key: Communication:{graphMessageId}:Process</constraint>
+    <constraint source="ADR-019">Return ProblemDetails for errors</constraint>
+    <constraint source="project">Validate clientState matches configured webhook secret</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Review Existing Endpoint">
+      Read CommunicationEndpoints.cs for existing webhook route.
+    </step>
+    <step order="2" name="Implement Validation Handshake">
+      If validationToken present, return it as text/plain (subscription validation).
+    </step>
+    <step order="3" name="Implement Notification Processing">
+      Validate clientState. Extract resource URL, mailbox, messageId.
+      Enqueue ProcessIncomingCommunication job to Service Bus.
+    </step>
+    <step order="4" name="Ensure Fast Response">
+      Return 202 immediately after enqueue. No synchronous processing.
+    </step>
+    <step order="5" name="Write Tests">
+      Test validation handshake, valid notification, invalid clientState, malformed payload.
+    </step>
+    <step order="6" name="Build and Test">
+      dotnet build and dotnet test.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Validation handshake returns validationToken correctly</criterion>
+    <criterion testable="true">Notifications enqueue ProcessIncomingCommunication job</criterion>
+    <criterion testable="true">ClientState validated against config</criterion>
+    <criterion testable="true">Response within 3 seconds (no synchronous processing)</criterion>
+    <criterion testable="true">Invalid clientState returns 401</criterion>
+    <criterion testable="true">All tests pass</criterion>
+  </acceptance-criteria>
+</task>

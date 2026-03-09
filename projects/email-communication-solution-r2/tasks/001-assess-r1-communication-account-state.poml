@@ -1,0 +1,70 @@
+<task id="ECS-001" project="Email Communication Solution R2">
+  <metadata>
+    <title>Assess R1 Communication Account Implementation State</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1 - Communication Account Entity (Phase A)</phase>
+    <tags>bff-api, assessment, dataverse</tags>
+    <dependencies>none</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Audit all existing R1 communication account code to determine what's complete,
+    what needs modification, and what gaps remain vs the R2 spec. This assessment
+    drives all subsequent Phase A tasks.
+  </prompt>
+
+  <role>Senior .NET developer performing code audit</role>
+
+  <goal>
+    A comprehensive gap analysis document in notes/research/r1-assessment-phase-a.md
+    listing: complete components, components needing modification, missing components,
+    and specific code changes needed for each.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>projects/email-communication-solution-r2/plan.md</file>
+      <file>projects/email-communication-solution-r2/design-communication-accounts.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>docs/data-model/sprk_communicationaccount.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read Existing Services">
+      Read and analyze:
+      - Services/Communication/CommunicationAccountService.cs
+      - Services/Communication/ApprovedSenderValidator.cs
+      - Services/Communication/CommunicationService.cs (outbound send)
+      - Api/CommunicationEndpoints.cs
+      - Infrastructure/DI/CommunicationModule.cs
+      - Configuration/CommunicationOptions.cs
+      - All models in Services/Communication/Models/
+    </step>
+    <step order="2" name="Compare with R2 Spec">
+      For each component, compare current implementation against R2 spec requirements.
+      Document: what works as-is, what needs changes, what's missing.
+    </step>
+    <step order="3" name="Check Dataverse State">
+      Review existing forms/views for sprk_communicationaccount entity.
+      Check if admin forms cover all field groups from spec.
+    </step>
+    <step order="4" name="Write Assessment">
+      Create notes/research/r1-assessment-phase-a.md with findings.
+      Include specific file paths and line numbers for changes needed.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r2/notes/research/r1-assessment-phase-a.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Assessment document lists every R1 file related to Phase A</criterion>
+    <criterion testable="true">Each component has clear status: complete / needs-modification / missing</criterion>
+    <criterion testable="true">Specific changes needed are documented with file paths</criterion>
+  </acceptance-criteria>
+</task>

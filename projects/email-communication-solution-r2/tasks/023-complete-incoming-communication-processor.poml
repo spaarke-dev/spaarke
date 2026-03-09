@@ -1,0 +1,83 @@
+<task id="ECS-023" project="Email Communication Solution R2">
+  <metadata>
+    <title>Complete Incoming Communication Processor</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>3 - Inbound Shared Mailbox Monitoring (Phase C)</phase>
+    <tags>bff-api, graph, jobs</tags>
+    <dependencies>ECS-022</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Complete IncomingCommunicationProcessor (or IncomingCommunicationJobHandler) to process
+    incoming emails. Fetch full message via Graph GET /users/{mailbox}/messages/{id}?$expand=attachments.
+    Create sprk_communication record with Direction = Incoming. Implement deduplication via
+    Redis idempotency key and sprk_graphmessageid uniqueness check.
+  </prompt>
+
+  <role>Senior .NET developer familiar with Microsoft Graph and Service Bus job processing</role>
+
+  <goal>
+    Incoming emails are processed into sprk_communication records with correct field mapping,
+    deduplication prevents duplicate records, and all tests pass.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-009-redis-first-caching.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-004">Idempotent handler; IdempotencyKey: Communication:{graphMessageId}:Process</constraint>
+    <constraint source="ADR-009">Redis processing lock 5-min TTL; idempotency key 7-day retention</constraint>
+    <constraint source="project">Use Graph $expand=attachments for single API call</constraint>
+    <constraint source="project">sprk_graphmessageid must be unique check before creating record</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Review Existing Handler">
+      Read IncomingCommunicationProcessor.cs and IncomingCommunicationJobHandler.cs.
+    </step>
+    <step order="2" name="Implement Message Fetch">
+      GET /users/{mailbox}/messages/{id}?$expand=attachments via GraphClientFactory.ForApp().
+    </step>
+    <step order="3" name="Implement Deduplication">
+      Check Redis idempotency key. Check sprk_graphmessageid uniqueness in Dataverse.
+      Acquire 5-minute processing lock.
+    </step>
+    <step order="4" name="Create Communication Record">
+      Map Graph message fields to sprk_communication:
+      direction=Incoming, from, to, cc, subject, body, receivedAt, graphMessageId.
+    </step>
+    <step order="5" name="Write Tests">
+      Test happy path, duplicate detection, lock acquisition, Graph API failure.
+    </step>
+    <step order="6" name="Build and Test">
+      dotnet build and dotnet test.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/IncomingCommunicationJobHandler.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Graph message fetched with $expand=attachments</criterion>
+    <criterion testable="true">sprk_communication record created with Direction = Incoming</criterion>
+    <criterion testable="true">All fields mapped (from, to, cc, subject, body, timestamps, graphMessageId)</criterion>
+    <criterion testable="true">Duplicate messages detected and skipped (Redis + Dataverse check)</criterion>
+    <criterion testable="true">Processing lock prevents concurrent processing</criterion>
+    <criterion testable="true">All tests pass</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,47 @@
+<task id="ECS-013" project="Email Communication Solution R2">
+  <metadata>
+    <title>End-to-End Individual User Send Test</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>2 - Individual User Outbound (Phase B)</phase>
+    <tags>testing, deploy</tags>
+    <dependencies>ECS-012</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Deploy and test individual user send end-to-end. Send as user via OBO →
+    verify email from user's mailbox → verify sprk_communication record.
+    Also verify shared mailbox send still works (regression).
+  </prompt>
+
+  <role>QA engineer</role>
+
+  <goal>
+    Both send modes verified working. Test report created.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Deploy">Build and deploy BFF.</step>
+    <step order="2" name="Test Shared Send">Send via shared mailbox, verify records.</step>
+    <step order="3" name="Test Individual Send">Send as user, verify email from user's address.</step>
+    <step order="4" name="Document">Create test report.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r2/notes/research/phase-b-e2e-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Individual user send delivers email from user's mailbox</criterion>
+    <criterion testable="true">sprk_communication record shows user's email as sender</criterion>
+    <criterion testable="true">Shared mailbox send still works (regression pass)</criterion>
+  </acceptance-criteria>
+</task>

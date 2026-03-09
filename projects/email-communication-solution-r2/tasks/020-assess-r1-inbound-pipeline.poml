@@ -1,0 +1,59 @@
+<task id="ECS-020" project="Email Communication Solution R2">
+  <metadata>
+    <title>Assess R1 Inbound Pipeline Implementation</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>3 - Inbound Shared Mailbox Monitoring (Phase C)</phase>
+    <tags>bff-api, assessment</tags>
+    <dependencies>ECS-005</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Audit all existing R1 inbound pipeline code: GraphSubscriptionManager,
+    IncomingCommunicationProcessor, InboundPollingBackupService, webhook endpoint,
+    IncomingCommunicationJobHandler. Determine completeness vs R2 spec.
+  </prompt>
+
+  <role>Senior .NET developer performing code audit</role>
+
+  <goal>
+    Comprehensive gap analysis for Phase C in notes/research/r1-assessment-phase-c.md.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>projects/email-communication-solution-r2/plan.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read Inbound Code">
+      Read GraphSubscriptionManager.cs, IncomingCommunicationProcessor.cs,
+      InboundPollingBackupService.cs, IncomingCommunicationJobHandler.cs,
+      CommunicationEndpoints.cs (webhook routes), GraphNotification.cs.
+    </step>
+    <step order="2" name="Compare with Spec">
+      Check subscription lifecycle, webhook handling, message processing,
+      deduplication, association resolution, backup polling.
+    </step>
+    <step order="3" name="Write Assessment">
+      Document in notes/research/r1-assessment-phase-c.md.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r2/notes/research/r1-assessment-phase-c.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All inbound pipeline files audited with status</criterion>
+    <criterion testable="true">Subscription lifecycle gaps identified</criterion>
+    <criterion testable="true">Webhook handling gaps identified</criterion>
+    <criterion testable="true">Deduplication strategy assessed</criterion>
+  </acceptance-criteria>
+</task>

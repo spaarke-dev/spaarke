@@ -1,0 +1,56 @@
+<task id="ECS-010" project="Email Communication Solution R2">
+  <metadata>
+    <title>Assess R1 OBO Individual Send Implementation</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>2 - Individual User Outbound (Phase B)</phase>
+    <tags>bff-api, assessment</tags>
+    <dependencies>ECS-005</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Audit existing OBO send implementation in CommunicationService.SendAsync() and related
+    components (SendMode enum, SendCommunicationRequest, SendEmailNodeExecutor). Determine
+    what's complete vs what gaps remain for R2.
+  </prompt>
+
+  <role>Senior .NET developer performing code audit</role>
+
+  <goal>
+    Gap analysis for Phase B in notes/research/r1-assessment-phase-b.md listing
+    OBO send completeness and specific changes needed.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>projects/email-communication-solution-r2/plan.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read OBO Code">
+      Read CommunicationService.SendAsync(), SendMode.cs, SendCommunicationRequest.cs,
+      SendEmailNodeExecutor.cs, GraphClientFactory.ForUserAsync().
+    </step>
+    <step order="2" name="Compare with Spec">
+      Check if SendMode branching exists, if user email resolution works,
+      if web resource supports send mode selection.
+    </step>
+    <step order="3" name="Write Assessment">
+      Document findings in notes/research/r1-assessment-phase-b.md.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r2/notes/research/r1-assessment-phase-b.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Assessment covers SendMode, OBO branch, user email resolution</criterion>
+    <criterion testable="true">Specific gaps identified with file paths and change descriptions</criterion>
+  </acceptance-criteria>
+</task>

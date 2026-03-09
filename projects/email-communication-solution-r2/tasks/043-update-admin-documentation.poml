@@ -1,0 +1,49 @@
+<task id="ECS-043" project="Email Communication Solution R2">
+  <metadata>
+    <title>Update Admin and Deployment Documentation</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>5 - Verification and Admin UX (Phase D)</phase>
+    <tags>documentation</tags>
+    <dependencies>ECS-042</dependencies>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    Update COMMUNICATION-ADMIN-GUIDE.md and COMMUNICATION-DEPLOYMENT-GUIDE.md with
+    R2 changes. Include multi-tenant deployment instructions, Graph subscription setup,
+    SSS retirement steps, account management procedures.
+  </prompt>
+
+  <role>Technical writer</role>
+
+  <goal>Documentation covers all R2 features and deployment for any tenant.</goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>docs/guides/COMMUNICATION-ADMIN-GUIDE.md</file>
+      <file>docs/guides/COMMUNICATION-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Update Admin Guide">
+      Add: account management, send mode selection, inbound monitoring, verification.
+    </step>
+    <step order="2" name="Update Deployment Guide">
+      Add: multi-tenant setup, Graph permissions, Exchange policy, SSS retirement.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="docs">docs/guides/COMMUNICATION-ADMIN-GUIDE.md</output>
+    <output type="docs">docs/guides/COMMUNICATION-DEPLOYMENT-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Admin guide covers all R2 features</criterion>
+    <criterion testable="true">Deployment guide includes multi-tenant instructions</criterion>
+    <criterion testable="true">SSS retirement steps documented</criterion>
+  </acceptance-criteria>
+</task>
