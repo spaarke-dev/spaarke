@@ -1,4 +1,10 @@
 /**
+ * @deprecated This file is deprecated and will be removed in a future version.
+ * Configuration is now managed by @spaarke/auth via authInit.ts.
+ *
+ * See authInit.ts for the migration wrapper.
+ *
+ * --- Original description ---
  * MSAL Configuration for SemanticSearchControl PCF
  *
  * This configuration enables SSO silent authentication in Dataverse PCF controls,

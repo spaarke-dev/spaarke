@@ -1,4 +1,13 @@
 /**
+ * @deprecated This file is deprecated and will be removed in a future version.
+ * Use @spaarke/auth instead:
+ *   import { initAuth, authenticatedFetch } from '@spaarke/auth';
+ *   await initAuth({ clientId, authority, bffApiScope, bffBaseUrl });
+ *   const response = await authenticatedFetch('/api/ai/search', { method: 'POST', ... });
+ *
+ * See authInit.ts for the migration wrapper.
+ *
+ * --- Original description ---
  * MSAL Authentication Provider for SemanticSearchControl PCF
  *
  * Provides SSO authentication for the Semantic Search API.

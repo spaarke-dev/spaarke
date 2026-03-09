@@ -8,7 +8,7 @@
  */
 
 import { SearchResult, SearchFilters, SearchScope } from "../types";
-import { msalConfig } from "./auth/msalConfig";
+import { getAuthProvider } from "@spaarke/auth";
 
 /**
  * Navigation target modes
@@ -157,7 +157,8 @@ export class NavigationService {
             return null;
         }
 
-        const authorityParts = msalConfig.auth.authority?.split("/") ?? [];
+        const authority = getAuthProvider().getConfig().authority ?? "";
+        const authorityParts = authority.split("/");
         const tenantId = authorityParts[authorityParts.length - 1] ?? "";
         const theme = isDarkMode ? "dark" : "light";
         const data = new URLSearchParams({ documentId: rawId, tenantId, theme }).toString();

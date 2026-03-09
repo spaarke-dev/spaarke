@@ -7,7 +7,7 @@
  * @see spec.md for API contract details
  */
 
-import { MsalAuthProvider } from "./auth/MsalAuthProvider";
+import { authenticatedFetch } from "@spaarke/auth";
 import {
     SearchRequest,
     SearchResponse,
@@ -47,20 +47,21 @@ export interface PreviewUrlResponse {
 }
 
 /**
- * Service for semantic search API calls
+ * Service for semantic search API calls.
+ *
+ * MIGRATION NOTE: This service now uses authenticatedFetch() from @spaarke/auth
+ * instead of receiving MsalAuthProvider as a parameter. Token acquisition, caching,
+ * and 401 retry logic are handled by the shared auth library.
  */
 export class SemanticSearchApiService {
     private readonly apiBaseUrl: string;
-    private readonly authProvider: MsalAuthProvider;
 
     /**
      * Create a new SemanticSearchApiService
      * @param apiBaseUrl - Base URL for the BFF API (e.g., https://api.example.com)
-     * @param authProvider - MSAL auth provider for token acquisition
      */
-    constructor(apiBaseUrl: string, authProvider: MsalAuthProvider) {
+    constructor(apiBaseUrl: string) {
         this.apiBaseUrl = apiBaseUrl.replace(/\/$/, ""); // Remove trailing slash
-        this.authProvider = authProvider;
     }
 
     /**
@@ -73,16 +74,6 @@ export class SemanticSearchApiService {
         const endpoint = `${this.apiBaseUrl}/api/ai/search`;
 
         try {
-            // Get access token
-            const token = await this.authProvider.getAccessToken();
-            if (!token) {
-                throw this.createError(
-                    "Authentication required. Please sign in.",
-                    "AUTH_REQUIRED",
-                    true
-                );
-            }
-
             // Transform PCF request format to API format
             const apiRequest = this.transformRequest(request);
 
@@ -93,12 +84,11 @@ export class SemanticSearchApiService {
                 apiRequest,
             });
 
-            // Build request
-            const response = await fetch(endpoint, {
+            // Use authenticatedFetch — token acquisition and 401 retry handled by @spaarke/auth
+            const response = await authenticatedFetch(endpoint, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify(apiRequest),
             });
@@ -159,22 +149,10 @@ export class SemanticSearchApiService {
         const endpoint = `${this.apiBaseUrl}/api/documents/${encodeURIComponent(documentId)}/open-links`;
 
         try {
-            const token = await this.authProvider.getAccessToken();
-            if (!token) {
-                throw this.createError(
-                    "Authentication required. Please sign in.",
-                    "AUTH_REQUIRED",
-                    true
-                );
-            }
-
             console.log("[SemanticSearchApiService] getOpenLinks:", { documentId, endpoint });
 
-            const response = await fetch(endpoint, {
+            const response = await authenticatedFetch(endpoint, {
                 method: "GET",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             });
 
             if (!response.ok) {
@@ -221,22 +199,10 @@ export class SemanticSearchApiService {
         const endpoint = `${this.apiBaseUrl}/api/documents/${encodeURIComponent(documentId)}/preview-url`;
 
         try {
-            const token = await this.authProvider.getAccessToken();
-            if (!token) {
-                throw this.createError(
-                    "Authentication required. Please sign in.",
-                    "AUTH_REQUIRED",
-                    true
-                );
-            }
-
             console.log("[SemanticSearchApiService] getPreviewUrl:", { documentId, endpoint });
 
-            const response = await fetch(endpoint, {
+            const response = await authenticatedFetch(endpoint, {
                 method: "GET",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             });
 
             if (!response.ok) {

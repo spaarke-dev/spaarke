@@ -45,9 +45,9 @@ import {
 } from "./hooks";
 import {
     SemanticSearchApiService,
-    MsalAuthProvider,
     NavigationService,
 } from "./services";
+import { initializeAuth } from "./authInit";
 
 /**
  * Styles using makeStyles with Fluent design tokens.
@@ -300,10 +300,9 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     }, []);
 
     // Initialize services (memoized to prevent recreation)
-    const authProvider = useMemo(() => MsalAuthProvider.getInstance(), []);
     const apiService = useMemo(
-        () => new SemanticSearchApiService(apiBaseUrl, authProvider),
-        [apiBaseUrl, authProvider]
+        () => new SemanticSearchApiService(apiBaseUrl),
+        [apiBaseUrl]
     );
     const navigationService = useMemo(() => new NavigationService(), []);
 
@@ -333,19 +332,19 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         reset,
     } = useSemanticSearch(apiService, searchScope, scopeId);
 
-    // Initialize MSAL on mount
+    // Initialize @spaarke/auth on mount (replaces local MsalAuthProvider)
     useEffect(() => {
-        const initAuth = async () => {
+        const doInitAuth = async () => {
             try {
-                await authProvider.initialize();
+                await initializeAuth(apiBaseUrl);
                 setIsAuthInitialized(true);
             } catch (err) {
-                console.error("[SemanticSearchControl] MSAL initialization failed:", err);
+                console.error("[SemanticSearchControl] @spaarke/auth initialization failed:", err);
                 setAuthError(err instanceof Error ? err.message : "Authentication initialization failed");
             }
         };
-        void initAuth();
-    }, [authProvider]);
+        void doInitAuth();
+    }, [apiBaseUrl]);
 
     // Auto-load all documents once auth is ready (shows documents without requiring a search query).
     // search and filters intentionally omitted from deps — we only want to fire once on auth ready.
