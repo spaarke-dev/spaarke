@@ -35,10 +35,7 @@ import {
   StarRegular,
   StarFilled,
 } from '@fluentui/react-icons';
-import {
-  getDocumentPreviewUrl,
-  getDocumentOpenLinks,
-} from '../../services/DocumentApiService';
+import { getDocumentPreviewUrl, getDocumentOpenLinks, type IOpenLinksResponse } from '../../services/DocumentApiService';
 import { navigateToEntity } from '../../utils/navigation';
 import { copyDocumentLink, setWorkspaceFlag } from './filePreviewService';
 
@@ -200,23 +197,37 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
     })();
   }, [documentId]);
 
-  // Open File: lazy-fetch open links, cascade desktop -> web
+  // Open File: fetch open links and cascade desktop → web → preview fallback.
+  // Desktop URL (ms-word:, ms-excel:, etc.) opens the file in the native app.
+  // Web URL opens in Office Online (browser). Preview URL is read-only fallback.
   const handleOpenFile = React.useCallback(async () => {
+    // Try to get the actual file open links from the BFF
     const links = await getDocumentOpenLinks(documentId);
-    if (!links) return;
-    if (links.desktopUrl) {
-      window.location.href = links.desktopUrl;
-    } else if (links.webUrl) {
-      window.open(links.webUrl, '_blank', 'noopener,noreferrer');
+    if (links) {
+      // Prefer desktop app for Office files (handles its own auth)
+      if (links.desktopUrl) {
+        window.location.href = links.desktopUrl;
+        return;
+      }
+      // Fall back to web URL (Office Online or SharePoint viewer)
+      if (links.webUrl) {
+        window.open(links.webUrl, '_blank', 'noopener,noreferrer');
+        return;
+      }
     }
-  }, [documentId]);
+    // Last resort: open the preview URL (authenticated, read-only)
+    if (previewUrl) {
+      window.open(previewUrl, '_blank', 'noopener,noreferrer');
+    }
+  }, [documentId, previewUrl]);
 
-  // Open Record
+  // Open Record (new tab)
   const handleOpenRecord = React.useCallback(() => {
     navigateToEntity({
       action: 'openRecord',
       entityName: 'sprk_document',
       entityId: documentId,
+      openInNewWindow: true,
     });
   }, [documentId]);
 

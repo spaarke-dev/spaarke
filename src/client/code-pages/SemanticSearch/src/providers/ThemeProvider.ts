@@ -75,18 +75,27 @@ function getThemeFromXrmFrameWalk(): ThemeValue | null {
         if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top);
     } catch { /* cross-origin */ }
 
+    let xrmFound = false;
+
     for (const frame of frames) {
         try {
             const xrm = (frame as any).Xrm;
             if (!xrm) continue;
+            xrmFound = true;
 
-            // Attempt getCurrentTheme() API
             const ctx = xrm.Utility?.getGlobalContext?.();
+
+            // Check user's Dataverse dark mode setting (Settings → Personalization)
+            // Available in newer Dataverse builds (2024+)
+            const userSettings = ctx?.userSettings;
+            if (userSettings?.isDarkMode === true) return "dark";
+            if (userSettings?.isDarkMode === false) return "light";
+
+            // Fallback: getCurrentTheme() API — check the content area background
+            // Note: themeInfo.navbarbackgroundcolor is the brand color (always dark),
+            // NOT an indicator of dark mode. Use backgroundcolor instead.
             if (ctx?.getCurrentTheme) {
                 const themeInfo = ctx.getCurrentTheme();
-                // Check the page/content background color — NOT the navbar color.
-                // The navbar color is the brand color (e.g. red/dark for Spaarke)
-                // and does NOT indicate light/dark mode.
                 if (themeInfo?.backgroundcolor) {
                     const isDark = isColorDark(themeInfo.backgroundcolor);
                     if (isDark !== null) return isDark ? "dark" : "light";
@@ -95,14 +104,32 @@ function getThemeFromXrmFrameWalk(): ThemeValue | null {
         } catch { /* cross-origin or unavailable */ }
     }
 
-    // Fallback: check the document body background (content area, not branded navbar)
-    try {
-        const bgColor = window.getComputedStyle(document.body).backgroundColor;
-        if (bgColor && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "transparent") {
-            const isDark = isColorDark(bgColor);
-            if (isDark !== null) return isDark ? "dark" : "light";
-        }
-    } catch { /* DOM access failed */ }
+    // Fallback: inspect the parent frame's actual rendered background.
+    // When our page runs inside a Dataverse iframe, the parent's body/content
+    // area reflects the user's dark mode choice.
+    const framesToCheck: Window[] = [];
+    try { if (window.parent && window.parent !== window) framesToCheck.push(window.parent); } catch { /* */ }
+    try { if (window.top && window.top !== window) framesToCheck.push(window.top); } catch { /* */ }
+
+    for (const frame of framesToCheck) {
+        try {
+            const doc = frame.document;
+            // Check the main content area element (Dataverse uses #mainContent or similar)
+            const contentArea = doc.getElementById("mainContent")
+                ?? doc.getElementById("crmContentPanel")
+                ?? doc.body;
+            const bgColor = frame.getComputedStyle(contentArea).backgroundColor;
+            if (bgColor && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "transparent") {
+                const isDark = isColorDark(bgColor);
+                if (isDark !== null) return isDark ? "dark" : "light";
+            }
+        } catch { /* cross-origin or DOM access failed */ }
+    }
+
+    // If we found Xrm but couldn't determine dark/light from any API or DOM check,
+    // default to light. Dataverse defaults to light mode, and we should NOT fall
+    // through to system preference (which may differ from the app setting).
+    if (xrmFound) return "light";
 
     return null;
 }

@@ -1,4 +1,5 @@
 const path = require('path');
+const webpack = require('webpack');
 const TerserPlugin = require('terser-webpack-plugin');
 
 module.exports = (env) => {
@@ -10,6 +11,7 @@ module.exports = (env) => {
     output: {
       filename: 'bundle.js',
       path: path.resolve(__dirname, 'out'),
+      publicPath: '',
       clean: true,
     },
     resolve: {
@@ -78,6 +80,10 @@ module.exports = (env) => {
       ],
       usedExports: true,
       sideEffects: true,
+      // Code Pages are single-file HTML web resources — no chunk loading possible.
+      // Disable all code splitting to prevent MSAL/library dynamic imports from
+      // creating separate chunk files (e.g. 357.bundle.js) that 404 in Dataverse.
+      splitChunks: false,
     },
     // NO externals — Code Pages bundle everything (unlike PCF platform library approach)
     devServer: {
@@ -85,7 +91,12 @@ module.exports = (env) => {
       port: 3004,
       hot: true,
     },
-    plugins: [],
+    plugins: [
+      // Force everything into a single chunk — Code Pages are single-file HTML
+      // web resources with no chunk loading capability. This prevents MSAL and
+      // other libraries that use dynamic import() from creating async chunks.
+      new webpack.optimize.LimitChunkCountPlugin({ maxChunks: 1 }),
+    ],
   };
 
   // Optional bundle analyzer for `npm run build:analyze`

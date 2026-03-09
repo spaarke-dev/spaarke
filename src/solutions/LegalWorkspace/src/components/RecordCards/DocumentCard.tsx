@@ -16,11 +16,6 @@ import {
   Text,
   Button,
   Tooltip,
-  Menu,
-  MenuTrigger,
-  MenuPopover,
-  MenuList,
-  MenuItem,
   Dialog,
   DialogSurface,
   DialogBody,
@@ -29,7 +24,6 @@ import {
   shorthands,
 } from "@fluentui/react-components";
 import {
-  MoreVerticalRegular,
   EyeRegular,
   DocumentSearchRegular,
   SparkleRegular,
@@ -396,10 +390,9 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
               </div>
             </div>
 
-            {/* Actions: Preview button + overflow menu */}
+            {/* Actions: icon-only buttons — Preview, Summary, Find Similar */}
             {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
             <div className={styles.actionsColumn} onClick={handleActionsClick}>
-              {/* Preview button — opens FilePreviewDialog */}
               <Tooltip content="Preview" relationship="label">
                 <Button
                   appearance="subtle"
@@ -409,37 +402,30 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
                   onClick={handlePreviewClick}
                 />
               </Tooltip>
-
-              {/* Overflow menu (Find Similar + Summary) */}
-              <Menu>
-                <MenuTrigger disableButtonEnhancement>
-                  <Tooltip content="More actions" relationship="label">
-                    <Button
-                      appearance="subtle"
-                      size="medium"
-                      icon={<MoreVerticalRegular aria-hidden="true" />}
-                      aria-label="More actions"
-                    />
-                  </Tooltip>
-                </MenuTrigger>
-                <MenuPopover>
-                  <MenuList>
-                    <MenuItem
-                      icon={<DocumentSearchRegular />}
-                      onClick={handleFindSimilar}
-                    >
-                      Find Similar
-                    </MenuItem>
-                    <MenuItem
-                      icon={<SparkleRegular />}
-                      onClick={handleSummaryClick}
-                    >
-                      Summary
-                    </MenuItem>
-                  </MenuList>
-                </MenuPopover>
-              </Menu>
-
+              <Tooltip content="Summary" relationship="label">
+                <Button
+                  appearance="subtle"
+                  size="medium"
+                  icon={<SparkleRegular aria-hidden="true" />}
+                  aria-label="Summary"
+                  onClick={(e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    handleSummaryClick();
+                  }}
+                />
+              </Tooltip>
+              <Tooltip content="Find Similar" relationship="label">
+                <Button
+                  appearance="subtle"
+                  size="medium"
+                  icon={<DocumentSearchRegular aria-hidden="true" />}
+                  aria-label="Find Similar"
+                  onClick={(e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    handleFindSimilar();
+                  }}
+                />
+              </Tooltip>
             </div>
           </div>
         </div>

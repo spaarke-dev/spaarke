@@ -12,13 +12,16 @@
   },
   "dependencies": {
     "@azure/msal-browser": "^4.29.0",
-    "@spaarke/auth": "file:../../shared/Spaarke.Auth",
     "@fluentui/react-components": "^9.54.0",
     "@fluentui/react-icons": "^2.0.0",
-    "@spaarke/ui-components": "workspace:*",
+    "@lexical/react": "^0.41.0",
+    "@spaarke/auth": "file:../../shared/Spaarke.Auth",
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
     "diff": "^8.0.3",
+    "lexical": "^0.41.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-window": "^2.2.7"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

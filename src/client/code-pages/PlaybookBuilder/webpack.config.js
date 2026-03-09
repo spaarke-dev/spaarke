@@ -1,4 +1,5 @@
 const path = require('path');
+const webpack = require('webpack');
 const TerserPlugin = require('terser-webpack-plugin');
 
 module.exports = (env) => {
@@ -10,6 +11,7 @@ module.exports = (env) => {
     output: {
       filename: 'bundle.js',
       path: path.resolve(__dirname, 'out'),
+      publicPath: '',
       clean: true,
     },
     resolve: {
@@ -82,6 +84,7 @@ module.exports = (env) => {
       ],
       usedExports: true,
       sideEffects: true,
+      splitChunks: false,
     },
     // NO externals — Code Pages bundle everything (unlike PCF platform library approach)
     devServer: {
@@ -89,7 +92,9 @@ module.exports = (env) => {
       port: 3005,
       hot: true,
     },
-    plugins: [],
+    plugins: [
+      new webpack.optimize.LimitChunkCountPlugin({ maxChunks: 1 }),
+    ],
   };
 
   // Optional bundle analyzer for `npm run build:analyze`

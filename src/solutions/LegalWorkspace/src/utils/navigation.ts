@@ -13,6 +13,7 @@ export interface INavigationMessage {
   entityName: string;
   entityId?: string;
   viewId?: string;
+  openInNewWindow?: boolean;
 }
 
 /**
@@ -38,6 +39,7 @@ export function navigateToEntity(message: INavigationMessage): void {
       xrm.Navigation.openForm({
         entityName: message.entityName,
         entityId: message.entityId,
+        openInNewWindow: message.openInNewWindow ?? false,
       });
       return;
     } catch (err) {

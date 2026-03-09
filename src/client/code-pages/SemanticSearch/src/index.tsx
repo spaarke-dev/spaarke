@@ -26,7 +26,7 @@
 import { createRoot } from "react-dom/client";
 import { FluentProvider } from "@fluentui/react-components";
 import { App } from "./App";
-import { detectTheme, isDarkTheme } from "./providers/ThemeProvider";
+import { detectTheme, isDarkTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { parseUrlParams } from "./utils/parseUrlParams";
 import { initializeAuth } from "./services/authInit";
 
@@ -53,8 +53,8 @@ const themeParams = dataEnvelope
     ? new URLSearchParams(decodeURIComponent(dataEnvelope))
     : rawUrlParams;
 
-const theme = detectTheme(themeParams);
-const isDark = isDarkTheme(themeParams);
+let theme = detectTheme(themeParams);
+let isDark = isDarkTheme(themeParams);
 
 // Set body background to match detected theme — prevents white flash in dark mode
 document.body.style.backgroundColor = isDark ? "#292929" : "#ffffff";
@@ -66,8 +66,10 @@ document.body.style.backgroundColor = isDark ? "#292929" : "#ffffff";
 const container = document.getElementById("root");
 if (!container) throw new Error("[SemanticSearch] Root container #root not found in DOM.");
 
+const root = createRoot(container);
+
 function renderApp(): void {
-    createRoot(container!).render(
+    root.render(
         <FluentProvider theme={theme} style={{ height: "100%" }}>
             <App
                 initialQuery={initialQuery}
@@ -92,3 +94,14 @@ initializeAuth()
         console.error("[SemanticSearch] Auth init failed, rendering anyway.", err);
         renderApp();
     });
+
+// ---------------------------------------------------------------------------
+// Theme change listener — re-render on system/user preference change
+// ---------------------------------------------------------------------------
+
+setupThemeListener(() => {
+    theme = detectTheme(themeParams);
+    isDark = isDarkTheme(themeParams);
+    document.body.style.backgroundColor = isDark ? "#292929" : "#ffffff";
+    renderApp();
+});
