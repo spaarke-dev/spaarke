@@ -1,12 +1,15 @@
 /**
  * SDAP API Client Factory
  *
- * Creates SdapApiClient instances with MSAL authentication integration.
- * Uses MsalAuthProvider for token acquisition with caching and proactive refresh.
+ * Creates SdapApiClient instances with @spaarke/auth authentication integration.
+ * Uses getAuthProvider() for token acquisition with caching and proactive refresh.
+ *
+ * MIGRATION NOTE: This factory now uses @spaarke/auth instead of local MsalAuthProvider.
+ * Token acquisition is handled by the shared SpaarkeAuthProvider singleton.
  */
 
 import { SdapApiClient } from './SdapApiClient';
-import { MsalAuthProvider } from './auth/MsalAuthProvider';
+import { getAuthProvider } from '@spaarke/auth';
 import { logger } from '../utils/logger';
 
 /**
@@ -14,16 +17,7 @@ import { logger } from '../utils/logger';
  */
 export class SdapApiClientFactory {
     /**
-     * OAuth scopes for SDAP BFF API (SharePoint Embedded)
-     *
-     * SPE BFF API App Registration:
-     * - Client ID: 1e40baad-e065-4aea-a8d4-4b7ab273458c
-     * - Application ID URI: api://1e40baad-e065-4aea-a8d4-4b7ab273458c
-     */
-    private static readonly SPE_BFF_API_SCOPES = ['api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation'];
-
-    /**
-     * Create SDAP API Client with MSAL authentication
+     * Create SDAP API Client with @spaarke/auth authentication
      *
      * @param baseUrl - SDAP BFF API base URL
      * @param timeout - Request timeout in milliseconds (default: 300000 = 5 minutes)
@@ -33,30 +27,20 @@ export class SdapApiClientFactory {
         baseUrl: string,
         timeout = 300000
     ): SdapApiClient {
-        logger.info('SdapApiClientFactory', 'Creating SDAP API client with MSAL auth', {
+        logger.info('SdapApiClientFactory', 'Creating SDAP API client with @spaarke/auth', {
             baseUrl,
             timeout
         });
 
-        // Create token provider function that uses MSAL
+        // Create token provider function that uses @spaarke/auth
         const getAccessToken = async (): Promise<string> => {
             try {
-                logger.debug('SdapApiClientFactory', 'Retrieving access token via MSAL');
+                logger.debug('SdapApiClientFactory', 'Retrieving access token via @spaarke/auth');
 
-                // Get user access token from MSAL
+                // Get user access token from @spaarke/auth
                 // This token represents the current user and will be used by SDAP BFF API
                 // for On-Behalf-Of (OBO) flow to access SharePoint Embedded
-                const authProvider = MsalAuthProvider.getInstance();
-
-                // Wait for MSAL initialization if not ready yet (handles race condition)
-                // This can happen if user clicks buttons before initializeMsalAsync() completes
-                if (!authProvider.isInitializedState()) {
-                    logger.info('SdapApiClientFactory', 'MSAL not yet initialized, waiting...');
-                    await authProvider.initialize();
-                    logger.info('SdapApiClientFactory', 'MSAL initialization complete');
-                }
-
-                const token = await authProvider.getToken(SdapApiClientFactory.SPE_BFF_API_SCOPES);
+                const token = await getAuthProvider().getAccessToken();
 
                 logger.debug('SdapApiClientFactory', 'Access token retrieved successfully');
 
@@ -64,7 +48,7 @@ export class SdapApiClientFactory {
 
             } catch (error) {
                 logger.error('SdapApiClientFactory', 'Failed to retrieve access token', error);
-                throw new Error('Failed to retrieve user access token via MSAL');
+                throw new Error('Failed to retrieve user access token via @spaarke/auth');
             }
         };
 

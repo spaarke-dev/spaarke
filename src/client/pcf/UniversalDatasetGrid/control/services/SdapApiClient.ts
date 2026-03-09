@@ -9,7 +9,7 @@
  */
 
 import { logger } from '../utils/logger';
-import { MsalAuthProvider } from './auth/MsalAuthProvider';
+import { getAuthProvider } from '@spaarke/auth';
 import type {
     SpeFileMetadata,
     FileUploadRequest,
@@ -238,8 +238,8 @@ export class SdapApiClient {
                         maxAttempts
                     });
 
-                    // Clear MSAL cache to force fresh token acquisition
-                    MsalAuthProvider.getInstance().clearCache();
+                    // Clear @spaarke/auth cache to force fresh token acquisition
+                    getAuthProvider().clearCache();
 
                     // Get fresh token for retry
                     const newToken = await this.getAccessToken();

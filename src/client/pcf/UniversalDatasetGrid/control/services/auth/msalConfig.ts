@@ -1,6 +1,14 @@
+/**
+ * @deprecated This file is deprecated. Use @spaarke/auth instead.
+ * Configuration is now centralized in authInit.ts using @spaarke/auth's IAuthConfig.
+ * See authInit.ts for the migration wrapper.
+ */
+
 import { Configuration, LogLevel } from "@azure/msal-browser";
 
 /**
+ * @deprecated Use @spaarke/auth instead. See authInit.ts for the migration wrapper.
+ *
  * MSAL Configuration for SDAP Universal Dataset Grid
  *
  * This configuration enables SSO silent authentication in Dataverse PCF controls,

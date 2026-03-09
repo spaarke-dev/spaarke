@@ -1,4 +1,10 @@
 /**
+ * @deprecated This file is deprecated. Use types from @spaarke/auth instead:
+ *   import type { IAuthConfig, ITokenResult } from '@spaarke/auth';
+ *
+ * See authInit.ts for the migration wrapper.
+ *
+ * --- Original description ---
  * Authentication Types for Universal Dataset Grid
  *
  * These types define the authentication provider contract and related data structures

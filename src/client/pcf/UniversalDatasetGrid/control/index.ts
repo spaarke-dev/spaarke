@@ -12,13 +12,14 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { DEFAULT_GRID_CONFIG, GridConfiguration, CalendarFilter, parseCalendarFilter } from "./types";
 import { logger } from "./utils/logger";
-import { MsalAuthProvider } from "./services/auth/MsalAuthProvider";
+import { initializeAuth } from "./authInit";
+import { getAuthProvider } from "@spaarke/auth";
 
 export class UniversalDatasetGrid implements ComponentFramework.StandardControl<IInputs, IOutputs> {
     private root: ReactDOM.Root | null = null;
     private notifyOutputChanged: () => void;
     private config: GridConfiguration;
-    private authProvider: MsalAuthProvider;
+    private authInitialized = false;
     private _cleanupThemeListener: (() => void) | null = null;
     private _context: ComponentFramework.Context<IInputs> | null = null;
     private _calendarFilter: CalendarFilter | null = null;
@@ -123,10 +124,15 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
                 this._cleanupThemeListener = null;
             }
 
-            // Clear MSAL token cache (optional - sessionStorage will be cleared on tab close)
-            if (this.authProvider) {
-                logger.info('Control', 'Destroy - Clearing MSAL token cache');
-                this.authProvider.clearCache();
+            // Clear @spaarke/auth token cache (optional - sessionStorage will be cleared on tab close)
+            if (this.authInitialized) {
+                logger.info('Control', 'Destroy - Clearing @spaarke/auth token cache');
+                try {
+                    getAuthProvider().clearCache();
+                } catch {
+                    // Auth may not have initialized successfully — ignore
+                }
+                this.authInitialized = false;
             }
 
             if (this.root) {
@@ -185,37 +191,26 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
     }
 
     /**
-     * Initialize MSAL authentication provider (Phase 1)
+     * Initialize authentication via @spaarke/auth shared library.
      *
      * Runs asynchronously in background. If initialization fails, displays error to user.
-     * Token acquisition will be implemented in Phase 2.
+     * Replaces the local MsalAuthProvider with the centralized @spaarke/auth package.
      *
      * @param container - PCF container element for error display
      */
     private initializeMsalAsync(container: HTMLDivElement): void {
         (async () => {
             try {
-                logger.info('Control', 'Initializing MSAL authentication...');
+                logger.info('Control', 'Initializing @spaarke/auth...');
 
-                // Get singleton instance of MsalAuthProvider
-                this.authProvider = MsalAuthProvider.getInstance();
+                // Initialize @spaarke/auth (replaces local MsalAuthProvider)
+                await initializeAuth();
+                this.authInitialized = true;
 
-                // Initialize MSAL (validates config, creates PublicClientApplication)
-                await this.authProvider.initialize();
-
-                logger.info('Control', 'MSAL authentication initialized successfully ✅');
-
-                // Check if user is authenticated (for logging only - Phase 1)
-                const isAuth = this.authProvider.isAuthenticated();
-                logger.info('Control', `User authenticated: ${isAuth}`);
-
-                if (isAuth) {
-                    const accountInfo = this.authProvider.getAccountDebugInfo();
-                    logger.info('Control', 'Account info:', accountInfo);
-                }
+                logger.info('Control', '@spaarke/auth initialized successfully');
 
             } catch (error) {
-                logger.error('Control', 'Failed to initialize MSAL:', error);
+                logger.error('Control', 'Failed to initialize @spaarke/auth:', error);
 
                 // Show user-friendly error message
                 this.showError(

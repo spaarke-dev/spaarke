@@ -1,3 +1,13 @@
+/**
+ * @deprecated This file is deprecated. Use @spaarke/auth instead:
+ *   import { initAuth, authenticatedFetch, getAuthProvider } from '@spaarke/auth';
+ *   await initAuth({ clientId, authority, bffApiScope, bffBaseUrl });
+ *   const response = await authenticatedFetch('/api/documents/123');
+ *   // or: const token = await getAuthProvider().getAccessToken();
+ *
+ * See authInit.ts for the migration wrapper.
+ */
+
 import {
   PublicClientApplication,
   AccountInfo,
@@ -10,6 +20,8 @@ import { msalConfig, validateMsalConfig } from "./msalConfig";
 import { IAuthProvider, TokenCacheEntry } from "../../types/auth";
 
 /**
+ * @deprecated Use @spaarke/auth instead. See authInit.ts for the migration wrapper.
+ *
  * MSAL Authentication Provider for Universal Dataset Grid
  *
  * Responsibilities:
