@@ -62,7 +62,7 @@ import {
 // even though the lookup UI fields are now in AssignResourcesStep.
 import type { ILookupItem } from '../../types/entities';
 import { getBffBaseUrl } from '../../config/bffConfig';
-import { authenticatedFetch } from '../../services/bffAuthProvider';
+import { authenticatedFetch } from '../../services/authInit';
 
 // ---------------------------------------------------------------------------
 // Constants

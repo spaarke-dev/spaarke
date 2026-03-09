@@ -22,7 +22,7 @@ import type { IWebApi, WebApiEntity } from '../../types/xrm';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IUploadProgress } from '../../services/EntityCreationService';
 import { getBffBaseUrl } from '../../config/bffConfig';
-import { authenticatedFetch } from '../../services/bffAuthProvider';
+import { authenticatedFetch } from '../../services/authInit';
 
 // ---------------------------------------------------------------------------
 // Result types

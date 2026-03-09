@@ -10,7 +10,7 @@
  *   GET /api/documents/{id}/open-links   → web URL + desktop protocol URL
  */
 
-import { authenticatedFetch } from './bffAuthProvider';
+import { authenticatedFetch } from './authInit';
 import { getBffBaseUrl } from '../config/bffConfig';
 
 // ---------------------------------------------------------------------------

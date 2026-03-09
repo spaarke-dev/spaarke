@@ -32,11 +32,10 @@ import {
 } from '@fluentui/react-components';
 import {
   EyeRegular,
-  DesktopRegular,
-  DocumentOnePageRegular,
   OpenRegular,
 } from '@fluentui/react-icons';
-import { navigateToEntity, openRecordDialog } from '../../utils/navigation';
+import { navigateToEntity } from '../../utils/navigation';
+import { FilePreviewDialog } from '../FilePreview';
 import type {
   FindSimilarStatus,
   FindSimilarDomain,
@@ -146,46 +145,6 @@ function mapRecordResults(records: IRecordResult[]): IGridRecord[] {
 // Row action handlers
 // ---------------------------------------------------------------------------
 
-function handlePreview(record: IGridRecord): void {
-  // Open document preview via navigateTo webresource
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm;
-  if (xrm?.Navigation?.navigateTo) {
-    try {
-      xrm.Navigation.navigateTo(
-        {
-          pageType: 'webresource',
-          webresourceName: 'sprk_documentpreview',
-          data: `documentId=${record.id}`,
-        },
-        {
-          target: 2,
-          width: { value: 80, unit: '%' },
-          height: { value: 80, unit: '%' },
-        },
-      );
-      return;
-    } catch (err) {
-      console.warn('[FindSimilar] Preview navigateTo failed, falling back to openRecordDialog:', err);
-    }
-  }
-  // Fallback: open document record dialog
-  openRecordDialog('sprk_document', record.id);
-}
-
-function handleOpenFile(record: IGridRecord): void {
-  // Open file on desktop via Xrm.Navigation.openFile or fallback to record
-  navigateToEntity({
-    action: 'openRecord',
-    entityName: 'sprk_document',
-    entityId: record.id,
-  });
-}
-
-function handleOpenDocument(record: IGridRecord): void {
-  openRecordDialog('sprk_document', record.id);
-}
-
 function handleOpenRecord(record: IGridRecord): void {
   navigateToEntity({
     action: 'openRecord',
@@ -287,6 +246,11 @@ interface IDomainGridProps {
 const DomainGrid: React.FC<IDomainGridProps> = ({ records, columns, domain }) => {
   const styles = useStyles();
 
+  // Preview dialog state
+  const [previewOpen, setPreviewOpen] = React.useState(false);
+  const [previewDocId, setPreviewDocId] = React.useState('');
+  const [previewDocName, setPreviewDocName] = React.useState('');
+
   // Lazy loading state
   const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
   const sentinelRef = React.useRef<HTMLDivElement>(null);
@@ -349,25 +313,12 @@ const DomainGrid: React.FC<IDomainGridProps> = ({ records, columns, domain }) =>
                   size="small"
                   icon={<EyeRegular />}
                   aria-label="Preview document"
-                  onClick={(e) => { e.stopPropagation(); handlePreview(item); }}
-                />
-              </Tooltip>
-              <Tooltip content="Open file" relationship="label">
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<DesktopRegular />}
-                  aria-label="Open file on desktop"
-                  onClick={(e) => { e.stopPropagation(); handleOpenFile(item); }}
-                />
-              </Tooltip>
-              <Tooltip content="Open document" relationship="label">
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<DocumentOnePageRegular />}
-                  aria-label="Open document record"
-                  onClick={(e) => { e.stopPropagation(); handleOpenDocument(item); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPreviewDocId(item.id);
+                    setPreviewDocName(item.name ?? item.id);
+                    setPreviewOpen(true);
+                  }}
                 />
               </Tooltip>
             </div>
@@ -407,9 +358,9 @@ const DomainGrid: React.FC<IDomainGridProps> = ({ records, columns, domain }) =>
     }
     // Actions column sizing
     options['_actions'] = {
-      defaultWidth: domain === 'documents' ? 120 : 48,
-      minWidth: domain === 'documents' ? 120 : 48,
-      idealWidth: domain === 'documents' ? 120 : 48,
+      defaultWidth: 48,
+      minWidth: 48,
+      idealWidth: 48,
     };
     return options;
   }, [columns, domain]);
@@ -480,6 +431,16 @@ const DomainGrid: React.FC<IDomainGridProps> = ({ records, columns, domain }) =>
             Showing {visibleCount} of {records.length} results...
           </Text>
         </>
+      )}
+
+      {/* File Preview Dialog (documents domain) */}
+      {domain === 'documents' && (
+        <FilePreviewDialog
+          open={previewOpen}
+          documentId={previewDocId}
+          documentName={previewDocName}
+          onClose={() => setPreviewOpen(false)}
+        />
       )}
     </>
   );

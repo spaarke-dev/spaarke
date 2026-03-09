@@ -50,7 +50,7 @@ import type { ILookupItem } from '../../types/entities';
 import type { IWebApi } from '../../types/xrm';
 import type { IUploadedFile } from '../CreateMatter/wizardTypes';
 import { getBffBaseUrl } from '../../config/bffConfig';
-import { authenticatedFetch } from '../../services/bffAuthProvider';
+import { authenticatedFetch } from '../../services/authInit';
 
 // ---------------------------------------------------------------------------
 // Constants

@@ -7,7 +7,7 @@
  * 3. Searches both documents and records (matters + projects)
  */
 import { getBffBaseUrl } from '../../config/bffConfig';
-import { authenticatedFetch } from '../../services/bffAuthProvider';
+import { authenticatedFetch } from '../../services/authInit';
 import type { IUploadedFile } from '../CreateMatter/wizardTypes';
 import type {
   IDocumentResult,

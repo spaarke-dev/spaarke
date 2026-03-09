@@ -4,7 +4,7 @@
  * Calls the BFF summarize endpoint with uploaded files.
  */
 import { getBffBaseUrl } from '../../config/bffConfig';
-import { authenticatedFetch } from '../../services/bffAuthProvider';
+import { authenticatedFetch } from '../../services/authInit';
 import type { IUploadedFile } from '../CreateMatter/wizardTypes';
 import type { ISummarizeResult } from './summarizeTypes';
 

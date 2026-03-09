@@ -15,7 +15,7 @@
 import type { IWebApi, WebApiEntity } from '../types/xrm';
 import type { IUploadedFile } from '../components/CreateMatter/wizardTypes';
 import { getBffBaseUrl } from '../config/bffConfig';
-import { authenticatedFetch } from './bffAuthProvider';
+import { authenticatedFetch } from './authInit';
 
 // ---------------------------------------------------------------------------
 // Types

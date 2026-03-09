@@ -3,9 +3,8 @@
  *
  * Follows the same visual pattern as RecordCard but with:
  *   - Dynamic file-type icon (based on sprk_filetype)
- *   - Standalone Preview button (eye icon)
- *   - Custom overflow menu: Open File in Web, Open File in Desktop,
- *     Open Record, Find Similar, Summary
+ *   - Preview button (eye icon) opens FilePreviewDialog
+ *   - Overflow menu: Find Similar, Summary
  *
  * Card double-click opens the record in a new tab via Xrm.Navigation.openForm.
  */
@@ -22,10 +21,6 @@ import {
   MenuPopover,
   MenuList,
   MenuItem,
-  Popover,
-  PopoverTrigger,
-  PopoverSurface,
-  Spinner,
   Dialog,
   DialogSurface,
   DialogBody,
@@ -36,9 +31,6 @@ import {
 import {
   MoreVerticalRegular,
   EyeRegular,
-  GlobeRegular,
-  DesktopRegular,
-  OpenRegular,
   DocumentSearchRegular,
   SparkleRegular,
 } from "@fluentui/react-icons";
@@ -46,11 +38,8 @@ import type { IDocument } from "../../types/entities";
 import { getFileTypeIcon } from "../../utils/fileIconMap";
 import { navigateToEntity } from "../../utils/navigation";
 import { getEffectiveDarkMode } from "../../providers/ThemeProvider";
-import {
-  getDocumentPreviewUrl,
-  getDocumentOpenLinks,
-} from "../../services/DocumentApiService";
-import { getTenantId } from "../../services/bffAuthProvider";
+import { getTenantId } from "../../services/authInit";
+import { FilePreviewDialog } from "../FilePreview/FilePreviewDialog";
 
 // ---------------------------------------------------------------------------
 // Styles (matching RecordCard pattern)
@@ -150,25 +139,6 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalXXS,
     flexShrink: 0,
     marginLeft: tokens.spacingHorizontalL,
-  },
-  // Preview popover
-  previewSurface: {
-    width: "600px",
-    height: "400px",
-    padding: "0px",
-    ...shorthands.overflow("hidden"),
-  },
-  previewFrame: {
-    width: "100%",
-    height: "100%",
-    borderWidth: "0px",
-  },
-  previewLoading: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "100%",
-    height: "100%",
   },
   // Find Similar dialog
   findSimilarSurface: {
@@ -270,9 +240,8 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
     // Resolve dynamic file icon
     const IconComponent = getFileTypeIcon(doc.sprk_filetype);
 
-    // ----- Preview state -----
-    const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
-    const [previewLoading, setPreviewLoading] = React.useState(false);
+    // ----- File Preview Dialog state -----
+    const [filePreviewOpen, setFilePreviewOpen] = React.useState(false);
 
     // ----- Find Similar state -----
     const [findSimilarUrl, setFindSimilarUrl] = React.useState<string | null>(
@@ -305,47 +274,14 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
       [doc.sprk_documentid]
     );
 
-    // ----- Preview action -----
+    // ----- Preview action (opens FilePreviewDialog) -----
     const handlePreviewClick = React.useCallback(
-      async (e: React.MouseEvent) => {
+      (e: React.MouseEvent) => {
         e.stopPropagation();
-        if (previewUrl) return; // Already loaded
-        setPreviewLoading(true);
-        const url = await getDocumentPreviewUrl(doc.sprk_documentid);
-        setPreviewUrl(url);
-        setPreviewLoading(false);
+        setFilePreviewOpen(true);
       },
-      [doc.sprk_documentid, previewUrl]
+      []
     );
-
-    // ----- Open File in Web -----
-    const handleOpenInWeb = React.useCallback(async () => {
-      const links = await getDocumentOpenLinks(doc.sprk_documentid);
-      if (links?.webUrl) {
-        window.open(links.webUrl, "_blank", "noopener,noreferrer");
-      } else {
-        console.warn("[DocumentCard] No web URL available for", doc.sprk_documentid);
-      }
-    }, [doc.sprk_documentid]);
-
-    // ----- Open File in Desktop -----
-    const handleOpenInDesktop = React.useCallback(async () => {
-      const links = await getDocumentOpenLinks(doc.sprk_documentid);
-      if (links?.desktopUrl) {
-        window.location.href = links.desktopUrl;
-      } else {
-        console.warn("[DocumentCard] No desktop URL available for", doc.sprk_documentid);
-      }
-    }, [doc.sprk_documentid]);
-
-    // ----- Open Record (new tab) -----
-    const handleOpenRecord = React.useCallback(() => {
-      navigateToEntity({
-        action: "openRecord",
-        entityName: "sprk_document",
-        entityId: doc.sprk_documentid,
-      });
-    }, [doc.sprk_documentid]);
 
     // ----- Find Similar -----
     const handleFindSimilar = React.useCallback(async () => {
@@ -463,44 +399,18 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
             {/* Actions: Preview button + overflow menu */}
             {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
             <div className={styles.actionsColumn} onClick={handleActionsClick}>
-              {/* Preview button (standalone) */}
-              <Popover
-                withArrow
-                onOpenChange={(_, data) => {
-                  if (!data.open) setPreviewUrl(null);
-                }}
-              >
-                <PopoverTrigger disableButtonEnhancement>
-                  <Tooltip content="Preview" relationship="label">
-                    <Button
-                      appearance="subtle"
-                      size="medium"
-                      icon={<EyeRegular aria-hidden="true" />}
-                      aria-label="Preview document"
-                      onClick={handlePreviewClick}
-                    />
-                  </Tooltip>
-                </PopoverTrigger>
-                <PopoverSurface className={styles.previewSurface}>
-                  {previewLoading ? (
-                    <div className={styles.previewLoading}>
-                      <Spinner size="small" label="Loading preview..." />
-                    </div>
-                  ) : previewUrl ? (
-                    <iframe
-                      src={previewUrl}
-                      title="Document preview"
-                      className={styles.previewFrame}
-                    />
-                  ) : (
-                    <div className={styles.previewLoading}>
-                      <Text size={300}>Preview not available.</Text>
-                    </div>
-                  )}
-                </PopoverSurface>
-              </Popover>
+              {/* Preview button — opens FilePreviewDialog */}
+              <Tooltip content="Preview" relationship="label">
+                <Button
+                  appearance="subtle"
+                  size="medium"
+                  icon={<EyeRegular aria-hidden="true" />}
+                  aria-label="Preview document"
+                  onClick={handlePreviewClick}
+                />
+              </Tooltip>
 
-              {/* Overflow menu */}
+              {/* Overflow menu (Find Similar + Summary) */}
               <Menu>
                 <MenuTrigger disableButtonEnhancement>
                   <Tooltip content="More actions" relationship="label">
@@ -514,24 +424,6 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
                 </MenuTrigger>
                 <MenuPopover>
                   <MenuList>
-                    <MenuItem
-                      icon={<GlobeRegular />}
-                      onClick={handleOpenInWeb}
-                    >
-                      Open File in Web
-                    </MenuItem>
-                    <MenuItem
-                      icon={<DesktopRegular />}
-                      onClick={handleOpenInDesktop}
-                    >
-                      Open File in Desktop
-                    </MenuItem>
-                    <MenuItem
-                      icon={<OpenRegular />}
-                      onClick={handleOpenRecord}
-                    >
-                      Open Record
-                    </MenuItem>
                     <MenuItem
                       icon={<DocumentSearchRegular />}
                       onClick={handleFindSimilar}
@@ -588,6 +480,14 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
             </DialogBody>
           </DialogSurface>
         </Dialog>
+
+        {/* File Preview Dialog */}
+        <FilePreviewDialog
+          open={filePreviewOpen}
+          documentId={doc.sprk_documentid}
+          documentName={doc.sprk_documentname}
+          onClose={() => setFilePreviewOpen(false)}
+        />
       </>
     );
   }
