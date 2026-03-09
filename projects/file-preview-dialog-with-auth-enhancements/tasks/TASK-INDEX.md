@@ -10,75 +10,75 @@
 
 | # | Task | Status | Rigor | Depends On | Parallel Group |
 |---|------|--------|-------|------------|----------------|
-| 001 | Scaffold @spaarke/auth Package | 🔲 | FULL | — | — |
-| 002 | Implement Token Acquisition Strategies | 🔲 | FULL | 001 | — |
-| 003 | Implement Authenticated Fetch | 🔲 | FULL | 002 | — |
-| 004 | Implement Token Bridge Utilities | 🔲 | STANDARD | 001 | pg-1a (with 002) |
-| 005 | Implement initAuth API and Options | 🔲 | FULL | 002, 003, 004 | — |
-| 006 | Unit Tests for @spaarke/auth | 🔲 | STANDARD | 005 | — |
-| 007 | Migrate LegalWorkspace to @spaarke/auth | 🔲 | FULL | 006 | — |
+| 001 | Scaffold @spaarke/auth Package | ✅ | FULL | — | — |
+| 002 | Implement Token Acquisition Strategies | ✅ | FULL | 001 | — |
+| 003 | Implement Authenticated Fetch | ✅ | FULL | 002 | — |
+| 004 | Implement Token Bridge Utilities | ✅ | STANDARD | 001 | pg-1a (with 002) |
+| 005 | Implement initAuth API and Options | ✅ | FULL | 002, 003, 004 | — |
+| 006 | Unit Tests for @spaarke/auth | ✅ | STANDARD | 005 | — |
+| 007 | Migrate LegalWorkspace to @spaarke/auth | ✅ | FULL | 006 | — |
 
 ### Phase 2: FilePreviewDialog Component (Group A)
 
 | # | Task | Status | Rigor | Depends On | Parallel Group |
 |---|------|--------|-------|------------|----------------|
-| 010 | Create FilePreviewDialog Component | 🔲 | FULL | 007 | A |
-| 011 | Implement Open File + Open Record Actions | 🔲 | FULL | 010 | A (parallel with 012) |
-| 012 | Implement Copy Link + Workspace Toggle | 🔲 | FULL | 010 | A (parallel with 011) |
-| 013 | Build & Verify FilePreviewDialog | 🔲 | STANDARD | 011, 012 | A |
+| 010 | Create FilePreviewDialog Component | ✅ | FULL | 007 | A |
+| 011 | Implement Open File + Open Record Actions | ✅ | FULL | 010 | A (parallel with 012) |
+| 012 | Implement Copy Link + Workspace Toggle | ✅ | FULL | 010 | A (parallel with 011) |
+| 013 | Build & Verify FilePreviewDialog | ✅ | STANDARD | 011, 012 | A |
 
 ### Phase 3: FilePreviewDialog Integration (Group A continued)
 
 | # | Task | Status | Rigor | Depends On | Parallel Group |
 |---|------|--------|-------|------------|----------------|
-| 020 | Integrate into FindSimilarResultsStep | 🔲 | FULL | 013 | A (parallel with 021) |
-| 021 | Integrate into DocumentCard | 🔲 | FULL | 013 | A (parallel with 020) |
-| 022 | Build & Verify Phase 3 Integration | 🔲 | STANDARD | 020, 021 | A |
+| 020 | Integrate into FindSimilarResultsStep | ✅ | FULL | 013 | A (parallel with 021) |
+| 021 | Integrate into DocumentCard | ✅ | FULL | 013 | A (parallel with 020) |
+| 022 | Build & Verify Phase 3 Integration | ✅ | STANDARD | 020, 021 | A |
 
 ### Phase 4: CreateDocumentDialog Code Page (Group B)
 
 | # | Task | Status | Rigor | Depends On | Parallel Group |
 |---|------|--------|-------|------------|----------------|
-| 030 | Scaffold CreateDocument Code Page | 🔲 | FULL | 007 | B |
-| 031 | Build FileUploadStep | 🔲 | FULL | 030 | B (parallel 031-035) |
-| 032 | Build DocumentDetailsStep | 🔲 | FULL | 030 | B (parallel 031-035) |
-| 033 | Build NextStepsStep | 🔲 | STANDARD | 030 | B (parallel 031-035) |
-| 034 | Implement Upload Service | 🔲 | FULL | 030 | B (parallel 031-035) |
-| 035 | Implement Record Creation Service | 🔲 | FULL | 030 | B (parallel 031-035) |
-| 036 | Wire Up Wizard + Feature Flag | 🔲 | FULL | 031-035 | B |
-| 037 | Build & Verify CreateDocumentDialog | 🔲 | STANDARD | 036 | B |
+| 030 | Scaffold CreateDocument Code Page | ✅ | FULL | 007 | B |
+| 031 | Build FileUploadStep | ✅ | FULL | 030 | B (parallel 031-035) |
+| 032 | Build DocumentDetailsStep | ✅ | FULL | 030 | B (parallel 031-035) |
+| 033 | Build NextStepsStep | ✅ | STANDARD | 030 | B (parallel 031-035) |
+| 034 | Implement Upload Service | ✅ | FULL | 030 | B (parallel 031-035) |
+| 035 | Implement Record Creation Service | ✅ | FULL | 030 | B (parallel 031-035) |
+| 036 | Wire Up Wizard + Feature Flag | ✅ | FULL | 031-035 | B |
+| 037 | Build & Verify CreateDocumentDialog | ✅ | STANDARD | 036 | B |
 
 ### Phase 5: Code Page Migration — Function-Based (Group C)
 
 | # | Task | Status | Rigor | Depends On | Parallel Group |
 |---|------|--------|-------|------------|----------------|
-| 040 | Migrate AnalysisWorkspace Auth | 🔲 | FULL | 007 | C (all parallel) |
-| 041 | Migrate PlaybookBuilder Auth | 🔲 | FULL | 007 | C (all parallel) |
-| 042 | Migrate SprkChatPane Auth | 🔲 | FULL | 007 | C (all parallel) |
+| 040 | Migrate AnalysisWorkspace Auth | ✅ | FULL | 007 | C (all parallel) |
+| 041 | Migrate PlaybookBuilder Auth | ✅ | FULL | 007 | C (all parallel) |
+| 042 | Migrate SprkChatPane Auth | ✅ | FULL | 007 | C (all parallel) |
 
 ### Phase 6: Code Page Migration — Class-Based (Group D)
 
 | # | Task | Status | Rigor | Depends On | Parallel Group |
 |---|------|--------|-------|------------|----------------|
-| 050 | Migrate SemanticSearch Code Page Auth | 🔲 | FULL | 007 | D (all parallel) |
-| 051 | Migrate DocumentRelationshipViewer Code Page Auth | 🔲 | FULL | 007 | D (all parallel) |
+| 050 | Migrate SemanticSearch Code Page Auth | ✅ | FULL | 007 | D (all parallel) |
+| 051 | Migrate DocumentRelationshipViewer Code Page Auth | ✅ | FULL | 007 | D (all parallel) |
 
 ### Phase 7: PCF Migration — Pilot (Group E)
 
 | # | Task | Status | Rigor | Depends On | Parallel Group |
 |---|------|--------|-------|------------|----------------|
-| 060 | Migrate SpeDocumentViewer PCF Auth (Pilot) | 🔲 | FULL | 007 | E (all parallel) |
-| 061 | Migrate SpeFileViewer PCF Auth (Pilot) | 🔲 | FULL | 007 | E (all parallel) |
+| 060 | Migrate SpeDocumentViewer PCF Auth (Pilot) | ✅ | FULL | 007 | E (all parallel) |
+| 061 | Migrate SpeFileViewer PCF Auth (Pilot) | ✅ | FULL | 007 | E (all parallel) |
 
 ### Phase 8: PCF Migration — Complete (Group F)
 
 | # | Task | Status | Rigor | Depends On | Parallel Group |
 |---|------|--------|-------|------------|----------------|
-| 070 | Migrate UniversalDatasetGrid PCF Auth | 🔲 | FULL | 060 | F (all parallel) |
-| 071 | Migrate SemanticSearchControl PCF Auth | 🔲 | FULL | 060 | F (all parallel) |
-| 072 | Migrate DocumentRelationshipViewer PCF Auth | 🔲 | FULL | 060 | F (all parallel) |
-| 073 | Migrate EmailProcessingMonitor PCF Auth | 🔲 | FULL | 060 | F (all parallel) |
-| 074 | Migrate AnalysisWorkspace PCF Auth + Scope Reconciliation | 🔲 | FULL | 060 | F (all parallel) |
+| 070 | Migrate UniversalDatasetGrid PCF Auth | ✅ | FULL | 060 | F (all parallel) |
+| 071 | Migrate SemanticSearchControl PCF Auth | ✅ | FULL | 060 | F (all parallel) |
+| 072 | Migrate DocumentRelationshipViewer PCF Auth | ✅ | FULL | 060 | F (all parallel) |
+| 073 | Migrate EmailProcessingMonitor PCF Auth | ✅ | FULL | 060 | F (all parallel) |
+| 074 | Migrate AnalysisWorkspace PCF Auth + Scope Reconciliation | ✅ | FULL | 060 | F (all parallel) |
 
 ### Wrap-up
 
