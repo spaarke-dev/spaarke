@@ -1,7 +1,7 @@
 <task id="ECS-002" project="Email Communication Solution R2">
   <metadata>
     <title>Complete Communication Account Admin UX (Dataverse Forms/Views)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>1 - Communication Account Entity (Phase A)</phase>
     <tags>dataverse, admin-ux</tags>

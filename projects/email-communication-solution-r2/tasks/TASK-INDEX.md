@@ -17,10 +17,10 @@
 
 | # | Task | Status | Depends On | Rigor |
 |---|------|--------|------------|-------|
-| 001 | Assess R1 Communication Account State | 🔲 | — | STANDARD |
-| 002 | Complete Communication Account Admin UX | 🔲 | 001 | STANDARD |
-| 003 | Complete ApprovedSenderValidator Migration | 🔲 | 001 | FULL |
-| 004 | Document Exchange Access Policy Setup | 🔲 | 001 | MINIMAL |
+| 001 | Assess R1 Communication Account State | ✅ | — | STANDARD |
+| 002 | Complete Communication Account Admin UX | ✅ | 001 | STANDARD |
+| 003 | Complete ApprovedSenderValidator Migration | ✅ | 001 | FULL |
+| 004 | Document Exchange Access Policy Setup | ✅ | 001 | MINIMAL |
 | 005 | End-to-End Outbound Shared Mailbox Test | 🔲 | 003 | STANDARD |
 
 ## Phase 2: Individual User Outbound (Phase B)

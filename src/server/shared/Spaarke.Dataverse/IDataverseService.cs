@@ -464,25 +464,13 @@ public interface IDataverseService
         CancellationToken ct = default);
 
     // ========================================
-    // Approved Sender Operations (Email Communication R1)
-    // ========================================
-
-    /// <summary>
-    /// Query all active sprk_approvedsender records from Dataverse.
-    /// Returns records where statecode eq 0 (Active).
-    /// </summary>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>Array of Entity objects with sprk_name, sprk_email, sprk_isdefault attributes</returns>
-    Task<Entity[]> QueryApprovedSendersAsync(CancellationToken ct = default);
-
-    // ========================================
     // Communication Account Operations (Email Communication R1 — Phase 6)
     // ========================================
 
     /// <summary>
     /// Query sprk_communicationaccount records from Dataverse with an OData filter and select.
     /// </summary>
-    /// <param name="filter">OData $filter expression (e.g., "sprk_sendenableds eq true and statecode eq 0")</param>
+    /// <param name="filter">OData $filter expression (e.g., "sprk_sendenabled eq true and statecode eq 0")</param>
     /// <param name="select">Comma-separated $select fields</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>Array of Entity objects with requested attributes</returns>

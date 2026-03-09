@@ -1,7 +1,7 @@
 <task id="ECS-004" project="Email Communication Solution R2">
   <metadata>
     <title>Document Exchange Access Policy Setup</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <phase>1 - Communication Account Entity (Phase A)</phase>
     <tags>documentation, exchange</tags>

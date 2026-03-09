@@ -32,14 +32,14 @@ public sealed class CommunicationAccountService
     }
 
     /// <summary>
-    /// Returns all active communication accounts where sprk_sendenableds eq true.
+    /// Returns all active communication accounts where sprk_sendenabled eq true.
     /// Results are cached in Redis with a 5-minute TTL.
     /// </summary>
     public async Task<CommunicationAccount[]> QuerySendEnabledAccountsAsync(CancellationToken ct = default)
     {
         return await GetCachedAccountsAsync(
             SendEnabledCacheKey,
-            "sprk_sendenableds eq true and statecode eq 0",
+            "sprk_sendenabled eq true and statecode eq 0",
             "sprk_emailaddress,sprk_displayname,sprk_isdefaultsender,sprk_accounttype,sprk_securitygroupid,sprk_securitygroupname,sprk_name,sprk_verificationstatus,sprk_lastverified",
             ct);
     }
@@ -142,7 +142,7 @@ public sealed class CommunicationAccountService
             AccountType = entity.Contains("sprk_accounttype")
                 ? (AccountType)(entity.GetAttributeValue<OptionSetValue>("sprk_accounttype")?.Value ?? 100000000)
                 : AccountType.SharedAccount,
-            SendEnabled = entity.GetAttributeValue<bool>("sprk_sendenableds"),
+            SendEnabled = entity.GetAttributeValue<bool>("sprk_sendenabled"),
             IsDefaultSender = entity.GetAttributeValue<bool>("sprk_isdefaultsender"),
             ReceiveEnabled = entity.GetAttributeValue<bool>("sprk_receiveenabled"),
             MonitorFolder = entity.GetAttributeValue<string>("sprk_monitorfolder"),

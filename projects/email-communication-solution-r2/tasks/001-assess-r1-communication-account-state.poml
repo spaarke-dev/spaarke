@@ -1,7 +1,7 @@
 <task id="ECS-001" project="Email Communication Solution R2">
   <metadata>
     <title>Assess R1 Communication Account Implementation State</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>1 - Communication Account Entity (Phase A)</phase>
     <tags>bff-api, assessment, dataverse</tags>

@@ -1,7 +1,7 @@
 <task id="ECS-003" project="Email Communication Solution R2">
   <metadata>
     <title>Complete ApprovedSenderValidator Migration to sprk_communicationaccount</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>1 - Communication Account Entity (Phase A)</phase>
     <tags>bff-api, auth</tags>

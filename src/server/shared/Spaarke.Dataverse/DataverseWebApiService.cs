@@ -1840,13 +1840,6 @@ public class DataverseWebApiService : IDataverseService
             "Configure DI to use ServiceClient implementation for alternate key lookups.");
     }
 
-    public Task<Entity[]> QueryApprovedSendersAsync(CancellationToken ct = default)
-    {
-        throw new NotImplementedException(
-            "QueryApprovedSendersAsync is implemented in DataverseServiceClientImpl. " +
-            "Configure DI to use ServiceClient implementation for approved sender queries.");
-    }
-
     public Task<Entity[]> QueryCommunicationAccountsAsync(string filter, string select, CancellationToken ct = default)
     {
         throw new NotImplementedException(

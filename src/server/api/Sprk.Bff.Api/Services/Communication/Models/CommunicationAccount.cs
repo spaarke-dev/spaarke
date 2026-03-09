@@ -12,7 +12,7 @@ public sealed class CommunicationAccount
     public string? DisplayName { get; init; }
     public AccountType AccountType { get; init; }
 
-    /// <summary>Note: actual Dataverse field is sprk_sendenableds (trailing 's').</summary>
+    /// <summary>Maps to Dataverse field sprk_sendenabled.</summary>
     public bool SendEnabled { get; init; }
 
     public bool IsDefaultSender { get; init; }

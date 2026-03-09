@@ -132,7 +132,7 @@ public sealed class IncomingCommunicationProcessor
 
         // ── Step 4: Create sprk_communication record ─────────────────────────────
         // Direction = Incoming (100000000)
-        // CommunicationType = Email (100000000) — NOTE: field name is sprk_communiationtype (intentional typo)
+        // CommunicationType = Email (100000000)
         // StatusCode = Delivered (659490003)
         // IMPORTANT: Do NOT set sprk_regardingmatter, sprk_regardingorganization, sprk_regardingperson
         var communicationId = await CreateCommunicationRecordAsync(message, mailboxEmail, graphMessageId, ct);
@@ -276,7 +276,7 @@ public sealed class IncomingCommunicationProcessor
         var communication = new DataverseEntity("sprk_communication")
         {
             ["sprk_name"] = $"Email: {TruncateTo(message.Subject ?? "(No Subject)", 200)}",
-            ["sprk_communiationtype"] = new OptionSetValue((int)CommunicationType.Email), // 100000000 — NOTE: intentional typo in Dataverse field name
+            ["sprk_communicationtype"] = new OptionSetValue((int)CommunicationType.Email), // 100000000
             ["statuscode"] = new OptionSetValue((int)CommunicationStatus.Delivered), // 659490003
             ["statecode"] = new OptionSetValue(0), // Active
             ["sprk_direction"] = new OptionSetValue((int)CommunicationDirection.Incoming), // 100000000

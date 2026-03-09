@@ -336,7 +336,7 @@ The `ApprovedSenderValidator` uses a two-tier model to validate sender mailboxes
 
 ### Tier 2: Dataverse + Redis Cache (Asynchronous)
 
-1. Check Redis cache (key: `communication:approved-senders`, TTL: 5 minutes)
+1. Check Redis cache (key: `communication:accounts:merged`, TTL: 5 minutes)
 2. If cache miss: query Dataverse `sprk_approvedsender` entity for active records
 3. Merge: config senders as base, Dataverse senders overlay (Dataverse wins on email match)
 4. Cache merged result in Redis

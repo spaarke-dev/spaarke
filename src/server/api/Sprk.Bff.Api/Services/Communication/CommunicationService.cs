@@ -544,7 +544,7 @@ public sealed class CommunicationService
         var communication = new DataverseEntity("sprk_communication")
         {
             ["sprk_name"] = $"Email: {TruncateTo(request.Subject, 200)}",
-            ["sprk_communiationtype"] = new OptionSetValue((int)request.CommunicationType), // NOTE: typo "communiation" is intentional (actual Dataverse schema)
+            ["sprk_communicationtype"] = new OptionSetValue((int)request.CommunicationType),
             ["statuscode"] = new OptionSetValue((int)CommunicationStatus.Send),
             ["statecode"] = new OptionSetValue(0), // Active
             ["sprk_direction"] = new OptionSetValue((int)CommunicationDirection.Outgoing),
@@ -678,7 +678,7 @@ public sealed class CommunicationService
         var communication = new DataverseEntity("sprk_communication")
         {
             ["sprk_name"] = $"Email: {TruncateTo(request.Subject, 200)}",
-            ["sprk_communiationtype"] = new OptionSetValue((int)request.CommunicationType), // NOTE: typo "communiation" is intentional (actual Dataverse schema)
+            ["sprk_communicationtype"] = new OptionSetValue((int)request.CommunicationType),
             ["statuscode"] = new OptionSetValue((int)CommunicationStatus.Send),
             ["statecode"] = new OptionSetValue(0), // Active
             ["sprk_direction"] = new OptionSetValue((int)CommunicationDirection.Outgoing),

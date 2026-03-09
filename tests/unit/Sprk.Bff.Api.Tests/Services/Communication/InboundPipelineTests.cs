@@ -583,10 +583,10 @@ public class InboundPipelineTests
         direction.Should().NotBeNull();
         direction!.Value.Should().Be(100000000, "sprk_direction should be Incoming (100000000)");
 
-        // CommunicationType = Email (100000000) — NOTE: intentional typo in field name
-        var commType = entity.GetAttributeValue<OptionSetValue>("sprk_communiationtype");
+        // CommunicationType = Email (100000000)
+        var commType = entity.GetAttributeValue<OptionSetValue>("sprk_communicationtype");
         commType.Should().NotBeNull();
-        commType!.Value.Should().Be(100000000, "sprk_communiationtype should be Email (100000000)");
+        commType!.Value.Should().Be(100000000, "sprk_communicationtype should be Email (100000000)");
 
         // StatusCode = Delivered (659490003)
         var statusCode = entity.GetAttributeValue<OptionSetValue>("statuscode");
