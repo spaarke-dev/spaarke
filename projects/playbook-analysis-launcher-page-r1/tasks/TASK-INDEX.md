@@ -2,7 +2,8 @@
 
 > **Total Tasks**: 22
 > **Phases**: 5
-> **Last Updated**: 2026-03-05
+> **Last Updated**: 2026-03-09
+> **Project Status**: Closed (core implementation complete; see PROJECT-CLOSURE.md)
 
 ## Status Legend
 
@@ -52,20 +53,22 @@
 
 | # | Task | Status | Rigor | Parallel Group | Dependencies |
 |---|------|--------|-------|----------------|--------------|
-| 040 | [E2E: Analysis Builder Code Page](040-e2e-analysis-builder.poml) | 🔲 | STANDARD | F | 022, 024 |
-| 041 | [E2E: Quick Start Playbook Wizards](041-e2e-quickstart-wizards.poml) | 🔲 | STANDARD | F | 034 |
+| 040 | [E2E: Analysis Builder Code Page](040-e2e-analysis-builder.poml) | ✅ | STANDARD | F | 022, 024 |
+| 041 | [E2E: Quick Start Playbook Wizards](041-e2e-quickstart-wizards.poml) | ✅ | STANDARD | F | 034 |
 | 042 | [Dark Mode Verification](042-dark-mode-verification.poml) | ✅ | STANDARD | F | 022, 034 |
 | 043 | [Portability Check](043-portability-check.poml) | ✅ | MINIMAL | F | 034 |
-| 044 | [Edge Case Testing](044-edge-case-testing.poml) | 🔲 | STANDARD | G | 040, 041 |
+| 044 | [Edge Case Testing](044-edge-case-testing.poml) | ✅ | STANDARD | G | 040, 041 |
 
 ## Phase 5: Deployment & Retirement
 
 | # | Task | Status | Rigor | Parallel Group | Dependencies |
 |---|------|--------|-------|----------------|--------------|
-| 050 | [Deploy Analysis Builder Code Page](050-deploy-analysis-builder.poml) | 🔲 | STANDARD | — | 040-044 |
-| 051 | [Deploy Updated Corporate Workspace](051-deploy-workspace.poml) | 🔲 | STANDARD | — | 040-044 |
-| 054 | [Retire AnalysisBuilder PCF Control](054-retire-analysis-builder-pcf.poml) | 🔲 | FULL | — | 050, 051 |
-| 090 | [Project Wrap-Up](090-project-wrap-up.poml) | 🔲 | MINIMAL | — | 054 |
+| 050 | [Deploy Analysis Builder Code Page](050-deploy-analysis-builder.poml) | ⏭️ | STANDARD | — | 040-044 |
+| 051 | [Deploy Updated Corporate Workspace](051-deploy-workspace.poml) | ⏭️ | STANDARD | — | 040-044 |
+| 054 | [Retire AnalysisBuilder PCF Control](054-retire-analysis-builder-pcf.poml) | ⏭️ | FULL | — | 050, 051 |
+| 090 | [Project Wrap-Up](090-project-wrap-up.poml) | ⏭️ | MINIMAL | — | 054 |
+
+> **Note (2026-03-09)**: Phase 5 tasks deferred — deployment will be scheduled separately. See [PROJECT-CLOSURE.md](../PROJECT-CLOSURE.md) for details.
 
 ---
 

@@ -1,6 +1,6 @@
 # Playbook & Analysis Launcher Page R1
 
-> **Status**: In Progress
+> **Status**: Closed (2026-03-09) — Core implementation complete; see [PROJECT-CLOSURE.md](PROJECT-CLOSURE.md)
 > **Branch**: `work/playbook-analysis-launcher-page-r1`
 > **Started**: 2026-03-04
 
