@@ -1761,33 +1761,6 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
 // Visualization endpoints for document relationship discovery
 app.MapVisualizationEndpoints();
 
-// ============================================================================
-// PLAYBOOK BUILDER SPA FALLBACK - Client-side routing support
-// ============================================================================
-// Catch-all for /playbook-builder/* routes that don't match static files.
-// IMPORTANT: MapFallbackToFile creates a route that matches the pattern, so we need to
-// ensure it doesn't match requests for static assets (.js, .css, .map, .svg, etc).
-// The fallback only triggers for non-file paths (client-side routes).
-app.MapFallback(context =>
-{
-    var path = context.Request.Path.Value ?? "";
-    // Only serve index.html for /playbook-builder/* paths that are NOT static files
-    if (path.StartsWith("/playbook-builder/", StringComparison.OrdinalIgnoreCase) &&
-        !Path.HasExtension(path))
-    {
-        context.Request.Path = "/playbook-builder/index.html";
-        return context.RequestServices.GetRequiredService<IWebHostEnvironment>()
-            .WebRootFileProvider
-            .GetFileInfo("playbook-builder/index.html")
-            .Exists
-            ? Results.File(
-                Path.Combine(context.RequestServices.GetRequiredService<IWebHostEnvironment>().WebRootPath!, "playbook-builder/index.html"),
-                "text/html").ExecuteAsync(context)
-            : Results.NotFound().ExecuteAsync(context);
-    }
-    return Results.NotFound().ExecuteAsync(context);
-});
-
 // Resilience monitoring endpoints (circuit breaker status)
 app.MapResilienceEndpoints();
 
@@ -1821,6 +1794,31 @@ app.MapFinanceRollupEndpoints();
 
 // Communication endpoints (email sending via Graph API)
 app.MapCommunicationEndpoints();
+
+// ============================================================================
+// PLAYBOOK BUILDER SPA FALLBACK - Client-side routing support
+// MUST be registered LAST — MapFallback is a catch-all that intercepts any
+// unmatched route. Endpoints registered after this will be unreachable.
+// ============================================================================
+app.MapFallback(context =>
+{
+    var path = context.Request.Path.Value ?? "";
+    // Only serve index.html for /playbook-builder/* paths that are NOT static files
+    if (path.StartsWith("/playbook-builder/", StringComparison.OrdinalIgnoreCase) &&
+        !Path.HasExtension(path))
+    {
+        context.Request.Path = "/playbook-builder/index.html";
+        return context.RequestServices.GetRequiredService<IWebHostEnvironment>()
+            .WebRootFileProvider
+            .GetFileInfo("playbook-builder/index.html")
+            .Exists
+            ? Results.File(
+                Path.Combine(context.RequestServices.GetRequiredService<IWebHostEnvironment>().WebRootPath!, "playbook-builder/index.html"),
+                "text/html").ExecuteAsync(context)
+            : Results.NotFound().ExecuteAsync(context);
+    }
+    return Results.NotFound().ExecuteAsync(context);
+});
 
 app.Run();
 
