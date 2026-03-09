@@ -28,7 +28,7 @@ import { FluentProvider } from "@fluentui/react-components";
 import { App } from "./App";
 import { detectTheme, isDarkTheme } from "./providers/ThemeProvider";
 import { parseUrlParams } from "./utils/parseUrlParams";
-import { msalAuthProvider } from "./services/auth/MsalAuthProvider";
+import { initializeAuth } from "./services/authInit";
 
 // ---------------------------------------------------------------------------
 // Parse URL parameters (ADR-026 data envelope unwrap)
@@ -81,13 +81,14 @@ function renderApp(): void {
     );
 }
 
-// Initialize MSAL before rendering so auth is ready for API calls
-msalAuthProvider.initialize()
+// Initialize @spaarke/auth before rendering so tokens are ready for API calls.
+// Uses multi-tenant authority and window.location.origin — no hardcoded tenant/redirect.
+initializeAuth()
     .then(() => {
-        console.info("[SemanticSearch] MSAL initialized, rendering app.");
+        console.info("[SemanticSearch] Auth initialized, rendering app.");
         renderApp();
     })
     .catch((err) => {
-        console.error("[SemanticSearch] MSAL init failed, rendering anyway.", err);
+        console.error("[SemanticSearch] Auth init failed, rendering anyway.", err);
         renderApp();
     });

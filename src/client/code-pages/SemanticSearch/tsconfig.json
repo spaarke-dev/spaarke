@@ -12,7 +12,10 @@
     "skipLibCheck": true,
     "outDir": "./out",
     "rootDir": "./src",
-    "typeRoots": ["./node_modules/@types"]
+    "typeRoots": ["./node_modules/@types"],
+    "paths": {
+      "@spaarke/auth": ["../../shared/Spaarke.Auth/src/index"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "out", "src/__tests__", "src/**/*.test.ts", "src/**/*.test.tsx", "src/**/*.spec.ts", "src/**/*.spec.tsx"]

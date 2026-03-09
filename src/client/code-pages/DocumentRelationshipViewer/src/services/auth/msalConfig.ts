@@ -1,6 +1,15 @@
+/**
+ * @deprecated This file is superseded by @spaarke/auth which uses multi-tenant authority
+ * (https://login.microsoftonline.com/organizations) and window.location.origin as redirect URI.
+ * The hardcoded TENANT_ID and REDIRECT_URI below only work in the dev environment.
+ *
+ * This file is retained for reference only and will be removed in a future cleanup.
+ */
+
 import { Configuration, LogLevel } from "@azure/msal-browser";
 
 /**
+ * @deprecated See @spaarke/auth config.ts for the shared, environment-portable equivalent.
  * MSAL Configuration for DocumentRelationshipViewer Code Page
  *
  * Same app registration as the PCF version.

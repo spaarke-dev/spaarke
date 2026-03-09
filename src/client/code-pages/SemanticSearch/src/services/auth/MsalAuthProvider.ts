@@ -1,3 +1,11 @@
+/**
+ * @deprecated This file is superseded by @spaarke/auth (via services/authInit.ts).
+ * The local MsalAuthProvider had hardcoded TENANT_ID and REDIRECT_URI that break
+ * in non-dev environments. Use `import { getAuthHeader } from "../authInit"` instead.
+ *
+ * This file is retained for reference only and will be removed in a future cleanup.
+ */
+
 import {
     PublicClientApplication,
     AccountInfo,
@@ -18,6 +26,7 @@ interface TokenCacheEntry {
 }
 
 /**
+ * @deprecated Use @spaarke/auth via services/authInit.ts instead.
  * MSAL Authentication Provider for SemanticSearch Code Page
  *
  * Singleton pattern — exports a single instance, not a class.

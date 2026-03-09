@@ -14,6 +14,9 @@ module.exports = (env) => {
     },
     resolve: {
       extensions: ['.ts', '.tsx', '.js', '.jsx'],
+      alias: {
+        '@spaarke/auth': path.resolve(__dirname, '../../shared/Spaarke.Auth/src'),
+      },
     },
     module: {
       rules: [

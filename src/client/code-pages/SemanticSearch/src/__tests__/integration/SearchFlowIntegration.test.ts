@@ -37,12 +37,10 @@ import type {
 // Mocks — MSAL auth provider returns a fake token immediately
 // ---------------------------------------------------------------------------
 
-jest.mock("../../services/auth/MsalAuthProvider", () => ({
-    msalAuthProvider: {
-        getAuthHeader: jest.fn().mockResolvedValue("Bearer fake-integration-token"),
-        initialize: jest.fn().mockResolvedValue(undefined),
-        isAuthenticated: jest.fn().mockReturnValue(true),
-    },
+jest.mock("../../services/authInit", () => ({
+    getAuthHeader: jest.fn().mockResolvedValue("Bearer fake-integration-token"),
+    initializeAuth: jest.fn().mockResolvedValue(undefined),
+    isAuthenticated: jest.fn().mockReturnValue(true),
 }));
 
 // Mock global fetch at the lowest level so the full service pipeline is tested

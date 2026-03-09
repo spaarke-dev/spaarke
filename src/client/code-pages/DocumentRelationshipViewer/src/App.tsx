@@ -43,8 +43,7 @@ import { RelationshipGrid } from "./components/RelationshipGrid";
 import { ControlPanel, DEFAULT_FILTER_SETTINGS, DOCUMENT_TYPES, type FilterSettings } from "./components/ControlPanel";
 import { NodeActionBar } from "./components/NodeActionBar";
 import { useVisualizationApi, formatVisualizationError } from "./hooks/useVisualizationApi";
-import { MsalAuthProvider } from "./services/auth/MsalAuthProvider";
-import { loginRequest } from "./services/auth/msalConfig";
+import { initializeAuth, getToken } from "./services/authInit";
 import type { DocumentNode } from "./types/graph";
 
 const DEFAULT_API_BASE_URL = "https://spe-api-dev-67e2xz.azurewebsites.net";
@@ -151,13 +150,12 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
     const [filters, setFilters] = useState<FilterSettings>(DEFAULT_FILTER_SETTINGS);
     const [selectedNode, setSelectedNode] = useState<DocumentNode | null>(null);
 
-    // Auth initialization
+    // Auth initialization — uses @spaarke/auth (multi-tenant, no hardcoded values)
     useEffect(() => {
-        const authProvider = MsalAuthProvider.getInstance();
         let cancelled = false;
 
-        authProvider.initialize()
-            .then(() => authProvider.getToken(loginRequest.scopes))
+        initializeAuth()
+            .then(() => getToken())
             .then((token) => {
                 if (!cancelled) setAccessToken(token);
             })

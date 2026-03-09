@@ -1,4 +1,10 @@
 /**
+ * @deprecated These types are superseded by @spaarke/auth which provides its own
+ * IAuthConfig, ITokenResult, and SpaarkeAuthProvider types. The IAuthProvider
+ * interface is no longer needed since @spaarke/auth provides the concrete implementation.
+ *
+ * This file is retained for reference only and will be removed in a future cleanup.
+ *
  * Authentication types for DocumentRelationshipViewer Code Page
  */
 

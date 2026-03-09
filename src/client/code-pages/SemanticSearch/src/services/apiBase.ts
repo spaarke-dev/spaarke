@@ -3,13 +3,13 @@
  *
  * Provides:
  * - BFF_API_BASE_URL constant
- * - buildAuthHeaders() — constructs Authorization + Content-Type headers via MSAL
+ * - buildAuthHeaders() — constructs Authorization + Content-Type headers via @spaarke/auth
  * - handleApiResponse<T>() — parses success or throws typed ApiError (RFC 7807 ProblemDetails)
  *
  * @see ADR-013: All AI calls go through BFF API
  */
 
-import { msalAuthProvider } from "./auth/MsalAuthProvider";
+import { getAuthHeader } from "./authInit";
 import type { ApiError } from "../types";
 
 /** BFF API base URL (dev environment). */
@@ -17,14 +17,14 @@ export const BFF_API_BASE_URL = "https://spe-api-dev-67e2xz.azurewebsites.net";
 
 /**
  * Build authenticated request headers for BFF API calls.
- * Acquires a Bearer token via MsalAuthProvider and returns
+ * Acquires a Bearer token via @spaarke/auth and returns
  * Authorization + Content-Type headers.
  *
  * @returns Header record ready for fetch() calls
- * @throws Error if MSAL is not initialized or token acquisition fails
+ * @throws Error if auth is not initialized or token acquisition fails
  */
 export async function buildAuthHeaders(): Promise<Record<string, string>> {
-    const authHeader = await msalAuthProvider.getAuthHeader();
+    const authHeader = await getAuthHeader();
     return {
         "Authorization": authHeader,
         "Content-Type": "application/json",

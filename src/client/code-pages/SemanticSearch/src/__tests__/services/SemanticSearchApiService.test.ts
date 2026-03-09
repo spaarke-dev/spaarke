@@ -22,10 +22,8 @@ import type {
 
 const mockGetAuthHeader = jest.fn<Promise<string>, []>();
 
-jest.mock("../../services/auth/MsalAuthProvider", () => ({
-    msalAuthProvider: {
-        getAuthHeader: mockGetAuthHeader,
-    },
+jest.mock("../../services/authInit", () => ({
+    getAuthHeader: mockGetAuthHeader,
 }));
 
 // Mock global fetch

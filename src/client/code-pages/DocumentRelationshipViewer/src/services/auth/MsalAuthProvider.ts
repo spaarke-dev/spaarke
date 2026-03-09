@@ -1,3 +1,11 @@
+/**
+ * @deprecated This file is superseded by @spaarke/auth (via services/authInit.ts).
+ * The local MsalAuthProvider had hardcoded TENANT_ID and REDIRECT_URI that break
+ * in non-dev environments. Use `import { getToken } from "../authInit"` instead.
+ *
+ * This file is retained for reference only and will be removed in a future cleanup.
+ */
+
 import {
     PublicClientApplication,
     AccountInfo,
@@ -10,6 +18,7 @@ import { msalConfig, validateMsalConfig } from "./msalConfig";
 import type { IAuthProvider, TokenCacheEntry } from "../../types/auth";
 
 /**
+ * @deprecated Use @spaarke/auth via services/authInit.ts instead.
  * MSAL Authentication Provider for DocumentRelationshipViewer Code Page
  *
  * Singleton pattern — same logic as PCF version, framework-agnostic.

@@ -17,10 +17,8 @@ import type { ApiError } from "../../types";
 
 const mockGetAuthHeader = jest.fn<Promise<string>, []>();
 
-jest.mock("../../services/auth/MsalAuthProvider", () => ({
-    msalAuthProvider: {
-        getAuthHeader: mockGetAuthHeader,
-    },
+jest.mock("../../services/authInit", () => ({
+    getAuthHeader: mockGetAuthHeader,
 }));
 
 import { BFF_API_BASE_URL, buildAuthHeaders, handleApiResponse } from "../../services/apiBase";
