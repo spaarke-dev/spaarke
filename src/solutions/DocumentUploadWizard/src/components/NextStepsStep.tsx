@@ -35,6 +35,7 @@ import * as React from "react";
 import {
     Card,
     Text,
+    Button,
     makeStyles,
     tokens,
     mergeClasses,
@@ -68,10 +69,14 @@ export interface INextStepsStepProps {
     selectedNextSteps: NextStepActionId[];
     /** Called when the selection changes. */
     onNextStepsChanged: (selected: NextStepActionId[]) => void;
-    /** Ref to the WizardShell handle for dynamic step injection (Send Email). */
+    /** Ref to the WizardShell handle for dynamic step injection. */
     wizardShellRef: React.RefObject<IWizardShellHandle | null>;
     /** Props for the DocumentEmailStep rendered inside the dynamic Send Email step. */
     emailStepProps: IDocumentEmailStepProps;
+    /** Callback to launch Work on Analysis (opens Analysis Builder). */
+    onLaunchAnalysis?: () => void;
+    /** Callback to launch Find Similar dialog. */
+    onLaunchFindSimilar?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -334,14 +339,22 @@ const CheckboxCard: React.FC<ICheckboxCardProps> = ({ def, selected, onToggle })
 // ---------------------------------------------------------------------------
 
 /**
+ * Options for building dynamic step configs.
+ */
+interface IDynamicStepBuildOptions {
+    emailStepProps: IDocumentEmailStepProps;
+    onLaunchAnalysis?: () => void;
+    onLaunchFindSimilar?: () => void;
+}
+
+/**
  * Builds a dynamic step config for a given next-step action.
- *
- * - Send Email: renders the DocumentEmailStep form
- * - Work on Analysis / Find Similar: placeholder steps (actions launch post-wizard from success screen)
+ * All dynamic steps are skippable — the user can press Skip to advance
+ * without completing the step.
  */
 function buildDynamicStepConfig(
     actionId: NextStepActionId,
-    emailStepProps: IDocumentEmailStepProps
+    options: IDynamicStepBuildOptions
 ): IWizardStepConfig {
     const stepId = DYNAMIC_STEP_ID_MAP[actionId];
     const stepLabel = DYNAMIC_STEP_LABEL_MAP[actionId];
@@ -351,25 +364,66 @@ function buildDynamicStepConfig(
             id: stepId,
             label: stepLabel,
             canAdvance: () => true,
+            isSkippable: true,
             renderContent: () => (
-                <DocumentEmailStep {...emailStepProps} />
+                <DocumentEmailStep {...options.emailStepProps} />
             ),
         };
     }
 
-    // Work on Analysis and Find Similar are launched from the success screen,
-    // but they appear in the sidebar to show the user's selected workflow.
+    if (actionId === "work-on-analysis") {
+        return {
+            id: stepId,
+            label: stepLabel,
+            canAdvance: () => true,
+            isSkippable: true,
+            renderContent: () => (
+                <div style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "24px" }}>
+                    <Text as="h2" size={500} weight="semibold">Work on Analysis</Text>
+                    <Text size={300}>
+                        Launch the AI Analysis Builder to run an analysis on your uploaded documents.
+                        You can also access this from the document record at any time.
+                    </Text>
+                    {options.onLaunchAnalysis && (
+                        <div>
+                            <Button
+                                appearance="primary"
+                                icon={<BrainCircuitRegular />}
+                                onClick={options.onLaunchAnalysis}
+                            >
+                                Open Analysis Builder
+                            </Button>
+                        </div>
+                    )}
+                </div>
+            ),
+        };
+    }
+
+    // find-similar
     return {
         id: stepId,
         label: stepLabel,
         canAdvance: () => true,
+        isSkippable: true,
         renderContent: () => (
-            <div style={{ padding: "24px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "24px" }}>
+                <Text as="h2" size={500} weight="semibold">Find Similar</Text>
                 <Text size={300}>
-                    {actionId === "work-on-analysis"
-                        ? "Analysis will be available after the wizard completes."
-                        : "Find Similar will be available after the wizard completes."}
+                    Search for similar documents across the tenant using AI-powered semantic search.
+                    You can also access this from the document record at any time.
                 </Text>
+                {options.onLaunchFindSimilar && (
+                    <div>
+                        <Button
+                            appearance="primary"
+                            icon={<DocumentSearchRegular />}
+                            onClick={options.onLaunchFindSimilar}
+                        >
+                            Open Find Similar
+                        </Button>
+                    </div>
+                )}
             </div>
         ),
     };
@@ -384,6 +438,8 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
     onNextStepsChanged,
     wizardShellRef,
     emailStepProps,
+    onLaunchAnalysis,
+    onLaunchFindSimilar,
 }) => {
     const styles = useStyles();
 
@@ -416,7 +472,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
         for (const actionId of next) {
             if (!prev.includes(actionId)) {
                 wizardShellRef.current?.addDynamicStep(
-                    buildDynamicStepConfig(actionId, emailStepProps),
+                    buildDynamicStepConfig(actionId, { emailStepProps, onLaunchAnalysis, onLaunchFindSimilar }),
                     DYNAMIC_CANONICAL_ORDER
                 );
             }
@@ -430,7 +486,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
         }
 
         prevSelectedRef.current = next;
-    }, [selectedNextSteps, wizardShellRef, emailStepProps]);
+    }, [selectedNextSteps, wizardShellRef, emailStepProps, onLaunchAnalysis, onLaunchFindSimilar]);
 
     return (
         <div className={styles.root}>

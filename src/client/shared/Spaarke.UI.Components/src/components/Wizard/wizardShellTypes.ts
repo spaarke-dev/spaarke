@@ -123,6 +123,13 @@ export interface IWizardStepConfig {
    */
   isEarlyFinish?: () => boolean;
   /**
+   * When `true`, a "Skip" button is shown in the footer that advances
+   * to the next step without requiring `canAdvance()` to be true.
+   * Intended for optional follow-on steps (e.g., Send Email, Work on Analysis)
+   * that the user selected but may decide to skip during execution.
+   */
+  isSkippable?: boolean;
+  /**
    * Optional extra actions rendered in the footer alongside the standard
    * Back/Next/Finish buttons. Use this for step-specific buttons like
    * "Reset Form" or "Preview".

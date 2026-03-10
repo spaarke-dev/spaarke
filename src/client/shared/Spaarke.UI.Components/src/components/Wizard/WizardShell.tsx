@@ -274,6 +274,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     const showFinish = isLastStep || isEarlyFinish;
 
     const canAdvance = currentConfig ? currentConfig.canAdvance() : true;
+    const isSkippable = currentConfig?.isSkippable ?? false;
 
     // ── Primary button label ──────────────────────────────────────────────
     const primaryButtonLabel: string = (() => {
@@ -315,6 +316,11 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     // ── Back button click ─────────────────────────────────────────────────
     const handleBack = React.useCallback(() => {
       dispatch({ type: 'PREV_STEP' });
+    }, []);
+
+    // ── Skip button click (advances without canAdvance check) ────────────
+    const handleSkip = React.useCallback(() => {
+      dispatch({ type: 'NEXT_STEP' });
     }, []);
 
     // ── Build the imperative handle for renderContent ─────────────────────
@@ -422,6 +428,16 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
                   disabled={isFinishing}
                 >
                   Back
+                </Button>
+              )}
+
+              {/* Skip button — shown on skippable steps (optional follow-on steps) */}
+              {isSkippable && !isLastStep && !isFinishing && (
+                <Button
+                  appearance="secondary"
+                  onClick={handleSkip}
+                >
+                  Skip
                 </Button>
               )}
 

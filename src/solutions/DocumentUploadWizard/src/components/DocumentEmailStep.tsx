@@ -14,10 +14,9 @@
  * @see ADR-021  - Fluent UI v9 design system (makeStyles + semantic tokens)
  */
 
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { SendEmailStep } from "@spaarke/ui-components/components/EmailStep";
 import type { ILookupItem } from "@spaarke/ui-components/components/EmailStep";
-import { resolveDataverseUrl, createDataverseTokenProvider } from "../services/codePageTokenProvider";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -86,72 +85,63 @@ function formatEntityTypeLabel(entityType: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Dataverse OData: search systemuser
+// Xrm.WebApi: search systemuser
 // ---------------------------------------------------------------------------
 
 /**
- * Searches the Dataverse systemuser table via OData for user lookup.
- * Returns ILookupItem[] with id (systemuserid) and name ("FullName (email)").
+ * Resolve Xrm.WebApi from the frame hierarchy.
  */
-async function searchSystemUsers(
-    query: string,
-    getToken: () => Promise<string>,
-    dataverseUrl: string
-): Promise<ILookupItem[]> {
-    if (!query || query.trim().length < 2) return [];
+function resolveXrmWebApi(): { retrieveMultipleRecords: (entity: string, options: string) => Promise<{ entities: Record<string, unknown>[] }> } | null {
+    const frames: Window[] = [window];
+    try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
+    try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* cross-origin */ }
 
-    const token = await getToken();
-    const filter = [
-        `contains(fullname, '${escapeODataString(query)}')`,
-        `or contains(internalemailaddress, '${escapeODataString(query)}')`,
-    ].join(" ");
-
-    const url =
-        `${dataverseUrl}/api/data/v9.2/systemusers` +
-        `?$select=systemuserid,fullname,internalemailaddress` +
-        `&$filter=${encodeURIComponent(filter)}` +
-        `&$top=10` +
-        `&$orderby=fullname asc`;
-
-    const response = await fetch(url, {
-        headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/json",
-            "OData-MaxVersion": "4.0",
-            "OData-Version": "4.0",
-        },
-    });
-
-    if (!response.ok) {
-        console.error(
-            "[DocumentEmailStep] systemuser search failed:",
-            response.status,
-            response.statusText
-        );
-        return [];
+    for (const frame of frames) {
+        try {
+            /* eslint-disable @typescript-eslint/no-explicit-any */
+            const xrm = (frame as any).Xrm;
+            if (xrm?.WebApi?.retrieveMultipleRecords) {
+                return xrm.WebApi;
+            }
+            /* eslint-enable @typescript-eslint/no-explicit-any */
+        } catch {
+            // Cross-origin frame — skip
+        }
     }
-
-    interface SystemUserRecord {
-        systemuserid: string;
-        fullname: string;
-        internalemailaddress?: string;
-    }
-
-    const data: { value: SystemUserRecord[] } = await response.json();
-
-    return data.value.map((user) => ({
-        id: user.systemuserid,
-        name: user.internalemailaddress
-            ? `${user.fullname} (${user.internalemailaddress})`
-            : user.fullname,
-    }));
+    return null;
 }
 
 /**
- * Escapes single quotes for OData string literals.
+ * Searches the Dataverse systemuser table via Xrm.WebApi for user lookup.
+ * Uses Xrm.WebApi (authenticated automatically) instead of direct OData fetch.
+ * Returns ILookupItem[] with id (systemuserid) and name ("FullName (email)").
  */
-function escapeODataString(value: string): string {
-    return value.replace(/'/g, "''");
+async function searchSystemUsers(query: string): Promise<ILookupItem[]> {
+    if (!query || query.trim().length < 2) return [];
+
+    const webApi = resolveXrmWebApi();
+    if (!webApi) {
+        console.error("[DocumentEmailStep] Xrm.WebApi not available for user search");
+        return [];
+    }
+
+    const escaped = query.replace(/'/g, "''");
+    const filter = `contains(fullname, '${escaped}') or contains(internalemailaddress, '${escaped}')`;
+    const options = `?$select=systemuserid,fullname,internalemailaddress&$filter=${filter}&$top=10&$orderby=fullname asc`;
+
+    try {
+        const result = await webApi.retrieveMultipleRecords("systemuser", options);
+
+        return result.entities.map((user) => ({
+            id: user.systemuserid as string,
+            name: user.internalemailaddress
+                ? `${user.fullname} (${user.internalemailaddress})`
+                : user.fullname as string,
+        }));
+    } catch (err) {
+        console.error("[DocumentEmailStep] systemuser search failed:", err);
+        return [];
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -164,10 +154,6 @@ export function DocumentEmailStep({
     parentEntityType,
     parentEntityId,
 }: IDocumentEmailStepProps): JSX.Element {
-    // Resolve Dataverse URL and token provider once
-    const dataverseUrl = useRef(resolveDataverseUrl()).current;
-    const getToken = useRef(createDataverseTokenProvider()).current;
-
     // Memoize default values so they only recompute when inputs change
     const defaultSubject = useMemo(
         () => buildDefaultSubject(parentEntityName),
@@ -186,9 +172,9 @@ export function DocumentEmailStep({
     // User search callback (stable reference via useCallback)
     const handleSearchUsers = useCallback(
         (query: string): Promise<ILookupItem[]> => {
-            return searchSystemUsers(query, getToken, dataverseUrl);
+            return searchSystemUsers(query);
         },
-        [getToken, dataverseUrl]
+        []
     );
 
     return (

@@ -481,6 +481,14 @@ export function DocumentUploadWizardDialog({
                         onNextStepsChanged={setSelectedNextSteps}
                         wizardShellRef={wizardRef}
                         emailStepProps={emailStepProps}
+                        onLaunchAnalysis={() => {
+                            // Launch analysis for the first successfully uploaded document
+                            const firstDoc = uploadedDocumentMapRef.current.values().next().value;
+                            if (firstDoc) {
+                                handleLaunchAnalysis(firstDoc.documentId);
+                            }
+                        }}
+                        onLaunchFindSimilar={handleLaunchFindSimilar}
                     />
                 ),
             },
