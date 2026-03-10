@@ -29,6 +29,7 @@ import {
     Card,
     Text,
     Button,
+    Link,
     Spinner,
     MessageBar,
     MessageBarBody,
@@ -54,12 +55,9 @@ import {
 } from "@spaarke/ui-components/components/Playbook";
 import type {
     IPlaybook,
-    IAction,
-    ISkill,
-    IKnowledge,
-    ITool,
     IPlaybookScopes,
 } from "@spaarke/ui-components/components/Playbook";
+import { FindSimilarDialog } from "@spaarke/ui-components/components/FindSimilarDialog";
 
 import type { NextStepActionId, IUploadedFile } from "../types";
 import { DocumentEmailStep } from "./DocumentEmailStep";
@@ -67,7 +65,7 @@ import type { IDocumentEmailStepProps } from "./DocumentEmailStep";
 import { DocumentPicker } from "./DocumentPicker";
 import type { UploadedDocumentInfo } from "./SummaryStep";
 import type { OrchestratorFileResult } from "../services/uploadOrchestrator";
-import { openFindSimilar } from "../services/nextStepLauncher";
+import { getClientUrl, getTenantId } from "../services/nextStepLauncher";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -318,6 +316,34 @@ const useStyles = makeStyles({
         alignItems: "center",
         gap: tokens.spacingHorizontalS,
     },
+    sectionHeader: {
+        fontWeight: tokens.fontWeightSemibold as unknown as string,
+        color: tokens.colorNeutralForeground1,
+    },
+    sectionExplanation: {
+        color: tokens.colorNeutralForeground3,
+        marginBottom: tokens.spacingVerticalXS,
+    },
+    sectionBlock: {
+        display: "flex",
+        flexDirection: "column",
+        gap: tokens.spacingVerticalXS,
+    },
+    successBlock: {
+        display: "flex",
+        flexDirection: "column",
+        gap: tokens.spacingVerticalS,
+        backgroundColor: tokens.colorNeutralBackground1,
+        borderRadius: tokens.borderRadiusMedium,
+        padding: tokens.spacingVerticalM,
+        border: `1px solid ${tokens.colorPaletteGreenBorder1}`,
+    },
+    indexingRow: {
+        display: "flex",
+        alignItems: "center",
+        gap: tokens.spacingHorizontalS,
+        color: tokens.colorNeutralForeground3,
+    },
 });
 
 // ---------------------------------------------------------------------------
@@ -423,7 +449,7 @@ const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
 
     // Execution state
     const [isCreating, setIsCreating] = React.useState(false);
-    const [successMessage, setSuccessMessage] = React.useState<string | null>(null);
+    const [analysisUrl, setAnalysisUrl] = React.useState<string | null>(null);
 
     // Load playbooks on mount
     React.useEffect(() => {
@@ -483,8 +509,8 @@ const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
             if (clientUrl) {
                 const url = `${clientUrl}/main.aspx?etn=sprk_analysis&id=${analysisId}&pagetype=entityrecord`;
                 window.open(url, "_blank", "noopener,noreferrer");
+                setAnalysisUrl(url);
             }
-            setSuccessMessage("Analysis created and opened in a new tab.");
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to create analysis");
         } finally {
@@ -506,7 +532,7 @@ const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
         <div className={styles.dynamicStepRoot}>
             <Text as="h2" size={500} weight="semibold">Work on Analysis</Text>
             <Text size={300} style={{ color: tokens.colorNeutralForeground3 }}>
-                Select a playbook to create an AI analysis on your uploaded document.
+                Create an AI-powered analysis on your uploaded document.
             </Text>
 
             {error && (
@@ -515,40 +541,64 @@ const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
                 </MessageBar>
             )}
 
-            {successMessage && (
-                <div className={styles.successRow}>
-                    <CheckmarkCircleRegular
-                        style={{ color: tokens.colorPaletteGreenForeground1, fontSize: "20px" }}
-                    />
-                    <Text size={300}>{successMessage}</Text>
-                </div>
-            )}
-
-            {!successMessage && (
-                <>
-                    {/* Document picker (multi-file only) */}
-                    {successfulFiles.length > 1 && (
-                        <DocumentPicker
-                            documents={successfulFiles}
-                            selectedDocumentId={selectedDocumentId}
-                            onSelectionChange={setSelectedDocumentId}
+            {analysisUrl ? (
+                <div className={styles.successBlock}>
+                    <div className={styles.successRow}>
+                        <CheckmarkCircleRegular
+                            style={{ color: tokens.colorPaletteGreenForeground1, fontSize: "24px" }}
                         />
-                    )}
-                    {successfulFiles.length === 1 && (
-                        <Text size={200} style={{ fontStyle: "italic", color: tokens.colorNeutralForeground3 }}>
-                            Document: {successfulFiles[0].fileName}
+                        <Text size={400} weight="semibold">Analysis created successfully!</Text>
+                    </div>
+                    <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+                        Your analysis has been opened in a new browser tab. If the tab was closed, click below to reopen it.
+                    </Text>
+                    <Link
+                        href={analysisUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ fontSize: tokens.fontSizeBase300 }}
+                    >
+                        Open Analysis
+                    </Link>
+                </div>
+            ) : (
+                <>
+                    {/* ── Choose a file ────────────────────────────────── */}
+                    <div className={styles.sectionBlock}>
+                        <Text size={300} className={styles.sectionHeader}>Choose a file:</Text>
+                        <Text size={200} className={styles.sectionExplanation}>
+                            Select the document you want to analyze.
                         </Text>
-                    )}
+                        {successfulFiles.length > 1 && (
+                            <DocumentPicker
+                                documents={successfulFiles}
+                                selectedDocumentId={selectedDocumentId}
+                                onSelectionChange={setSelectedDocumentId}
+                            />
+                        )}
+                        {successfulFiles.length === 1 && (
+                            <Text size={200} style={{ fontStyle: "italic", color: tokens.colorNeutralForeground2 }}>
+                                {successfulFiles[0].fileName}
+                            </Text>
+                        )}
+                    </div>
 
-                    {/* Playbook card grid */}
-                    <PlaybookCardGrid
-                        playbooks={playbooks}
-                        selectedId={selectedPlaybook?.id}
-                        onSelect={handlePlaybookSelect}
-                        isLoading={false}
-                    />
+                    {/* ── Choose a playbook ──────────────────────────── */}
+                    <div className={styles.sectionBlock}>
+                        <Text size={300} className={styles.sectionHeader}>Choose a playbook:</Text>
+                        <Text size={200} className={styles.sectionExplanation}>
+                            Select an AI playbook to define the analysis scope.
+                        </Text>
+                        <PlaybookCardGrid
+                            playbooks={playbooks}
+                            selectedId={selectedPlaybook?.id}
+                            onSelect={handlePlaybookSelect}
+                            isLoading={false}
+                            compact={true}
+                        />
+                    </div>
 
-                    {/* Create button */}
+                    {/* ── Create button ──────────────────────────────── */}
                     <div>
                         <Button
                             appearance="primary"
@@ -556,7 +606,7 @@ const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
                             onClick={handleCreateAnalysis}
                             disabled={!canCreate || isCreating}
                         >
-                            {isCreating ? "Creating..." : "Create Analysis"}
+                            {isCreating ? "Creating Analysis..." : "Create Analysis"}
                         </Button>
                     </div>
                 </>
@@ -566,59 +616,137 @@ const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
 };
 
 // ---------------------------------------------------------------------------
-// FindSimilarStepContent — document picker + opens Find Similar in new tab
+// FindSimilarStepContent — inline dialog + ensure-indexed
 // ---------------------------------------------------------------------------
 
 interface IFindSimilarStepContentProps {
     successfulFiles: OrchestratorFileResult[];
     containerId: string;
+    /** Map of local file ID -> uploaded document info (for driveId/itemId). */
+    uploadedDocumentMap?: Map<string, UploadedDocumentInfo>;
+    /** BFF API base URL for indexing trigger. */
+    bffBaseUrl: string;
+    /** Token provider for BFF API authentication. */
+    bffTokenProvider: () => Promise<string>;
 }
 
 const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
     successfulFiles,
     containerId,
+    uploadedDocumentMap,
+    bffBaseUrl,
+    bffTokenProvider,
 }) => {
     const styles = useStyles();
 
     const [selectedDocumentId, setSelectedDocumentId] = React.useState<string | null>(
         successfulFiles.length === 1 ? (successfulFiles[0].createResult?.documentId ?? null) : null
     );
+    const [showViewer, setShowViewer] = React.useState(false);
+    const [isIndexing, setIsIndexing] = React.useState(false);
 
-    const handleLaunch = React.useCallback(() => {
-        if (selectedDocumentId) {
-            openFindSimilar(selectedDocumentId, containerId);
-        }
+    // Build the DocumentRelationshipViewer URL
+    const viewerUrl = React.useMemo(() => {
+        if (!selectedDocumentId) return null;
+        const clientUrl = getClientUrl();
+        if (!clientUrl) return null;
+        const tenantId = getTenantId();
+        const params = new URLSearchParams();
+        params.set("documentId", selectedDocumentId);
+        if (tenantId) params.set("tenantId", tenantId);
+        if (containerId) params.set("containerId", containerId);
+        return `${clientUrl}/WebResources/sprk_documentrelationshipviewer?data=${encodeURIComponent(params.toString())}`;
     }, [selectedDocumentId, containerId]);
+
+    // Ensure file is indexed, then open dialog
+    const handleOpenFindSimilar = React.useCallback(async () => {
+        if (!selectedDocumentId) return;
+
+        // Find the file's driveId/itemId from uploadedDocumentMap
+        const fileResult = successfulFiles.find(
+            (f) => f.createResult?.documentId === selectedDocumentId
+        );
+        const driveId = fileResult?.createResult?.driveId;
+        const itemId = fileResult?.createResult?.itemId;
+
+        // Trigger indexing if we have file metadata
+        if (driveId && itemId) {
+            setIsIndexing(true);
+            try {
+                const token = await bffTokenProvider();
+                await fetch(`${bffBaseUrl}/api/ai/rag/index-file`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                        driveId,
+                        itemId,
+                        fileName: fileResult?.fileName ?? "document",
+                    }),
+                });
+            } catch (err) {
+                console.warn("[FindSimilar] Indexing trigger failed (non-critical):", err);
+            } finally {
+                setIsIndexing(false);
+            }
+        }
+
+        setShowViewer(true);
+    }, [selectedDocumentId, successfulFiles, bffBaseUrl, bffTokenProvider]);
 
     return (
         <div className={styles.dynamicStepRoot}>
             <Text as="h2" size={500} weight="semibold">Find Similar</Text>
             <Text size={300} style={{ color: tokens.colorNeutralForeground3 }}>
-                Select a document and search for similar documents across the tenant
-                using AI-powered semantic search. The viewer will open in a new tab.
+                Search for similar documents across the tenant using AI-powered semantic search.
             </Text>
-            {successfulFiles.length > 1 && (
-                <DocumentPicker
-                    documents={successfulFiles}
-                    selectedDocumentId={selectedDocumentId}
-                    onSelectionChange={setSelectedDocumentId}
-                />
-            )}
-            {successfulFiles.length === 1 && (
-                <Text size={200} style={{ fontStyle: "italic", color: tokens.colorNeutralForeground3 }}>
-                    Document: {successfulFiles[0].fileName}
+
+            {/* ── Choose a file ────────────────────────────────── */}
+            <div className={styles.sectionBlock}>
+                <Text size={300} className={styles.sectionHeader}>Choose a file:</Text>
+                <Text size={200} className={styles.sectionExplanation}>
+                    Select the document to find similar documents for.
                 </Text>
-            )}
-            <div>
-                <Button
-                    appearance="primary"
-                    icon={<DocumentSearchRegular />}
-                    onClick={handleLaunch}
-                    disabled={!selectedDocumentId}
-                >
-                    Open Find Similar
-                </Button>
+                {successfulFiles.length > 1 && (
+                    <DocumentPicker
+                        documents={successfulFiles}
+                        selectedDocumentId={selectedDocumentId}
+                        onSelectionChange={setSelectedDocumentId}
+                    />
+                )}
+                {successfulFiles.length === 1 && (
+                    <Text size={200} style={{ fontStyle: "italic", color: tokens.colorNeutralForeground2 }}>
+                        {successfulFiles[0].fileName}
+                    </Text>
+                )}
             </div>
+
+            {isIndexing ? (
+                <div className={styles.indexingRow}>
+                    <Spinner size="tiny" />
+                    <Text size={200}>Ensuring document is indexed for semantic search...</Text>
+                </div>
+            ) : (
+                <div>
+                    <Button
+                        appearance="primary"
+                        icon={<DocumentSearchRegular />}
+                        onClick={handleOpenFindSimilar}
+                        disabled={!selectedDocumentId}
+                    >
+                        Find Similar Documents
+                    </Button>
+                </div>
+            )}
+
+            {/* Inline FindSimilarDialog overlay */}
+            <FindSimilarDialog
+                open={showViewer}
+                onClose={() => setShowViewer(false)}
+                url={viewerUrl}
+            />
         </div>
     );
 };
@@ -631,6 +759,9 @@ interface IDynamicStepBuildOptions {
     emailStepProps: IDocumentEmailStepProps;
     successfulFiles?: OrchestratorFileResult[];
     containerId: string;
+    uploadedDocumentMap?: Map<string, UploadedDocumentInfo>;
+    bffBaseUrl: string;
+    bffTokenProvider: () => Promise<string>;
 }
 
 function buildDynamicStepConfig(
@@ -677,6 +808,9 @@ function buildDynamicStepConfig(
             <FindSimilarStepContent
                 successfulFiles={options.successfulFiles ?? []}
                 containerId={options.containerId}
+                uploadedDocumentMap={options.uploadedDocumentMap}
+                bffBaseUrl={options.bffBaseUrl}
+                bffTokenProvider={options.bffTokenProvider}
             />
         ),
     };
@@ -694,6 +828,8 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
     uploadedDocumentMap,
     uploadedFiles,
     containerId,
+    bffBaseUrl,
+    bffTokenProvider,
 }) => {
     const styles = useStyles();
 
@@ -746,7 +882,14 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
         for (const actionId of next) {
             if (!prev.includes(actionId)) {
                 wizardShellRef.current?.addDynamicStep(
-                    buildDynamicStepConfig(actionId, { emailStepProps, successfulFiles, containerId }),
+                    buildDynamicStepConfig(actionId, {
+                        emailStepProps,
+                        successfulFiles,
+                        containerId,
+                        uploadedDocumentMap,
+                        bffBaseUrl,
+                        bffTokenProvider,
+                    }),
                     DYNAMIC_CANONICAL_ORDER
                 );
             }
@@ -759,7 +902,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
         }
 
         prevSelectedRef.current = next;
-    }, [selectedNextSteps, wizardShellRef, emailStepProps, successfulFiles, containerId]);
+    }, [selectedNextSteps, wizardShellRef, emailStepProps, successfulFiles, containerId, uploadedDocumentMap, bffBaseUrl, bffTokenProvider]);
 
     return (
         <div className={styles.root}>

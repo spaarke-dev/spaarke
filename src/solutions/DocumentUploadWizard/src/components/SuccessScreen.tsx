@@ -16,9 +16,8 @@ import {
     Button,
 } from "@fluentui/react-components";
 import {
-    CheckmarkCircleFilled,
+    CheckmarkCircleRegular,
     WarningFilled,
-    DismissRegular,
 } from "@fluentui/react-icons";
 
 import type { IWizardSuccessConfig } from "@spaarke/ui-components/components/Wizard";
@@ -48,12 +47,27 @@ export function buildSuccessConfig({
     uploadResults,
     onClose,
 }: IBuildSuccessConfigParams): IWizardSuccessConfig {
+    // Close handler with fallback — try onClose first, then window.close()
+    const handleDone = (): void => {
+        try {
+            onClose();
+        } catch {
+            // Fallback if onClose throws
+        }
+        // Double-ensure: also try window.close() directly for Dataverse dialog contexts
+        try {
+            window.close();
+        } catch {
+            // May be blocked in non-popup contexts — ignore
+        }
+    };
+
     // Handle case where upload didn't complete (shouldn't happen with Processing step)
     if (!uploadResults) {
         return {
             icon: (
                 <WarningFilled
-                    style={{ fontSize: "64px", color: tokens.colorPaletteYellowForeground1 }}
+                    style={{ fontSize: "48px", color: tokens.colorPaletteYellowForeground1 }}
                 />
             ),
             title: "Upload incomplete",
@@ -63,8 +77,8 @@ export function buildSuccessConfig({
                 </Text>
             ),
             actions: (
-                <Button appearance="primary" icon={<DismissRegular />} onClick={onClose}>
-                    Close
+                <Button appearance="primary" icon={<CheckmarkCircleRegular />} onClick={handleDone}>
+                    Done
                 </Button>
             ),
         };
@@ -74,20 +88,16 @@ export function buildSuccessConfig({
     const hasFailures = failureCount > 0;
     const allFailed = successCount === 0 && totalFiles > 0;
 
-    // -- Icon --
+    // -- Icon (smaller, only shown for warnings/failures) --
     const icon = allFailed ? (
         <WarningFilled
-            style={{ fontSize: "64px", color: tokens.colorPaletteRedForeground1 }}
+            style={{ fontSize: "48px", color: tokens.colorPaletteRedForeground1 }}
         />
     ) : hasFailures ? (
         <WarningFilled
-            style={{ fontSize: "64px", color: tokens.colorPaletteYellowForeground1 }}
+            style={{ fontSize: "48px", color: tokens.colorPaletteYellowForeground1 }}
         />
-    ) : (
-        <CheckmarkCircleFilled
-            style={{ fontSize: "64px", color: tokens.colorPaletteGreenForeground1 }}
-        />
-    );
+    ) : null;
 
     // -- Title --
     const title = allFailed
@@ -109,10 +119,10 @@ export function buildSuccessConfig({
         </Text>
     );
 
-    // -- Actions (just Close) --
+    // -- Actions --
     const actions = (
-        <Button appearance="primary" icon={<DismissRegular />} onClick={onClose}>
-            Close
+        <Button appearance="primary" icon={<CheckmarkCircleRegular />} onClick={handleDone}>
+            Done
         </Button>
     );
 

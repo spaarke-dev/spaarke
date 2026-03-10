@@ -41,7 +41,7 @@ const LOG_PREFIX = "[nextStepLauncher]";
  *
  * @returns Client URL (e.g. "https://spaarkedev1.crm.dynamics.com") or null
  */
-function getClientUrl(): string | null {
+export function getClientUrl(): string | null {
     const frames: Window[] = [window];
     try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
     try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* cross-origin */ }
@@ -65,7 +65,7 @@ function getClientUrl(): string | null {
  * Resolve the Azure AD tenant ID from the MSAL auth provider.
  * Falls back to extracting from Xrm authority URL.
  */
-function getTenantId(): string {
+export function getTenantId(): string {
     // Try @spaarke/auth provider (MSAL)
     try {
         const provider = getAuthProvider();

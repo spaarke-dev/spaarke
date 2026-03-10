@@ -47,6 +47,8 @@ export interface IPlaybookCardGridProps {
     selectedId?: string;
     onSelect: (playbook: IPlaybook) => void;
     isLoading: boolean;
+    /** Compact mode: smaller cards with icon + name only, description in popover. */
+    compact?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,6 +206,32 @@ const useStyles = makeStyles({
         color: tokens.colorNeutralForeground3,
         fontSize: tokens.fontSizeBase300,
     },
+
+    // ── Compact overrides ────────────────────────────────────────────────
+    gridCompact: {
+        gridTemplateColumns: "repeat(4, 1fr)",
+        gap: tokens.spacingHorizontalS,
+        "@media (max-width: 680px)": {
+            gridTemplateColumns: "repeat(3, 1fr)",
+        },
+        "@media (max-width: 420px)": {
+            gridTemplateColumns: "repeat(2, 1fr)",
+        },
+    },
+    cardContentCompact: {
+        paddingTop: tokens.spacingVerticalXS,
+        paddingBottom: tokens.spacingVerticalXS,
+        paddingLeft: tokens.spacingHorizontalS,
+        paddingRight: tokens.spacingHorizontalS,
+    },
+    iconWrapperCompact: {
+        width: "24px",
+        height: "24px",
+        marginBottom: "0px",
+    },
+    nameCompact: {
+        fontSize: tokens.fontSizeBase200,
+    },
 });
 
 // ---------------------------------------------------------------------------
@@ -235,9 +263,10 @@ interface PlaybookCardProps {
     isSelected: boolean;
     onSelect: (playbook: IPlaybook) => void;
     styles: ReturnType<typeof useStyles>;
+    compact?: boolean;
 }
 
-const PlaybookCard: React.FC<PlaybookCardProps> = ({ playbook, isSelected, onSelect, styles }) => {
+const PlaybookCard: React.FC<PlaybookCardProps> = ({ playbook, isSelected, onSelect, styles, compact }) => {
     const handleClick = (): void => {
         onSelect(playbook);
     };
@@ -291,12 +320,12 @@ const PlaybookCard: React.FC<PlaybookCardProps> = ({ playbook, isSelected, onSel
 
             <CardHeader
                 header={
-                    <div className={styles.cardContent}>
-                        <div className={styles.iconWrapper}>
+                    <div className={mergeClasses(styles.cardContent, compact && styles.cardContentCompact)}>
+                        <div className={mergeClasses(styles.iconWrapper, compact && styles.iconWrapperCompact)}>
                             {resolveIcon(playbook.icon)}
                         </div>
-                        <Text className={styles.name}>{playbook.name}</Text>
-                        {playbook.description && (
+                        <Text className={mergeClasses(styles.name, compact && styles.nameCompact)}>{playbook.name}</Text>
+                        {!compact && playbook.description && (
                             <Text className={styles.description}>{playbook.description}</Text>
                         )}
                     </div>
@@ -315,6 +344,7 @@ export const PlaybookCardGrid: React.FC<IPlaybookCardGridProps> = ({
     selectedId,
     onSelect,
     isLoading,
+    compact,
 }) => {
     const styles = useStyles();
 
@@ -338,7 +368,7 @@ export const PlaybookCardGrid: React.FC<IPlaybookCardGridProps> = ({
 
     return (
         <div className={styles.container}>
-            <div className={styles.grid}>
+            <div className={mergeClasses(styles.grid, compact && styles.gridCompact)}>
                 {playbooks.map((playbook) => (
                     <PlaybookCard
                         key={playbook.id}
@@ -346,6 +376,7 @@ export const PlaybookCardGrid: React.FC<IPlaybookCardGridProps> = ({
                         isSelected={selectedId === playbook.id}
                         onSelect={onSelect}
                         styles={styles}
+                        compact={compact}
                     />
                 ))}
             </div>

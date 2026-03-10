@@ -423,23 +423,6 @@ export function DocumentUploadWizardDialog({
                 ),
             });
             steps.push({
-                id: "review",
-                label: "Review",
-                canAdvance: () => true,
-                renderContent: (_handle: IWizardShellHandle) => (
-                    <SummaryStep
-                        files={fileState.selectedFiles}
-                        apiBaseUrl={bffBaseUrl}
-                        getToken={bffTokenProvider}
-                        uploadedDocumentMap={uploadedDocumentMap}
-                        onProcessingChange={setIsProfileProcessing}
-                        reviewOnly={true}
-                        parentEntityName={effectiveParentEntityName}
-                    />
-                ),
-            });
-
-            steps.push({
                 id: "processing",
                 label: "Processing",
                 canAdvance: () => {
