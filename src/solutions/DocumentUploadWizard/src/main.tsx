@@ -5,7 +5,7 @@
  *   Xrm.Navigation.navigateTo(
  *     { pageType: "webresource", webresourceName: "sprk_DocumentUploadWizard",
  *       data: "parentEntityType=sprk_document&parentEntityId=...&parentEntityName=...&containerId=..." },
- *     { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" } }
+ *     { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" } }
  *   )
  *
  * Authentication:

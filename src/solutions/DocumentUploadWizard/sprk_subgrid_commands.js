@@ -362,11 +362,11 @@ function openDocumentUploadDialog(params, selectedControl) {
         data: encodeURIComponent(dataString)
     };
 
-    // Configure dialog display options - 85% width/height centered dialog
+    // Configure dialog display options — sized to match Create New Matter dialog
     const navigationOptions = {
         target: 2,      // Dialog
-        width: { value: 85, unit: "%" },
-        height: { value: 85, unit: "%" }
+        width: { value: 60, unit: "%" },
+        height: { value: 70, unit: "%" }
     };
 
     console.log("[Spaarke] Page Input:", pageInput);

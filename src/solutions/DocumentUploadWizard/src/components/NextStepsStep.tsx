@@ -106,8 +106,32 @@ const CARD_DEFS: INextStepCardDef[] = [
 /** Step ID for the dynamically injected Send Email step. */
 export const DYNAMIC_SEND_EMAIL_STEP_ID = "dynamic-send-email";
 
+/** Step ID for the dynamically injected Work on Analysis step. */
+export const DYNAMIC_WORK_ON_ANALYSIS_STEP_ID = "dynamic-work-on-analysis";
+
+/** Step ID for the dynamically injected Find Similar step. */
+export const DYNAMIC_FIND_SIMILAR_STEP_ID = "dynamic-find-similar";
+
+/** Map NextStepActionId → dynamic step ID used in the sidebar. */
+export const DYNAMIC_STEP_ID_MAP: Record<NextStepActionId, string> = {
+    "send-email": DYNAMIC_SEND_EMAIL_STEP_ID,
+    "work-on-analysis": DYNAMIC_WORK_ON_ANALYSIS_STEP_ID,
+    "find-similar": DYNAMIC_FIND_SIMILAR_STEP_ID,
+};
+
+/** Map NextStepActionId → step label shown in the sidebar. */
+export const DYNAMIC_STEP_LABEL_MAP: Record<NextStepActionId, string> = {
+    "send-email": "Send Email",
+    "work-on-analysis": "Work on Analysis",
+    "find-similar": "Find Similar",
+};
+
 /** Canonical order for dynamic steps injected after "next-steps". */
-const DYNAMIC_CANONICAL_ORDER = [DYNAMIC_SEND_EMAIL_STEP_ID];
+const DYNAMIC_CANONICAL_ORDER = [
+    DYNAMIC_SEND_EMAIL_STEP_ID,
+    DYNAMIC_WORK_ON_ANALYSIS_STEP_ID,
+    DYNAMIC_FIND_SIMILAR_STEP_ID,
+];
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -306,23 +330,47 @@ const CheckboxCard: React.FC<ICheckboxCardProps> = ({ def, selected, onToggle })
 };
 
 // ---------------------------------------------------------------------------
-// buildSendEmailDynamicStep — creates the IWizardStepConfig for the
-// dynamically injected Send Email step.
+// buildDynamicStepConfig — creates an IWizardStepConfig for a dynamic step.
 // ---------------------------------------------------------------------------
 
 /**
- * Builds the dynamic step config for Send Email.
- * Renders the DocumentEmailStep wrapper around the shared SendEmailStep.
+ * Builds a dynamic step config for a given next-step action.
+ *
+ * - Send Email: renders the DocumentEmailStep form
+ * - Work on Analysis / Find Similar: placeholder steps (actions launch post-wizard from success screen)
  */
-function buildSendEmailDynamicStep(
+function buildDynamicStepConfig(
+    actionId: NextStepActionId,
     emailStepProps: IDocumentEmailStepProps
 ): IWizardStepConfig {
+    const stepId = DYNAMIC_STEP_ID_MAP[actionId];
+    const stepLabel = DYNAMIC_STEP_LABEL_MAP[actionId];
+
+    if (actionId === "send-email") {
+        return {
+            id: stepId,
+            label: stepLabel,
+            canAdvance: () => true,
+            renderContent: () => (
+                <DocumentEmailStep {...emailStepProps} />
+            ),
+        };
+    }
+
+    // Work on Analysis and Find Similar are launched from the success screen,
+    // but they appear in the sidebar to show the user's selected workflow.
     return {
-        id: DYNAMIC_SEND_EMAIL_STEP_ID,
-        label: "Send Email",
-        canAdvance: () => true, // Email is optional — user can skip
+        id: stepId,
+        label: stepLabel,
+        canAdvance: () => true,
         renderContent: () => (
-            <DocumentEmailStep {...emailStepProps} />
+            <div style={{ padding: "24px" }}>
+                <Text size={300}>
+                    {actionId === "work-on-analysis"
+                        ? "Analysis will be available after the wizard completes."
+                        : "Find Similar will be available after the wizard completes."}
+                </Text>
+            </div>
         ),
     };
 }
@@ -364,20 +412,21 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
         const prev = prevSelectedRef.current;
         const next = selectedNextSteps;
 
-        // Only "send-email" injects a dynamic step; others are stored for
-        // the success screen only.
-        const sendEmailWasSelected = prev.includes("send-email");
-        const sendEmailIsSelected = next.includes("send-email");
+        // Add newly selected follow-on steps
+        for (const actionId of next) {
+            if (!prev.includes(actionId)) {
+                wizardShellRef.current?.addDynamicStep(
+                    buildDynamicStepConfig(actionId, emailStepProps),
+                    DYNAMIC_CANONICAL_ORDER
+                );
+            }
+        }
 
-        if (sendEmailIsSelected && !sendEmailWasSelected) {
-            // Add the dynamic Send Email step
-            wizardShellRef.current?.addDynamicStep(
-                buildSendEmailDynamicStep(emailStepProps),
-                DYNAMIC_CANONICAL_ORDER
-            );
-        } else if (!sendEmailIsSelected && sendEmailWasSelected) {
-            // Remove the dynamic Send Email step
-            wizardShellRef.current?.removeDynamicStep(DYNAMIC_SEND_EMAIL_STEP_ID);
+        // Remove deselected follow-on steps
+        for (const actionId of prev) {
+            if (!next.includes(actionId)) {
+                wizardShellRef.current?.removeDynamicStep(DYNAMIC_STEP_ID_MAP[actionId]);
+            }
         }
 
         prevSelectedRef.current = next;
