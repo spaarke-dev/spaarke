@@ -236,12 +236,224 @@ public class DocumentProfileFieldMapperTests
         var types = DocumentProfileFieldMapper.SupportedOutputTypes;
 
         // Assert
-        types.Should().HaveCount(5);
+        types.Should().HaveCount(6);
         types.Should().Contain("TL;DR");
         types.Should().Contain("Summary");
         types.Should().Contain("Keywords");
         types.Should().Contain("Document Type");
         types.Should().Contain("Entities");
+        types.Should().Contain("searchprofile");
+    }
+
+    #endregion
+
+    #region BuildSearchProfile Tests
+
+    [Fact]
+    public void BuildSearchProfile_AllFieldsPresent_ReturnsFullProfile()
+    {
+        // Arrange
+        var outputs = new Dictionary<string, string>
+        {
+            ["documenttype"] = "Contract",
+            ["tldr"] = "A services agreement between two parties",
+            ["entities"] = "[{\"name\":\"Acme Corp\",\"type\":\"Organization\"},{\"name\":\"Beta LLC\",\"type\":\"Organization\"}]",
+            ["keywords"] = "services, agreement, consulting"
+        };
+
+        // Act
+        var result = DocumentProfileFieldMapper.BuildSearchProfile(
+            outputs,
+            parentEntityName: "Acme Corp",
+            parentEntityType: "account",
+            fileName: "ServiceAgreement_2025.pdf");
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Should().Be("Contract | A services agreement between two parties | Acme Corp, Beta LLC | services, agreement, consulting | account: Acme Corp | ServiceAgreement_2025");
+    }
+
+    [Fact]
+    public void BuildSearchProfile_PartialFields_ThreeOfSix_ReturnsProfile()
+    {
+        // Arrange
+        var outputs = new Dictionary<string, string>
+        {
+            ["documenttype"] = "Invoice",
+            ["keywords"] = "billing, payment"
+        };
+
+        // Act
+        var result = DocumentProfileFieldMapper.BuildSearchProfile(
+            outputs,
+            fileName: "Invoice_001.xlsx");
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Should().Be("Invoice | billing, payment | Invoice_001");
+    }
+
+    [Fact]
+    public void BuildSearchProfile_MinimalTwoParts_ReturnsProfile()
+    {
+        // Arrange
+        var outputs = new Dictionary<string, string>
+        {
+            ["tldr"] = "Brief document description"
+        };
+
+        // Act
+        var result = DocumentProfileFieldMapper.BuildSearchProfile(
+            outputs,
+            fileName: "report.pdf");
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Should().Be("Brief document description | report");
+    }
+
+    [Fact]
+    public void BuildSearchProfile_OnlyOnePart_ReturnsNull()
+    {
+        // Arrange
+        var outputs = new Dictionary<string, string>
+        {
+            ["tldr"] = "Brief document description"
+        };
+
+        // Act
+        var result = DocumentProfileFieldMapper.BuildSearchProfile(outputs);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void BuildSearchProfile_EmptyDictionary_ReturnsNull()
+    {
+        // Arrange
+        var outputs = new Dictionary<string, string>();
+
+        // Act
+        var result = DocumentProfileFieldMapper.BuildSearchProfile(outputs);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void BuildSearchProfile_MalformedEntityJson_SkipsEntities()
+    {
+        // Arrange
+        var outputs = new Dictionary<string, string>
+        {
+            ["documenttype"] = "Contract",
+            ["entities"] = "this is not valid JSON {{{",
+            ["keywords"] = "legal, binding"
+        };
+
+        // Act
+        var result = DocumentProfileFieldMapper.BuildSearchProfile(outputs);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Should().Be("Contract | legal, binding");
+        result.Should().NotContain("this is not valid JSON");
+    }
+
+    [Fact]
+    public void BuildSearchProfile_LegacyKeyNames_AreRecognized()
+    {
+        // Arrange — uses "Document Type" and "TL;DR" (legacy) instead of "documenttype"/"tldr"
+        var outputs = new Dictionary<string, string>
+        {
+            ["Document Type"] = "Memo",
+            ["TL;DR"] = "Internal communication about Q3 goals"
+        };
+
+        // Act
+        var result = DocumentProfileFieldMapper.BuildSearchProfile(outputs);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Should().Be("Memo | Internal communication about Q3 goals");
+    }
+
+    [Fact]
+    public void BuildSearchProfile_ParentEntityPartiallyProvided_Skipped()
+    {
+        // Arrange — only parentEntityType, no parentEntityName
+        var outputs = new Dictionary<string, string>
+        {
+            ["documenttype"] = "Report",
+            ["keywords"] = "quarterly, finance"
+        };
+
+        // Act
+        var result = DocumentProfileFieldMapper.BuildSearchProfile(
+            outputs,
+            parentEntityType: "account");
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Should().Be("Report | quarterly, finance");
+        result.Should().NotContain("account");
+    }
+
+    [Fact]
+    public void BuildSearchProfile_FileNameWithoutExtension_HandledCorrectly()
+    {
+        // Arrange — file name with no extension
+        var outputs = new Dictionary<string, string>
+        {
+            ["keywords"] = "notes"
+        };
+
+        // Act
+        var result = DocumentProfileFieldMapper.BuildSearchProfile(
+            outputs,
+            fileName: "README");
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Should().Be("notes | README");
+    }
+
+    [Fact]
+    public void BuildSearchProfile_EntitiesWithNoNameProperty_SkipsEntities()
+    {
+        // Arrange — valid JSON array but objects lack "name" property
+        var outputs = new Dictionary<string, string>
+        {
+            ["documenttype"] = "Letter",
+            ["entities"] = "[{\"type\":\"Organization\"},{\"type\":\"Person\"}]",
+            ["keywords"] = "correspondence"
+        };
+
+        // Act
+        var result = DocumentProfileFieldMapper.BuildSearchProfile(outputs);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Should().Be("Letter | correspondence");
+    }
+
+    [Fact]
+    public void BuildSearchProfile_WhitespaceValues_AreTrimmed()
+    {
+        // Arrange
+        var outputs = new Dictionary<string, string>
+        {
+            ["documenttype"] = "  Contract  ",
+            ["keywords"] = "  legal, binding  "
+        };
+
+        // Act
+        var result = DocumentProfileFieldMapper.BuildSearchProfile(outputs);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Should().Be("Contract | legal, binding");
     }
 
     #endregion

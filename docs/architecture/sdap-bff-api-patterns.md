@@ -1,7 +1,7 @@
 # SDAP BFF API Patterns
 
 > **Source**: SDAP-ARCHITECTURE-GUIDE.md (BFF API section)
-> **Last Updated**: February 26, 2026
+> **Last Updated**: March 9, 2026
 > **Applies To**: Backend API development, endpoint changes, service layer
 
 ---
@@ -58,7 +58,8 @@ ASP.NET Core 8.0 Minimal APIs. Key services: `GraphClientFactory` (OBO token exc
 
 | Upload Flow | Container ID Source | Code Reference |
 |-------------|-------------------|----------------|
-| **PCF upload** (UniversalQuickCreate) | Read from parent entity's `sprk_containerid` field via form context | PCF `EntityDocumentConfig.containerIdField` |
+| **DocumentUploadWizard Code Page** (preferred) | Passed via URL parameter `containerId` from ribbon command (resolved from parent entity or Business Unit) | `src/solutions/DocumentUploadWizard/src/main.tsx` |
+| **PCF upload** (UniversalQuickCreate, legacy) | Read from parent entity's `sprk_containerid` field via form context | PCF `EntityDocumentConfig.containerIdField` |
 | **Email-to-Document** (background job) | `EmailProcessingOptions.DefaultContainerId` from config | `EmailToDocumentJobHandler.cs:201` |
 | **Office Add-in** (save/upload) | Request `ContainerId` ?? fallback to `DefaultContainerId` | `OfficeService.cs:261` |
 | **Email endpoints** | Request `ContainerId` ?? fallback to `DefaultContainerId` | `EmailEndpoints.cs:454` |
@@ -91,9 +92,38 @@ This ordering is mandatory because:
 
 **Rationale**: If the Dataverse record is created first but the SPE upload fails, we have an orphan `sprk_document` record with no file backing it. The "SPE first" pattern ensures files exist in SPE before metadata is committed to Dataverse.
 
-#### Flow Variant A: PCF Upload (with parent entity)
+#### Flow Variant A: Code Page Wizard Upload (preferred, with parent entity)
 
-Standard upload from a form where the parent entity already exists (e.g., uploading a document to an existing Matter).
+Standard upload via the DocumentUploadWizard Code Page, opened from a ribbon button on any parent entity form.
+
+```
+User clicks upload button on form → opens sprk_documentuploadwizard via navigateTo
+    │
+    ├─ 1. Code Page receives containerId + parentEntityId via URL params
+    │
+    ├─ 2. Shared MultiFileUploadService calls BFF: PUT /api/containers/{containerId}/files/{path}
+    │     → SPE returns: { id, name, webUrl }    ← driveItemId + URL
+    │
+    ├─ 3. Shared DocumentRecordService creates sprk_document via Xrm.WebApi.createRecord()
+    │     payload: {
+    │       sprk_graphitemid: driveItem.id,
+    │       sprk_graphdriveid: containerId,
+    │       sprk_filepath: driveItem.webUrl,
+    │       sprk_filename: file.name,
+    │       sprk_filesize: file.size,
+    │       "sprk_Matter@odata.bind": "/sprk_matters({matterId})"
+    │     }
+    │
+    ├─ 4. Document Profile playbook queued (streaming results via useAiSummary)
+    │     → Populates: sprk_filesummary, sprk_filetldr, sprk_filekeywords,
+    │       sprk_documenttype, sprk_entities, sprk_searchprofile
+    │
+    └─ 5. RAG indexing enqueued (fire-and-forget)
+```
+
+#### Flow Variant A2: PCF Upload (legacy, with parent entity)
+
+Form-embedded upload via UniversalQuickCreate PCF. Same SPE-first pattern but without the wizard steps.
 
 ```
 User attaches file in PCF
@@ -104,14 +134,6 @@ User attaches file in PCF
     │     → SPE returns: { id, name, webUrl }    ← driveItemId + URL
     │
     ├─ 3. PCF creates sprk_document via Xrm.WebApi.createRecord()
-    │     payload: {
-    │       sprk_graphitemid: driveItem.id,
-    │       sprk_graphdriveid: containerId,
-    │       sprk_filepath: driveItem.webUrl,
-    │       sprk_filename: file.name,
-    │       sprk_filesize: file.size,
-    │       "sprk_Matter@odata.bind": "/sprk_matters({matterId})"
-    │     }
     │
     └─ 4. (Optional) Queue AI profile + RAG indexing via BFF
 ```

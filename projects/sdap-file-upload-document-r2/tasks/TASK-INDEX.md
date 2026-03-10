@@ -20,52 +20,52 @@
 
 | # | Task | Status | Dependencies | Estimate |
 |---|------|--------|-------------|----------|
-| 001 | Extract WizardShell components to shared | 🔲 | none | 2-3h |
-| 002 | Extract FileUpload components to shared | 🔲 | none | 2-3h |
-| 003 | Extract EmailStep components to shared | 🔲 | none | 2-3h |
-| 004 | Extract FindSimilar components to shared | 🔲 | none | 2-3h |
-| 005 | Extract upload services to shared | 🔲 | none | 3-4h |
-| 006 | Extract useAiSummary hook to shared | 🔲 | none | 1-2h |
-| 007 | Update LegalWorkspace imports to shared | 🔲 | 001-004 | 2-3h |
-| 008 | Update UniversalQuickCreate imports to shared | 🔲 | 005, 006 | 1-2h |
+| 001 | Extract WizardShell components to shared | ✅ | none | 2-3h |
+| 002 | Extract FileUpload components to shared | ✅ | none | 2-3h |
+| 003 | Extract EmailStep components to shared | ✅ | none | 2-3h |
+| 004 | Extract FindSimilar components to shared | ✅ | none | 2-3h |
+| 005 | Extract upload services to shared | ✅ | none | 3-4h |
+| 006 | Extract useAiSummary hook to shared | ✅ | none | 1-2h |
+| 007 | Update LegalWorkspace imports to shared | ✅ | 001-004 | 2-3h |
+| 008 | Update UniversalQuickCreate imports to shared | ✅ | 005, 006 | 1-2h |
 
 ### Phase 2: Document Upload Wizard Code Page
 
 | # | Task | Status | Dependencies | Estimate |
 |---|------|--------|-------------|----------|
-| 010 | Scaffold Code Page solution | 🔲 | 001-006 | 2-3h |
-| 011 | Implement wizard dialog and AddFilesStep | 🔲 | 010 | 3-4h |
-| 012 | Implement upload orchestrator with chunked upload | 🔲 | 011 | 3-4h |
-| 013 | Implement SummaryStep with Document Profile streaming | 🔲 | 011, 006 | 3-4h |
-| 014 | Implement NextStepsStep with dynamic step injection | 🔲 | 011 | 2-3h |
-| 015 | Implement Send Email dynamic wizard step | 🔲 | 014, 003 | 2-3h |
-| 016 | Implement success screen with document picker | 🔲 | 014 | 2-3h |
-| 017 | Implement next step launchers | 🔲 | 016 | 1-2h |
+| 010 | Scaffold Code Page solution | ✅ | 001-006 | 2-3h |
+| 011 | Implement wizard dialog and AddFilesStep | ✅ | 010 | 3-4h |
+| 012 | Implement upload orchestrator with chunked upload | ✅ | 011 | 3-4h |
+| 013 | Implement SummaryStep with Document Profile streaming | ✅ | 011, 006 | 3-4h |
+| 014 | Implement NextStepsStep with dynamic step injection | ✅ | 011 | 2-3h |
+| 015 | Implement Send Email dynamic wizard step | ✅ | 014, 003 | 2-3h |
+| 016 | Implement success screen with document picker | ✅ | 014 | 2-3h |
+| 017 | Implement next step launchers | ✅ | 016 | 1-2h |
 
 ### Phase 3: Search Profile Integration (Backend)
 
 | # | Task | Status | Dependencies | Estimate |
 |---|------|--------|-------------|----------|
-| 020 | Add searchprofile mapping to DocumentProfileFieldMapper | 🔲 | none | 1-2h |
-| 021 | Implement BuildSearchProfile deterministic builder | 🔲 | 020 | 2-3h |
-| 022 | Integrate BuildSearchProfile into CreateFieldMapping | 🔲 | 021 | 1-2h |
+| 020 | Add searchprofile mapping to DocumentProfileFieldMapper | ✅ | none | 1-2h |
+| 021 | Implement BuildSearchProfile deterministic builder | ✅ | 020 | 2-3h |
+| 022 | Integrate BuildSearchProfile into CreateFieldMapping | ✅ | 021 | 1-2h |
 | 023 | Test search profile generation end-to-end | 🔲 | 022 | 1-2h |
 
 ### Phase 4: Ribbon Integration & Deployment
 
 | # | Task | Status | Dependencies | Estimate |
 |---|------|--------|-------------|----------|
-| 030 | Build Code Page web resource | 🔲 | 017 | 1-2h |
-| 031 | Update ribbon commands for new wizard | 🔲 | 030 | 2-3h |
+| 030 | Build Code Page web resource | ✅ | 017 | 1-2h |
+| 031 | Update ribbon commands for new wizard | ✅ | 030 | 2-3h |
 | 032 | Deploy to Dataverse | 🔲 | 031 | 1-2h |
 | 033 | End-to-end testing | 🔲 | 032, 023 | 2-3h |
-| 034 | Dark mode and accessibility testing | 🔲 | 032 | 1-2h |
+| 034 | Dark mode and accessibility testing | ✅ | 032 | 1-2h |
 
 ### Phase 5: Wrap-Up
 
 | # | Task | Status | Dependencies | Estimate |
 |---|------|--------|-------------|----------|
-| 040 | Update documentation | 🔲 | 033 | 1-2h |
+| 040 | Update documentation | ✅ | 033 | 1-2h |
 | 090 | Project wrap-up and archive | 🔲 | 040 | 1h |
 
 ## Dependencies Graph

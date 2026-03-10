@@ -3,9 +3,11 @@
  *
  * Creates SdapApiClient instances with MSAL authentication integration.
  * Uses MsalAuthProvider for token acquisition with caching and proactive refresh.
+ *
+ * Updated for shared library: imports SdapApiClient from @spaarke/ui-components.
  */
 
-import { SdapApiClient } from './SdapApiClient';
+import { SdapApiClient } from '@spaarke/ui-components/src/services/document-upload';
 import { MsalAuthProvider } from './auth/MsalAuthProvider';
 import { logger } from '../utils/logger';
 
@@ -81,7 +83,16 @@ export class SdapApiClientFactory {
             }
         };
 
-        return new SdapApiClient(baseUrl, getAccessToken, timeout);
+        return new SdapApiClient({
+            baseUrl,
+            getAccessToken,
+            timeout,
+            logger,
+            onUnauthorized: () => {
+                // Clear MSAL cache to force fresh token acquisition on 401
+                MsalAuthProvider.getInstance().clearCache();
+            }
+        });
     }
 
     /**
@@ -107,6 +118,11 @@ export class SdapApiClientFactory {
             return staticToken;
         };
 
-        return new SdapApiClient(baseUrl, getAccessToken, timeout);
+        return new SdapApiClient({
+            baseUrl,
+            getAccessToken,
+            timeout,
+            logger
+        });
     }
 }

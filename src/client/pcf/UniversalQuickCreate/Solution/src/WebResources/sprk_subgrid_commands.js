@@ -1,12 +1,12 @@
 /**
  * Universal Multi-Document Upload Command Script
  *
- * PURPOSE: Opens Custom Page Dialog for uploading multiple documents
+ * PURPOSE: Opens Document Upload Wizard Code Page dialog for uploading multiple documents
  * WORKS WITH: Any parent entity (Matter, Project, Invoice, Account, Contact, etc.)
  * DEPLOYMENT: Classic Ribbon Workbench command button on Documents subgrid
- * ARCHITECTURE: Custom Page dialog approach with PCF control
+ * ARCHITECTURE: Code Page (webresource) dialog approach with React 18
  *
- * @version 3.0.4-DIAGNOSTIC
+ * @version 4.0.0
  * @namespace Spaarke.Commands.Documents
  */
 
@@ -79,7 +79,7 @@ function getEntityConfiguration(entityName) {
 async function Spaarke_AddMultipleDocuments(selectedControl) {
     try {
         console.log("[Spaarke] ========================================");
-    console.log("[Spaarke] AddMultipleDocuments: Starting v3.0.4-DIAGNOSTIC - CUSTOM PAGE DIALOG");
+    console.log("[Spaarke] AddMultipleDocuments: Starting v4.0.0 - CODE PAGE DIALOG");
         console.log("[Spaarke] ========================================");
         console.log("[Spaarke] Received selectedControl:", selectedControl);
         console.log("[Spaarke] selectedControl type:", typeof selectedControl);
@@ -145,7 +145,7 @@ async function Spaarke_AddMultipleDocuments(selectedControl) {
             return;
         }
 
-        // STEP 6: Open custom page dialog
+        // STEP 6: Open Code Page dialog (webresource)
         openDocumentUploadDialog({
             parentEntityName: parentEntityName,
             parentRecordId: cleanParentRecordId,
@@ -323,89 +323,47 @@ async function getContainerId(formContext, entityConfig) {
 }
 
 /**
- * Open Custom Page Dialog for document upload
- * Uses Custom Page with PCF control (v3.0.3)
+ * Open Document Upload Wizard Code Page dialog
+ * Uses webresource-based Code Page (React 18) instead of Custom Page
  *
  * @param {object} params - Dialog parameters
  * @param {object} selectedControl - Subgrid control for refresh
- * @version 3.0.3
+ * @version 4.0.0
  */
 function openDocumentUploadDialog(params, selectedControl) {
-    console.log("[Spaarke] Opening Custom Page Dialog with parameters:", params);
+    console.log("[Spaarke] Opening DocumentUploadWizard Code Page with parameters:", params);
 
-    // Try to get appId (may not be available in ribbon context)
-    let appId = null;
-    try {
-        const globalContext = Xrm.Utility.getGlobalContext();
-        if (globalContext && globalContext.client && typeof globalContext.client.getAppId === 'function') {
-            appId = globalContext.client.getAppId();
-            console.log("[Spaarke] Using appId:", appId);
-        } else {
-            console.log("[Spaarke] client.getAppId() not available in this context (ribbon commands), using default app resolution");
-        }
-    } catch (e) {
-        console.log("[Spaarke] Could not get appId:", e.message);
-    }
+    // Build query string parameters for the Code Page
+    const parentEntityType = params?.parentEntityName ?? "";
+    const parentEntityId = (params?.parentRecordId ?? "").replace(/[{}]/g, "").toLowerCase();
+    const parentEntityName = params?.parentDisplayName ?? "";
+    const containerId = params?.containerId ?? "";
 
-    // Fallback: try to parse appId from current window URL when navigateTo runs in-app
-    if (!appId) {
-        try {
-            const currentUrl = window?.location?.href;
-            const match = currentUrl ? currentUrl.match(/[?&]appid=([0-9a-f-]+)/i) : null;
-            if (match && match[1]) {
-                appId = match[1];
-                console.log("[Spaarke] Parsed appId from window.location:", appId);
-            }
-        } catch (e) {
-            console.log("[Spaarke] Could not parse appId from URL:", e.message);
-        }
-    }
-
-    // Configure Custom Page navigation
-    // NOTE: Using 'parameters' property so Custom Page can access values via Param("parameterName")
-    // IMPORTANT: Ensure all values are serializable (use ?? "" for safety, clean GUID format)
-    const dialogParameters = {
-        parentEntityName: params?.parentEntityName ?? "",
-        parentRecordId: (params?.parentRecordId ?? "").replace(/[{}]/g, "").toLowerCase(),
-        containerId: params?.containerId ?? "",
-        parentDisplayName: params?.parentDisplayName ?? ""
-    };
-
-    // Encode parameters as JSON string and pass via recordId (workaround for dialog parameter issues)
-    const dataPayload = JSON.stringify({
-        parentEntityName: dialogParameters.parentEntityName,
-        parentRecordId: dialogParameters.parentRecordId,
-        containerId: dialogParameters.containerId,
-        parentDisplayName: dialogParameters.parentDisplayName
-    });
+    const dataString = "parentEntityType=" + parentEntityType +
+        "&parentEntityId=" + parentEntityId +
+        "&parentEntityName=" + parentEntityName +
+        "&containerId=" + containerId;
 
     const pageInput = {
-        pageType: "custom",
-        name: "sprk_documentuploaddialog_e52db",  // Custom Page logical name (with Dataverse suffix)
-        recordId: dataPayload  // Use recordId to pass JSON string (dialog workaround)
+        pageType: "webresource",
+        webresourceName: "sprk_documentuploadwizard",
+        data: encodeURIComponent(dataString)
     };
 
-    if (appId) {
-        pageInput.appId = appId; // Only include when available; null can break custom page resolution
-    }
-
-    // Configure dialog display options
+    // Configure dialog display options - 85% width/height centered dialog
     const navigationOptions = {
         target: 2,      // Dialog
-        position: 2,    // Right side pane (Quick Create style)
-        width: { value: 640, unit: 'px' }
-        // Height removed - let Custom Page control its own height
-        // NOTE: hideHeader option attempted but caused issues - Custom Page header styling
-        // must be addressed via Canvas App design or CSS injection
+        width: { value: 85, unit: "%" },
+        height: { value: 85, unit: "%" }
     };
 
     console.log("[Spaarke] Page Input:", pageInput);
     console.log("[Spaarke] Navigation Options:", navigationOptions);
 
-    // Navigate to Custom Page
+    // Navigate to Code Page webresource
     Xrm.Navigation.navigateTo(pageInput, navigationOptions).then(
         function success(result) {
-            console.log("[Spaarke] Custom Page Dialog closed successfully", result);
+            console.log("[Spaarke] DocumentUploadWizard dialog closed successfully", result);
 
             // Refresh subgrid to show new documents
             if (selectedControl && typeof selectedControl.refresh === "function") {
@@ -547,6 +505,8 @@ ADDING NEW ENTITIES:
 5. Test end-to-end flow
 
 VERSION HISTORY:
+- 4.0.0: Code Page (webresource) dialog approach with React 18 (sprk_documentuploadwizard)
+- 3.0.x: Custom Page dialog approach with PCF control (sprk_documentuploaddialog_e52db)
 - 2.1.0: Form Dialog approach using sprk_uploadcontext utility entity
 - 2.0.0: Initial release for Custom Page architecture (deprecated)
 */

@@ -37,9 +37,9 @@ import { UploadProgressBar } from './UploadProgressBar';
 import { ErrorMessageList } from './ErrorMessageList';
 import { AiSummaryCarousel } from './AiSummaryCarousel';
 import { FILE_UPLOAD_LIMITS, ParentContext, UploadedFileMetadata, CreateResult } from '../types';
-import { MultiFileUploadService } from '../services/MultiFileUploadService';
-import { DocumentRecordService } from '../services/DocumentRecordService';
-import { useAiSummary, SummaryDocument } from '../services/useAiSummary';
+import { MultiFileUploadService, DocumentRecordService } from '@spaarke/ui-components/src/services/document-upload';
+import { useAiSummary } from '@spaarke/ui-components/src/hooks';
+import type { SummaryDocument } from '@spaarke/ui-components/src/hooks';
 import { logInfo, logError } from '../utils/logger';
 
 /**

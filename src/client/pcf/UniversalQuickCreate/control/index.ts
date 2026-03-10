@@ -261,11 +261,14 @@ function setupThemeListener(
     };
 }
 import { MsalAuthProvider } from "./services/auth/MsalAuthProvider";
-import { MultiFileUploadService } from "./services/MultiFileUploadService";
-import { DocumentRecordService } from "./services/DocumentRecordService";
-import { FileUploadService } from "./services/FileUploadService";
+import {
+    MultiFileUploadService,
+    FileUploadService,
+    NavMapClient,
+    DocumentRecordService,
+    PcfDataverseClient,
+} from "@spaarke/ui-components/src/services/document-upload";
 import { SdapApiClientFactory } from "./services/SdapApiClientFactory";
-import { NavMapClient } from "./services/NavMapClient"; // Phase 7
 import { getEntityDocumentConfig, isEntitySupported, getSupportedEntities } from "./config/EntityDocumentConfig";
 import { ParentContext } from "./types";
 import { DocumentUploadForm } from "./components/DocumentUploadForm";
@@ -535,20 +538,30 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
 
         // Create API clients
         const apiClient = SdapApiClientFactory.create(apiBaseUrl);
-        const navMapClient = new NavMapClient(
-            navMapBaseUrl,
-            async () => {
+        const navMapClient = new NavMapClient({
+            baseUrl: navMapBaseUrl,
+            getAccessToken: async () => {
                 // Reuse same MSAL auth as file operations
                 // Use same OAuth scope as msalConfig.ts (full application ID URI)
                 const token = await this.authProvider.getToken(['api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation']);
                 return token;
+            },
+            onUnauthorized: () => {
+                MsalAuthProvider.getInstance().clearCache();
             }
-        );
+        });
 
-        // Create services
+        // Create services (using shared library with dependency injection)
         const fileUploadService = new FileUploadService(apiClient);
         this.multiFileService = new MultiFileUploadService(fileUploadService);
-        this.documentRecordService = new DocumentRecordService(context, navMapClient); // Pass navMapClient for metadata queries
+
+        // PcfDataverseClient wraps context.webAPI to implement IDataverseClient
+        const dataverseClient = new PcfDataverseClient(context.webAPI);
+        this.documentRecordService = new DocumentRecordService({
+            dataverseClient,
+            navMapClient,
+            getEntityConfig: getEntityDocumentConfig,
+        });
 
         logInfo('UniversalDocumentUpload', 'Services initialized (including NavMapClient)');
     }

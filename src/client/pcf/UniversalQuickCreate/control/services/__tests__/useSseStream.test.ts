@@ -5,7 +5,8 @@
  */
 
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { useSseStream, SseStreamStatus, UseSseStreamOptions } from '../useSseStream';
+import { useSseStream } from '@spaarke/ui-components/src/hooks';
+import type { SseStreamStatus, UseSseStreamOptions } from '@spaarke/ui-components/src/hooks';
 
 // Helper to create a mock ReadableStream
 const createMockStream = (chunks: string[]) => {

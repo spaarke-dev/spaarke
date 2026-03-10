@@ -1,46 +1,21 @@
 /**
  * FilePreviewDialog.tsx
- * Full-screen modal dialog for document preview with toolbar actions.
+ * LegalWorkspace adapter for the shared FilePreviewDialog component.
  *
- * Features:
- *   - Fluent UI v9 Dialog (85vw x 85vh, max 880px)
- *   - Iframe preview with Spinner during load, error + retry on failure
- *   - Toolbar: Open File, Open Record, Copy Link, Add/Remove Workspace
- *   - Open File: lazy-fetch open links, cascade desktop -> web -> download
+ * Maintains the simple interface (without `services` prop) expected by
+ * DocumentCard and other local consumers, while injecting the environment-
+ * specific service implementations required by the shared @spaarke/ui-components
+ * version.
  */
-
 import * as React from 'react';
-import {
-  Dialog,
-  DialogSurface,
-  DialogBody,
-  DialogTitle,
-  DialogContent,
-  Button,
-  Toolbar,
-  ToolbarButton,
-  ToolbarDivider,
-  Tooltip,
-  Spinner,
-  Text,
-  makeStyles,
-  shorthands,
-  tokens,
-} from '@fluentui/react-components';
-import {
-  Dismiss24Regular,
-  Open24Regular,
-  OpenRegular,
-  LinkRegular,
-  StarRegular,
-  StarFilled,
-} from '@fluentui/react-icons';
-import { getDocumentPreviewUrl, getDocumentOpenLinks, type IOpenLinksResponse } from '../../services/DocumentApiService';
+import { FilePreviewDialog as SharedFilePreviewDialog } from '@spaarke/ui-components/components/FilePreview';
+import type { IFilePreviewServices } from '@spaarke/ui-components/components/FilePreview/filePreviewTypes';
+import { getDocumentPreviewUrl, getDocumentOpenLinks } from '../../services/DocumentApiService';
 import { navigateToEntity } from '../../utils/navigation';
 import { copyDocumentLink, setWorkspaceFlag } from './filePreviewService';
 
 // ---------------------------------------------------------------------------
-// Props
+// Props (unchanged — consumers do NOT need to supply services)
 // ---------------------------------------------------------------------------
 
 export interface IFilePreviewDialogProps {
@@ -55,296 +30,26 @@ export interface IFilePreviewDialogProps {
 }
 
 // ---------------------------------------------------------------------------
-// Styles
+// Service implementation (stable reference)
 // ---------------------------------------------------------------------------
 
-const useStyles = makeStyles({
-  surface: {
-    width: '85vw',
-    maxWidth: '880px',
-    height: '85vh',
-    maxHeight: '85vh',
-    ...shorthands.padding('0px'),
-    display: 'flex',
-    flexDirection: 'column',
-    ...shorthands.overflow('hidden'),
-    ...shorthands.borderRadius(tokens.borderRadiusXLarge),
-  },
-  titleBar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalS,
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: tokens.colorNeutralStroke2,
-    flexShrink: 0,
-  },
-  titleText: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    flex: 1,
-    minWidth: 0,
-  },
-  toolbar: {
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: tokens.colorNeutralStroke2,
-    flexShrink: 0,
-  },
-  body: {
-    ...shorthands.padding('0px'),
-    flex: 1,
-    minHeight: 0,
-    position: 'relative' as const,
-  },
-  iframe: {
-    position: 'absolute' as const,
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: '100%',
-    borderWidth: '0px',
-  },
-  centerContent: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-    height: '100%',
-    gap: tokens.spacingVerticalM,
-  },
-});
+const filePreviewServices: IFilePreviewServices = {
+  getDocumentPreviewUrl,
+  getDocumentOpenLinks,
+  navigateToEntity: (params) => navigateToEntity(params),
+  copyDocumentLink,
+  setWorkspaceFlag,
+};
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
-  open,
-  documentId,
-  documentName,
-  onClose,
-  isInWorkspace,
-  onWorkspaceFlagChanged,
-}) => {
-  const styles = useStyles();
-
-  // Preview state
-  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState(false);
-
-  // Workspace flag local state (track optimistically)
-  const [inWorkspace, setInWorkspace] = React.useState(isInWorkspace ?? false);
-
-  // Sync prop changes
-  React.useEffect(() => {
-    setInWorkspace(isInWorkspace ?? false);
-  }, [isInWorkspace]);
-
-  // Fetch preview URL when dialog opens
-  React.useEffect(() => {
-    if (!open || !documentId) {
-      setPreviewUrl(null);
-      setError(false);
-      return;
-    }
-
-    let cancelled = false;
-    setLoading(true);
-    setError(false);
-
-    (async () => {
-      const url = await getDocumentPreviewUrl(documentId);
-      if (cancelled) return;
-      if (url) {
-        setPreviewUrl(url);
-      } else {
-        setError(true);
-      }
-      setLoading(false);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, documentId]);
-
-  // Retry handler
-  const handleRetry = React.useCallback(() => {
-    if (!documentId) return;
-    setLoading(true);
-    setError(false);
-    setPreviewUrl(null);
-    (async () => {
-      const url = await getDocumentPreviewUrl(documentId);
-      if (url) {
-        setPreviewUrl(url);
-      } else {
-        setError(true);
-      }
-      setLoading(false);
-    })();
-  }, [documentId]);
-
-  // Open File: fetch open links and cascade desktop → web → preview fallback.
-  // Desktop URL (ms-word:, ms-excel:, etc.) opens the file in the native app.
-  // Web URL opens in Office Online (browser). Preview URL is read-only fallback.
-  const handleOpenFile = React.useCallback(async () => {
-    // Try to get the actual file open links from the BFF
-    const links = await getDocumentOpenLinks(documentId);
-    if (links) {
-      // Prefer desktop app for Office files (handles its own auth)
-      if (links.desktopUrl) {
-        window.location.href = links.desktopUrl;
-        return;
-      }
-      // Fall back to web URL (Office Online or SharePoint viewer)
-      if (links.webUrl) {
-        window.open(links.webUrl, '_blank', 'noopener,noreferrer');
-        return;
-      }
-    }
-    // Last resort: open the preview URL (authenticated, read-only)
-    if (previewUrl) {
-      window.open(previewUrl, '_blank', 'noopener,noreferrer');
-    }
-  }, [documentId, previewUrl]);
-
-  // Open Record (new tab)
-  const handleOpenRecord = React.useCallback(() => {
-    navigateToEntity({
-      action: 'openRecord',
-      entityName: 'sprk_document',
-      entityId: documentId,
-      openInNewWindow: true,
-    });
-  }, [documentId]);
-
-  // Copy Link
-  const handleCopyLink = React.useCallback(async () => {
-    await copyDocumentLink(documentId);
-  }, [documentId]);
-
-  // Toggle workspace flag
-  const handleToggleWorkspace = React.useCallback(async () => {
-    const newFlag = !inWorkspace;
-    setInWorkspace(newFlag); // optimistic
-    const success = await setWorkspaceFlag(documentId, newFlag);
-    if (success) {
-      onWorkspaceFlagChanged?.(newFlag);
-    } else {
-      setInWorkspace(!newFlag); // revert
-    }
-  }, [documentId, inWorkspace, onWorkspaceFlagChanged]);
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(_, data) => {
-        if (!data.open) onClose();
-      }}
-    >
-      <DialogSurface className={styles.surface}>
-        {/* Title bar */}
-        <div className={styles.titleBar}>
-          <DialogTitle action={null} className={styles.titleText}>
-            {documentName || 'Document Preview'}
-          </DialogTitle>
-          <Tooltip content="Close" relationship="label">
-            <Button
-              appearance="subtle"
-              icon={<Dismiss24Regular />}
-              aria-label="Close"
-              onClick={onClose}
-            />
-          </Tooltip>
-        </div>
-
-        {/* Toolbar */}
-        <Toolbar className={styles.toolbar} size="small">
-          <Tooltip content="Open file" relationship="label">
-            <ToolbarButton
-              icon={<Open24Regular />}
-              onClick={handleOpenFile}
-            >
-              Open File
-            </ToolbarButton>
-          </Tooltip>
-          <Tooltip content="Open record" relationship="label">
-            <ToolbarButton
-              icon={<OpenRegular />}
-              onClick={handleOpenRecord}
-            >
-              Open Record
-            </ToolbarButton>
-          </Tooltip>
-          <ToolbarDivider />
-          <Tooltip content="Copy link to clipboard" relationship="label">
-            <ToolbarButton
-              icon={<LinkRegular />}
-              onClick={handleCopyLink}
-            >
-              Copy Link
-            </ToolbarButton>
-          </Tooltip>
-          <Tooltip
-            content={inWorkspace ? 'Remove from workspace' : 'Add to workspace'}
-            relationship="label"
-          >
-            <ToolbarButton
-              icon={inWorkspace ? <StarFilled /> : <StarRegular />}
-              onClick={handleToggleWorkspace}
-            >
-              {inWorkspace ? 'Remove from Workspace' : 'Add to Workspace'}
-            </ToolbarButton>
-          </Tooltip>
-        </Toolbar>
-
-        {/* Preview content */}
-        <DialogBody className={styles.body}>
-          <DialogContent className={styles.body}>
-            {loading && (
-              <div className={styles.centerContent}>
-                <Spinner size="large" label="Loading preview..." labelPosition="below" />
-              </div>
-            )}
-            {error && !loading && (
-              <div className={styles.centerContent}>
-                <Text size={400} weight="semibold">
-                  Preview not available
-                </Text>
-                <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-                  Unable to load the document preview. The file may be unsupported or temporarily unavailable.
-                </Text>
-                <Button appearance="primary" onClick={handleRetry}>
-                  Retry
-                </Button>
-              </div>
-            )}
-            {previewUrl && !loading && !error && (
-              <iframe
-                src={previewUrl}
-                title={`Preview: ${documentName}`}
-                className={styles.iframe}
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-              />
-            )}
-          </DialogContent>
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
-  );
-};
+export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = (props) => (
+  <SharedFilePreviewDialog
+    {...props}
+    services={filePreviewServices}
+  />
+);
 
 FilePreviewDialog.displayName = 'FilePreviewDialog';

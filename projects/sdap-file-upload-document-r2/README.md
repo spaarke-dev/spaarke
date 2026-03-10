@@ -1,6 +1,6 @@
 # SDAP File Upload & Document Creation Dialog (R2)
 
-> **Status**: Active
+> **Status**: Implementation Complete — Awaiting Deployment
 > **Branch**: `feature/sdap-file-upload-document-r2`
 > **Created**: 2026-03-09
 

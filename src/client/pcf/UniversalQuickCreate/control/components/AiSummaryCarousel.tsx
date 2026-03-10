@@ -27,7 +27,7 @@ import {
     DocumentMultipleRegular
 } from '@fluentui/react-icons';
 import { AiSummaryPanel } from './AiSummaryPanel';
-import { DocumentSummaryState, SummaryStatus } from '../services/useAiSummary';
+import type { DocumentSummaryState, SummaryStatus } from '@spaarke/ui-components/src/hooks';
 
 // Re-export for backward compatibility
 export type { DocumentSummaryState, SummaryStatus };

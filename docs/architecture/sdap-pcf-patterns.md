@@ -1,14 +1,16 @@
 # SDAP PCF Control Patterns
 
 > **Source**: SDAP-ARCHITECTURE-GUIDE.md (Component Architecture section)
-> **Last Updated**: December 3, 2025
+> **Last Updated**: March 9, 2026
 > **Applies To**: PCF control development, upload/preview UI changes
 
 ---
 
 ## TL;DR
 
-Two PCF controls: **UniversalQuickCreate** (v2.3.0) for file upload, **SpeFileViewer** (v1.0.6) for preview/edit. Both use MSAL.js auth, Fluent UI, React. Upload control handles multi-file with progress; viewer embeds Office Online. Key config in `EntityDocumentConfig.ts`.
+Two PCF controls: **UniversalQuickCreate** (v2.3.0) for form-embedded file upload, **SpeFileViewer** (v1.0.6) for preview/edit. Both use MSAL.js auth, Fluent UI, React. Upload control handles multi-file with progress; viewer embeds Office Online. Key config in `EntityDocumentConfig.ts`.
+
+> **Migration Note (March 2026)**: The primary document upload experience is migrating to the **DocumentUploadWizard Code Page** (`sprk_documentuploadwizard`) at `src/solutions/DocumentUploadWizard/`. This standalone React 18 wizard (Add Files, Summary, Next Steps) replaces the Custom Page + UniversalQuickCreate PCF wrapper pattern per ADR-006. The UniversalQuickCreate PCF remains available for form-embedded upload but the Custom Page wrapper is deprecated. Upload services (`MultiFileUploadService`, `DocumentRecordService`) have been extracted to `@spaarke/ui-components` shared library for reuse across both surfaces.
 
 ---
 

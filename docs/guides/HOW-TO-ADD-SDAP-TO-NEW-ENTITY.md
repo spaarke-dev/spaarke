@@ -1,7 +1,7 @@
 # How to Add SDAP (Document Upload) to a New Entity
 
-**Version:** 1.0.0
-**Last Updated:** October 20, 2025
+**Version:** 1.1.0
+**Last Updated:** March 9, 2026
 **Phase:** 7 (Dynamic Metadata Discovery)
 
 ---
@@ -23,6 +23,8 @@ This guide explains how to enable SDAP (SharePoint Embedded Document Attachment 
 - [ ] 4. Update PCF control configuration (EntityDocumentConfig.ts)
 - [ ] 5. Build and deploy PCF control
 - [ ] 6. Test document upload functionality
+
+> **Note (March 2026)**: The primary upload experience is migrating from the Custom Page + UniversalQuickCreate PCF to the **DocumentUploadWizard Code Page** (`sprk_documentuploadwizard`), a standalone React 18 wizard dialog opened via `Xrm.Navigation.navigateTo`. The new wizard provides a guided 3-step flow (Add Files, Summary with Document Profile streaming, Next Steps) and uses shared components from `@spaarke/ui-components`. The UniversalQuickCreate PCF remains available for form-embedded upload scenarios but the Custom Page wrapper is deprecated. See `src/solutions/DocumentUploadWizard/` for the new implementation.
 
 ---
 
@@ -98,13 +100,17 @@ Add a subgrid to display documents and enable the Universal Quick Create button.
 6. **Save** and **Publish**
 
 **Command Button:**
-The Universal Quick Create button is added automatically by the ribbon customization. If missing:
-- Check ribbon customizations are published
-- Verify the `sprk_uploadcontext` subgrid command button is configured
+The document upload button is added via ribbon customization. Two approaches exist:
+- **DocumentUploadWizard Code Page (preferred)**: Ribbon command opens `sprk_documentuploadwizard` via `Xrm.Navigation.navigateTo` with `parentEntityType`, `parentEntityId`, `parentEntityName`, and `containerId` parameters
+- **UniversalQuickCreate PCF (legacy)**: The `sprk_uploadcontext` subgrid command button opens the PCF-based upload
+
+If the upload button is missing, check that ribbon customizations are published.
 
 ---
 
 ### Step 4: Update PCF Control Configuration
+
+> **Note**: This step applies to the UniversalQuickCreate PCF upload path. The DocumentUploadWizard Code Page discovers entity configuration dynamically via URL parameters and does not require a separate config entry.
 
 Add your entity to the PCF control configuration file.
 
@@ -185,7 +191,14 @@ msbuild /t:Rebuild /p:Configuration=Release
 
 Verify the configuration works end-to-end.
 
-**Testing Steps:**
+**Testing Steps (DocumentUploadWizard Code Page - preferred):**
+1. Open a record of your new entity (e.g., a Project record)
+2. Click the upload ribbon button (should open the DocumentUploadWizard dialog)
+3. Upload a test file via the Add Files step
+4. Verify the Summary step shows streaming Document Profile results
+5. Complete the wizard and verify document appears in subgrid
+
+**Testing Steps (UniversalQuickCreate PCF - legacy):**
 1. Open a record of your new entity (e.g., a Project record)
 2. Navigate to the **Documents** subgrid
 3. Click **Universal Quick Create** button (command bar)

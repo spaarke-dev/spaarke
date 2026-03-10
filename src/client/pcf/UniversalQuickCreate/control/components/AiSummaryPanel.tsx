@@ -38,7 +38,7 @@ import {
     DocumentCopyRegular,
     DismissRegular
 } from '@fluentui/react-icons';
-import { SummaryStatus, ExtractedEntities } from '../services/useAiSummary';
+import type { SummaryStatus, ExtractedEntities } from '@spaarke/ui-components/src/hooks';
 
 // Re-export for backward compatibility
 export type { SummaryStatus };

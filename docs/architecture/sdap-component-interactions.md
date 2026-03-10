@@ -123,6 +123,16 @@ When modifying a component, check this table for potential downstream effects:
 
 ### Pattern 1: Document Upload Flow
 
+**Primary (Code Page wizard):**
+```
+User → Ribbon button → DocumentUploadWizard Code Page (sprk_documentuploadwizard)
+       → BFF API → Graph API → SPE Container
+       → Xrm.WebApi → Dataverse → sprk_document record
+       → BFF API → Document Profile playbook (streaming)
+       → BFF API → RAG indexing (fire-and-forget)
+```
+
+**Legacy (PCF form-embedded):**
 ```
 User → PCF (UniversalQuickCreate) → BFF API → Graph API → SPE Container
                                        │
@@ -130,17 +140,18 @@ User → PCF (UniversalQuickCreate) → BFF API → Graph API → SPE Container
 ```
 
 **Components involved:**
-1. `src/client/pcf/UniversalQuickCreate/` — UI, file selection, metadata form
-2. `src/server/api/Sprk.Bff.Api/Api/DocumentsEndpoints.cs` — Upload endpoints
-3. `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/UploadSessionManager.cs` — Chunked uploads
-4. `src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/` — Metadata record creation
+1. `src/solutions/DocumentUploadWizard/` — Code Page wizard (React 18, preferred path)
+2. `src/client/pcf/UniversalQuickCreate/` — PCF upload (form-embedded, legacy path)
+3. `src/client/shared/` — Shared upload services (`MultiFileUploadService`, `DocumentRecordService`, `useAiSummary`)
+4. `src/server/api/Sprk.Bff.Api/Api/DocumentsEndpoints.cs` — Upload endpoints
+5. `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/UploadSessionManager.cs` — Chunked uploads
 
 **Change Impact:**
 | Change | Impact |
 |--------|--------|
-| Modify upload endpoint signature | Update PCF API client |
-| Add upload validation | Add corresponding PCF-side validation |
-| Change file size limits | Update both BFF config and PCF UI messaging |
+| Modify upload endpoint signature | Update shared upload services (consumed by both Code Page and PCF) |
+| Add upload validation | Add corresponding client-side validation in shared services |
+| Change file size limits | Update both BFF config and shared UI messaging |
 
 ### Pattern 2: Authentication Flow (OBO)
 

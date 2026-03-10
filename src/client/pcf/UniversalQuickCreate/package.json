@@ -17,7 +17,8 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
-    "@azure/msal-browser": "^4.24.1"
+    "@azure/msal-browser": "^4.24.1",
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components"
   },
   "devDependencies": {
     "@eslint/js": "^9.25.1",

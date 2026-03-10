@@ -86,10 +86,11 @@ spaarke/
 
 | Subdirectory | Technology | Purpose |
 |--------------|------------|---------|
-| `pcf/` | TypeScript, React, Fluent UI | PCF controls for Dataverse model-driven apps |
+| `pcf/` | TypeScript, React, Fluent UI | PCF controls for Dataverse model-driven apps (React 16/17) |
+| `code-pages/` | TypeScript, React 18, Fluent UI | Standalone React 18 dialogs and pages opened via `navigateTo` |
 | `office-addins/` | TypeScript | Office Add-ins (Word, Excel, Outlook) |
 | `webresources/` | JavaScript/HTML | Dataverse web resources |
-| `shared/` | TypeScript | Shared UI component library |
+| `shared/` | TypeScript | Shared UI component library (`@spaarke/ui-components`) |
 | `assets/` | Static files | Icons, images, stylesheets |
 
 **PCF Controls (`src/client/pcf/`):**
@@ -100,7 +101,14 @@ spaarke/
 | `SpeFileViewer/` | Document preview and Office Online editing |
 | `ThemeEnforcer/` | Dark mode theme enforcement |
 | `UniversalDatasetGrid/` | Generic dataset grid control |
-| `UniversalQuickCreate/` | Document upload with metadata |
+| `UniversalQuickCreate/` | Form-embedded document upload (legacy; see DocumentUploadWizard Code Page) |
+
+**Solutions / Code Pages (`src/solutions/`):**
+
+| Solution | Purpose |
+|----------|---------|
+| `DocumentUploadWizard/` | Document upload wizard Code Page (`sprk_documentuploadwizard`) — 3-step guided upload with Document Profile and next steps |
+| `LegalWorkspace/` | Corporate workspace SPA with entity creation wizards |
 
 ### `src/server/` — Backend Services
 

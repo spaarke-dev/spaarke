@@ -34,6 +34,7 @@ public static class DocumentProfileFieldMapper
             // JPS structured output field names
             "tldr" => "sprk_filetldr",
             "documenttype" => "sprk_documenttype",
+            "searchprofile" => "sprk_searchprofile",
             _ => null
         };
     }
@@ -78,10 +79,18 @@ public static class DocumentProfileFieldMapper
     /// <summary>
     /// Creates a field mapping dictionary for Document Profile outputs.
     /// Maps output type names to their corresponding sprk_document field values.
+    /// Automatically builds a search profile from collected outputs.
     /// </summary>
     /// <param name="outputs">Dictionary of output type name → value</param>
+    /// <param name="parentEntityName">Optional parent entity display name for search profile enrichment</param>
+    /// <param name="parentEntityType">Optional parent entity type for search profile enrichment</param>
+    /// <param name="fileName">Optional file name for search profile enrichment</param>
     /// <returns>Dictionary of sprk_document field name → prepared value</returns>
-    public static Dictionary<string, object?> CreateFieldMapping(Dictionary<string, string?> outputs)
+    public static Dictionary<string, object?> CreateFieldMapping(
+        Dictionary<string, string?> outputs,
+        string? parentEntityName = null,
+        string? parentEntityType = null,
+        string? fileName = null)
     {
         var fields = new Dictionary<string, object?>();
 
@@ -96,6 +105,20 @@ public static class DocumentProfileFieldMapper
                     fields[fieldName] = preparedValue;
                 }
             }
+        }
+
+        // Build search profile from collected outputs (deterministic post-processing, no AI calls)
+        var nonNullOutputs = new Dictionary<string, string>();
+        foreach (var kvp in outputs)
+        {
+            if (kvp.Value != null)
+                nonNullOutputs[kvp.Key] = kvp.Value;
+        }
+
+        var searchProfile = BuildSearchProfile(nonNullOutputs, parentEntityName, parentEntityType, fileName);
+        if (searchProfile != null)
+        {
+            fields["sprk_searchprofile"] = searchProfile;
         }
 
         return fields;
@@ -118,6 +141,115 @@ public static class DocumentProfileFieldMapper
         "Summary",
         "Keywords",
         "Document Type",
-        "Entities"
+        "Entities",
+        "searchprofile"
     };
+
+    /// <summary>
+    /// Deterministically assembles a BM25-optimized search profile string from Document Profile outputs.
+    /// </summary>
+    /// <param name="outputs">Dictionary of output type name → value (case-insensitive keys expected)</param>
+    /// <param name="parentEntityName">Optional parent entity display name (e.g., "Acme Corp")</param>
+    /// <param name="parentEntityType">Optional parent entity type (e.g., "account")</param>
+    /// <param name="fileName">Optional file name (extension will be stripped)</param>
+    /// <returns>
+    /// Pipe-delimited search profile string for BM25 tokenization, or null if fewer than 2 parts are assembled.
+    /// </returns>
+    public static string? BuildSearchProfile(
+        Dictionary<string, string> outputs,
+        string? parentEntityName = null,
+        string? parentEntityType = null,
+        string? fileName = null)
+    {
+        var parts = new List<string>();
+
+        // 1. Document Type
+        var documentType = GetOutputValue(outputs, "documenttype", "document type");
+        if (!string.IsNullOrWhiteSpace(documentType))
+            parts.Add(documentType.Trim());
+
+        // 2. TL;DR
+        var tldr = GetOutputValue(outputs, "tldr", "tl;dr");
+        if (!string.IsNullOrWhiteSpace(tldr))
+            parts.Add(tldr.Trim());
+
+        // 3. Entities (extract names from JSON array)
+        var entitiesJson = GetOutputValue(outputs, "entities");
+        var entityNames = ExtractEntityNames(entitiesJson);
+        if (!string.IsNullOrWhiteSpace(entityNames))
+            parts.Add(entityNames);
+
+        // 4. Keywords
+        var keywords = GetOutputValue(outputs, "keywords");
+        if (!string.IsNullOrWhiteSpace(keywords))
+            parts.Add(keywords.Trim());
+
+        // 5. Parent Entity
+        if (!string.IsNullOrWhiteSpace(parentEntityType) && !string.IsNullOrWhiteSpace(parentEntityName))
+            parts.Add($"{parentEntityType.Trim()}: {parentEntityName.Trim()}");
+
+        // 6. File Name (without extension)
+        if (!string.IsNullOrWhiteSpace(fileName))
+        {
+            var nameWithoutExtension = Path.GetFileNameWithoutExtension(fileName).Trim();
+            if (!string.IsNullOrWhiteSpace(nameWithoutExtension))
+                parts.Add(nameWithoutExtension);
+        }
+
+        return parts.Count >= 2 ? string.Join(" | ", parts) : null;
+    }
+
+    /// <summary>
+    /// Extracts entity names from a JSON entity output string.
+    /// Expects a JSON array of objects with a "name" property.
+    /// </summary>
+    /// <param name="entityJson">JSON string (e.g., [{"name":"Acme","type":"Organization"}])</param>
+    /// <returns>Comma-separated entity names, or null if parsing fails or no names found.</returns>
+    private static string? ExtractEntityNames(string? entityJson)
+    {
+        if (string.IsNullOrWhiteSpace(entityJson))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(entityJson);
+            var names = new List<string>();
+
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var element in doc.RootElement.EnumerateArray())
+                {
+                    if (element.TryGetProperty("name", out var nameProp) &&
+                        nameProp.ValueKind == JsonValueKind.String)
+                    {
+                        var name = nameProp.GetString();
+                        if (!string.IsNullOrWhiteSpace(name))
+                            names.Add(name);
+                    }
+                }
+            }
+
+            return names.Count > 0 ? string.Join(", ", names) : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets a value from the outputs dictionary, trying multiple key variants (case-insensitive).
+    /// </summary>
+    private static string? GetOutputValue(Dictionary<string, string> outputs, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            foreach (var kvp in outputs)
+            {
+                if (kvp.Key.Equals(key, StringComparison.OrdinalIgnoreCase))
+                    return kvp.Value;
+            }
+        }
+        return null;
+    }
 }

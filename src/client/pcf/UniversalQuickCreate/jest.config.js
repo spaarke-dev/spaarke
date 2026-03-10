@@ -5,7 +5,10 @@ module.exports = {
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   moduleNameMapper: {
-    '\\.(css|less|scss|sass)$': 'identity-obj-proxy'
+    '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
+    // Map @spaarke/ui-components to shared library source
+    '^@spaarke/ui-components/src/(.*)$': '<rootDir>/../../shared/Spaarke.UI.Components/src/$1',
+    '^@spaarke/ui-components$': '<rootDir>/../../shared/Spaarke.UI.Components/src/index.ts'
   },
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {
@@ -17,6 +20,6 @@ module.exports = {
     }]
   },
   transformIgnorePatterns: [
-    '/node_modules/(?!(@fluentui)/)'
+    '/node_modules/(?!(@fluentui|@spaarke)/)'
   ]
 };
