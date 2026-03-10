@@ -11,11 +11,19 @@
     "lint:fix": "eslint src --ext .ts,.tsx --fix"
   },
   "dependencies": {
-    "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
     "@azure/msal-browser": "^4.28.2",
     "@fluentui/react-components": "^9.46.2",
     "@fluentui/react-icons": "^2.0.225",
-    "@hello-pangea/dnd": "^18.0.1"
+    "@hello-pangea/dnd": "^18.0.1",
+    "@lexical/html": "^0.41.0",
+    "@lexical/list": "^0.41.0",
+    "@lexical/react": "^0.41.0",
+    "@lexical/rich-text": "^0.41.0",
+    "@lexical/selection": "^0.41.0",
+    "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
+    "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",
+    "lexical": "^0.41.0",
+    "scheduler": "^0.27.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.27",

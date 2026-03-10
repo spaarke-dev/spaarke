@@ -506,6 +506,7 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
           open={filePreviewOpen}
           documentId={doc.sprk_documentid}
           documentName={doc.sprk_documentname}
+          fileSummary={doc.sprk_filetldr ?? doc.sprk_filesummary}
           onClose={() => setFilePreviewOpen(false)}
         />
       </>

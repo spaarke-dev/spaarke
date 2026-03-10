@@ -130,6 +130,10 @@ export const ResultsList: React.FC<IResultsListProps> = ({
     onFindSimilar,
     onPreview,
     onSummary,
+    onEmailDocument,
+    onCopyLink,
+    onToggleWorkspace,
+    isInWorkspace,
     onViewAll,
     compactMode,
 }) => {
@@ -217,6 +221,26 @@ export const ResultsList: React.FC<IResultsListProps> = ({
         [onSummary]
     );
 
+    const handleEmailDocument = useCallback(
+        (result: SearchResult) => () => onEmailDocument(result),
+        [onEmailDocument]
+    );
+
+    const handleCopyLink = useCallback(
+        (result: SearchResult) => () => onCopyLink(result),
+        [onCopyLink]
+    );
+
+    const handleToggleWorkspace = useCallback(
+        (result: SearchResult) => () => onToggleWorkspace(result),
+        [onToggleWorkspace]
+    );
+
+    const getIsInWorkspace = useCallback(
+        (result: SearchResult) => isInWorkspace(result),
+        [isInWorkspace]
+    );
+
     return (
         <div className={styles.container}>
             {/* Results count header */}
@@ -284,6 +308,10 @@ export const ResultsList: React.FC<IResultsListProps> = ({
                             onFindSimilar={handleFindSimilar(result)}
                             onPreview={handlePreview(result)}
                             onSummary={handleSummary(result)}
+                            onEmailDocument={handleEmailDocument(result)}
+                            onCopyLink={handleCopyLink(result)}
+                            onToggleWorkspace={handleToggleWorkspace(result)}
+                            isInWorkspace={getIsInWorkspace(result)}
                             compactMode={compactMode}
                         />
                     ))}

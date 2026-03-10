@@ -5,13 +5,33 @@ import path from "path";
 
 export default defineConfig({
   plugins: [
-    react(),
+    react({
+      // Include shared lib source for transpilation
+      include: [
+        "src/**/*.tsx",
+        "src/**/*.ts",
+        path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src/**/*.ts"),
+      ],
+    }),
     viteSingleFile(),
   ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "@spaarke/ui-components": path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
     },
+    // Force all shared packages to resolve from THIS project's node_modules
+    dedupe: [
+      "react",
+      "react-dom",
+      "scheduler",
+      "@fluentui/react-components",
+      "@fluentui/react-icons",
+      "@fluentui/react-context-selector",
+      "@lexical/react",
+      "lexical",
+    ],
   },
   build: {
     outDir: "dist",

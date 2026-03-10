@@ -48,6 +48,9 @@ import {
     NavigationService,
 } from "./services";
 import { initializeAuth } from "./authInit";
+import { authenticatedFetch } from "@spaarke/auth";
+import { SendEmailDialog, type ISendEmailPayload } from "@spaarke/ui-components/dist/components/SendEmailDialog";
+import type { ILookupItem } from "@spaarke/ui-components/dist/types/LookupTypes";
 
 /**
  * Styles using makeStyles with Fluent design tokens.
@@ -299,6 +302,9 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     // Find Similar dialog state — URL of the web resource to show in the iframe dialog
     const [findSimilarUrl, setFindSimilarUrl] = useState<string | null>(null);
 
+    // Email dialog state
+    const [emailDialogResult, setEmailDialogResult] = useState<SearchResult | null>(null);
+
     // Filter pane collapse state
     const [isFilterPaneCollapsed, setIsFilterPaneCollapsed] = useState(true);
     const handleToggleFilterPane = useCallback(() => {
@@ -507,6 +513,127 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         );
     }, [navigationService, scopeId, searchScope]);
 
+    // Handle Email Document — opens SendEmailDialog with result context
+    const handleEmailDocument = useCallback(
+        (result: SearchResult) => {
+            setEmailDialogResult(result);
+        },
+        []
+    );
+
+    // Handle Copy Link — copies Dataverse record URL to clipboard
+    const handleCopyLink = useCallback(
+        (result: SearchResult) => {
+            try {
+                const clientUrl = ((context as unknown as { page?: { getClientUrl?: () => string } }).page?.getClientUrl?.()) ?? window.location.origin;
+                const recordUrl = `${clientUrl}/main.aspx?etn=sprk_document&id=${result.documentId}&pagetype=entityrecord`;
+                void navigator.clipboard.writeText(recordUrl);
+            } catch (err) {
+                console.error("[SemanticSearchControl] Failed to copy link:", err);
+            }
+        },
+        [context]
+    );
+
+    // Workspace flag tracking — local set of document IDs added to workspace
+    const [workspaceSet, setWorkspaceSet] = useState<Set<string>>(new Set());
+
+    // Handle Toggle Workspace — toggles the sprk_inworkspace flag on the document
+    const handleToggleWorkspace = useCallback(
+        (result: SearchResult) => {
+            const isCurrentlyIn = workspaceSet.has(result.documentId);
+            const newFlag = !isCurrentlyIn;
+            // Optimistic update
+            setWorkspaceSet(prev => {
+                const next = new Set(prev);
+                if (newFlag) {
+                    next.add(result.documentId);
+                } else {
+                    next.delete(result.documentId);
+                }
+                return next;
+            });
+            // Update Dataverse
+            context.webAPI.updateRecord("sprk_document", result.documentId, {
+                sprk_inworkspace: newFlag,
+            }).catch((err: unknown) => {
+                console.error("[SemanticSearchControl] Failed to toggle workspace flag:", err);
+                // Revert on failure
+                setWorkspaceSet(prev => {
+                    const next = new Set(prev);
+                    if (isCurrentlyIn) {
+                        next.add(result.documentId);
+                    } else {
+                        next.delete(result.documentId);
+                    }
+                    return next;
+                });
+            });
+        },
+        [context.webAPI, workspaceSet]
+    );
+
+    // Check if a document is in the workspace
+    const isInWorkspace = useCallback(
+        (result: SearchResult) => workspaceSet.has(result.documentId),
+        [workspaceSet]
+    );
+
+    // Email dialog: search users via Dataverse WebAPI
+    const handleSearchUsers = useCallback(
+        async (query: string): Promise<ILookupItem[]> => {
+            try {
+                const filter = `contains(fullname,'${query.replace(/'/g, "''")}') or contains(internalemailaddress,'${query.replace(/'/g, "''")}')`;
+                const result = await context.webAPI.retrieveMultipleRecords(
+                    "systemuser",
+                    `?$select=systemuserid,fullname,internalemailaddress&$filter=${filter}&$top=10`
+                );
+                return (result.entities || [])
+                    .filter((u: Record<string, unknown>) => u.internalemailaddress)
+                    .map((u: Record<string, unknown>) => ({
+                        id: u.systemuserid as string,
+                        name: `${u.fullname || "Unknown"} (${u.internalemailaddress})`,
+                    }));
+            } catch (err) {
+                console.error("[SemanticSearchControl] User search failed:", err);
+                return [];
+            }
+        },
+        [context.webAPI]
+    );
+
+    // Email dialog: send email via BFF
+    const handleSendEmail = useCallback(
+        async (payload: ISendEmailPayload) => {
+            // Extract email from "Full Name (email@example.com)" format
+            const emailMatch = payload.to.name.match(/\(([^)]+@[^)]+)\)/);
+            const toEmail = emailMatch ? emailMatch[1] : payload.to.name;
+
+            const response = await authenticatedFetch(`${apiBaseUrl}/api/communications/send`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    to: [toEmail],
+                    subject: payload.subject,
+                    body: payload.body,
+                    bodyFormat: "Text",
+                    associations: emailDialogResult ? [{ entityType: "sprk_document", entityId: emailDialogResult.documentId }] : [],
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to send email: ${response.status}`);
+            }
+        },
+        [apiBaseUrl, emailDialogResult]
+    );
+
+    // Build email defaults from result context
+    const emailDefaultSubject = emailDialogResult ? `Document: ${emailDialogResult.name}` : "";
+    const emailDefaultBody = emailDialogResult
+        ? `Dear Colleague,\n\nPlease find the following document for your review:\n\nDocument: ${emailDialogResult.name}\n\n────\n\n${emailDialogResult.summary || emailDialogResult.tldr || "No summary available."}\n\n────\n\nKind regards`
+        : "";
+
     // Determine what content to show in main area
     const renderMainContent = () => {
         // Auth error state
@@ -579,6 +706,10 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
                     onFindSimilar={handleFindSimilar}
                     onPreview={handlePreview}
                     onSummary={handleSummary}
+                    onEmailDocument={handleEmailDocument}
+                    onCopyLink={handleCopyLink}
+                    onToggleWorkspace={handleToggleWorkspace}
+                    isInWorkspace={isInWorkspace}
                     onViewAll={handleViewAll}
                     compactMode={compactMode}
                 />
@@ -660,7 +791,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
             {/* Version Footer (always visible) */}
             <div className={styles.versionFooter}>
-                <Text size={100}>v1.1.1 • Built 2026-03-09</Text>
+                <Text size={100}>v1.1.2 • Built 2026-03-10</Text>
             </div>
 
             {/* Find Similar — iframe dialog (no Dataverse chrome) */}
@@ -680,6 +811,16 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
                     </DialogBody>
                 </DialogSurface>
             </Dialog>
+
+            {/* Send Email Dialog */}
+            <SendEmailDialog
+                open={!!emailDialogResult}
+                onClose={() => setEmailDialogResult(null)}
+                defaultSubject={emailDefaultSubject}
+                defaultBody={emailDefaultBody}
+                onSearchUsers={handleSearchUsers}
+                onSend={handleSendEmail}
+            />
         </div>
     );
 };

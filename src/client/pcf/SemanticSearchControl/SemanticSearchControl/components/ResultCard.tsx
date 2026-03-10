@@ -278,6 +278,10 @@ export const ResultCard: React.FC<IResultCardProps> = ({
     onFindSimilar,
     onPreview,
     onSummary,
+    onEmailDocument,
+    onCopyLink,
+    onToggleWorkspace,
+    isInWorkspace,
     compactMode,
 }) => {
     const styles = useStyles();
@@ -512,6 +516,10 @@ export const ResultCard: React.FC<IResultCardProps> = ({
                 fetchPreviewUrl={onPreview}
                 onOpenFile={onOpenFile}
                 onOpenRecord={handleOpenRecord}
+                onEmailDocument={onEmailDocument}
+                onCopyLink={onCopyLink}
+                onToggleWorkspace={onToggleWorkspace}
+                isInWorkspace={isInWorkspace}
             />
         </>
     );

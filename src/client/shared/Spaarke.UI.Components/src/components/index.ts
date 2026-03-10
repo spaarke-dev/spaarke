@@ -33,3 +33,9 @@ export * from "./SprkChat";
 
 // DiffCompareView - AI revision diff comparison (side-by-side + inline)
 export * from "./DiffCompareView";
+
+// LookupField - Reusable search-as-you-type lookup
+export * from "./LookupField";
+
+// SendEmailDialog - Reusable email composition dialog
+export * from "./SendEmailDialog";
