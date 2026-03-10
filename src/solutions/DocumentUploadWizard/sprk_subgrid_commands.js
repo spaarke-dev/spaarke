@@ -468,6 +468,68 @@ function Spaarke_ShowAddDocuments() {
 }
 
 // ============================================================================
+// STANDALONE LAUNCH (no parent context)
+// ============================================================================
+
+/**
+ * Opens the Document Upload Wizard in standalone mode (no parent entity context).
+ *
+ * The wizard will show an "Associate To" step allowing the user to:
+ *   1. Select a record type + specific record to associate documents with
+ *   2. OR upload without association (documents go to business unit container)
+ *
+ * Can be wired to a global ribbon button, sitemap entry, or any "New Document" button.
+ * No CRM parameters needed — the wizard handles parent resolution internally.
+ *
+ * Ribbon Workbench Configuration:
+ *   - Command ID: Spaarke.Document.AddStandalone
+ *   - Function: Spaarke_UploadDocumentsStandalone
+ *   - Library: sprk_subgrid_commands
+ *   - CrmParameter: (none required)
+ */
+function Spaarke_UploadDocumentsStandalone() {
+    // Detect current Dataverse theme
+    var theme = "light";
+    try {
+        var bodyBg = window.getComputedStyle(document.body).backgroundColor;
+        var rgbMatch = bodyBg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+        if (rgbMatch) {
+            var luminance = 0.299 * parseInt(rgbMatch[1]) +
+                0.587 * parseInt(rgbMatch[2]) +
+                0.114 * parseInt(rgbMatch[3]);
+            if (luminance < 128) theme = "dark";
+        }
+    } catch (e) {
+        // Ignore theme detection failures
+    }
+
+    // Only pass theme — no parent context triggers standalone mode in the wizard
+    var dataString = "theme=" + theme;
+
+    Xrm.Navigation.navigateTo(
+        {
+            pageType: "webresource",
+            webresourceName: "sprk_documentuploadwizard",
+            data: encodeURIComponent(dataString),
+        },
+        {
+            target: 2,
+            width: { value: 60, unit: "%" },
+            height: { value: 70, unit: "%" },
+        }
+    ).then(
+        function () {
+            console.log("[Spaarke] Standalone upload dialog closed.");
+        },
+        function (err) {
+            if (err && err.errorCode !== 2) {
+                console.error("[Spaarke] Standalone upload dialog error:", err);
+            }
+        }
+    );
+}
+
+// ============================================================================
 // DEPLOYMENT NOTES
 // ============================================================================
 

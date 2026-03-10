@@ -151,6 +151,31 @@ export class DocumentRecordService {
         formData: DocumentFormData
     ): Promise<CreateResult> {
         try {
+            // Unassociated mode: create document without parent lookup binding
+            const isUnassociated = !parentContext.parentEntityName || !parentContext.parentRecordId;
+            if (isUnassociated) {
+                const payload: Record<string, unknown> = {
+                    sprk_documentname: formData.documentName || file.name,
+                    sprk_filename: file.name,
+                    sprk_filesize: file.size,
+                    sprk_graphitemid: file.id,
+                    sprk_graphdriveid: parentContext.containerId,
+                    sprk_filepath: file.webUrl || null,
+                    sprk_documentdescription: formData.description || null,
+                };
+                this.logger.info('DocumentRecordService', `Creating unassociated Document: ${file.name}`);
+                const result = await this.dataverseClient.createRecord('sprk_document', payload);
+                this.logger.info('DocumentRecordService', `Created unassociated Document record: ${result.id}`);
+                return {
+                    success: true,
+                    fileName: file.name,
+                    recordId: result.id,
+                    documentId: result.id,
+                    driveId: parentContext.containerId,
+                    itemId: file.id,
+                };
+            }
+
             // Get entity configuration
             const config = this.getEntityConfig(parentContext.parentEntityName);
             if (!config) {

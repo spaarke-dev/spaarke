@@ -53,9 +53,11 @@ import type {
     IFileValidationError,
     ISummaryResults,
     NextStepActionId,
+    IResolvedParentContext,
 } from "./types";
 
 import { AddFilesStep } from "./components/AddFilesStep";
+import { AssociateToStep } from "./components/AssociateToStep";
 import { SummaryStep } from "./components/SummaryStep";
 import type { UploadedDocumentInfo } from "./components/SummaryStep";
 import { NextStepsStep } from "./components/NextStepsStep";
@@ -245,6 +247,22 @@ export function DocumentUploadWizardDialog({
     const styles = useStyles();
     const wizardRef = useRef<IWizardShellHandle>(null);
 
+    // ── Standalone mode detection ───────────────────────────────────────────
+    const isStandaloneMode = !parentEntityType || !parentEntityId;
+
+    // ── Standalone state (AssociateToStep resolution) ────────────────────────
+    const [resolvedParent, setResolvedParent] = useState<IResolvedParentContext | null>(null);
+    const [isUnassociated, setIsUnassociated] = useState(false);
+    const resolvedParentRef = useRef(resolvedParent);
+    resolvedParentRef.current = resolvedParent;
+
+    // ── Effective values (bridge raw props vs AssociateToStep resolution) ────
+    const effectiveParentEntityType = isStandaloneMode ? (resolvedParent?.parentEntityType ?? "") : parentEntityType;
+    const effectiveParentEntityId = isStandaloneMode ? (resolvedParent?.parentEntityId ?? "") : parentEntityId;
+    const effectiveParentEntityName = isStandaloneMode ? (resolvedParent?.parentEntityName ?? "") : parentEntityName;
+    const effectiveContainerId = isStandaloneMode ? (resolvedParent?.containerId ?? "") : containerId;
+    const effectiveIsUnassociated = isStandaloneMode && (resolvedParent?.isUnassociated ?? false);
+
     // ── File state (useReducer) ─────────────────────────────────────────────
     const [fileState, fileDispatch] = useReducer(fileReducer, INITIAL_FILE_STATE);
 
@@ -351,10 +369,10 @@ export function DocumentUploadWizardDialog({
                     dataverseClient,
                     entityConfigResolver: defaultEntityConfigResolver,
                     parentContext: {
-                        parentEntityName: parentEntityType,
-                        parentRecordId: parentEntityId,
-                        containerId,
-                        parentDisplayName: parentEntityName,
+                        parentEntityName: effectiveParentEntityType,
+                        parentRecordId: effectiveParentEntityId,
+                        containerId: effectiveContainerId,
+                        parentDisplayName: effectiveParentEntityName,
                     },
                     onUnauthorized: () => {
                         try {
@@ -376,7 +394,7 @@ export function DocumentUploadWizardDialog({
                     if (matchingFile) {
                         uploadedDocumentMap.set(matchingFile.id, {
                             documentId: fileResult.createResult.recordId,
-                            driveId: fileResult.speMetadata.parentId ?? containerId,
+                            driveId: fileResult.speMetadata.parentId ?? effectiveContainerId,
                             itemId: fileResult.speMetadata.id,
                         });
                     }
@@ -395,24 +413,43 @@ export function DocumentUploadWizardDialog({
         } finally {
             setIsUploading(false);
         }
-    }, [parentEntityType, parentEntityId, parentEntityName, containerId, handleOrchestratorProgress, uploadedDocumentMap]);
+    }, [effectiveParentEntityType, effectiveParentEntityId, effectiveParentEntityName, effectiveContainerId, handleOrchestratorProgress, uploadedDocumentMap]);
 
     // ── Email step props (memoized for the dynamic Send Email step) ────────
     const emailStepProps: IDocumentEmailStepProps = useMemo(
         () => ({
             uploadedFileNames: fileState.selectedFiles.map((f) => f.name),
-            parentEntityName,
-            parentEntityType,
-            parentEntityId,
+            parentEntityName: effectiveParentEntityName,
+            parentEntityType: effectiveParentEntityType,
+            parentEntityId: effectiveParentEntityId,
         }),
-        [fileState.selectedFiles, parentEntityName, parentEntityType, parentEntityId]
+        [fileState.selectedFiles, effectiveParentEntityName, effectiveParentEntityType, effectiveParentEntityId]
     );
 
     // ── Step configurations ─────────────────────────────────────────────────
 
     const stepConfigs: IWizardStepConfig[] = useMemo(
-        () => [
-            {
+        () => {
+            const steps: IWizardStepConfig[] = [];
+
+            // Standalone mode: prepend AssociateToStep
+            if (isStandaloneMode) {
+                steps.push({
+                    id: "associate-to",
+                    label: "Associate To",
+                    canAdvance: () => resolvedParentRef.current !== null && resolvedParentRef.current.containerId !== "",
+                    renderContent: (_handle: IWizardShellHandle) => (
+                        <AssociateToStep
+                            resolvedParent={resolvedParent}
+                            onParentResolved={setResolvedParent}
+                            isUnassociated={isUnassociated}
+                            onUnassociatedChanged={setIsUnassociated}
+                        />
+                    ),
+                });
+            }
+
+            steps.push({
                 id: "add-files",
                 label: "Add Files",
                 canAdvance: () => fileStateRef.current.selectedFiles.length > 0,
@@ -421,14 +458,15 @@ export function DocumentUploadWizardDialog({
                         files={fileState.selectedFiles}
                         onFilesAdded={handleFilesAdded}
                         onFileRemoved={handleFileRemoved}
-                        parentEntityName={parentEntityName}
-                        parentEntityType={parentEntityType}
+                        parentEntityName={effectiveParentEntityName}
+                        parentEntityType={effectiveParentEntityType}
                         validationErrors={fileState.validationErrors}
                         onClearErrors={handleClearErrors}
+                        isUnassociated={effectiveIsUnassociated}
                     />
                 ),
-            },
-            {
+            });
+            steps.push({
                 id: "summary",
                 label: "Summary",
                 canAdvance: () => {
@@ -469,8 +507,9 @@ export function DocumentUploadWizardDialog({
                         </>
                     );
                 },
-            },
-            {
+            });
+
+            steps.push({
                 id: "next-steps",
                 label: "Next Steps",
                 canAdvance: () => true,
@@ -491,9 +530,14 @@ export function DocumentUploadWizardDialog({
                         onLaunchFindSimilar={handleLaunchFindSimilar}
                     />
                 ),
-            },
-        ],
+            });
+
+            return steps;
+        },
         [
+            isStandaloneMode,
+            resolvedParent,
+            isUnassociated,
             fileState.selectedFiles,
             fileState.validationErrors,
             orchestratorProgress,
@@ -502,8 +546,9 @@ export function DocumentUploadWizardDialog({
             uploadedDocumentMap,
             selectedNextSteps,
             emailStepProps,
-            parentEntityName,
-            parentEntityType,
+            effectiveParentEntityName,
+            effectiveParentEntityType,
+            effectiveIsUnassociated,
             handleFilesAdded,
             handleFileRemoved,
             handleClearErrors,
@@ -515,9 +560,9 @@ export function DocumentUploadWizardDialog({
     const handleLaunchAnalysis = useCallback(
         (documentRecordId: string) => {
             console.log("[DocumentUploadWizard] Launching Analysis Builder for:", documentRecordId);
-            openAnalysisBuilder(documentRecordId, containerId);
+            openAnalysisBuilder(documentRecordId, effectiveContainerId);
         },
-        [containerId],
+        [effectiveContainerId],
     );
 
     const handleLaunchFindSimilar = useCallback(() => {
@@ -583,9 +628,11 @@ export function DocumentUploadWizardDialog({
                 open={true}
                 embedded={true}
                 title={
-                    parentEntityName
-                        ? `Upload Files \u2014 ${parentEntityName}`
-                        : "Upload Files"
+                    effectiveParentEntityName
+                        ? `Upload Files \u2014 ${effectiveParentEntityName}`
+                        : effectiveIsUnassociated
+                            ? "Upload Files \u2014 General"
+                            : "Upload Files"
                 }
                 steps={stepConfigs}
                 onClose={onClose}

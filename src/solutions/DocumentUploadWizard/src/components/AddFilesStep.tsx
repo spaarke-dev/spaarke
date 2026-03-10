@@ -157,6 +157,7 @@ export function AddFilesStep({
     parentEntityType,
     validationErrors = [],
     onClearErrors,
+    isUnassociated = false,
 }: IAddFilesStepProps): JSX.Element {
     const styles = useStyles();
 
@@ -221,6 +222,19 @@ export function AddFilesStep({
                     </Text>
                     <Text size={200} className={styles.relatedToLabel}>
                         ({entityLabel})
+                    </Text>
+                </div>
+            )}
+
+            {/* Unassociated upload indicator (standalone mode, no parent) */}
+            {!parentEntityName && isUnassociated && (
+                <div className={styles.relatedToBar}>
+                    <LinkRegular className={styles.relatedToIcon} aria-hidden="true" />
+                    <Text size={200} className={styles.relatedToLabel}>
+                        Uploading to:
+                    </Text>
+                    <Text size={200} className={styles.relatedToValue}>
+                        General Container (no parent record)
                     </Text>
                 </div>
             )}

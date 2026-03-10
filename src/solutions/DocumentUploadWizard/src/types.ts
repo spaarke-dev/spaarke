@@ -96,6 +96,28 @@ export interface IDocumentUploadWizardDialogProps {
     onClose: () => void;
 }
 
+// ---------------------------------------------------------------------------
+// Standalone mode (AssociateToStep resolution)
+// ---------------------------------------------------------------------------
+
+/** Resolved parent context from the AssociateToStep (standalone mode). */
+export interface IResolvedParentContext {
+    /** Parent entity logical name (e.g., "sprk_matter"). Empty string if unassociated. */
+    parentEntityType: string;
+    /** Parent record GUID. Empty string if unassociated. */
+    parentEntityId: string;
+    /** Parent record display name. Empty string if unassociated. */
+    parentEntityName: string;
+    /** SPE container ID — always resolved (from record or business unit). */
+    containerId: string;
+    /** Whether this is an unassociated upload (no parent record). */
+    isUnassociated: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Component props
+// ---------------------------------------------------------------------------
+
 /** Props for the AddFilesStep component. */
 export interface IAddFilesStepProps {
     /** Currently selected files. */
@@ -112,4 +134,6 @@ export interface IAddFilesStepProps {
     validationErrors?: IFileValidationError[];
     /** Callback to clear validation errors (e.g., on user interaction). */
     onClearErrors?: () => void;
+    /** Whether this is an unassociated upload (standalone mode, no parent). */
+    isUnassociated?: boolean;
 }
