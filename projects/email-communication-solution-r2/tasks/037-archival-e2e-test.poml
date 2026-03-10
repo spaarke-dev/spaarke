@@ -1,7 +1,7 @@
 <task id="ECS-037" project="Email Communication Solution R2">
   <metadata>
     <title>End-to-End Document Archival Test (Inbound + Outbound)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>4 - Email-to-Document Migration (Phase E)</phase>
     <tags>testing, deploy</tags>
