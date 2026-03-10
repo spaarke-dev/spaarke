@@ -128,7 +128,7 @@ public static class EmailEndpoints
         HttpRequest request,
         JobSubmissionService jobSubmissionService,
         IOptions<EmailProcessingOptions> emailOptions,
-        Telemetry.EmailTelemetry telemetry,
+        Telemetry.CommunicationTelemetry telemetry,
         ILogger<Program> logger,
         CancellationToken cancellationToken)
     {

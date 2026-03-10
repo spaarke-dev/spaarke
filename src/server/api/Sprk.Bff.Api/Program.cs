@@ -602,9 +602,9 @@ else
 // Email processing stats service - in-memory stats readable via API (admin monitoring PCF)
 builder.Services.AddSingleton<Sprk.Bff.Api.Services.Email.EmailProcessingStatsService>();
 
-// Email telemetry - OpenTelemetry-compatible metrics for email processing (delegates to stats service)
-builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.EmailTelemetry>(sp =>
-    new Sprk.Bff.Api.Telemetry.EmailTelemetry(sp.GetService<Sprk.Bff.Api.Services.Email.EmailProcessingStatsService>()));
+// Communication telemetry - OpenTelemetry-compatible metrics for communication processing (delegates to stats service)
+builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.CommunicationTelemetry>(sp =>
+    new Sprk.Bff.Api.Telemetry.CommunicationTelemetry(sp.GetService<Sprk.Bff.Api.Services.Email.EmailProcessingStatsService>()));
 
 // Document telemetry - OpenTelemetry-compatible metrics for document downloads (FR-03 audit logging)
 builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.DocumentTelemetry>();

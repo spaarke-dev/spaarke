@@ -5,22 +5,22 @@ using Sprk.Bff.Api.Services.Email;
 namespace Sprk.Bff.Api.Telemetry;
 
 /// <summary>
-/// Metrics and tracing for email-to-document processing (OpenTelemetry-compatible).
+/// Metrics and tracing for communication processing (OpenTelemetry-compatible).
 /// Tracks: conversion requests, webhook triggers, filter evaluations, job processing.
 ///
 /// Also delegates to EmailProcessingStatsService for in-memory stats readable via API.
 ///
 /// Usage:
-/// - Meter name: "Sprk.Bff.Api.Email" for OpenTelemetry configuration
-/// - Metrics: email.conversion.*, email.webhook.*, email.filter.*, email.job.*
-/// - Dimensions: email.trigger (manual/webhook/polling), email.status (success/failed/filtered)
+/// - Meter name: "Sprk.Bff.Api.Communication" for OpenTelemetry configuration
+/// - Metrics: communication.conversion.*, communication.webhook.*, communication.filter.*, communication.job.*
+/// - Dimensions: communication.trigger (manual/webhook/polling), communication.status (success/failed/filtered)
 ///
 /// Application Insights custom queries:
-/// - Conversion success rate: customMetrics | where name startswith "email.conversion" | summarize count() by customDimensions["email.status"]
-/// - Webhook latency: customMetrics | where name == "email.webhook.duration" | summarize avg(value), percentile(value, 95)
-/// - Filter rule hits: customMetrics | where name == "email.filter.matched" | summarize count() by customDimensions["email.filter.action"]
+/// - Conversion success rate: customMetrics | where name startswith "communication.conversion" | summarize count() by customDimensions["communication.status"]
+/// - Webhook latency: customMetrics | where name == "communication.webhook.duration" | summarize avg(value), percentile(value, 95)
+/// - Filter rule hits: customMetrics | where name == "communication.filter.matched" | summarize count() by customDimensions["communication.filter.action"]
 /// </summary>
-public class EmailTelemetry : IDisposable
+public class CommunicationTelemetry : IDisposable
 {
     private readonly Meter _meter;
     private readonly EmailProcessingStatsService? _statsService;
@@ -74,12 +74,12 @@ public class EmailTelemetry : IDisposable
     private readonly Counter<long> _dlqRedriveFailures;
 
     // Meter name for OpenTelemetry
-    private const string MeterName = "Sprk.Bff.Api.Email";
+    private const string MeterName = "Sprk.Bff.Api.Communication";
 
     // Static ActivitySource for distributed tracing
     public static readonly ActivitySource ActivitySource = new(MeterName, "1.0.0");
 
-    public EmailTelemetry(EmailProcessingStatsService? statsService = null)
+    public CommunicationTelemetry(EmailProcessingStatsService? statsService = null)
     {
         _statsService = statsService;
         _meter = new Meter(MeterName, "1.0.0");
@@ -88,45 +88,45 @@ public class EmailTelemetry : IDisposable
         // Conversion Metrics (Manual save endpoint)
         // ═══════════════════════════════════════════════════════════════════════════
         _conversionRequests = _meter.CreateCounter<long>(
-            name: "email.conversion.requests",
+            name: "communication.conversion.requests",
             unit: "{request}",
             description: "Total number of email-to-document conversion requests");
 
         _conversionSuccesses = _meter.CreateCounter<long>(
-            name: "email.conversion.successes",
+            name: "communication.conversion.successes",
             unit: "{request}",
             description: "Number of successful email conversions");
 
         _conversionFailures = _meter.CreateCounter<long>(
-            name: "email.conversion.failures",
+            name: "communication.conversion.failures",
             unit: "{request}",
             description: "Number of failed email conversions");
 
         _conversionDuration = _meter.CreateHistogram<double>(
-            name: "email.conversion.duration",
+            name: "communication.conversion.duration",
             unit: "ms",
-            description: "Email conversion duration in milliseconds");
+            description: "Communication conversion duration in milliseconds");
 
         // ═══════════════════════════════════════════════════════════════════════════
         // Webhook Metrics
         // ═══════════════════════════════════════════════════════════════════════════
         _webhookReceived = _meter.CreateCounter<long>(
-            name: "email.webhook.received",
+            name: "communication.webhook.received",
             unit: "{request}",
             description: "Total webhook requests received");
 
         _webhookEnqueued = _meter.CreateCounter<long>(
-            name: "email.webhook.enqueued",
+            name: "communication.webhook.enqueued",
             unit: "{job}",
             description: "Jobs successfully enqueued from webhooks");
 
         _webhookRejected = _meter.CreateCounter<long>(
-            name: "email.webhook.rejected",
+            name: "communication.webhook.rejected",
             unit: "{request}",
             description: "Webhook requests rejected (invalid signature, disabled, etc.)");
 
         _webhookDuration = _meter.CreateHistogram<double>(
-            name: "email.webhook.duration",
+            name: "communication.webhook.duration",
             unit: "ms",
             description: "Webhook processing duration in milliseconds");
 
@@ -134,17 +134,17 @@ public class EmailTelemetry : IDisposable
         // Polling Metrics
         // ═══════════════════════════════════════════════════════════════════════════
         _pollingRuns = _meter.CreateCounter<long>(
-            name: "email.polling.runs",
+            name: "communication.polling.runs",
             unit: "{run}",
             description: "Total polling service runs");
 
         _pollingEmailsFound = _meter.CreateCounter<long>(
-            name: "email.polling.emails_found",
+            name: "communication.polling.emails_found",
             unit: "{email}",
             description: "Emails found during polling");
 
         _pollingEmailsEnqueued = _meter.CreateCounter<long>(
-            name: "email.polling.emails_enqueued",
+            name: "communication.polling.emails_enqueued",
             unit: "{email}",
             description: "Emails enqueued during polling");
 
@@ -152,45 +152,45 @@ public class EmailTelemetry : IDisposable
         // Filter Metrics
         // ═══════════════════════════════════════════════════════════════════════════
         _filterEvaluations = _meter.CreateCounter<long>(
-            name: "email.filter.evaluations",
+            name: "communication.filter.evaluations",
             unit: "{evaluation}",
             description: "Total filter rule evaluations");
 
         _filterMatched = _meter.CreateCounter<long>(
-            name: "email.filter.matched",
+            name: "communication.filter.matched",
             unit: "{match}",
-            description: "Emails that matched a filter rule");
+            description: "Communications that matched a filter rule");
 
         _filterDefaultAction = _meter.CreateCounter<long>(
-            name: "email.filter.default_action",
+            name: "communication.filter.default_action",
             unit: "{evaluation}",
-            description: "Emails that used default action (no rule matched)");
+            description: "Communications that used default action (no rule matched)");
 
         // ═══════════════════════════════════════════════════════════════════════════
         // Job Processing Metrics
         // ═══════════════════════════════════════════════════════════════════════════
         _jobsProcessed = _meter.CreateCounter<long>(
-            name: "email.job.processed",
+            name: "communication.job.processed",
             unit: "{job}",
-            description: "Total email processing jobs handled");
+            description: "Total communication processing jobs handled");
 
         _jobsSucceeded = _meter.CreateCounter<long>(
-            name: "email.job.succeeded",
+            name: "communication.job.succeeded",
             unit: "{job}",
-            description: "Successfully completed email processing jobs");
+            description: "Successfully completed communication processing jobs");
 
         _jobsFailed = _meter.CreateCounter<long>(
-            name: "email.job.failed",
+            name: "communication.job.failed",
             unit: "{job}",
-            description: "Failed email processing jobs");
+            description: "Failed communication processing jobs");
 
         _jobsSkippedDuplicate = _meter.CreateCounter<long>(
-            name: "email.job.skipped_duplicate",
+            name: "communication.job.skipped_duplicate",
             unit: "{job}",
             description: "Jobs skipped due to idempotency (already processed)");
 
         _jobDuration = _meter.CreateHistogram<double>(
-            name: "email.job.duration",
+            name: "communication.job.duration",
             unit: "ms",
             description: "Job processing duration in milliseconds");
 
@@ -198,12 +198,12 @@ public class EmailTelemetry : IDisposable
         // File Metrics
         // ═══════════════════════════════════════════════════════════════════════════
         _emlFileSize = _meter.CreateHistogram<long>(
-            name: "email.eml.file_size",
+            name: "communication.eml.file_size",
             unit: "By",
             description: "Size of generated .eml files");
 
         _attachmentsProcessed = _meter.CreateCounter<long>(
-            name: "email.attachments.processed",
+            name: "communication.attachments.processed",
             unit: "{attachment}",
             description: "Total attachments processed");
 
@@ -211,12 +211,12 @@ public class EmailTelemetry : IDisposable
         // AI Job Enqueueing Metrics
         // ═══════════════════════════════════════════════════════════════════════════
         _aiJobsEnqueued = _meter.CreateCounter<long>(
-            name: "email.ai_job.enqueued",
+            name: "communication.ai_job.enqueued",
             unit: "{job}",
-            description: "AI analysis jobs enqueued for email documents");
+            description: "AI analysis jobs enqueued for communication documents");
 
         _aiJobEnqueueFailures = _meter.CreateCounter<long>(
-            name: "email.ai_job.enqueue_failures",
+            name: "communication.ai_job.enqueue_failures",
             unit: "{failure}",
             description: "Failed attempts to enqueue AI analysis jobs");
 
@@ -224,17 +224,17 @@ public class EmailTelemetry : IDisposable
         // RAG Job Enqueueing Metrics
         // ═══════════════════════════════════════════════════════════════════════════
         _ragJobsEnqueued = _meter.CreateCounter<long>(
-            name: "email.rag_job.enqueued",
+            name: "communication.rag_job.enqueued",
             unit: "{job}",
-            description: "RAG indexing jobs enqueued for email documents");
+            description: "RAG indexing jobs enqueued for communication documents");
 
         _ragJobEnqueueFailures = _meter.CreateCounter<long>(
-            name: "email.rag_job.enqueue_failures",
+            name: "communication.rag_job.enqueue_failures",
             unit: "{failure}",
             description: "Failed attempts to enqueue RAG indexing jobs");
 
         _ragJobsSkipped = _meter.CreateCounter<long>(
-            name: "email.rag_job.skipped",
+            name: "communication.rag_job.skipped",
             unit: "{job}",
             description: "RAG indexing jobs skipped (disabled or already indexed)");
 
@@ -242,22 +242,22 @@ public class EmailTelemetry : IDisposable
         // DLQ Metrics
         // ═══════════════════════════════════════════════════════════════════════════
         _dlqListOperations = _meter.CreateCounter<long>(
-            name: "email.dlq.list_operations",
+            name: "communication.dlq.list_operations",
             unit: "{operation}",
             description: "Total DLQ list/peek operations");
 
         _dlqRedriveAttempts = _meter.CreateCounter<long>(
-            name: "email.dlq.redrive_attempts",
+            name: "communication.dlq.redrive_attempts",
             unit: "{attempt}",
             description: "Total DLQ re-drive attempts");
 
         _dlqRedriveSuccesses = _meter.CreateCounter<long>(
-            name: "email.dlq.redrive_successes",
+            name: "communication.dlq.redrive_successes",
             unit: "{message}",
             description: "Messages successfully re-driven from DLQ");
 
         _dlqRedriveFailures = _meter.CreateCounter<long>(
-            name: "email.dlq.redrive_failures",
+            name: "communication.dlq.redrive_failures",
             unit: "{message}",
             description: "Failed DLQ re-drive operations");
     }
@@ -271,13 +271,13 @@ public class EmailTelemetry : IDisposable
     /// </summary>
     public Stopwatch RecordConversionStart(string trigger = "manual")
     {
-        _conversionRequests.Add(1, new KeyValuePair<string, object?>("email.trigger", trigger));
+        _conversionRequests.Add(1, new KeyValuePair<string, object?>("communication.trigger", trigger));
         _statsService?.RecordConversionRequest();
         return Stopwatch.StartNew();
     }
 
     /// <summary>
-    /// Record successful email conversion.
+    /// Record successful communication conversion.
     /// </summary>
     public void RecordConversionSuccess(
         Stopwatch stopwatch,
@@ -290,8 +290,8 @@ public class EmailTelemetry : IDisposable
 
         var tags = new TagList
         {
-            { "email.trigger", trigger },
-            { "email.status", "success" }
+            { "communication.trigger", trigger },
+            { "communication.status", "success" }
         };
 
         _conversionSuccesses.Add(1, tags);
@@ -312,7 +312,7 @@ public class EmailTelemetry : IDisposable
     }
 
     /// <summary>
-    /// Record failed email conversion.
+    /// Record failed communication conversion.
     /// </summary>
     public void RecordConversionFailure(Stopwatch stopwatch, string errorCode, string trigger = "manual")
     {
@@ -321,9 +321,9 @@ public class EmailTelemetry : IDisposable
 
         var tags = new TagList
         {
-            { "email.trigger", trigger },
-            { "email.status", "failed" },
-            { "email.error_code", errorCode }
+            { "communication.trigger", trigger },
+            { "communication.status", "failed" },
+            { "communication.error_code", errorCode }
         };
 
         _conversionFailures.Add(1, tags);
@@ -354,7 +354,7 @@ public class EmailTelemetry : IDisposable
         var durationMs = stopwatch.Elapsed.TotalMilliseconds;
         _webhookEnqueued.Add(1);
         _webhookDuration.Record(durationMs,
-            new KeyValuePair<string, object?>("email.status", "enqueued"));
+            new KeyValuePair<string, object?>("communication.status", "enqueued"));
         _statsService?.RecordWebhookEnqueued(durationMs);
     }
 
@@ -365,10 +365,10 @@ public class EmailTelemetry : IDisposable
     {
         stopwatch.Stop();
         var durationMs = stopwatch.Elapsed.TotalMilliseconds;
-        _webhookRejected.Add(1, new KeyValuePair<string, object?>("email.rejection_reason", reason));
+        _webhookRejected.Add(1, new KeyValuePair<string, object?>("communication.rejection_reason", reason));
         _webhookDuration.Record(durationMs,
-            new KeyValuePair<string, object?>("email.status", "rejected"),
-            new KeyValuePair<string, object?>("email.rejection_reason", reason));
+            new KeyValuePair<string, object?>("communication.status", "rejected"),
+            new KeyValuePair<string, object?>("communication.rejection_reason", reason));
         _statsService?.RecordWebhookRejected(durationMs);
     }
 
@@ -401,13 +401,13 @@ public class EmailTelemetry : IDisposable
         if (ruleMatched)
         {
             _filterMatched.Add(1,
-                new KeyValuePair<string, object?>("email.filter.action", action),
-                new KeyValuePair<string, object?>("email.filter.rule", ruleName ?? "unknown"));
+                new KeyValuePair<string, object?>("communication.filter.action", action),
+                new KeyValuePair<string, object?>("communication.filter.rule", ruleName ?? "unknown"));
         }
         else
         {
             _filterDefaultAction.Add(1,
-                new KeyValuePair<string, object?>("email.filter.action", action));
+                new KeyValuePair<string, object?>("communication.filter.action", action));
         }
 
         _statsService?.RecordFilterEvaluation(ruleMatched);
@@ -436,7 +436,7 @@ public class EmailTelemetry : IDisposable
         var durationMs = stopwatch.Elapsed.TotalMilliseconds;
         _jobsSucceeded.Add(1);
         _jobDuration.Record(durationMs,
-            new KeyValuePair<string, object?>("email.status", "success"));
+            new KeyValuePair<string, object?>("communication.status", "success"));
         _statsService?.RecordJobSuccess(durationMs);
 
         if (emlSizeBytes.HasValue)
@@ -459,10 +459,10 @@ public class EmailTelemetry : IDisposable
     {
         stopwatch.Stop();
         var durationMs = stopwatch.Elapsed.TotalMilliseconds;
-        _jobsFailed.Add(1, new KeyValuePair<string, object?>("email.error_code", errorCode));
+        _jobsFailed.Add(1, new KeyValuePair<string, object?>("communication.error_code", errorCode));
         _jobDuration.Record(durationMs,
-            new KeyValuePair<string, object?>("email.status", "failed"),
-            new KeyValuePair<string, object?>("email.error_code", errorCode));
+            new KeyValuePair<string, object?>("communication.status", "failed"),
+            new KeyValuePair<string, object?>("communication.error_code", errorCode));
         _statsService?.RecordJobFailure(durationMs);
     }
 
@@ -486,8 +486,8 @@ public class EmailTelemetry : IDisposable
     {
         // Using job processed counter with batch tag
         _jobsProcessed.Add(1,
-            new KeyValuePair<string, object?>("email.job_type", "batch"),
-            new KeyValuePair<string, object?>("email.batch.max_emails", maxEmails));
+            new KeyValuePair<string, object?>("communication.job_type", "batch"),
+            new KeyValuePair<string, object?>("communication.batch.max_emails", maxEmails));
     }
 
     /// <summary>
@@ -497,25 +497,25 @@ public class EmailTelemetry : IDisposable
     {
         var tags = new TagList
         {
-            { "email.job_type", "batch" },
-            { "email.status", errorCount == 0 ? "success" : (processedCount == 0 ? "failed" : "partial") }
+            { "communication.job_type", "batch" },
+            { "communication.status", errorCount == 0 ? "success" : (processedCount == 0 ? "failed" : "partial") }
         };
 
         _jobDuration.Record(duration.TotalMilliseconds, tags);
 
         if (processedCount > 0)
         {
-            _jobsSucceeded.Add(processedCount, new KeyValuePair<string, object?>("email.job_type", "batch"));
+            _jobsSucceeded.Add(processedCount, new KeyValuePair<string, object?>("communication.job_type", "batch"));
         }
 
         if (errorCount > 0)
         {
-            _jobsFailed.Add(errorCount, new KeyValuePair<string, object?>("email.job_type", "batch"));
+            _jobsFailed.Add(errorCount, new KeyValuePair<string, object?>("communication.job_type", "batch"));
         }
 
         if (skippedCount > 0)
         {
-            _jobsSkippedDuplicate.Add(skippedCount, new KeyValuePair<string, object?>("email.job_type", "batch"));
+            _jobsSkippedDuplicate.Add(skippedCount, new KeyValuePair<string, object?>("communication.job_type", "batch"));
         }
     }
 
@@ -532,26 +532,26 @@ public class EmailTelemetry : IDisposable
         if (extractedCount > 0)
         {
             _attachmentsProcessed.Add(extractedCount,
-                new KeyValuePair<string, object?>("email.attachment.operation", "extracted"));
+                new KeyValuePair<string, object?>("communication.attachment.operation", "extracted"));
         }
 
         if (filteredCount > 0)
         {
             _attachmentsProcessed.Add(filteredCount,
-                new KeyValuePair<string, object?>("email.attachment.operation", "filtered"));
+                new KeyValuePair<string, object?>("communication.attachment.operation", "filtered"));
         }
 
         if (uploadedCount > 0)
         {
             _attachmentsProcessed.Add(uploadedCount,
-                new KeyValuePair<string, object?>("email.attachment.operation", "uploaded"));
+                new KeyValuePair<string, object?>("communication.attachment.operation", "uploaded"));
             _statsService?.RecordAttachmentsProcessed(uploadedCount);
         }
 
         if (failedCount > 0)
         {
             _attachmentsProcessed.Add(failedCount,
-                new KeyValuePair<string, object?>("email.attachment.operation", "failed"));
+                new KeyValuePair<string, object?>("communication.attachment.operation", "failed"));
         }
     }
 
@@ -565,7 +565,7 @@ public class EmailTelemetry : IDisposable
     public void RecordDlqListOperation(int messagesReturned)
     {
         _dlqListOperations.Add(1,
-            new KeyValuePair<string, object?>("email.dlq.messages_returned", messagesReturned));
+            new KeyValuePair<string, object?>("communication.dlq.messages_returned", messagesReturned));
     }
 
     /// <summary>
@@ -591,13 +591,13 @@ public class EmailTelemetry : IDisposable
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Record AI analysis job successfully enqueued for an email document.
+    /// Record AI analysis job successfully enqueued for a communication document.
     /// </summary>
     /// <param name="documentType">Type of document: "email" or "attachment"</param>
     public void RecordAiJobEnqueued(string documentType)
     {
         _aiJobsEnqueued.Add(1,
-            new KeyValuePair<string, object?>("email.document_type", documentType));
+            new KeyValuePair<string, object?>("communication.document_type", documentType));
     }
 
     /// <summary>
@@ -608,8 +608,8 @@ public class EmailTelemetry : IDisposable
     public void RecordAiJobEnqueueFailure(string documentType, string errorCode)
     {
         _aiJobEnqueueFailures.Add(1,
-            new KeyValuePair<string, object?>("email.document_type", documentType),
-            new KeyValuePair<string, object?>("email.error_code", errorCode));
+            new KeyValuePair<string, object?>("communication.document_type", documentType),
+            new KeyValuePair<string, object?>("communication.error_code", errorCode));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -617,7 +617,7 @@ public class EmailTelemetry : IDisposable
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Record RAG indexing job successfully enqueued for an email document.
+    /// Record RAG indexing job successfully enqueued for a communication document.
     /// </summary>
     public void RecordRagJobEnqueued()
     {
@@ -631,7 +631,7 @@ public class EmailTelemetry : IDisposable
     public void RecordRagJobEnqueueFailure(string errorCode)
     {
         _ragJobEnqueueFailures.Add(1,
-            new KeyValuePair<string, object?>("email.error_code", errorCode));
+            new KeyValuePair<string, object?>("communication.error_code", errorCode));
     }
 
     /// <summary>
@@ -641,7 +641,7 @@ public class EmailTelemetry : IDisposable
     public void RecordRagJobSkipped(string reason)
     {
         _ragJobsSkipped.Add(1,
-            new KeyValuePair<string, object?>("email.skip_reason", reason));
+            new KeyValuePair<string, object?>("communication.skip_reason", reason));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -658,7 +658,7 @@ public class EmailTelemetry : IDisposable
         {
             if (emailId.HasValue)
             {
-                activity.SetTag("email.id", emailId.Value.ToString());
+                activity.SetTag("communication.id", emailId.Value.ToString());
             }
             if (!string.IsNullOrEmpty(correlationId))
             {
