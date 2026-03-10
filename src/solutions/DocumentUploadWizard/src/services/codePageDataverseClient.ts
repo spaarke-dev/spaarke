@@ -1,68 +1,130 @@
 /**
  * codePageDataverseClient.ts
  *
- * Factory for creating an ODataDataverseClient wired with Code Page auth.
+ * Factory for creating a Dataverse client for Code Page context.
  *
- * In a Code Page context, we do not have access to ComponentFramework.WebApi,
- * so we use ODataDataverseClient (direct OData fetch with bearer tokens)
- * instead of PcfDataverseClient.
+ * Uses Xrm.WebApi from the parent Dataverse frame — the same API that PCF
+ * controls use via ComponentFramework.WebApi. This avoids the need for a
+ * separate Dataverse-scoped MSAL token (the BFF token has a different
+ * audience and cannot authenticate to Dataverse OData directly).
  *
  * @see ADR-006  - Code Pages for standalone dialogs (not PCF)
- * @see ADR-007  - All SPE operations through BFF API
  */
 
-import {
-    ODataDataverseClient,
-} from "@spaarke/ui-components/services/document-upload";
 import type {
+    IDataverseClient,
     ILogger,
+    DataverseRecordRef,
 } from "@spaarke/ui-components/services/document-upload";
+import { consoleLogger } from "@spaarke/ui-components/services/document-upload";
 
-import {
-    createDataverseTokenProvider,
-    resolveDataverseUrl,
-} from "./codePageTokenProvider";
+// ---------------------------------------------------------------------------
+// Xrm.WebApi type shims (minimal subset used by this client)
+// ---------------------------------------------------------------------------
+
+interface XrmWebApi {
+    createRecord(
+        entityLogicalName: string,
+        data: Record<string, unknown>
+    ): Promise<{ id: string }>;
+    updateRecord(
+        entityLogicalName: string,
+        id: string,
+        data: Record<string, unknown>
+    ): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// XrmDataverseClient
+// ---------------------------------------------------------------------------
+
+/**
+ * IDataverseClient that delegates to Xrm.WebApi from the parent Dataverse frame.
+ *
+ * Code Pages run as web resources inside a Dataverse iframe — the parent
+ * frame exposes `Xrm.WebApi` which handles authentication automatically.
+ */
+class XrmDataverseClient implements IDataverseClient {
+    private readonly webApi: XrmWebApi;
+    private readonly logger: ILogger;
+
+    constructor(webApi: XrmWebApi, logger: ILogger) {
+        this.webApi = webApi;
+        this.logger = logger;
+    }
+
+    async createRecord(
+        entityLogicalName: string,
+        data: Record<string, unknown>
+    ): Promise<DataverseRecordRef> {
+        this.logger.info('XrmDataverseClient', `Creating ${entityLogicalName} record`);
+        const result = await this.webApi.createRecord(entityLogicalName, data);
+        this.logger.info('XrmDataverseClient', `Created ${entityLogicalName} record: ${result.id}`);
+        return { id: result.id };
+    }
+
+    async updateRecord(
+        entityLogicalName: string,
+        id: string,
+        data: Record<string, unknown>
+    ): Promise<void> {
+        const sanitizedId = id.replace(/[{}]/g, '').toLowerCase();
+        this.logger.info('XrmDataverseClient', `Updating ${entityLogicalName} record: ${sanitizedId}`);
+        await this.webApi.updateRecord(entityLogicalName, sanitizedId, data);
+        this.logger.info('XrmDataverseClient', `Updated ${entityLogicalName} record: ${sanitizedId}`);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Xrm.WebApi Resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve Xrm.WebApi from the frame hierarchy.
+ *
+ * Walks: window → parent → top to find Xrm.WebApi.
+ * This is available because Code Pages are webresources loaded inside
+ * a Dataverse dialog iframe.
+ */
+function resolveXrmWebApi(): XrmWebApi {
+    const frames: Window[] = [window];
+    try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
+    try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* cross-origin */ }
+
+    for (const frame of frames) {
+        try {
+            /* eslint-disable @typescript-eslint/no-explicit-any */
+            const xrm = (frame as any).Xrm;
+            if (xrm?.WebApi?.createRecord) {
+                return xrm.WebApi as XrmWebApi;
+            }
+            /* eslint-enable @typescript-eslint/no-explicit-any */
+        } catch {
+            // Cross-origin frame — skip
+        }
+    }
+
+    throw new Error(
+        "[codePageDataverseClient] Xrm.WebApi not found in frame hierarchy. " +
+        "Ensure the Code Page is running inside a Dataverse webresource dialog."
+    );
+}
 
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
 /**
- * Options for creating the Code Page Dataverse client.
- */
-export interface CodePageDataverseClientOptions {
-    /** Override Dataverse URL (defaults to Xrm context resolution). */
-    dataverseUrl?: string;
-
-    /** Logger implementation (defaults to consoleLogger from shared types). */
-    logger?: ILogger;
-}
-
-/**
- * Create an ODataDataverseClient configured for Code Page context.
+ * Create a Dataverse client for Code Page context.
  *
- * Wires:
- *   - Token provider: @spaarke/auth (BFF-scoped, Dataverse-delegated)
- *   - Dataverse URL: resolved from Xrm context or fallback
+ * Uses Xrm.WebApi from the parent frame — no separate token needed.
  *
- * @param options - Optional overrides
- * @returns Configured ODataDataverseClient instance
- *
- * @example
- * ```ts
- * const client = createCodePageDataverseClient();
- * const result = await client.createRecord('sprk_document', payload);
- * ```
+ * @param logger - Optional logger
+ * @returns IDataverseClient backed by Xrm.WebApi
  */
 export function createCodePageDataverseClient(
-    options?: CodePageDataverseClientOptions
-): ODataDataverseClient {
-    const dataverseUrl = options?.dataverseUrl ?? resolveDataverseUrl();
-    const tokenProvider = createDataverseTokenProvider();
-
-    return new ODataDataverseClient({
-        dataverseUrl,
-        getAccessToken: tokenProvider,
-        logger: options?.logger,
-    });
+    logger?: ILogger
+): IDataverseClient {
+    const webApi = resolveXrmWebApi();
+    return new XrmDataverseClient(webApi, logger ?? consoleLogger);
 }
