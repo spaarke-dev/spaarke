@@ -41,6 +41,9 @@ public static class CommunicationModule
         // Background service: backup polling for missed webhooks (ADR-001)
         services.AddHostedService<InboundPollingBackupService>();
 
+        // Background service: reset daily send counts at midnight UTC (ADR-001)
+        services.AddHostedService<DailySendCountResetService>();
+
         return services;
     }
 }

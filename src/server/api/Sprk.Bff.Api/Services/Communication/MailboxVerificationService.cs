@@ -56,7 +56,8 @@ public sealed class MailboxVerificationService
                 {
                     "sprk_emailaddress", "sprk_displayname", "sprk_name",
                     "sprk_sendenabled", "sprk_receiveenabled",
-                    "sprk_accounttype", "sprk_verificationstatus", "sprk_lastverified"
+                    "sprk_accounttype", "sprk_verificationstatus", "sprk_lastverified",
+                    "sprk_verificationmessage"
                 },
                 ct);
 
@@ -115,7 +116,7 @@ public sealed class MailboxVerificationService
         var verifiedAt = DateTimeOffset.UtcNow;
 
         // 5. Update Dataverse with results
-        await UpdateVerificationResultAsync(accountId, overallStatus, verifiedAt, ct);
+        await UpdateVerificationResultAsync(accountId, overallStatus, verifiedAt, failureReason, ct);
 
         _logger.LogInformation(
             "Mailbox verification completed for account {AccountId} ({Email}): {Status} | Send={Send}, Read={Read}",
@@ -251,6 +252,7 @@ public sealed class MailboxVerificationService
         Guid accountId,
         VerificationStatus status,
         DateTimeOffset verifiedAt,
+        string? verificationMessage,
         CancellationToken ct)
     {
         try
@@ -258,7 +260,8 @@ public sealed class MailboxVerificationService
             var fields = new Dictionary<string, object>
             {
                 ["sprk_verificationstatus"] = new OptionSetValue((int)status),
-                ["sprk_lastverified"] = verifiedAt.UtcDateTime
+                ["sprk_lastverified"] = verifiedAt.UtcDateTime,
+                ["sprk_verificationmessage"] = verificationMessage ?? string.Empty
             };
 
             await _dataverseService.UpdateAsync("sprk_communicationaccount", accountId, fields, ct);
@@ -295,7 +298,8 @@ public sealed class MailboxVerificationService
                 : null,
             LastVerified = entity.Contains("sprk_lastverified")
                 ? entity.GetAttributeValue<DateTime?>("sprk_lastverified")
-                : null
+                : null,
+            VerificationMessage = entity.GetAttributeValue<string>("sprk_verificationmessage")
         };
     }
 }

@@ -40,7 +40,7 @@ public sealed class CommunicationAccountService
         return await GetCachedAccountsAsync(
             SendEnabledCacheKey,
             "sprk_sendenabled eq true and statecode eq 0",
-            "sprk_emailaddress,sprk_displayname,sprk_isdefaultsender,sprk_accounttype,sprk_securitygroupid,sprk_securitygroupname,sprk_name,sprk_verificationstatus,sprk_lastverified,sprk_archiveoutgoingoptin",
+            "sprk_emailaddress,sprk_displayname,sprk_isdefaultsender,sprk_accounttype,sprk_securitygroupid,sprk_securitygroupname,sprk_name,sprk_verificationstatus,sprk_lastverified,sprk_archiveoutgoingoptin,sprk_sendstoday,sprk_dailysendlimit",
             ct);
     }
 
@@ -164,7 +164,94 @@ public sealed class CommunicationAccountService
                 : null,
             LastVerified = entity.Contains("sprk_lastverified")
                 ? entity.GetAttributeValue<DateTime?>("sprk_lastverified")
+                : null,
+            VerificationMessage = entity.GetAttributeValue<string>("sprk_verificationmessage"),
+            SendsToday = entity.GetAttributeValue<int>("sprk_sendstoday"),
+            DailySendLimit = entity.Contains("sprk_dailysendlimit")
+                ? entity.GetAttributeValue<int?>("sprk_dailysendlimit")
                 : null
         };
+    }
+
+    /// <summary>
+    /// Increments sprk_sendstoday on the Dataverse record for the given account.
+    /// Best-effort: callers should catch exceptions and not fail the send.
+    /// Bypasses cache — writes directly to Dataverse, then invalidates the send-enabled cache.
+    /// </summary>
+    public async Task IncrementSendCountAsync(Guid accountId, CancellationToken ct = default)
+    {
+        // Read current value directly from Dataverse (bypass cache for accuracy)
+        var entity = await _dataverseService.RetrieveAsync(
+            "sprk_communicationaccount", accountId, new[] { "sprk_sendstoday" }, ct);
+
+        var currentCount = entity.GetAttributeValue<int>("sprk_sendstoday");
+        var newCount = currentCount + 1;
+
+        await _dataverseService.UpdateAsync(
+            "sprk_communicationaccount",
+            accountId,
+            new Dictionary<string, object> { ["sprk_sendstoday"] = newCount },
+            ct);
+
+        _logger.LogDebug(
+            "Incremented send count for account {AccountId}: {OldCount} → {NewCount}",
+            accountId, currentCount, newCount);
+
+        // Invalidate cache so next query picks up updated count
+        await InvalidateSendEnabledCacheAsync(ct);
+    }
+
+    /// <summary>
+    /// Resets sprk_sendstoday to 0 for all active communication accounts.
+    /// Called by DailySendCountResetService at midnight UTC.
+    /// </summary>
+    public async Task ResetAllSendCountsAsync(CancellationToken ct = default)
+    {
+        var filter = "statecode eq 0 and sprk_sendstoday gt 0";
+        var select = "sprk_sendstoday";
+
+        Entity[] entities;
+        try
+        {
+            entities = await _dataverseService.QueryCommunicationAccountsAsync(filter, select, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to query accounts for daily send count reset");
+            throw;
+        }
+
+        if (entities.Length == 0)
+        {
+            _logger.LogDebug("No accounts with non-zero send counts; skipping reset");
+            return;
+        }
+
+        var updates = entities
+            .Select(e => (e.Id, new Dictionary<string, object> { ["sprk_sendstoday"] = 0 }))
+            .ToList();
+
+        await _dataverseService.BulkUpdateAsync("sprk_communicationaccount", updates, ct);
+
+        _logger.LogInformation(
+            "Reset daily send counts for {Count} communication accounts", entities.Length);
+
+        // Invalidate cache so queries pick up zeroed counts
+        await InvalidateSendEnabledCacheAsync(ct);
+    }
+
+    /// <summary>
+    /// Removes the send-enabled cache entry so the next query fetches fresh data from Dataverse.
+    /// </summary>
+    private async Task InvalidateSendEnabledCacheAsync(CancellationToken ct)
+    {
+        try
+        {
+            await _cache.RemoveAsync(SendEnabledCacheKey, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to invalidate send-enabled cache after send count update");
+        }
     }
 }

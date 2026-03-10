@@ -119,6 +119,39 @@ public sealed class CommunicationService
                 });
         }
 
+        // Step 2b: Check daily send limit
+        CommunicationAccount? senderAccount = null;
+        try
+        {
+            senderAccount = await _accountService.GetSendAccountByEmailAsync(senderResult.Email!, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to retrieve sender account for daily limit check (proceeding without limit check) | CorrelationId: {CorrelationId}",
+                correlationId);
+        }
+
+        if (senderAccount is { DailySendLimit: > 0 } && senderAccount.SendsToday >= senderAccount.DailySendLimit)
+        {
+            _logger.LogWarning(
+                "Daily send limit reached | CorrelationId: {CorrelationId}, AccountId: {AccountId}, SendsToday: {SendsToday}, DailySendLimit: {DailySendLimit}",
+                correlationId, senderAccount.Id, senderAccount.SendsToday, senderAccount.DailySendLimit);
+
+            throw new SdapProblemException(
+                code: "DAILY_SEND_LIMIT_REACHED",
+                title: "Daily Send Limit Reached",
+                detail: $"This mailbox has reached its daily send limit of {senderAccount.DailySendLimit}. Sends will reset at midnight UTC.",
+                statusCode: 429,
+                extensions: new Dictionary<string, object>
+                {
+                    ["correlationId"] = correlationId,
+                    ["sendsToday"] = senderAccount.SendsToday,
+                    ["dailySendLimit"] = senderAccount.DailySendLimit.Value
+                });
+        }
+
         // Step 3: Build Graph message
         var message = BuildGraphMessage(request, senderResult);
 
@@ -147,6 +180,22 @@ public sealed class CommunicationService
                 senderResult.Email,
                 request.To.Length);
 
+            // Step 4b: Increment daily send count (best-effort — don't fail the send)
+            if (senderAccount is not null)
+            {
+                try
+                {
+                    await _accountService.IncrementSendCountAsync(senderAccount.Id, cancellationToken);
+                }
+                catch (Exception incEx)
+                {
+                    _logger.LogWarning(
+                        incEx,
+                        "Failed to increment daily send count (non-fatal) | CorrelationId: {CorrelationId}, AccountId: {AccountId}",
+                        correlationId, senderAccount.Id);
+                }
+            }
+
             // Step 5: Create Dataverse communication record (best-effort)
             Guid? communicationId = null;
             try
@@ -170,10 +219,10 @@ public sealed class CommunicationService
             {
                 try
                 {
-                    var senderAccount = await _accountService.GetSendAccountByEmailAsync(senderResult.Email, cancellationToken);
-                    if (senderAccount is not null)
+                    var archiveAccount = await _accountService.GetSendAccountByEmailAsync(senderResult.Email, cancellationToken);
+                    if (archiveAccount is not null)
                     {
-                        archiveOutgoingOptIn = senderAccount.ArchiveOutgoingOptIn ?? true;
+                        archiveOutgoingOptIn = archiveAccount.ArchiveOutgoingOptIn ?? true;
                     }
                 }
                 catch (Exception optInEx)

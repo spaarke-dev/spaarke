@@ -38,6 +38,15 @@ public sealed class CommunicationAccount
     public VerificationStatus? VerificationStatus { get; init; }
     public DateTimeOffset? LastVerified { get; init; }
 
+    /// <summary>Maps to Dataverse field sprk_verificationmessage. Contains last verification result detail.</summary>
+    public string? VerificationMessage { get; init; }
+
+    /// <summary>Maps to Dataverse field sprk_sendstoday. Tracks outbound sends in current UTC day.</summary>
+    public int SendsToday { get; init; }
+
+    /// <summary>Maps to Dataverse field sprk_dailysendlimit. Null means unlimited.</summary>
+    public int? DailySendLimit { get; init; }
+
     /// <summary>
     /// Derives auth method from account type.
     /// Shared/Service → AppOnly, User → OnBehalfOf.

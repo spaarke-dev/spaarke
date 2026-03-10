@@ -1,7 +1,7 @@
 <task id="ECS-040" project="Email Communication Solution R2">
   <metadata>
     <title>Create Mailbox Verification Endpoint</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>5 - Verification and Admin UX (Phase D)</phase>
     <tags>bff-api</tags>

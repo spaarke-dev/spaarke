@@ -62,8 +62,8 @@
 
 | # | Task | Status | Depends On | Rigor |
 |---|------|--------|------------|-------|
-| 040 | Create Verification Endpoint | 🔲 | 037 | FULL |
-| 041 | Daily Send Count Tracking | 🔲 | 037 | STANDARD |
+| 040 | Create Verification Endpoint | ✅ | 037 | FULL |
+| 041 | Daily Send Count Tracking | ✅ | 037 | STANDARD |
 | 042 | Admin Form Enhancements | 🔲 | 040, 041 | STANDARD |
 | 043 | Update Admin Documentation | 🔲 | 042 | MINIMAL |
 
