@@ -339,10 +339,22 @@ function openDocumentUploadDialog(params, selectedControl) {
     const parentEntityName = params?.parentDisplayName ?? "";
     const containerId = params?.containerId ?? "";
 
+    // Detect Dataverse theme for the Code Page
+    var theme = "light";
+    try {
+        var bodyBg = window.getComputedStyle(document.body).backgroundColor;
+        var rgbMatch = bodyBg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+        if (rgbMatch) {
+            var luminance = 0.299 * parseInt(rgbMatch[1]) + 0.587 * parseInt(rgbMatch[2]) + 0.114 * parseInt(rgbMatch[3]);
+            if (luminance < 128) theme = "dark";
+        }
+    } catch (_) { /* ignore */ }
+
     const dataString = "parentEntityType=" + parentEntityType +
         "&parentEntityId=" + parentEntityId +
         "&parentEntityName=" + parentEntityName +
-        "&containerId=" + containerId;
+        "&containerId=" + containerId +
+        "&theme=" + theme;
 
     const pageInput = {
         pageType: "webresource",

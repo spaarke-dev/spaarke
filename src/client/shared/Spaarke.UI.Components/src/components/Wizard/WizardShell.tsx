@@ -80,6 +80,15 @@ const useStyles = makeStyles({
     height: '70vh',
     overflow: 'hidden',
   },
+  // Embedded mode: fills the host container (e.g., Dataverse dialog iframe)
+  embeddedRoot: {
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100%',
+    overflow: 'hidden',
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
   // Custom title bar (replaces DialogTitle default rendering)
   titleBar: {
     display: 'flex',
@@ -159,6 +168,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
   (props, ref) => {
     const {
       open,
+      embedded = false,
       title,
       ariaLabel,
       steps: stepConfigs,
@@ -334,8 +344,115 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
       [shellState],
     );
 
+    // ── Shared inner content (used by both dialog and embedded modes) ─────
+
+    const innerContent = (
+      <>
+        {/* Custom title bar with close button */}
+        <div className={styles.titleBar}>
+          <Text
+            as="h1"
+            size={500}
+            weight="semibold"
+            className={styles.titleText}
+          >
+            {title}
+          </Text>
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<Dismiss24Regular />}
+            className={styles.closeButton}
+            onClick={onClose}
+            aria-label="Close dialog"
+          />
+        </div>
+
+        {/* Sidebar + content area */}
+        <div className={styles.mainArea}>
+          <WizardStepper steps={shellState.steps} />
+
+          <div className={styles.contentArea}>
+            {/* Finish error bar */}
+            {finishError && (
+              <MessageBar intent="error" role="alert">
+                <MessageBarBody>{finishError}</MessageBarBody>
+              </MessageBar>
+            )}
+
+            {/* Success screen replaces step content */}
+            {successConfig ? (
+              <WizardSuccessScreen config={successConfig} />
+            ) : (
+              currentConfig?.renderContent(handle)
+            )}
+          </div>
+        </div>
+
+        {/* Footer — hidden after success */}
+        {!successConfig && (
+          <div className={styles.footer}>
+            <div className={styles.footerLeft}>
+              <Button
+                appearance="secondary"
+                onClick={onClose}
+                disabled={isFinishing}
+              >
+                Cancel
+              </Button>
+            </div>
+
+            <div className={styles.footerRight}>
+              {/* In-progress spinner */}
+              {isFinishing && (
+                <div className={styles.progressRow}>
+                  <Spinner size="tiny" />
+                  <Text size={200}>{finishingLabel}</Text>
+                </div>
+              )}
+
+              {/* Per-step custom footer actions */}
+              {currentConfig?.footerActions}
+
+              {/* Back button — hidden on step 0, disabled when finishing */}
+              {!isFirstStep && (
+                <Button
+                  appearance="secondary"
+                  onClick={handleBack}
+                  disabled={isFinishing}
+                >
+                  Back
+                </Button>
+              )}
+
+              {/* Next / Finish */}
+              <Button
+                appearance="primary"
+                onClick={handlePrimaryButtonClick}
+                disabled={!canAdvance || isFinishing}
+              >
+                {primaryButtonLabel}
+              </Button>
+            </div>
+          </div>
+        )}
+      </>
+    );
+
     // ── Render ──────────────────────────────────────────────────────────────
 
+    // Embedded mode: render directly without Dialog/DialogSurface wrapper.
+    // Used when the wizard is already inside a Dataverse dialog iframe.
+    if (embedded) {
+      if (!open) return null;
+      return (
+        <div className={styles.embeddedRoot} aria-label={ariaLabel ?? title}>
+          {innerContent}
+        </div>
+      );
+    }
+
+    // Standard mode: render inside Fluent Dialog overlay.
     return (
       <Dialog
         open={open}
@@ -348,94 +465,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
           aria-label={ariaLabel ?? title}
         >
           <DialogBody className={styles.body}>
-            {/* Custom title bar with close button */}
-            <div className={styles.titleBar}>
-              <Text
-                as="h1"
-                size={500}
-                weight="semibold"
-                className={styles.titleText}
-              >
-                {title}
-              </Text>
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<Dismiss24Regular />}
-                className={styles.closeButton}
-                onClick={onClose}
-                aria-label="Close dialog"
-              />
-            </div>
-
-            {/* Sidebar + content area */}
-            <div className={styles.mainArea}>
-              <WizardStepper steps={shellState.steps} />
-
-              <DialogContent className={styles.contentArea}>
-                {/* Finish error bar */}
-                {finishError && (
-                  <MessageBar intent="error" role="alert">
-                    <MessageBarBody>{finishError}</MessageBarBody>
-                  </MessageBar>
-                )}
-
-                {/* Success screen replaces step content */}
-                {successConfig ? (
-                  <WizardSuccessScreen config={successConfig} />
-                ) : (
-                  currentConfig?.renderContent(handle)
-                )}
-              </DialogContent>
-            </div>
-
-            {/* Footer — hidden after success */}
-            {!successConfig && (
-              <DialogActions className={styles.footer}>
-                <div className={styles.footerLeft}>
-                  <Button
-                    appearance="secondary"
-                    onClick={onClose}
-                    disabled={isFinishing}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-
-                <div className={styles.footerRight}>
-                  {/* In-progress spinner */}
-                  {isFinishing && (
-                    <div className={styles.progressRow}>
-                      <Spinner size="tiny" />
-                      <Text size={200}>{finishingLabel}</Text>
-                    </div>
-                  )}
-
-                  {/* Per-step custom footer actions */}
-                  {currentConfig?.footerActions}
-
-                  {/* Back button — hidden on step 0, disabled when finishing */}
-                  {!isFirstStep && (
-                    <Button
-                      appearance="secondary"
-                      onClick={handleBack}
-                      disabled={isFinishing}
-                    >
-                      Back
-                    </Button>
-                  )}
-
-                  {/* Next / Finish */}
-                  <Button
-                    appearance="primary"
-                    onClick={handlePrimaryButtonClick}
-                    disabled={!canAdvance || isFinishing}
-                  >
-                    {primaryButtonLabel}
-                  </Button>
-                </div>
-              </DialogActions>
-            )}
+            {innerContent}
           </DialogBody>
         </DialogSurface>
       </Dialog>

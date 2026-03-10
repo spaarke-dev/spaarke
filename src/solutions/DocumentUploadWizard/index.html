@@ -20,6 +20,19 @@
      *   2. prefers-color-scheme media query (standalone / dev)
      */
     (function detectTheme() {
+      // Priority 1: URL parameter from ribbon command (most reliable)
+      try {
+        var raw = new URLSearchParams(window.location.search);
+        var dataParam = raw.get('data');
+        var params = dataParam ? new URLSearchParams(decodeURIComponent(dataParam)) : raw;
+        var urlTheme = params.get('theme');
+        if (urlTheme === 'dark' || urlTheme === 'light') {
+          document.documentElement.setAttribute('data-theme', urlTheme);
+          return;
+        }
+      } catch (_) { /* ignore */ }
+
+      // Priority 2: Xrm global context theme detection
       try {
         var xrm = window.parent && window.parent.Xrm ? window.parent.Xrm : window.Xrm;
         if (xrm && xrm.Utility && xrm.Utility.getGlobalContext) {
@@ -34,11 +47,22 @@
         }
       } catch (_) { /* cross-origin or Xrm unavailable */ }
 
-      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        document.documentElement.setAttribute('data-theme', 'dark');
-      } else {
-        document.documentElement.setAttribute('data-theme', 'light');
-      }
+      // Priority 3: Parent frame background luminance check
+      try {
+        var parentBody = window.parent && window.parent.document ? window.parent.document.body : null;
+        if (parentBody) {
+          var bg = window.parent.getComputedStyle(parentBody).backgroundColor;
+          var m = bg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+          if (m) {
+            var lum = 0.299 * parseInt(m[1]) + 0.587 * parseInt(m[2]) + 0.114 * parseInt(m[3]);
+            document.documentElement.setAttribute('data-theme', lum < 128 ? 'dark' : 'light');
+            return;
+          }
+        }
+      } catch (_) { /* cross-origin */ }
+
+      // Fallback: default to light (matches most Dataverse deployments)
+      document.documentElement.setAttribute('data-theme', 'light');
     })();
   </script>
 </head>

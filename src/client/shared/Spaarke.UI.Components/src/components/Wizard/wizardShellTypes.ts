@@ -201,6 +201,13 @@ export interface IWizardSuccessConfig {
 export interface IWizardShellProps {
   /** Whether the wizard dialog is currently open (visible). */
   open: boolean;
+  /**
+   * When `true`, the shell renders as a full-page layout without the Fluent
+   * `<Dialog>` overlay wrapper. Use this when the wizard is already hosted
+   * inside a Dataverse dialog (e.g., a Code Page opened via `navigateTo`).
+   * Defaults to `false`.
+   */
+  embedded?: boolean;
   /** Title displayed in the wizard's custom title bar. */
   title: string;
   /**

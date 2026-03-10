@@ -8,7 +8,7 @@
  *   Step 2 — Summary:     Upload progress (FileUploadProgress) then Document Profile (SummaryStep)
  *   Step 3 — Next Steps:  Optional follow-on actions (NextStepsStep)
  *
- * Upload pipeline (triggered on "Upload" button click):
+ * Upload pipeline (auto-triggered when entering Step 2 — Summary):
  *   Phase 1: Upload files to SPE via MultiFileUploadService (parallel)
  *   Phase 2: Create sprk_document records via DocumentRecordService (OData)
  *   Phase 3: Document Profile playbook (fire-and-forget, visible in SummaryStep)
@@ -26,7 +26,7 @@
  * @see ADR-021  - Fluent UI v9 design system (makeStyles + semantic tokens)
  */
 
-import { useReducer, useState, useCallback, useRef, useMemo, lazy, Suspense } from "react";
+import { useReducer, useState, useCallback, useRef, useMemo, useEffect, lazy, Suspense } from "react";
 import {
     makeStyles,
     tokens,
@@ -74,6 +74,21 @@ import type {
 import { FileUploadProgress } from "./components/FileUploadProgress";
 import { buildSuccessConfig } from "./components/SuccessScreen";
 import { openAnalysisBuilder } from "./services/nextStepLauncher";
+
+// ---------------------------------------------------------------------------
+// AutoUploadTrigger — starts the upload pipeline on mount (step 2 entry)
+// ---------------------------------------------------------------------------
+
+function AutoUploadTrigger({ onStart }: { onStart: () => void }): null {
+    const triggered = useRef(false);
+    useEffect(() => {
+        if (!triggered.current) {
+            triggered.current = true;
+            onStart();
+        }
+    }, [onStart]);
+    return null;
+}
 
 // ---------------------------------------------------------------------------
 // Lazy-loaded FindSimilarDialog (chunk only fetched on user interaction)
@@ -446,11 +461,12 @@ export function DocumentUploadWizardDialog({
                         return <FileUploadProgress fileProgress={orchestratorProgress} />;
                     }
 
-                    // Before upload starts (should not normally be visible)
+                    // Auto-trigger upload when entering step 2
                     return (
-                        <Text size={300}>
-                            Click Upload to begin uploading your files.
-                        </Text>
+                        <>
+                            <AutoUploadTrigger onStart={() => void runUploadPipeline()} />
+                            <FileUploadProgress fileProgress={[]} />
+                        </>
                     );
                 },
             },
@@ -517,16 +533,27 @@ export function DocumentUploadWizardDialog({
     // ── Finish handler ──────────────────────────────────────────────────────
 
     const handleFinish = useCallback(async (): Promise<IWizardSuccessConfig | void> => {
-        // If upload hasn't run yet, trigger the 4-phase pipeline now
+        // Wait for in-progress upload or trigger if not started
         let result = uploadResultRef.current;
 
-        if (!result) {
+        if (!result && !isUploadingRef.current) {
             try {
                 result = await runUploadPipeline();
             } catch (err) {
                 const message = err instanceof Error ? err.message : "Upload failed";
                 throw new Error(message);
             }
+        } else if (!result && isUploadingRef.current) {
+            // Upload is in progress — wait for it to finish
+            await new Promise<void>((resolve) => {
+                const interval = setInterval(() => {
+                    if (uploadResultRef.current) {
+                        clearInterval(interval);
+                        result = uploadResultRef.current;
+                        resolve();
+                    }
+                }, 200);
+            });
         }
 
         // Build success/failure screen via shared SuccessScreen component
@@ -546,6 +573,7 @@ export function DocumentUploadWizardDialog({
             <WizardShell
                 ref={wizardRef}
                 open={true}
+                embedded={true}
                 title={
                     parentEntityName
                         ? `Upload Files \u2014 ${parentEntityName}`
@@ -554,8 +582,8 @@ export function DocumentUploadWizardDialog({
                 steps={stepConfigs}
                 onClose={onClose}
                 onFinish={handleFinish}
-                finishLabel="Upload"
-                finishingLabel="Uploading..."
+                finishLabel="Finish"
+                finishingLabel="Processing..."
             />
 
             {/* Find Similar dialog — rendered inline, lazy-loaded on first open */}
