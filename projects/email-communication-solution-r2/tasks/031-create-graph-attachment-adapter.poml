@@ -1,7 +1,7 @@
 <task id="ECS-031" project="Email Communication Solution R2">
   <metadata>
     <title>Create GraphAttachmentAdapter</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>4 - Email-to-Document Migration (Phase E)</phase>
     <tags>bff-api</tags>

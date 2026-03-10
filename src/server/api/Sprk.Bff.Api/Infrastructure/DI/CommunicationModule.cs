@@ -22,6 +22,7 @@ public static class CommunicationModule
         services.AddSingleton<ApprovedSenderValidator>();
         services.AddSingleton<CommunicationService>();
         services.AddSingleton<EmlGenerationService>();
+        services.AddSingleton<GraphMessageToEmlConverter>();
         services.AddSingleton<MailboxVerificationService>();
         services.AddSingleton<IncomingAssociationResolver>();
         services.AddSingleton<IncomingCommunicationProcessor>();

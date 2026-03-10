@@ -1,7 +1,7 @@
 <task id="ECS-030" project="Email Communication Solution R2">
   <metadata>
     <title>Create GraphMessageToEmlConverter</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <phase>4 - Email-to-Document Migration (Phase E)</phase>
     <tags>bff-api</tags>
