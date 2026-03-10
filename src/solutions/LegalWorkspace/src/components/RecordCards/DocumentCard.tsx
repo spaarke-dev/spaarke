@@ -16,10 +16,6 @@ import {
   Text,
   Button,
   Tooltip,
-  Dialog,
-  DialogSurface,
-  DialogBody,
-  shorthands,
 } from "@fluentui/react-components";
 import {
   EyeRegular,
@@ -34,7 +30,7 @@ import { getEffectiveDarkMode } from "../../providers/ThemeProvider";
 import { getTenantId, authenticatedFetch } from "../../services/authInit";
 import { getDocumentOpenLinks } from "../../services/DocumentApiService";
 import { getBffBaseUrl } from "../../config/bffConfig";
-import { AiSummaryPopover, type ISummaryData } from "@spaarke/ui-components";
+import { AiSummaryPopover, type ISummaryData, FindSimilarDialog } from "@spaarke/ui-components";
 import { FilePreviewDialog } from "../FilePreview/FilePreviewDialog";
 
 // ---------------------------------------------------------------------------
@@ -135,32 +131,6 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalXXS,
     flexShrink: 0,
     marginLeft: tokens.spacingHorizontalL,
-  },
-  // Find Similar dialog
-  findSimilarSurface: {
-    padding: "0px",
-    width: "85vw",
-    maxWidth: "85vw",
-    height: "80vh",
-    maxHeight: "80vh",
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.overflow("hidden"),
-    ...shorthands.borderRadius(tokens.borderRadiusXLarge),
-  },
-  findSimilarBody: {
-    padding: "0px",
-    flex: 1,
-    minHeight: 0,
-    position: "relative" as const,
-  },
-  findSimilarFrame: {
-    position: "absolute" as const,
-    top: 0,
-    left: 0,
-    width: "100%",
-    height: "100%",
-    borderWidth: "0px",
   },
 });
 
@@ -461,25 +431,12 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
           </div>
         </div>
 
-        {/* Find Similar — iframe dialog */}
-        <Dialog
+        {/* Find Similar — shared iframe dialog */}
+        <FindSimilarDialog
           open={!!findSimilarUrl}
-          onOpenChange={(_, data) => {
-            if (!data.open) setFindSimilarUrl(null);
-          }}
-        >
-          <DialogSurface className={styles.findSimilarSurface}>
-            <DialogBody className={styles.findSimilarBody}>
-              {findSimilarUrl && (
-                <iframe
-                  src={findSimilarUrl}
-                  title="Document Relationships"
-                  className={styles.findSimilarFrame}
-                />
-              )}
-            </DialogBody>
-          </DialogSurface>
-        </Dialog>
+          onClose={() => setFindSimilarUrl(null)}
+          url={findSimilarUrl}
+        />
 
         {/* File Preview Dialog */}
         <FilePreviewDialog

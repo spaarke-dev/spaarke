@@ -19,9 +19,6 @@ import {
     Link,
     Button,
     Tooltip,
-    Dialog,
-    DialogSurface,
-    DialogBody,
 } from "@fluentui/react-components";
 import { ChevronRight20Regular } from "@fluentui/react-icons";
 import {
@@ -50,6 +47,7 @@ import {
 import { initializeAuth } from "./authInit";
 import { authenticatedFetch } from "@spaarke/auth";
 import { SendEmailDialog, type ISendEmailPayload } from "@spaarke/ui-components/dist/components/SendEmailDialog";
+import { FindSimilarDialog } from "@spaarke/ui-components/dist/components/FindSimilarDialog";
 import type { ILookupItem } from "@spaarke/ui-components/dist/types/LookupTypes";
 
 /**
@@ -173,33 +171,6 @@ const useStyles = makeStyles({
         color: tokens.colorNeutralForeground4,
     },
 
-    // Find Similar iframe dialog
-    findSimilarSurface: {
-        padding: "0px",
-        width: "85vw",
-        maxWidth: "85vw",
-        height: "85vh",
-        maxHeight: "85vh",
-        display: "flex",
-        flexDirection: "column",
-        ...shorthands.overflow("hidden"),
-        ...shorthands.borderRadius(tokens.borderRadiusXLarge),
-    },
-    findSimilarBody: {
-        padding: "0px",
-        flex: 1,
-        minHeight: 0,
-        position: "relative" as const,
-    },
-    findSimilarFrame: {
-        position: "absolute" as const,
-        top: 0,
-        left: 0,
-        width: "100%",
-        height: "100%",
-        border: "none",
-        display: "block",
-    },
 });
 
 /**
@@ -861,26 +832,15 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
             {/* Version Footer (always visible) */}
             <div className={styles.versionFooter}>
-                <Text size={100}>v1.1.9 • Built 2026-03-10</Text>
+                <Text size={100}>v1.1.10 • Built 2026-03-10</Text>
             </div>
 
-            {/* Find Similar — iframe dialog (no Dataverse chrome) */}
-            <Dialog
+            {/* Find Similar — shared iframe dialog */}
+            <FindSimilarDialog
                 open={!!findSimilarUrl}
-                onOpenChange={(_, data) => { if (!data.open) setFindSimilarUrl(null); }}
-            >
-                <DialogSurface className={styles.findSimilarSurface}>
-                    <DialogBody className={styles.findSimilarBody}>
-                        {findSimilarUrl && (
-                            <iframe
-                                src={findSimilarUrl}
-                                title="Document Relationships"
-                                className={styles.findSimilarFrame}
-                            />
-                        )}
-                    </DialogBody>
-                </DialogSurface>
-            </Dialog>
+                onClose={() => setFindSimilarUrl(null)}
+                url={findSimilarUrl}
+            />
 
             {/* Send Email Dialog */}
             <SendEmailDialog

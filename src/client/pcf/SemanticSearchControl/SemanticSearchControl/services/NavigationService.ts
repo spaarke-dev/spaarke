@@ -9,6 +9,7 @@
 
 import { SearchResult, SearchFilters, SearchScope } from "../types";
 import { getAuthProvider } from "@spaarke/auth";
+import { getEffectiveDarkMode } from "./ThemeService";
 
 /**
  * Navigation target modes
@@ -236,19 +237,9 @@ export class NavigationService {
             }
         }
 
-        // Detect theme
-        let theme = "light";
-        try {
-            const bodyBg = window.getComputedStyle(document.body).backgroundColor;
-            const rgbMatch = bodyBg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-            if (rgbMatch) {
-                const luminance =
-                    0.299 * parseInt(rgbMatch[1]) +
-                    0.587 * parseInt(rgbMatch[2]) +
-                    0.114 * parseInt(rgbMatch[3]);
-                if (luminance < 128) theme = "dark";
-            }
-        } catch { /* ignore */ }
+        // Detect theme using ThemeService priority chain
+        // (localStorage → URL flag → PCF context → navbar → page background → system)
+        const theme = getEffectiveDarkMode() ? "dark" : "light";
 
         const dataString =
             "parentEntityType=" + parentEntityType +
