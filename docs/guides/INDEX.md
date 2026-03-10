@@ -12,6 +12,10 @@ This directory contains practical guides for implementing features, configuring 
 
 <!-- TODO: Phase 3 - Organize by category and add descriptions -->
 
+### Shared Libraries
+
+- **[SHARED-UI-COMPONENTS-GUIDE.md](SHARED-UI-COMPONENTS-GUIDE.md)** - `@spaarke/ui-components` library: component inventory, consumption patterns (barrel vs deep import), build workflow, adding components
+
 ### PCF Development
 
 - [PCF-BUILDING-BLOCKS.md](PCF-BUILDING-BLOCKS.md)
@@ -67,6 +71,7 @@ This directory contains practical guides for implementing features, configuring 
 **Loading strategy**: Load specific guides when working on related tasks.
 
 **Common scenarios**:
+- Shared UI components → Load SHARED-UI-COMPONENTS-GUIDE.md
 - Creating PCF control → Load HOW-TO-CREATE-NEW-PCF-CONTROL.md, PCF-CONTROL-DEVELOPMENT.md
 - Adding document support → Load HOW-TO-ADD-DOCUMENT-SUPPORT-TO-ENTITY.md
 - **Creating AI playbook scopes → Load HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md**

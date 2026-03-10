@@ -744,6 +744,7 @@ Use this as a **pass/fail** review gate for PRs that add or change shared compon
 | 2025-10-03 | 1.0 | Initial ADR creation | Spaarke Engineering |
 | 2025-12-12 | 1.1 | Added explicit UI/UX standards and compliance checklist (Fluent + MDA fit + dark-mode compatibility) | Spaarke Engineering |
 | 2026-02-23 | 1.2 | Updated for two-tier architecture (ADR-006 revision): PCF consumption uses React 16 devDependency (not React 18); Code Page consumption uses React 18; library peerDependencies widened to `>=16.14.0`; added WizardDialog and SidePanel to directory structure; added Code Page consumption pattern. | Spaarke Engineering |
+| 2026-03-10 | 1.3 | Updated component inventory to reflect v2.0.0 (16 component groups, 10 hooks, 8 services). Added PCF deep import pattern guidance. Added callback-based props constraint. Created companion guide: `docs/guides/SHARED-UI-COMPONENTS-GUIDE.md`. | Spaarke Engineering |
 
 ---
 
