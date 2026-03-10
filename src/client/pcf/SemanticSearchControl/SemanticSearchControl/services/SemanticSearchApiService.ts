@@ -390,13 +390,13 @@ export class SemanticSearchApiService {
             case "invoice":
             case "account":
             case "contact":
+            case "document":
                 // Entity scopes map to API entity scope with corresponding entityType
                 apiScope = "entity";
                 entityType = request.scope;
                 entityId = request.scopeId ?? undefined;
                 break;
             case "all":
-                // scope=all is not supported in R1, but API will return proper error
                 apiScope = "all";
                 break;
             case "custom":
@@ -404,8 +404,11 @@ export class SemanticSearchApiService {
                 apiScope = "documentIds";
                 break;
             default:
-                // Pass through unknown scopes
-                apiScope = request.scope;
+                // Unknown entity types still scope to "entity" with scopeId
+                // so the BFF filters by the record, not returning all documents
+                apiScope = "entity";
+                entityType = request.scope;
+                entityId = request.scopeId ?? undefined;
         }
 
         // Build API request

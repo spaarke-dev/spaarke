@@ -12,7 +12,7 @@
  * - "matter", "project", "invoice", "account", "contact": Explicit entity-scoped search
  * - "custom": Custom scope using documentIds (future)
  */
-export type SearchScope = "all" | "entity" | "matter" | "project" | "invoice" | "account" | "contact" | "custom";
+export type SearchScope = "all" | "entity" | "matter" | "project" | "invoice" | "account" | "contact" | "document" | "custom" | (string & {});
 
 /**
  * Search mode for controlling how vector and keyword search are combined.

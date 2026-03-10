@@ -1,9 +1,12 @@
 /**
  * ResultCard component
  *
- * Displays a single search result with document info, similarity score,
- * metadata, highlighted snippet, and action buttons.
- * v1.0.33: createdOn/createdBy metadata, Preview popover, Summary popover.
+ * Displays a single search result using the 2-row DocumentCard design pattern:
+ *   Row 1: File icon (40px circle) | Title + description | Actions (icon-only)
+ *   Row 2: Similarity badge + metadata (created date, created by)
+ *
+ * Action button order (L→R): Preview, Summary, Open File, Find Similar
+ * Preview opens the shared FilePreviewDialog (not a popover).
  *
  * @see ADR-021 for Fluent UI v9 requirements
  */
@@ -13,116 +16,198 @@ import { useCallback, useState } from "react";
 import {
     makeStyles,
     tokens,
-    Card,
-    CardHeader,
     Text,
     Button,
-    Menu,
-    MenuTrigger,
-    MenuPopover,
-    MenuList,
-    MenuItem,
+    Tooltip,
     Popover,
     PopoverTrigger,
     PopoverSurface,
-    Tooltip,
     Spinner,
+    shorthands,
 } from "@fluentui/react-components";
 import {
     DocumentRegular,
     DocumentPdfRegular,
-    Document20Regular,
-    FolderOpenRegular,
-    OpenRegular,
-    BranchRegular,
-    GlobeRegular,
-    ArrowDownloadRegular,
+    DocumentTextRegular,
+    TableRegular,
+    SlideTextRegular,
+    ImageRegular,
+    MailRegular,
     Eye20Regular,
     Sparkle20Regular,
+    DocumentSearchRegular,
+    FolderOpenRegular,
 } from "@fluentui/react-icons";
 import { IResultCardProps } from "../types";
-import { SimilarityBadge } from "./SimilarityBadge";
-import { HighlightedSnippet } from "./HighlightedSnippet";
+import { FilePreviewDialog } from "./FilePreviewDialog";
+
+// ---------------------------------------------------------------------------
+// File icon mapping (mirrors LegalWorkspace fileIconMap.ts)
+// ---------------------------------------------------------------------------
+
+type IconComponent = typeof DocumentRegular;
+
+function getFileIcon(fileType: string): IconComponent {
+    const ext = fileType?.toLowerCase().trim() ?? "";
+    switch (ext) {
+        case "pdf":
+            return DocumentPdfRegular;
+        case "doc":
+        case "docx":
+        case "rtf":
+        case "odt":
+        case "txt":
+            return DocumentTextRegular;
+        case "xls":
+        case "xlsx":
+        case "csv":
+            return TableRegular;
+        case "ppt":
+        case "pptx":
+            return SlideTextRegular;
+        case "jpg":
+        case "jpeg":
+        case "png":
+        case "gif":
+        case "bmp":
+        case "svg":
+            return ImageRegular;
+        case "msg":
+        case "eml":
+            return MailRegular;
+        default:
+            return DocumentRegular;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Date formatter
+// ---------------------------------------------------------------------------
+
+function formatShortDate(dateString: string | null): string {
+    if (!dateString) return "";
+    try {
+        const d = new Date(dateString);
+        if (isNaN(d.getTime())) return "";
+        return d.toLocaleDateString(undefined, {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+        });
+    } catch {
+        return "";
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Styles (DocumentCard 2-row pattern)
+// ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
     card: {
+        display: "flex",
+        flexDirection: "column",
+        paddingTop: tokens.spacingVerticalM,
+        paddingBottom: tokens.spacingVerticalM,
+        paddingLeft: tokens.spacingHorizontalL,
+        paddingRight: tokens.spacingHorizontalL,
+        backgroundColor: tokens.colorNeutralBackground1,
+        ...shorthands.borderRadius(tokens.borderRadiusMedium),
+        boxShadow: tokens.shadow2,
+        marginBottom: tokens.spacingVerticalXS,
+        borderLeftWidth: "3px",
+        borderLeftStyle: "solid",
+        borderLeftColor: tokens.colorBrandStroke1,
         cursor: "pointer",
-        "&:hover": {
+        transitionProperty: "background-color, box-shadow",
+        transitionDuration: tokens.durationFaster,
+        transitionTimingFunction: tokens.curveEasyEase,
+        ":hover": {
             backgroundColor: tokens.colorNeutralBackground1Hover,
+            boxShadow: tokens.shadow4,
+        },
+        ":focus-visible": {
+            outlineStyle: "solid",
+            outlineWidth: "2px",
+            outlineColor: tokens.colorBrandStroke1,
+            outlineOffset: "-2px",
         },
     },
-    cardCompact: {
-        padding: tokens.spacingVerticalS,
-    },
-    header: {
+    mainRow: {
         display: "flex",
+        flexDirection: "row",
         alignItems: "flex-start",
-        gap: tokens.spacingHorizontalM,
+        gap: tokens.spacingHorizontalL,
     },
-    icon: {
-        fontSize: "24px",
-        color: tokens.colorBrandForeground1,
+    typeIconCircle: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
         flexShrink: 0,
+        width: "40px",
+        height: "40px",
+        ...shorthands.borderRadius("50%"),
+        backgroundColor: tokens.colorBrandBackground2,
+        color: tokens.colorBrandForeground1,
+        marginTop: "2px",
     },
-    titleGroup: {
-        flex: 1,
+    contentColumn: {
+        flex: "1 1 0",
+        minWidth: 0,
+        display: "flex",
+        flexDirection: "column",
+        gap: tokens.spacingVerticalXS,
+    },
+    primaryRow: {
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: tokens.spacingHorizontalS,
+        flexWrap: "nowrap",
         minWidth: 0,
     },
     title: {
-        fontWeight: tokens.fontWeightSemibold,
-        overflow: "hidden",
+        ...shorthands.overflow("hidden"),
         textOverflow: "ellipsis",
         whiteSpace: "nowrap",
-    },
-    metadata: {
-        display: "flex",
-        flexWrap: "wrap",
-        gap: tokens.spacingHorizontalXS,
-        marginTop: tokens.spacingVerticalXS,
-        alignItems: "center",
-    },
-    metaLabel: {
+        color: tokens.colorNeutralForeground1,
         fontWeight: tokens.fontWeightSemibold,
+        flexShrink: 1,
+        minWidth: 0,
+    },
+    description: {
+        ...shorthands.overflow("hidden"),
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
         color: tokens.colorNeutralForeground3,
-        fontSize: tokens.fontSizeBase200,
+        flexShrink: 1,
+        minWidth: 0,
     },
-    metaValue: {
-        color: tokens.colorNeutralForeground2,
-        fontSize: tokens.fontSizeBase200,
-    },
-    metaSeparator: {
-        color: tokens.colorNeutralForeground3,
-        fontSize: tokens.fontSizeBase200,
-    },
-    snippet: {
-        marginTop: tokens.spacingVerticalS,
-        paddingLeft: `calc(24px + ${tokens.spacingHorizontalM})`,
-    },
-    actions: {
+    secondaryRow: {
         display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
         gap: tokens.spacingHorizontalS,
-        marginTop: tokens.spacingVerticalS,
-        paddingLeft: `calc(24px + ${tokens.spacingHorizontalM})`,
         flexWrap: "wrap",
     },
-    badge: {
+    metaText: {
+        ...shorthands.overflow("hidden"),
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        color: tokens.colorNeutralForeground3,
+    },
+    actionsColumn: {
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: tokens.spacingHorizontalXXS,
         flexShrink: 0,
+        marginLeft: tokens.spacingHorizontalL,
     },
-    previewPopover: {
-        width: "880px",
-        height: "85vh",
-        padding: "0px",
-        overflow: "hidden",
-    },
-    previewFrame: {
-        width: "100%",
-        height: "100%",
-        border: "none",
-        display: "block",
-    },
+    // Summary popover
     summaryPopover: {
         width: "480px",
-        height: "620px",
+        maxHeight: "400px",
         overflowY: "auto",
         display: "flex",
         flexDirection: "column",
@@ -132,58 +217,58 @@ const useStyles = makeStyles({
         fontWeight: tokens.fontWeightSemibold,
         fontSize: tokens.fontSizeBase400,
         paddingBottom: tokens.spacingVerticalXS,
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        borderBottomWidth: "1px",
+        borderBottomStyle: "solid",
+        borderBottomColor: tokens.colorNeutralStroke2,
+    },
+    centered: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "100%",
+        ...shorthands.padding("16px"),
     },
 });
 
-/**
- * Get file type icon based on extension.
- */
-function getFileIcon(fileType: string): React.ReactElement {
-    const type = fileType.toLowerCase();
-    switch (type) {
-        case "pdf":
-            return <DocumentPdfRegular />;
-        case "doc":
-        case "docx":
-            return <DocumentRegular />;
-        default:
-            return <Document20Regular />;
-    }
-}
+// ---------------------------------------------------------------------------
+// Similarity badge inline (small pill for secondary row)
+// ---------------------------------------------------------------------------
+
+const ScoreBadge: React.FC<{ score: number }> = ({ score }) => {
+    const pct = Math.round(score * 100);
+    return (
+        <span
+            role="img"
+            aria-label={`Relevance: ${pct}%`}
+            style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: tokens.borderRadiusSmall,
+                paddingTop: "1px",
+                paddingBottom: "1px",
+                paddingLeft: tokens.spacingHorizontalXS,
+                paddingRight: tokens.spacingHorizontalXS,
+                fontSize: tokens.fontSizeBase100,
+                fontWeight: tokens.fontWeightSemibold,
+                lineHeight: tokens.lineHeightBase100,
+                whiteSpace: "nowrap",
+                backgroundColor: tokens.colorBrandBackground2,
+                color: tokens.colorBrandForeground1,
+                flexShrink: 0,
+            }}
+        >
+            {pct}%
+        </span>
+    );
+};
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 /**
- * Format date for display.
- */
-function formatDate(dateString: string | null): string {
-    if (!dateString) {
-        return "";
-    }
-    try {
-        const date = new Date(dateString);
-        if (isNaN(date.getTime())) {
-            return "";
-        }
-        return date.toLocaleDateString(undefined, {
-            year: "numeric",
-            month: "short",
-            day: "numeric",
-        });
-    } catch {
-        return "";
-    }
-}
-
-/**
- * ResultCard component for displaying a search result.
- *
- * @param props.result - Search result data
- * @param props.onClick - Callback when card is clicked
- * @param props.onOpenFile - Callback to open file
- * @param props.onOpenRecord - Callback to open record (inModal: boolean)
- * @param props.onFindSimilar - Callback to find similar documents
- * @param props.onPreview - Callback to get preview URL (lazy-loaded)
- * @param props.compactMode - Whether in compact mode
+ * ResultCard component — 2-row DocumentCard design pattern.
  */
 export const ResultCard: React.FC<IResultCardProps> = ({
     result,
@@ -197,287 +282,238 @@ export const ResultCard: React.FC<IResultCardProps> = ({
 }) => {
     const styles = useStyles();
 
-    // Preview popover state — URL is lazy-loaded via onPreview callback
-    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-    const [previewLoading, setPreviewLoading] = useState(false);
-    const [previewError, setPreviewError] = useState(false);
+    // FilePreviewDialog state
+    const [previewOpen, setPreviewOpen] = useState(false);
 
-    // Summary popover state — lazy-loaded from Dataverse via onSummary callback
+    // Summary popover state
     const [summaryData, setSummaryData] = useState<{ summary: string | null; tldr: string | null } | null>(null);
     const [summaryLoading, setSummaryLoading] = useState(false);
     const [summaryError, setSummaryError] = useState(false);
 
-    // Handle card click
+    // Resolve file icon
+    const IconComponent = getFileIcon(result.fileType);
+
+    // Card double-click opens record in new tab
+    const handleCardDoubleClick = useCallback(() => {
+        onOpenRecord(false);
+    }, [onOpenRecord]);
+
+    // Card single-click selects the document
     const handleCardClick = useCallback(
         (ev: React.MouseEvent) => {
-            // Don't trigger if clicking on action buttons
-            if ((ev.target as HTMLElement).closest("button")) {
-                return;
-            }
+            if ((ev.target as HTMLElement).closest("button")) return;
             onClick();
         },
         [onClick]
     );
 
-    // Handle Open File in Web
-    const handleOpenFileWeb = useCallback(
-        (ev: React.MouseEvent) => {
-            ev.stopPropagation();
-            onOpenFile("web");
+    const handleCardKeyDown = useCallback(
+        (e: React.KeyboardEvent) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                onOpenRecord(false);
+            }
         },
-        [onOpenFile]
+        [onOpenRecord]
     );
 
-    // Handle Open File in Desktop Application
-    const handleOpenFileDesktop = useCallback(
-        (ev: React.MouseEvent) => {
-            ev.stopPropagation();
+    // Stop propagation on action clicks
+    const handleActionsClick = useCallback((e: React.MouseEvent) => {
+        e.stopPropagation();
+    }, []);
+
+    // Preview — opens FilePreviewDialog
+    const handlePreviewClick = useCallback(
+        (e: React.MouseEvent) => {
+            e.stopPropagation();
+            setPreviewOpen(true);
+        },
+        []
+    );
+
+    // Open file — prefer desktop app
+    const handleOpenFileClick = useCallback(
+        (e: React.MouseEvent) => {
+            e.stopPropagation();
             onOpenFile("desktop");
         },
         [onOpenFile]
     );
 
-    // Handle Open Record in Modal
-    const handleOpenRecordModal = useCallback(() => {
-        onOpenRecord(true);
-    }, [onOpenRecord]);
-
-    // Handle Open Record in New Tab
-    const handleOpenRecordNewTab = useCallback(() => {
+    // Open record in new tab (for FilePreviewDialog toolbar)
+    const handleOpenRecord = useCallback(() => {
         onOpenRecord(false);
     }, [onOpenRecord]);
 
-    // Handle Find Similar
-    const handleFindSimilar = useCallback(
-        (ev: React.MouseEvent) => {
-            ev.stopPropagation();
-            onFindSimilar();
-        },
-        [onFindSimilar]
-    );
+    const formattedDate = formatShortDate(result.createdAt);
 
-    const cardClassName = compactMode
-        ? `${styles.card} ${styles.cardCompact}`
-        : styles.card;
-
-    const formattedDate = formatDate(result.createdAt);
+    // Build aria label
+    const cardAriaLabel = [
+        result.name,
+        result.documentType,
+        formattedDate ? `Created: ${formattedDate}` : "",
+    ].filter(Boolean).join(", ");
 
     return (
-        <Card
-            className={cardClassName}
-            onClick={handleCardClick}
-        >
-            {/* Header with icon, title, and badge */}
-            <CardHeader
-                image={getFileIcon(result.fileType)}
-                header={
-                    <div className={styles.titleGroup}>
-                        <Text className={styles.title} block>
-                            {result.name}
-                        </Text>
-                        <div className={styles.metadata}>
+        <>
+            <div
+                className={styles.card}
+                role="listitem"
+                tabIndex={0}
+                aria-label={cardAriaLabel}
+                onClick={handleCardClick}
+                onDoubleClick={handleCardDoubleClick}
+                onKeyDown={handleCardKeyDown}
+            >
+                <div className={styles.mainRow}>
+                    {/* File type icon in 40px circle */}
+                    <div
+                        className={styles.typeIconCircle}
+                        aria-label={result.fileType || "Document"}
+                        role="img"
+                    >
+                        <IconComponent fontSize={20} />
+                    </div>
+
+                    {/* Content: 2 rows */}
+                    <div className={styles.contentColumn}>
+                        {/* Row 1: Title + document type */}
+                        <div className={styles.primaryRow}>
+                            <Text as="span" size={400} className={styles.title}>
+                                {result.name}
+                            </Text>
+                            {result.documentType && (
+                                <Text as="span" size={300} className={styles.description}>
+                                    {result.documentType}
+                                </Text>
+                            )}
+                        </div>
+
+                        {/* Row 2: Score badge + metadata */}
+                        <div className={styles.secondaryRow}>
+                            <ScoreBadge score={result.combinedScore} />
                             {formattedDate && (
-                                <>
-                                    <Text className={styles.metaLabel}>Created On:</Text>
-                                    <Text className={styles.metaValue}>{formattedDate}</Text>
-                                </>
+                                <Text as="span" size={200} className={styles.metaText}>
+                                    Created: {formattedDate}
+                                </Text>
                             )}
                             {result.createdBy && (
-                                <>
-                                    {formattedDate && <Text className={styles.metaSeparator}>&middot;</Text>}
-                                    <Text className={styles.metaLabel}>createdBy:</Text>
-                                    <Text className={styles.metaValue}>{result.createdBy}</Text>
-                                </>
+                                <Text as="span" size={200} className={styles.metaText}>
+                                    By: {result.createdBy}
+                                </Text>
                             )}
                         </div>
                     </div>
-                }
-                action={
-                    <div className={styles.badge}>
-                        <SimilarityBadge score={result.combinedScore} />
-                    </div>
-                }
-            />
 
-            {/* Highlighted snippet */}
-            {!compactMode && (result.highlights?.length ?? 0) > 0 && (
-                <div className={styles.snippet}>
-                    <HighlightedSnippet
-                        text={result.highlights[0]}
-                        maxLength={200}
-                    />
-                </div>
-            )}
-
-            {/* Action buttons */}
-            <div className={styles.actions}>
-                <Menu>
-                    <MenuTrigger disableButtonEnhancement>
-                        <Button
-                            appearance="subtle"
-                            size="small"
-                            icon={<FolderOpenRegular />}
-                        >
-                            Open File
-                        </Button>
-                    </MenuTrigger>
-                    <MenuPopover>
-                        <MenuList>
-                            <MenuItem icon={<GlobeRegular />} onClick={handleOpenFileWeb}>
-                                Open in Web
-                            </MenuItem>
-                            <MenuItem icon={<ArrowDownloadRegular />} onClick={handleOpenFileDesktop}>
-                                Open in Desktop
-                            </MenuItem>
-                        </MenuList>
-                    </MenuPopover>
-                </Menu>
-
-                <Menu>
-                    <MenuTrigger disableButtonEnhancement>
-                        <Button
-                            appearance="subtle"
-                            size="small"
-                            icon={<OpenRegular />}
-                        >
-                            Open Record
-                        </Button>
-                    </MenuTrigger>
-                    <MenuPopover>
-                        <MenuList>
-                            <MenuItem onClick={handleOpenRecordModal}>
-                                Open in Dialog
-                            </MenuItem>
-                            <MenuItem onClick={handleOpenRecordNewTab}>
-                                Open in New Tab
-                            </MenuItem>
-                        </MenuList>
-                    </MenuPopover>
-                </Menu>
-
-                <Button
-                    appearance="subtle"
-                    size="small"
-                    icon={<BranchRegular />}
-                    onClick={handleFindSimilar}
-                >
-                    Find Similar
-                </Button>
-
-                {/* Preview — lazy-loads document URL on popover open */}
-                <Popover
-                    positioning="after"
-                    withArrow
-                    onOpenChange={(_ev, data) => {
-                        if (data.open && !previewUrl && !previewLoading) {
-                            setPreviewLoading(true);
-                            setPreviewError(false);
-                            void onPreview()
-                                .then((url) => {
-                                    setPreviewUrl(url);
-                                    setPreviewLoading(false);
-                                    return url;
-                                })
-                                .catch(() => {
-                                    setPreviewError(true);
-                                    setPreviewLoading(false);
-                                });
-                        }
-                    }}
-                >
-                    <PopoverTrigger disableButtonEnhancement>
-                        <Tooltip content="Preview document" relationship="label">
+                    {/* Actions: icon-only buttons — Preview, Summary, Open File, Find Similar */}
+                    <div className={styles.actionsColumn} role="toolbar" onClick={handleActionsClick}>
+                        {/* 1. Preview */}
+                        <Tooltip content="Preview" relationship="label">
                             <Button
                                 appearance="subtle"
-                                size="small"
-                                icon={<Eye20Regular />}
-                                onClick={(ev) => ev.stopPropagation()}
-                            >
-                                Preview
-                            </Button>
-                        </Tooltip>
-                    </PopoverTrigger>
-                    <PopoverSurface className={styles.previewPopover}>
-                        {previewLoading && (
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
-                                <Spinner size="medium" label="Loading preview..." />
-                            </div>
-                        )}
-                        {previewError && (
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", padding: "16px" }}>
-                                <Text>Preview not available for this document.</Text>
-                            </div>
-                        )}
-                        {previewUrl && !previewLoading && (
-                            <iframe
-                                src={previewUrl}
-                                title={result.name}
-                                className={styles.previewFrame}
+                                size="medium"
+                                icon={<Eye20Regular aria-hidden="true" />}
+                                aria-label="Preview document"
+                                onClick={handlePreviewClick}
                             />
-                        )}
-                    </PopoverSurface>
-                </Popover>
+                        </Tooltip>
 
-                {/* Summary — lazy-loads from Dataverse via onSummary callback */}
-                <Popover
-                    positioning="after"
-                    withArrow
-                    onOpenChange={(_ev, data) => {
-                        if (data.open && !summaryData && !summaryLoading) {
-                            setSummaryLoading(true);
-                            setSummaryError(false);
-                            void onSummary()
-                                .then((sd) => {
-                                    setSummaryData(sd);
-                                    setSummaryLoading(false);
-                                    return sd;
-                                })
-                                .catch(() => {
-                                    setSummaryError(true);
-                                    setSummaryLoading(false);
-                                });
-                        }
-                    }}
-                >
-                    <PopoverTrigger disableButtonEnhancement>
-                        <Tooltip content="View AI summary" relationship="label">
+                        {/* 2. Summary */}
+                        <Popover
+                            positioning="after"
+                            withArrow
+                            onOpenChange={(_ev, data) => {
+                                if (data.open && !summaryData && !summaryLoading) {
+                                    setSummaryLoading(true);
+                                    setSummaryError(false);
+                                    void onSummary()
+                                        .then((sd) => {
+                                            setSummaryData(sd);
+                                            setSummaryLoading(false);
+                                            return sd;
+                                        })
+                                        .catch(() => {
+                                            setSummaryError(true);
+                                            setSummaryLoading(false);
+                                        });
+                                }
+                            }}
+                        >
+                            <PopoverTrigger disableButtonEnhancement>
+                                <Tooltip content="Summary" relationship="label">
+                                    <Button
+                                        appearance="subtle"
+                                        size="medium"
+                                        icon={<Sparkle20Regular aria-hidden="true" />}
+                                        aria-label="Summary"
+                                        onClick={(ev) => ev.stopPropagation()}
+                                    />
+                                </Tooltip>
+                            </PopoverTrigger>
+                            <PopoverSurface className={styles.summaryPopover}>
+                                <Text className={styles.summaryHeader}>Summary</Text>
+                                {summaryLoading && (
+                                    <div className={styles.centered}>
+                                        <Spinner size="small" label="Loading summary..." />
+                                    </div>
+                                )}
+                                {summaryError && (
+                                    <Text>Summary not available for this document.</Text>
+                                )}
+                                {summaryData && !summaryLoading && (
+                                    <>
+                                        {summaryData.tldr && (
+                                            <Text weight="semibold">{summaryData.tldr}</Text>
+                                        )}
+                                        {summaryData.summary && (
+                                            <Text style={{ whiteSpace: "pre-wrap" }}>{summaryData.summary}</Text>
+                                        )}
+                                        {!summaryData.summary && !summaryData.tldr && (
+                                            <Text>No summary available for this document.</Text>
+                                        )}
+                                    </>
+                                )}
+                            </PopoverSurface>
+                        </Popover>
+
+                        {/* 3. Open File */}
+                        <Tooltip content="Open file" relationship="label">
                             <Button
                                 appearance="subtle"
-                                size="small"
-                                icon={<Sparkle20Regular />}
-                                onClick={(ev) => ev.stopPropagation()}
-                            >
-                                Summary
-                            </Button>
+                                size="medium"
+                                icon={<FolderOpenRegular aria-hidden="true" />}
+                                aria-label="Open file"
+                                onClick={handleOpenFileClick}
+                            />
                         </Tooltip>
-                    </PopoverTrigger>
-                    <PopoverSurface className={styles.summaryPopover}>
-                        <Text className={styles.summaryHeader}>Summary</Text>
-                        {summaryLoading && (
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", flex: 1 }}>
-                                <Spinner size="small" label="Loading summary..." />
-                            </div>
-                        )}
-                        {summaryError && (
-                            <Text>Summary not available for this document.</Text>
-                        )}
-                        {summaryData && !summaryLoading && (
-                            <>
-                                {summaryData.tldr && (
-                                    <Text weight="semibold">{summaryData.tldr}</Text>
-                                )}
-                                {summaryData.summary && (
-                                    <Text style={{ whiteSpace: "pre-wrap" }}>{summaryData.summary}</Text>
-                                )}
-                                {!summaryData.summary && !summaryData.tldr && (
-                                    <Text>No summary available for this document.</Text>
-                                )}
-                            </>
-                        )}
-                    </PopoverSurface>
-                </Popover>
+
+                        {/* 4. Find Similar */}
+                        <Tooltip content="Find Similar" relationship="label">
+                            <Button
+                                appearance="subtle"
+                                size="medium"
+                                icon={<DocumentSearchRegular aria-hidden="true" />}
+                                aria-label="Find Similar"
+                                onClick={(e: React.MouseEvent) => {
+                                    e.stopPropagation();
+                                    onFindSimilar();
+                                }}
+                            />
+                        </Tooltip>
+                    </div>
+                </div>
             </div>
-        </Card>
+
+            {/* FilePreviewDialog — same component used in CorporateWorkspace */}
+            <FilePreviewDialog
+                open={previewOpen}
+                documentName={result.name}
+                onClose={() => setPreviewOpen(false)}
+                fetchPreviewUrl={onPreview}
+                onOpenFile={onOpenFile}
+                onOpenRecord={handleOpenRecord}
+            />
+        </>
     );
 };
 

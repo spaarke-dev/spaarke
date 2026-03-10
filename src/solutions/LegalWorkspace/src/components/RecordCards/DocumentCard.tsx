@@ -27,12 +27,14 @@ import {
   EyeRegular,
   DocumentSearchRegular,
   SparkleRegular,
+  FolderOpenRegular,
 } from "@fluentui/react-icons";
 import type { IDocument } from "../../types/entities";
 import { getFileTypeIcon } from "../../utils/fileIconMap";
 import { navigateToEntity } from "../../utils/navigation";
 import { getEffectiveDarkMode } from "../../providers/ThemeProvider";
 import { getTenantId } from "../../services/authInit";
+import { getDocumentOpenLinks } from "../../services/DocumentApiService";
 import { FilePreviewDialog } from "../FilePreview/FilePreviewDialog";
 
 // ---------------------------------------------------------------------------
@@ -277,6 +279,29 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
       []
     );
 
+    // ----- Open File — prefer desktop app, fall back to web -----
+    const handleOpenFileClick = React.useCallback(
+      async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        try {
+          const links = await getDocumentOpenLinks(doc.sprk_documentid);
+          if (links) {
+            if (links.desktopUrl) {
+              window.location.href = links.desktopUrl;
+              return;
+            }
+            if (links.webUrl) {
+              window.open(links.webUrl, "_blank", "noopener,noreferrer");
+              return;
+            }
+          }
+        } catch (err) {
+          console.error("[DocumentCard] Open file error:", err);
+        }
+      },
+      [doc.sprk_documentid]
+    );
+
     // ----- Find Similar -----
     const handleFindSimilar = React.useCallback(async () => {
       try {
@@ -390,7 +415,7 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
               </div>
             </div>
 
-            {/* Actions: icon-only buttons — Preview, Summary, Find Similar */}
+            {/* Actions: icon-only buttons — Preview, Summary, Open File, Find Similar */}
             {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
             <div className={styles.actionsColumn} onClick={handleActionsClick}>
               <Tooltip content="Preview" relationship="label">
@@ -412,6 +437,15 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
                     e.stopPropagation();
                     handleSummaryClick();
                   }}
+                />
+              </Tooltip>
+              <Tooltip content="Open file" relationship="label">
+                <Button
+                  appearance="subtle"
+                  size="medium"
+                  icon={<FolderOpenRegular aria-hidden="true" />}
+                  aria-label="Open file"
+                  onClick={handleOpenFileClick}
                 />
               </Tooltip>
               <Tooltip content="Find Similar" relationship="label">

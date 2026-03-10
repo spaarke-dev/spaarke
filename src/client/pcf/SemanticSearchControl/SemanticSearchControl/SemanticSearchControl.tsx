@@ -241,10 +241,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
             "sprk_matter": "matter",
             "sprk_project": "project",
             "sprk_invoice": "invoice",
+            "sprk_document": "document",
             "account": "account",
             "contact": "contact",
         };
-        return mapping[logicalName.toLowerCase()] ?? null;
+        // Return mapped name, or fall back to the raw logical name so any entity
+        // form still scopes correctly (the BFF accepts arbitrary entityType values).
+        return mapping[logicalName.toLowerCase()] ?? logicalName.toLowerCase();
     };
 
     // Determine search scope and entity context
@@ -258,19 +261,22 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     const detectedEntityType = getEntityTypeFromLogicalName(pageEntityTypeName);
 
     // Resolve final search scope:
-    // - If on a record form with a recognized entity → use detected entity type
-    // - If configured as "entity" but NOT on a form → fall back to "all"
+    // - If on a record form with a page entity ID → always scope to that entity
+    // - If configured as "entity" but NOT on a form → keep "entity" (will show no results
+    //   rather than searching all documents unscoped)
     // - If configured as "all" or "custom" → use as-is
     // - Legacy: "matter" configured value still works (auto-detection overrides when on form)
     let searchScope: SearchScope;
     if (pageEntityId && detectedEntityType) {
         // On a record form → auto-detect overrides any configured scope
         searchScope = detectedEntityType as SearchScope;
-    } else if (configuredScope === "entity" || configuredScope === "matter") {
-        // Configured as "entity" (or legacy "matter") but NOT on a record form → fall back to "all"
-        searchScope = "all";
+    } else if (pageEntityId && !detectedEntityType) {
+        // On a record form but entity type not mapped → use configured scope
+        // (scopeId below will still be set to pageEntityId)
+        searchScope = configuredScope;
     } else {
-        // "all", "custom", or explicit entity type → use as configured
+        // Not on a record form → use configured scope as-is
+        // Note: "entity" scope without a scopeId will return no results (safe default)
         searchScope = configuredScope;
     }
 
@@ -294,7 +300,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     const [findSimilarUrl, setFindSimilarUrl] = useState<string | null>(null);
 
     // Filter pane collapse state
-    const [isFilterPaneCollapsed, setIsFilterPaneCollapsed] = useState(false);
+    const [isFilterPaneCollapsed, setIsFilterPaneCollapsed] = useState(true);
     const handleToggleFilterPane = useCallback(() => {
         setIsFilterPaneCollapsed((prev) => !prev);
     }, []);
@@ -654,7 +660,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
             {/* Version Footer (always visible) */}
             <div className={styles.versionFooter}>
-                <Text size={100}>v1.0.47 • Built 2026-02-25</Text>
+                <Text size={100}>v1.1.1 • Built 2026-03-09</Text>
             </div>
 
             {/* Find Similar — iframe dialog (no Dataverse chrome) */}
