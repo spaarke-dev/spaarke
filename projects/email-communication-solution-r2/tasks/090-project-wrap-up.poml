@@ -1,0 +1,49 @@
+<task id="ECS-090" project="Email Communication Solution R2">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>Wrap-Up</phase>
+    <tags>documentation, cleanup</tags>
+    <dependencies>ECS-043</dependencies>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    Final project wrap-up: update README status to Complete, create lessons-learned.md,
+    verify all graduation criteria met, clean up notes/ directory, prepare for
+    merge-to-master.
+  </prompt>
+
+  <role>Project manager</role>
+
+  <goal>Project artifacts finalized and ready for merge.</goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/README.md</file>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Update README">Set status to Complete. Check all graduation criteria.</step>
+    <step order="2" name="Create Lessons Learned">
+      Document: what went well, challenges, decisions, reuse opportunities.
+    </step>
+    <step order="3" name="Clean Up Notes">Remove scratch files, keep research artifacts.</step>
+    <step order="4" name="Prepare for Merge">Verify branch is clean, all tests pass.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r2/README.md</output>
+    <output type="docs">projects/email-communication-solution-r2/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">README status set to Complete</criterion>
+    <criterion testable="true">All graduation criteria verified</criterion>
+    <criterion testable="true">lessons-learned.md created</criterion>
+    <criterion testable="true">Branch clean and ready for merge</criterion>
+  </acceptance-criteria>
+</task>

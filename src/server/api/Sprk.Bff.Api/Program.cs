@@ -602,9 +602,9 @@ else
 // Email processing stats service - in-memory stats readable via API (admin monitoring PCF)
 builder.Services.AddSingleton<Sprk.Bff.Api.Services.Email.EmailProcessingStatsService>();
 
-// Email telemetry - OpenTelemetry-compatible metrics for email processing (delegates to stats service)
-builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.EmailTelemetry>(sp =>
-    new Sprk.Bff.Api.Telemetry.EmailTelemetry(sp.GetService<Sprk.Bff.Api.Services.Email.EmailProcessingStatsService>()));
+// Communication telemetry - OpenTelemetry-compatible metrics for communication processing (delegates to stats service)
+builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.CommunicationTelemetry>(sp =>
+    new Sprk.Bff.Api.Telemetry.CommunicationTelemetry(sp.GetService<Sprk.Bff.Api.Services.Email.EmailProcessingStatsService>()));
 
 // Document telemetry - OpenTelemetry-compatible metrics for document downloads (FR-03 audit logging)
 builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.DocumentTelemetry>();
@@ -620,13 +620,6 @@ builder.Services.Configure<Sprk.Bff.Api.Configuration.EmailProcessingOptions>(
 builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Email.EmailToEmlConverter>();
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.IEmailToEmlConverter>(sp =>
     sp.GetRequiredService<Sprk.Bff.Api.Services.Email.EmailToEmlConverter>());
-
-// Email filter service - evaluates rules from Dataverse with Redis caching (NFR-06: 5min TTL)
-builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.IEmailFilterService,
-    Sprk.Bff.Api.Services.Email.EmailFilterService>();
-
-// Email rule seed service - seeds default exclusion rules to Dataverse
-builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.EmailRuleSeedService>();
 
 // Email association service - determines Matter/Account/Contact associations with confidence scoring
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.IEmailAssociationService,
@@ -654,10 +647,6 @@ builder.Services.AddSingleton<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>()
 
 // Register job handlers
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.DocumentProcessingJobHandler>();
-builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.EmailToDocumentJobHandler>();
-builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.BatchProcessEmailsJobHandler>();
-// Also register EmailToDocumentJobHandler as concrete type for BatchProcessEmailsJobHandler dependency
-builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.Handlers.EmailToDocumentJobHandler>();
 
 // App-only document analysis job handler - for background AI analysis without user context
 // Uses AppOnlyAnalysisService with playbook-based analysis (FR-10)
@@ -692,7 +681,6 @@ if (string.IsNullOrWhiteSpace(serviceBusConnectionString))
 
 builder.Services.AddSingleton(sp => new Azure.Messaging.ServiceBus.ServiceBusClient(serviceBusConnectionString));
 builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.ServiceBusJobProcessor>();
-builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.EmailPollingBackupService>();
 
 // DocumentVector backfill service - one-time migration to populate documentVector field
 builder.Services.Configure<Sprk.Bff.Api.Services.Jobs.DocumentVectorBackfillOptions>(

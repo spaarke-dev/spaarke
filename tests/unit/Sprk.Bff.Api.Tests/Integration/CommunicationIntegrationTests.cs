@@ -152,6 +152,8 @@ public class CommunicationIntegrationTests
             dataverseMock.Object,
             null!, // EmlGenerationService - not used when ArchiveToSpe=false
             null!, // SpeFileStore - not used when ArchiveToSpe=false
+            null!, // CommunicationAccountService — not tested here
+            null!, // JobSubmissionService — not tested here
             Options.Create(opts),
             Mock.Of<ILogger<CommunicationService>>());
     }
@@ -215,7 +217,7 @@ public class CommunicationIntegrationTests
                     e.GetAttributeValue<string>("sprk_from") == "noreply@contoso.com" &&
                     e.GetAttributeValue<string>("sprk_graphmessageid") == "e2e-bff-001" &&
                     e.GetAttributeValue<string>("sprk_correlationid") == "e2e-bff-001" &&
-                    ((OptionSetValue)e["sprk_communiationtype"]).Value == (int)CommunicationType.Email &&
+                    ((OptionSetValue)e["sprk_communicationtype"]).Value == (int)CommunicationType.Email &&
                     ((OptionSetValue)e["statuscode"]).Value == (int)CommunicationStatus.Send &&
                     ((OptionSetValue)e["sprk_direction"]).Value == (int)CommunicationDirection.Outgoing
                 ),
@@ -461,7 +463,7 @@ public class CommunicationIntegrationTests
         dataverseSenderEntity["sprk_name"] = "Dataverse Name";
         dataverseSenderEntity["sprk_displayname"] = "Dataverse Name";
         dataverseSenderEntity["sprk_isdefaultsender"] = true;
-        dataverseSenderEntity["sprk_sendenableds"] = true;
+        dataverseSenderEntity["sprk_sendenabled"] = true;
         dataverseSenderEntity["sprk_accounttype"] = new OptionSetValue(100000000);
 
         var dataverseMock = new Mock<IDataverseService>();
@@ -687,13 +689,13 @@ public class CommunicationIntegrationTests
         capturedEntity.Should().NotBeNull();
         capturedEntity!.LogicalName.Should().Be("sprk_communication");
 
-        // Verify intentional typo in field name: "communiation" not "communication"
-        capturedEntity.Attributes.Should().ContainKey("sprk_communiationtype",
-            "Field uses intentional Dataverse schema typo: sprk_communiationtype");
+        // Verify communication type field
+        capturedEntity.Attributes.Should().ContainKey("sprk_communicationtype",
+            "sprk_communicationtype field should be set");
 
         // Verify OptionSetValue types
-        capturedEntity["sprk_communiationtype"].Should().BeOfType<OptionSetValue>();
-        ((OptionSetValue)capturedEntity["sprk_communiationtype"]).Value.Should().Be(100000000,
+        capturedEntity["sprk_communicationtype"].Should().BeOfType<OptionSetValue>();
+        ((OptionSetValue)capturedEntity["sprk_communicationtype"]).Value.Should().Be(100000000,
             "CommunicationType.Email maps to 100000000");
 
         capturedEntity["statuscode"].Should().BeOfType<OptionSetValue>();
@@ -784,7 +786,7 @@ public class CommunicationIntegrationTests
         accountEntity["sprk_emailaddress"] = "mailbox-central@spaarke.com";
         accountEntity["sprk_name"] = "Spaarke Central Mailbox";
         accountEntity["sprk_displayname"] = "Spaarke Central";
-        accountEntity["sprk_sendenableds"] = true;
+        accountEntity["sprk_sendenabled"] = true;
         accountEntity["sprk_isdefaultsender"] = true;
         accountEntity["sprk_accounttype"] = new OptionSetValue(100000000);
 
@@ -890,7 +892,7 @@ public class CommunicationIntegrationTests
         accountEntity["sprk_emailaddress"] = "mailbox-central@spaarke.com";
         accountEntity["sprk_name"] = "Spaarke Central Mailbox";
         accountEntity["sprk_displayname"] = "Spaarke Central";
-        accountEntity["sprk_sendenableds"] = true;
+        accountEntity["sprk_sendenabled"] = true;
         accountEntity["sprk_isdefaultsender"] = true;
         accountEntity["sprk_accounttype"] = new OptionSetValue(100000000);
 
@@ -967,7 +969,7 @@ public class CommunicationIntegrationTests
         dataverseSenderEntity["sprk_name"] = "Spaarke Central";
         dataverseSenderEntity["sprk_displayname"] = "Spaarke Central";
         dataverseSenderEntity["sprk_isdefaultsender"] = true;
-        dataverseSenderEntity["sprk_sendenableds"] = true;
+        dataverseSenderEntity["sprk_sendenabled"] = true;
         dataverseSenderEntity["sprk_accounttype"] = new OptionSetValue(100000000);
 
         var dataverseMock = new Mock<IDataverseService>();
@@ -1343,6 +1345,10 @@ public class CommunicationIntegrationTests
             graphFactoryMock.Object,
             dataverseMock.Object,
             accountService,
+            new IncomingAssociationResolver(
+                dataverseMock.Object,
+                graphFactoryMock.Object,
+                Mock.Of<ILogger<IncomingAssociationResolver>>()),
             Mock.Of<IEmailAttachmentProcessor>(),
             new EmlGenerationService(Mock.Of<ILogger<EmlGenerationService>>()),
             null!, // SpeFileStore - ArchiveContainerId not configured in tests, so archival path is skipped
@@ -1445,8 +1451,8 @@ public class CommunicationIntegrationTests
             "Direction must be Incoming (100000000) for inbound emails");
 
         // CommunicationType = Email (100000000) — intentional typo in field name
-        capturedEntity["sprk_communiationtype"].Should().BeOfType<OptionSetValue>();
-        ((OptionSetValue)capturedEntity["sprk_communiationtype"]).Value.Should().Be(
+        capturedEntity["sprk_communicationtype"].Should().BeOfType<OptionSetValue>();
+        ((OptionSetValue)capturedEntity["sprk_communicationtype"]).Value.Should().Be(
             (int)CommunicationType.Email,
             "CommunicationType must be Email (100000000)");
 
@@ -1754,9 +1760,18 @@ public class CommunicationIntegrationTests
             cacheMock.Object,
             Mock.Of<ILogger<CommunicationAccountService>>());
 
+        var sbOptionsMock = new Mock<IOptions<Sprk.Bff.Api.Configuration.ServiceBusOptions>>();
+        sbOptionsMock.Setup(o => o.Value).Returns(new Sprk.Bff.Api.Configuration.ServiceBusOptions());
+        var jobSubmissionMock = new Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>(
+            MockBehavior.Loose,
+            sbOptionsMock.Object,
+            Mock.Of<ILogger<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>>(),
+            new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+
         var pollingService = new InboundPollingBackupService(
             accountService,
             graphFactoryMock.Object,
+            jobSubmissionMock.Object,
             Mock.Of<ILogger<InboundPollingBackupService>>());
 
         // Act: start and immediately stop the service to trigger one poll cycle

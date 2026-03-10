@@ -4,6 +4,9 @@
  * Mirrors the LegalWorkspace FilePreviewDialog but uses callbacks
  * instead of importing service modules directly, so it works within
  * the PCF control's service layer.
+ *
+ * Toolbar: icon-only, right-justified
+ * Order: Open File, Open Document, Email Document, Copy Link, Add/Remove Workspace
  */
 
 import * as React from "react";
@@ -16,7 +19,6 @@ import {
     Button,
     Toolbar,
     ToolbarButton,
-    ToolbarDivider,
     Tooltip,
     Spinner,
     Text,
@@ -27,7 +29,11 @@ import {
 import {
     Dismiss24Regular,
     Open24Regular,
-    OpenRegular,
+    DocumentRegular,
+    MailRegular,
+    LinkRegular,
+    StarRegular,
+    StarFilled,
 } from "@fluentui/react-icons";
 
 // ---------------------------------------------------------------------------
@@ -44,6 +50,14 @@ export interface IFilePreviewDialogProps {
     onOpenFile: (mode: "desktop" | "web") => void;
     /** Open the Dataverse record in a new tab. */
     onOpenRecord: () => void;
+    /** Open the email document dialog. */
+    onEmailDocument: () => void;
+    /** Copy the document link to clipboard. */
+    onCopyLink: () => void;
+    /** Toggle workspace flag. */
+    onToggleWorkspace?: () => void;
+    /** Whether document is currently in workspace. */
+    isInWorkspace?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,18 +99,23 @@ const useStyles = makeStyles({
     toolbar: {
         paddingLeft: tokens.spacingHorizontalM,
         paddingRight: tokens.spacingHorizontalM,
-        paddingTop: tokens.spacingVerticalXS,
-        paddingBottom: tokens.spacingVerticalXS,
+        paddingTop: tokens.spacingVerticalS,
+        paddingBottom: tokens.spacingVerticalS,
         borderBottomWidth: "1px",
         borderBottomStyle: "solid",
         borderBottomColor: tokens.colorNeutralStroke2,
+        backgroundColor: tokens.colorNeutralBackground2,
         flexShrink: 0,
+        justifyContent: "flex-end",
+        minHeight: "36px",
+        gap: tokens.spacingHorizontalS,
     },
     body: {
         ...shorthands.padding("0px"),
         flex: 1,
         minHeight: 0,
         position: "relative" as const,
+        ...shorthands.overflow("hidden"),
     },
     iframe: {
         position: "absolute" as const,
@@ -128,6 +147,10 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
     fetchPreviewUrl,
     onOpenFile,
     onOpenRecord,
+    onEmailDocument,
+    onCopyLink,
+    onToggleWorkspace,
+    isInWorkspace,
 }) => {
     const styles = useStyles();
 
@@ -205,25 +228,48 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
                     </Tooltip>
                 </div>
 
-                {/* Toolbar */}
+                {/* Toolbar — icon-only, right-justified */}
                 <Toolbar className={styles.toolbar} size="small">
                     <Tooltip content="Open file" relationship="label">
                         <ToolbarButton
                             icon={<Open24Regular />}
+                            aria-label="Open file"
                             onClick={handleOpenFile}
-                        >
-                            Open File
-                        </ToolbarButton>
+                        />
                     </Tooltip>
-                    <Tooltip content="Open record" relationship="label">
+                    <Tooltip content="Open document record" relationship="label">
                         <ToolbarButton
-                            icon={<OpenRegular />}
+                            icon={<DocumentRegular />}
+                            aria-label="Open document record"
                             onClick={onOpenRecord}
-                        >
-                            Open Record
-                        </ToolbarButton>
+                        />
                     </Tooltip>
-                    <ToolbarDivider />
+                    <Tooltip content="Email document" relationship="label">
+                        <ToolbarButton
+                            icon={<MailRegular />}
+                            aria-label="Email document"
+                            onClick={onEmailDocument}
+                        />
+                    </Tooltip>
+                    <Tooltip content="Copy link" relationship="label">
+                        <ToolbarButton
+                            icon={<LinkRegular />}
+                            aria-label="Copy link"
+                            onClick={onCopyLink}
+                        />
+                    </Tooltip>
+                    {onToggleWorkspace && (
+                        <Tooltip
+                            content={isInWorkspace ? "Remove from workspace" : "Add to workspace"}
+                            relationship="label"
+                        >
+                            <ToolbarButton
+                                icon={isInWorkspace ? <StarFilled /> : <StarRegular />}
+                                aria-label={isInWorkspace ? "Remove from workspace" : "Add to workspace"}
+                                onClick={onToggleWorkspace}
+                            />
+                        </Tooltip>
+                    )}
                 </Toolbar>
 
                 {/* Preview content */}

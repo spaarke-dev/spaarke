@@ -1,0 +1,76 @@
+<task id="ECS-011" project="Email Communication Solution R2">
+  <metadata>
+    <title>Complete OBO Individual User Send Path</title>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2 - Individual User Outbound (Phase B)</phase>
+    <tags>bff-api, auth</tags>
+    <dependencies>ECS-010</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Complete the OBO send code path in CommunicationService.SendAsync(). When SendMode.User,
+    use GraphClientFactory.ForUserAsync() to send via /me/sendMail. Resolve user email from
+    OBO token claims. Skip approved sender validation for user sends. Set sprk_from to user email.
+  </prompt>
+
+  <role>Senior .NET developer familiar with Microsoft Graph OBO flows</role>
+
+  <goal>
+    CommunicationService.SendAsync() correctly branches on SendMode, sends as user via OBO,
+    and creates sprk_communication record with user's email. All tests pass.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/patterns/auth/token-caching.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-008">Use endpoint filters for authorization</constraint>
+    <constraint source="project">Skip ApprovedSenderValidator for SendMode.User</constraint>
+    <constraint source="project">Resolve user email from OBO token claims (preferred_username or mail)</constraint>
+    <constraint source="project">Multi-tenant: no hardcoded tenant or app IDs</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Implement SendMode Branch">
+      In SendAsync(), add branch: if SendMode.User → use ForUserAsync(), else existing flow.
+    </step>
+    <step order="2" name="Resolve User Email">
+      Extract user email from OBO token claims (preferred_username, mail, or upn).
+      Pattern: see SendEmailNodeExecutor for existing approach.
+    </step>
+    <step order="3" name="Update Communication Record">
+      Set sprk_from to user's email, sprk_direction = Outgoing.
+    </step>
+    <step order="4" name="Write Tests">
+      Add unit tests for OBO send path, user email resolution, and mixed-mode scenarios.
+    </step>
+    <step order="5" name="Build and Test">
+      dotnet build and dotnet test.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SendMode.User uses ForUserAsync() and /me/sendMail</criterion>
+    <criterion testable="true">User email resolved from token claims</criterion>
+    <criterion testable="true">ApprovedSenderValidator skipped for user sends</criterion>
+    <criterion testable="true">sprk_communication record has user's email in sprk_from</criterion>
+    <criterion testable="true">All tests pass</criterion>
+  </acceptance-criteria>
+</task>

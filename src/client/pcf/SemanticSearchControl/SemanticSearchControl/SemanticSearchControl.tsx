@@ -48,6 +48,9 @@ import {
     NavigationService,
 } from "./services";
 import { initializeAuth } from "./authInit";
+import { authenticatedFetch } from "@spaarke/auth";
+import { SendEmailDialog, type ISendEmailPayload } from "@spaarke/ui-components/dist/components/SendEmailDialog";
+import type { ILookupItem } from "@spaarke/ui-components/dist/types/LookupTypes";
 
 /**
  * Styles using makeStyles with Fluent design tokens.
@@ -299,6 +302,9 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     // Find Similar dialog state — URL of the web resource to show in the iframe dialog
     const [findSimilarUrl, setFindSimilarUrl] = useState<string | null>(null);
 
+    // Email dialog state
+    const [emailDialogResult, setEmailDialogResult] = useState<SearchResult | null>(null);
+
     // Filter pane collapse state
     const [isFilterPaneCollapsed, setIsFilterPaneCollapsed] = useState(true);
     const handleToggleFilterPane = useCallback(() => {
@@ -402,20 +408,39 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     // since search results do not pre-populate fileUrl.
     const handleOpenFile = useCallback(
         (result: SearchResult, mode: "web" | "desktop") => {
-            apiService.getOpenLinks(result.documentId).then((openLinks) => {
-                if (mode === "web") {
-                    return window.open(openLinks.webUrl, "_blank", "noopener,noreferrer");
-                }
-                // Desktop: use protocol URL if available, otherwise fall back to web
+            apiService.getOpenLinks(result.documentId).then(async (openLinks) => {
+                // Desktop protocol available (Word, Excel, PowerPoint) — open in native app
                 if (openLinks.desktopUrl) {
                     return window.open(openLinks.desktopUrl, "_self");
                 }
+                // No desktop protocol — download via BFF and let OS open with default app
+                // (e.g. Adobe Acrobat for PDFs). SPE webUrl requires SharePoint permissions
+                // users may not have, so we stream through the BFF's /content endpoint.
+                try {
+                    const contentUrl = `${apiBaseUrl}/api/documents/${encodeURIComponent(result.documentId)}/content`;
+                    const response = await authenticatedFetch(contentUrl);
+                    if (response.ok) {
+                        const blob = await response.blob();
+                        const objectUrl = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = objectUrl;
+                        a.download = openLinks.fileName ?? result.name ?? "document";
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(objectUrl);
+                        return;
+                    }
+                } catch (err) {
+                    console.error("[SemanticSearchControl] Download failed, falling back:", err);
+                }
+                // Final fallback to webUrl
                 return window.open(openLinks.webUrl, "_blank", "noopener,noreferrer");
             }).catch((err) => {
                 console.error("[SemanticSearchControl] Failed to open file:", err);
             });
         },
-        [apiService]
+        [apiService, apiBaseUrl]
     );
 
     // Handle open record
@@ -434,6 +459,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     const handleViewAll = useCallback(() => {
         void navigationService.viewAllResults(query, searchScope, scopeId, filters);
     }, [navigationService, query, searchScope, scopeId, filters]);
+
+    // Handle reload — re-run the current search query
+    const handleReload = useCallback(() => {
+        if (query) {
+            void search(query, filters);
+        }
+    }, [query, search, filters]);
 
     // Handle Find Similar — opens DocumentRelationshipViewer as an in-page iframe dialog
     const handleFindSimilar = useCallback(
@@ -499,13 +531,177 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         [context.webAPI]
     );
 
-    // Handle Add Document — opens document upload dialog custom page
+    // Handle Add Document — opens DocumentUploadWizard Code Page dialog
     const handleAddDocument = useCallback(() => {
         void navigationService.openAddDocument(
             scopeId,
-            searchScope !== "all" ? searchScope : null
+            searchScope !== "all" ? searchScope : null,
+            () => {
+                // Refresh search results after upload completes
+                if (query) {
+                    void search(query, filters);
+                }
+            },
         );
-    }, [navigationService, scopeId, searchScope]);
+    }, [navigationService, scopeId, searchScope, query, search, filters]);
+
+    // Handle Email Document — opens SendEmailDialog with result context
+    const handleEmailDocument = useCallback(
+        (result: SearchResult) => {
+            setEmailDialogResult(result);
+        },
+        []
+    );
+
+    // Handle Copy Link — copies Dataverse record URL to clipboard
+    const handleCopyLink = useCallback(
+        (result: SearchResult) => {
+            try {
+                const clientUrl = ((context as unknown as { page?: { getClientUrl?: () => string } }).page?.getClientUrl?.()) ?? window.location.origin;
+                const recordUrl = `${clientUrl}/main.aspx?etn=sprk_document&id=${result.documentId}&pagetype=entityrecord`;
+                void navigator.clipboard.writeText(recordUrl);
+            } catch (err) {
+                console.error("[SemanticSearchControl] Failed to copy link:", err);
+            }
+        },
+        [context]
+    );
+
+    // Workspace flag tracking — local set of document IDs marked as "in workspace"
+    const [workspaceSet, setWorkspaceSet] = useState<Set<string>>(new Set());
+
+    // Load initial workspace flags from Dataverse when search results change
+    useEffect(() => {
+        if (results.length === 0) return;
+
+        const documentIds = results.map(r => r.documentId);
+        // Build OData filter: sprk_documentid eq 'id1' or sprk_documentid eq 'id2' ...
+        const filterClauses = documentIds.map(id => `sprk_documentid eq '${id}'`);
+        // Batch in groups of 50 to avoid overly long filter strings
+        const batchSize = 50;
+        const batches: string[][] = [];
+        for (let i = 0; i < filterClauses.length; i += batchSize) {
+            batches.push(filterClauses.slice(i, i + batchSize));
+        }
+
+        const loadWorkspaceFlags = async () => {
+            const inWorkspaceIds = new Set<string>();
+            for (const batch of batches) {
+                try {
+                    const filter = batch.join(" or ");
+                    const resp = await context.webAPI.retrieveMultipleRecords(
+                        "sprk_document",
+                        `?$select=sprk_documentid,sprk_inworkspace&$filter=(${filter}) and sprk_inworkspace eq true`
+                    );
+                    for (const entity of (resp.entities || [])) {
+                        const docId = entity.sprk_documentid as string;
+                        if (docId) inWorkspaceIds.add(docId);
+                    }
+                } catch (err) {
+                    console.warn("[SemanticSearchControl] Failed to load workspace flags:", err);
+                }
+            }
+            setWorkspaceSet(inWorkspaceIds);
+        };
+
+        void loadWorkspaceFlags();
+    }, [results, context.webAPI]);
+
+    // Handle Toggle Workspace — toggles the sprk_inworkspace flag on the document.
+    // Uses functional setState to avoid stale-closure issues with workspaceSet.
+    const handleToggleWorkspace = useCallback(
+        (result: SearchResult) => {
+            setWorkspaceSet(prev => {
+                const isCurrentlyIn = prev.has(result.documentId);
+                const newFlag = !isCurrentlyIn;
+                const next = new Set(prev);
+                if (newFlag) {
+                    next.add(result.documentId);
+                } else {
+                    next.delete(result.documentId);
+                }
+                // Update Dataverse (fire-and-forget with revert on failure)
+                context.webAPI.updateRecord("sprk_document", result.documentId, {
+                    sprk_inworkspace: newFlag,
+                }).catch((err: unknown) => {
+                    console.error("[SemanticSearchControl] Failed to toggle workspace flag:", err);
+                    // Revert on failure
+                    setWorkspaceSet(revert => {
+                        const reverted = new Set(revert);
+                        if (isCurrentlyIn) {
+                            reverted.add(result.documentId);
+                        } else {
+                            reverted.delete(result.documentId);
+                        }
+                        return reverted;
+                    });
+                });
+                return next;
+            });
+        },
+        [context.webAPI]
+    );
+
+    // Check if a document is in the workspace
+    const isInWorkspace = useCallback(
+        (result: SearchResult) => workspaceSet.has(result.documentId),
+        [workspaceSet]
+    );
+
+    // Email dialog: search users via Dataverse WebAPI
+    const handleSearchUsers = useCallback(
+        async (query: string): Promise<ILookupItem[]> => {
+            try {
+                const filter = `contains(fullname,'${query.replace(/'/g, "''")}') or contains(internalemailaddress,'${query.replace(/'/g, "''")}')`;
+                const result = await context.webAPI.retrieveMultipleRecords(
+                    "systemuser",
+                    `?$select=systemuserid,fullname,internalemailaddress&$filter=${filter}&$top=10`
+                );
+                return (result.entities || [])
+                    .filter((u: Record<string, unknown>) => u.internalemailaddress)
+                    .map((u: Record<string, unknown>) => ({
+                        id: u.systemuserid as string,
+                        name: `${u.fullname || "Unknown"} (${u.internalemailaddress})`,
+                    }));
+            } catch (err) {
+                console.error("[SemanticSearchControl] User search failed:", err);
+                return [];
+            }
+        },
+        [context.webAPI]
+    );
+
+    // Email dialog: send email via BFF
+    const handleSendEmail = useCallback(
+        async (payload: ISendEmailPayload) => {
+            // Extract email from "Full Name (email@example.com)" format
+            const emailMatch = payload.to.name.match(/\(([^)]+@[^)]+)\)/);
+            const toEmail = emailMatch ? emailMatch[1] : payload.to.name;
+
+            const response = await authenticatedFetch(`${apiBaseUrl}/api/communications/send`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    to: [toEmail],
+                    subject: payload.subject,
+                    body: payload.body,
+                    bodyFormat: "Text",
+                    associations: emailDialogResult ? [{ entityType: "sprk_document", entityId: emailDialogResult.documentId }] : [],
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to send email: ${response.status}`);
+            }
+        },
+        [apiBaseUrl, emailDialogResult]
+    );
+
+    // Build email defaults from result context
+    const emailDefaultSubject = emailDialogResult ? `Document: ${emailDialogResult.name}` : "";
+    const emailDefaultBody = emailDialogResult
+        ? `Dear Colleague,\n\nPlease find the following document for your review:\n\nDocument: ${emailDialogResult.name}\n\n────\n\n${emailDialogResult.summary || emailDialogResult.tldr || "No summary available."}\n\n────\n\nKind regards`
+        : "";
 
     // Determine what content to show in main area
     const renderMainContent = () => {
@@ -579,7 +775,12 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
                     onFindSimilar={handleFindSimilar}
                     onPreview={handlePreview}
                     onSummary={handleSummary}
+                    onEmailDocument={handleEmailDocument}
+                    onCopyLink={handleCopyLink}
+                    onToggleWorkspace={handleToggleWorkspace}
+                    isInWorkspace={isInWorkspace}
                     onViewAll={handleViewAll}
+                    onReload={handleReload}
                     compactMode={compactMode}
                 />
             );
@@ -660,7 +861,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
             {/* Version Footer (always visible) */}
             <div className={styles.versionFooter}>
-                <Text size={100}>v1.1.1 • Built 2026-03-09</Text>
+                <Text size={100}>v1.1.9 • Built 2026-03-10</Text>
             </div>
 
             {/* Find Similar — iframe dialog (no Dataverse chrome) */}
@@ -680,6 +881,16 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
                     </DialogBody>
                 </DialogSurface>
             </Dialog>
+
+            {/* Send Email Dialog */}
+            <SendEmailDialog
+                open={!!emailDialogResult}
+                onClose={() => setEmailDialogResult(null)}
+                defaultSubject={emailDefaultSubject}
+                defaultBody={emailDefaultBody}
+                onSearchUsers={handleSearchUsers}
+                onSend={handleSendEmail}
+            />
         </div>
     );
 };

@@ -113,7 +113,6 @@ internal static class TestHostConfiguration
         // The ServiceBusJobProcessor creates a real ServiceBusProcessor from the fake
         // connection string, which throws ObjectDisposedException during test teardown.
         RemoveHostedService<Sprk.Bff.Api.Services.Jobs.ServiceBusJobProcessor>(services);
-        RemoveHostedService<Sprk.Bff.Api.Services.Jobs.EmailPollingBackupService>(services);
         RemoveHostedService<Sprk.Bff.Api.Services.Jobs.DocumentVectorBackfillService>(services);
         RemoveHostedService<Sprk.Bff.Api.Services.Jobs.EmbeddingMigrationService>(services);
         RemoveHostedService<Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingService>(services);

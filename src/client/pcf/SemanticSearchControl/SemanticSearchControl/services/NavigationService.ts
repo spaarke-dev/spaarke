@@ -167,11 +167,18 @@ export class NavigationService {
     }
 
     /**
-     * Open the document upload dialog custom page (Add Document)
+     * Open the Document Upload Wizard (Code Page web resource).
+     * Uses Integration Pattern B from DOCUMENT-UPLOAD-WIZARD-INTEGRATION-GUIDE.md.
+     *
      * @param scopeId - Current record ID to associate the upload with
      * @param entityType - API entity type name (matter, project, etc.)
+     * @param onDialogClosed - Optional callback after dialog closes (e.g. refresh results)
      */
-    async openAddDocument(scopeId: string | null, entityType: string | null): Promise<void> {
+    async openAddDocument(
+        scopeId: string | null,
+        entityType: string | null,
+        onDialogClosed?: () => void,
+    ): Promise<void> {
         const xrm = this.getXrm();
         if (!xrm?.Navigation?.navigateTo) {
             console.warn("NavigationService.openAddDocument: Xrm.Navigation not available");
@@ -185,29 +192,92 @@ export class NavigationService {
             account: "account",
             contact: "contact",
         };
-        const entityLogicalName = entityType ? entityLogicalNameMap[entityType] : undefined;
+        const parentEntityType = entityType ? (entityLogicalNameMap[entityType] ?? entityType) : "sprk_matter";
+        const cleanId = scopeId ? scopeId.replace(/[{}]/g, "").toLowerCase() : "";
 
-        // Wrap GUID in braces if not already wrapped — Dataverse custom pages require {guid} format
-        const formattedRecordId = scopeId
-            ? (scopeId.startsWith("{") ? scopeId : `{${scopeId}}`)
-            : undefined;
+        // Resolve container ID from business unit
+        let containerId = "";
+        try {
+            const userSettings = xrm.Utility.getGlobalContext().userSettings;
+            const userId = userSettings.userId.replace(/[{}]/g, "");
+            const user = await xrm.WebApi.retrieveRecord(
+                "systemuser", userId, "?$select=_businessunitid_value"
+            );
+            const buId = user["_businessunitid_value"] as string;
+            if (buId) {
+                const bu = await xrm.WebApi.retrieveRecord(
+                    "businessunit", buId, "?$select=sprk_containerid"
+                );
+                containerId = (bu["sprk_containerid"] as string) ?? "";
+            }
+        } catch (err) {
+            console.warn("NavigationService.openAddDocument: Failed to resolve container ID:", err);
+        }
+
+        if (!containerId) {
+            console.error("NavigationService.openAddDocument: No container ID available");
+            return;
+        }
+
+        // Resolve display name from parent record
+        let parentEntityName = "";
+        if (cleanId && parentEntityType) {
+            try {
+                const record = await xrm.WebApi.retrieveRecord(
+                    parentEntityType, cleanId, "?$select=sprk_name,name,sprk_matternumber,sprk_projectname"
+                );
+                parentEntityName = (record["sprk_matternumber"] as string)
+                    ?? (record["sprk_projectname"] as string)
+                    ?? (record["sprk_name"] as string)
+                    ?? (record["name"] as string)
+                    ?? "";
+            } catch {
+                parentEntityName = "";
+            }
+        }
+
+        // Detect theme
+        let theme = "light";
+        try {
+            const bodyBg = window.getComputedStyle(document.body).backgroundColor;
+            const rgbMatch = bodyBg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+            if (rgbMatch) {
+                const luminance =
+                    0.299 * parseInt(rgbMatch[1]) +
+                    0.587 * parseInt(rgbMatch[2]) +
+                    0.114 * parseInt(rgbMatch[3]);
+                if (luminance < 128) theme = "dark";
+            }
+        } catch { /* ignore */ }
+
+        const dataString =
+            "parentEntityType=" + parentEntityType +
+            "&parentEntityId=" + cleanId +
+            "&parentEntityName=" + encodeURIComponent(parentEntityName) +
+            "&containerId=" + containerId +
+            "&theme=" + theme;
 
         try {
             await xrm.Navigation.navigateTo(
                 {
-                    pageType: "custom",
-                    name: "sprk_documentuploaddialog_e52db",
-                    entityName: entityLogicalName,
-                    recordId: formattedRecordId,
-                },
+                    pageType: "webresource" as Xrm.Navigation.PageInputHtmlWebResource["pageType"],
+                    webresourceName: "sprk_documentuploadwizard",
+                    data: encodeURIComponent(dataString),
+                } as Xrm.Navigation.PageInputHtmlWebResource,
                 {
                     target: 2,
-                    width: { value: 70, unit: "%" },
-                    height: { value: 80, unit: "%" },
+                    width: { value: 60, unit: "%" },
+                    height: { value: 70, unit: "%" },
                 }
             );
+            // Dialog closed successfully
+            onDialogClosed?.();
         } catch (error) {
-            console.error("NavigationService.openAddDocument: Navigation failed", error);
+            // errorCode 2 = user cancelled — not an error
+            const err = error as { errorCode?: number };
+            if (err?.errorCode !== 2) {
+                console.error("NavigationService.openAddDocument: Navigation failed", error);
+            }
         }
     }
 

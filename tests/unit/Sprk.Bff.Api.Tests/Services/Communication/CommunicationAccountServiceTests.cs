@@ -71,7 +71,7 @@ public class CommunicationAccountServiceTests
         entity["sprk_emailaddress"] = email;
         entity["sprk_name"] = name;
         if (displayName != null) entity["sprk_displayname"] = displayName;
-        entity["sprk_sendenableds"] = sendEnabled;
+        entity["sprk_sendenabled"] = sendEnabled;
         entity["sprk_isdefaultsender"] = isDefault;
         entity["sprk_receiveenabled"] = receiveEnabled;
         entity["sprk_accounttype"] = new OptionSetValue(accountType);
@@ -151,7 +151,7 @@ public class CommunicationAccountServiceTests
 
         // Assert
         _dataverseMock.Verify(d => d.QueryCommunicationAccountsAsync(
-            It.Is<string>(f => f.Contains("sprk_sendenableds eq true") && f.Contains("statecode eq 0")),
+            It.Is<string>(f => f.Contains("sprk_sendenabled eq true") && f.Contains("statecode eq 0")),
             It.IsAny<string>(),
             It.IsAny<CancellationToken>()), Times.Once);
         result.Should().HaveCount(1);

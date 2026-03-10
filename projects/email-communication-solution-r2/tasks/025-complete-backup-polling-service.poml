@@ -1,0 +1,63 @@
+<task id="ECS-025" project="Email Communication Solution R2">
+  <metadata>
+    <title>Complete Backup Polling Service</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>3 - Inbound Shared Mailbox Monitoring (Phase C)</phase>
+    <tags>bff-api, graph</tags>
+    <dependencies>ECS-023</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Complete CommunicationPollingBackupService (InboundPollingBackupService) that polls
+    Graph every 5 minutes for each receive-enabled mailbox. Query for messages since last poll.
+    Deduplicate against already-processed messages. Enqueue missed messages as
+    ProcessIncomingCommunication jobs.
+  </prompt>
+
+  <role>Senior .NET developer</role>
+
+  <goal>
+    Backup polling service catches messages missed by webhooks within 5 minutes.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="project">Poll every 5 minutes</constraint>
+    <constraint source="project">Query: GET /users/{email}/mailFolders/inbox/messages?$filter=receivedDateTime ge {lastPoll}</constraint>
+    <constraint source="project">Deduplicate: check sprk_graphmessageid before enqueue</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Review Existing Service">Read InboundPollingBackupService.cs.</step>
+    <step order="2" name="Complete Polling Logic">
+      Timer every 5 min. For each receive-enabled account, query Graph for recent messages.
+      Check if already processed (Redis key or Dataverse lookup). Enqueue if new.
+    </step>
+    <step order="3" name="Write Tests">Test polling logic, dedup, error handling.</step>
+    <step order="4" name="Build and Test">dotnet build and dotnet test.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/InboundPollingBackupService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Polls every 5 minutes per receive-enabled account</criterion>
+    <criterion testable="true">Queries Graph for messages since last poll</criterion>
+    <criterion testable="true">Deduplicates against already-processed messages</criterion>
+    <criterion testable="true">Enqueues missed messages as ProcessIncomingCommunication jobs</criterion>
+    <criterion testable="true">All tests pass</criterion>
+  </acceptance-criteria>
+</task>

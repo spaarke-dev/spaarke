@@ -35,7 +35,7 @@ public sealed class MailboxVerificationService
 
     /// <summary>
     /// Verifies a communication account's mailbox capabilities.
-    /// Tests send (if sprk_sendenableds=true) and read (if sprk_receiveenabled=true),
+    /// Tests send (if sprk_sendenabled=true) and read (if sprk_receiveenabled=true),
     /// then updates sprk_verificationstatus and sprk_lastverified on the account record.
     /// </summary>
     /// <param name="accountId">The Dataverse sprk_communicationaccount record ID.</param>
@@ -55,8 +55,9 @@ public sealed class MailboxVerificationService
                 new[]
                 {
                     "sprk_emailaddress", "sprk_displayname", "sprk_name",
-                    "sprk_sendenableds", "sprk_receiveenabled",
-                    "sprk_accounttype", "sprk_verificationstatus", "sprk_lastverified"
+                    "sprk_sendenabled", "sprk_receiveenabled",
+                    "sprk_accounttype", "sprk_verificationstatus", "sprk_lastverified",
+                    "sprk_verificationmessage"
                 },
                 ct);
 
@@ -115,7 +116,7 @@ public sealed class MailboxVerificationService
         var verifiedAt = DateTimeOffset.UtcNow;
 
         // 5. Update Dataverse with results
-        await UpdateVerificationResultAsync(accountId, overallStatus, verifiedAt, ct);
+        await UpdateVerificationResultAsync(accountId, overallStatus, verifiedAt, failureReason, ct);
 
         _logger.LogInformation(
             "Mailbox verification completed for account {AccountId} ({Email}): {Status} | Send={Send}, Read={Read}",
@@ -251,6 +252,7 @@ public sealed class MailboxVerificationService
         Guid accountId,
         VerificationStatus status,
         DateTimeOffset verifiedAt,
+        string? verificationMessage,
         CancellationToken ct)
     {
         try
@@ -258,7 +260,8 @@ public sealed class MailboxVerificationService
             var fields = new Dictionary<string, object>
             {
                 ["sprk_verificationstatus"] = new OptionSetValue((int)status),
-                ["sprk_lastverified"] = verifiedAt.UtcDateTime
+                ["sprk_lastverified"] = verifiedAt.UtcDateTime,
+                ["sprk_verificationmessage"] = verificationMessage ?? string.Empty
             };
 
             await _dataverseService.UpdateAsync("sprk_communicationaccount", accountId, fields, ct);
@@ -288,14 +291,15 @@ public sealed class MailboxVerificationService
             AccountType = entity.Contains("sprk_accounttype")
                 ? (AccountType)(entity.GetAttributeValue<OptionSetValue>("sprk_accounttype")?.Value ?? 100000000)
                 : AccountType.SharedAccount,
-            SendEnabled = entity.GetAttributeValue<bool>("sprk_sendenableds"),
+            SendEnabled = entity.GetAttributeValue<bool>("sprk_sendenabled"),
             ReceiveEnabled = entity.GetAttributeValue<bool>("sprk_receiveenabled"),
             VerificationStatus = entity.Contains("sprk_verificationstatus")
                 ? (VerificationStatus?)(entity.GetAttributeValue<OptionSetValue>("sprk_verificationstatus")?.Value)
                 : null,
             LastVerified = entity.Contains("sprk_lastverified")
                 ? entity.GetAttributeValue<DateTime?>("sprk_lastverified")
-                : null
+                : null,
+            VerificationMessage = entity.GetAttributeValue<string>("sprk_verificationmessage")
         };
     }
 }

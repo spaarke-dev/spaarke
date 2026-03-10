@@ -1,0 +1,76 @@
+<task id="ECS-035" project="Email Communication Solution R2">
+  <metadata>
+    <title>Delete Retired Components (Legacy Email Pipeline)</title>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>4 - Email-to-Document Migration (Phase E)</phase>
+    <tags>bff-api, cleanup</tags>
+    <dependencies>ECS-033, ECS-034</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Delete all retired components from the codebase. Remove: EmailToEmlConverter,
+    IEmailToEmlConverter, EmailToDocumentJobHandler, EmailPollingBackupService,
+    EmailFilterService, IEmailFilterService, EmailRuleSeedService, EmailEndpoints webhook routes,
+    EmailProcessingOptions (consolidate into CommunicationOptions). Remove DI registrations.
+    Remove associated test files. Verify dotnet build passes after deletion.
+  </prompt>
+
+  <role>Senior .NET developer performing code cleanup</role>
+
+  <goal>
+    All retired legacy email pipeline components deleted. No dangling references.
+    dotnet build and dotnet test pass clean.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>projects/email-communication-solution-r2/design-communication-accounts.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Delete Service Files">
+      Delete: EmailToEmlConverter.cs, IEmailToEmlConverter.cs, EmailFilterService.cs,
+      IEmailFilterService.cs, EmailRuleSeedService.cs.
+    </step>
+    <step order="2" name="Delete Job Handlers">
+      Delete: EmailToDocumentJobHandler.cs, EmailPollingBackupService.cs.
+    </step>
+    <step order="3" name="Delete Webhook Routes">
+      Remove webhook-related routes from EmailEndpoints.cs.
+      If EmailEndpoints.cs is now empty, delete the file.
+    </step>
+    <step order="4" name="Consolidate Config">
+      Merge remaining EmailProcessingOptions into CommunicationOptions.
+      Delete EmailProcessingOptions.cs if empty.
+    </step>
+    <step order="5" name="Update DI Registrations">
+      Remove registrations for deleted services from CommunicationModule.cs or Program.cs.
+    </step>
+    <step order="6" name="Delete Test Files">
+      Delete associated test files for removed components.
+    </step>
+    <step order="7" name="Fix Dangling References">
+      Search codebase for references to deleted classes. Fix or remove.
+    </step>
+    <step order="8" name="Build and Test">
+      dotnet build and dotnet test — must pass clean.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">Multiple files deleted</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All files from retirement checklist deleted</criterion>
+    <criterion testable="true">No dangling references to deleted classes</criterion>
+    <criterion testable="true">DI registrations cleaned up</criterion>
+    <criterion testable="true">dotnet build passes with no errors</criterion>
+    <criterion testable="true">dotnet test passes</criterion>
+  </acceptance-criteria>
+</task>

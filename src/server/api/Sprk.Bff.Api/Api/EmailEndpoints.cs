@@ -34,9 +34,6 @@ public static class EmailEndpoints
     // Job type for email processing
     private const string JobTypeProcessEmail = "ProcessEmailToDocument";
 
-    // Job type for batch email processing
-    private const string JobTypeBatchProcessEmails = "BatchProcessEmails";
-
     public static IEndpointRouteBuilder MapEmailEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/v1/emails")
@@ -83,43 +80,6 @@ public static class EmailEndpoints
         var adminGroup = app.MapGroup("/api/v1/emails/admin")
             .RequireAuthorization()
             .WithTags("Email Admin");
-
-        // POST /api/v1/emails/admin/seed-rules - Seed default email processing rules
-        adminGroup.MapPost("/seed-rules", SeedDefaultRulesAsync)
-            .WithName("SeedEmailProcessingRules")
-            .WithDescription("Seed default email processing rules to Dataverse (idempotent)")
-            .Produces<SeedRulesResponse>(StatusCodes.Status200OK)
-            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
-
-        // GET /api/v1/emails/admin/rules - Get all active rules (for debugging/admin)
-        adminGroup.MapGet("/rules", GetActiveRulesAsync)
-            .WithName("GetActiveEmailRules")
-            .WithDescription("Get all active email processing rules from Dataverse")
-            .Produces<IReadOnlyList<EmailFilterRule>>(StatusCodes.Status200OK)
-            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
-
-        // POST /api/v1/emails/admin/refresh-rules-cache - Force refresh rules cache
-        adminGroup.MapPost("/refresh-rules-cache", RefreshRulesCacheAsync)
-            .WithName("RefreshEmailRulesCache")
-            .WithDescription("Force refresh the email processing rules cache")
-            .Produces(StatusCodes.Status204NoContent)
-            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
-
-        // POST /api/v1/emails/admin/batch-process - Batch process historical emails
-        adminGroup.MapPost("/batch-process", BatchProcessEmailsAsync)
-            .WithName("BatchProcessEmails")
-            .WithDescription("Submit a batch job to process historical emails within a date range")
-            .Produces<BatchProcessEmailsResponse>(StatusCodes.Status202Accepted)
-            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
-            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
-
-        // GET /api/v1/emails/admin/batch-process/{jobId}/status - Get batch job status
-        adminGroup.MapGet("/batch-process/{jobId}/status", GetBatchJobStatusAsync)
-            .WithName("GetBatchJobStatus")
-            .WithDescription("Get the status of a batch processing job")
-            .Produces<BatchJobStatusResponse>(StatusCodes.Status200OK)
-            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
-            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
         // ═══════════════════════════════════════════════════════════════════════════
         // DLQ Admin Endpoints (Task 043)
@@ -168,7 +128,7 @@ public static class EmailEndpoints
         HttpRequest request,
         JobSubmissionService jobSubmissionService,
         IOptions<EmailProcessingOptions> emailOptions,
-        Telemetry.EmailTelemetry telemetry,
+        Telemetry.CommunicationTelemetry telemetry,
         ILogger<Program> logger,
         CancellationToken cancellationToken)
     {
@@ -758,242 +718,6 @@ public static class EmailEndpoints
         };
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Admin Endpoint Handlers
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Seed default email processing rules to Dataverse.
-    /// Idempotent - skips rules that already exist.
-    /// </summary>
-    private static async Task<IResult> SeedDefaultRulesAsync(
-        EmailRuleSeedService seedService,
-        ILogger<Program> logger,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            logger.LogInformation("Starting email processing rules seed operation");
-
-            var result = await seedService.SeedDefaultRulesAsync(forceUpdate: false, cancellationToken);
-
-            return Results.Ok(new SeedRulesResponse
-            {
-                Created = result.Created,
-                Skipped = result.Skipped,
-                Errors = result.Errors,
-                TotalRulesAvailable = EmailRuleSeedService.DefaultRules.Count,
-                Success = result.IsSuccess
-            });
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error seeding email processing rules");
-            return Results.Problem(
-                title: "Seed Operation Failed",
-                detail: ex.Message,
-                statusCode: StatusCodes.Status500InternalServerError);
-        }
-    }
-
-    /// <summary>
-    /// Get all active email processing rules (for debugging/admin).
-    /// </summary>
-    private static async Task<IResult> GetActiveRulesAsync(
-        IEmailFilterService filterService,
-        ILogger<Program> logger,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var rules = await filterService.GetActiveRulesAsync(cancellationToken);
-            return Results.Ok(rules);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error retrieving active email processing rules");
-            return Results.Problem(
-                title: "Failed to Retrieve Rules",
-                detail: ex.Message,
-                statusCode: StatusCodes.Status500InternalServerError);
-        }
-    }
-
-    /// <summary>
-    /// Force refresh the email processing rules cache.
-    /// </summary>
-    private static async Task<IResult> RefreshRulesCacheAsync(
-        IEmailFilterService filterService,
-        ILogger<Program> logger,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            logger.LogInformation("Force refreshing email processing rules cache");
-            await filterService.RefreshRulesAsync(cancellationToken);
-            return Results.NoContent();
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error refreshing email processing rules cache");
-            return Results.Problem(
-                title: "Cache Refresh Failed",
-                detail: ex.Message,
-                statusCode: StatusCodes.Status500InternalServerError);
-        }
-    }
-
-    /// <summary>
-    /// Submit a batch job to process historical emails.
-    /// Returns 202 Accepted with job tracking information.
-    /// </summary>
-    private static async Task<IResult> BatchProcessEmailsAsync(
-        BatchProcessEmailsRequest request,
-        JobSubmissionService jobSubmissionService,
-        BatchJobStatusStore statusStore,
-        IOptions<EmailProcessingOptions> emailOptions,
-        Telemetry.EmailTelemetry telemetry,
-        ILogger<Program> logger,
-        HttpContext context,
-        CancellationToken cancellationToken)
-    {
-        var traceId = context.TraceIdentifier;
-        var correlationId = context.Request.Headers["X-Correlation-Id"].FirstOrDefault() ?? traceId;
-
-        try
-        {
-            logger.LogInformation(
-                "Received batch process request: StartDate={StartDate}, EndDate={EndDate}, MaxEmails={MaxEmails}, CorrelationId={CorrelationId}",
-                request.StartDate, request.EndDate, request.MaxEmails, correlationId);
-
-            // Validate date range
-            if (request.StartDate > request.EndDate)
-            {
-                return Results.Problem(
-                    title: "Invalid Date Range",
-                    detail: "StartDate must be before or equal to EndDate",
-                    statusCode: StatusCodes.Status400BadRequest,
-                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
-            }
-
-            // Validate date range is not too far in the future
-            if (request.EndDate > DateTime.UtcNow.AddDays(1))
-            {
-                return Results.Problem(
-                    title: "Invalid Date Range",
-                    detail: "EndDate cannot be in the future",
-                    statusCode: StatusCodes.Status400BadRequest,
-                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
-            }
-
-            // Validate date range span (max 365 days)
-            var dateSpan = request.EndDate - request.StartDate;
-            if (dateSpan.TotalDays > 365)
-            {
-                return Results.Problem(
-                    title: "Invalid Date Range",
-                    detail: "Date range cannot exceed 365 days. Submit multiple batch jobs for larger ranges.",
-                    statusCode: StatusCodes.Status400BadRequest,
-                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
-            }
-
-            // Determine container ID
-            var containerId = request.ContainerId ?? emailOptions.Value.DefaultContainerId;
-            if (string.IsNullOrEmpty(containerId))
-            {
-                return Results.Problem(
-                    title: "Missing Container",
-                    detail: "No container ID specified and no default configured",
-                    statusCode: StatusCodes.Status400BadRequest,
-                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
-            }
-
-            // Create batch job payload
-            var jobPayload = JsonDocument.Parse(JsonSerializer.Serialize(new
-            {
-                StartDate = request.StartDate,
-                EndDate = request.EndDate,
-                ContainerId = containerId,
-                IncludeAttachments = request.IncludeAttachments,
-                CreateAttachmentDocuments = request.CreateAttachmentDocuments,
-                QueueForAiProcessing = request.QueueForAiProcessing,
-                DirectionFilter = request.DirectionFilter?.ToString(),
-                StatusFilter = request.StatusFilter.ToString(),
-                SkipAlreadyConverted = request.SkipAlreadyConverted,
-                MaxEmails = request.MaxEmails,
-                MailboxFilter = request.MailboxFilter,
-                SenderDomainFilter = request.SenderDomainFilter,
-                SubjectContainsFilter = request.SubjectContainsFilter,
-                Priority = request.Priority
-            }));
-
-            // Generate unique idempotency key based on request parameters
-            var idempotencyKey = $"BatchProcess:{request.StartDate:yyyyMMdd}-{request.EndDate:yyyyMMdd}:{correlationId}";
-
-            var job = new JobContract
-            {
-                JobType = JobTypeBatchProcessEmails,
-                SubjectId = $"batch-{request.StartDate:yyyyMMdd}-{request.EndDate:yyyyMMdd}",
-                CorrelationId = correlationId,
-                IdempotencyKey = idempotencyKey,
-                Payload = jobPayload,
-                MaxAttempts = 1 // Batch jobs should not auto-retry (admin can resubmit)
-            };
-
-            await jobSubmissionService.SubmitJobAsync(job, cancellationToken);
-
-            // Create initial status record in distributed cache
-            var filters = new BatchFiltersApplied
-            {
-                StartDate = request.StartDate,
-                EndDate = request.EndDate,
-                DirectionFilter = request.DirectionFilter?.ToString(),
-                StatusFilter = request.StatusFilter.ToString(),
-                SkipAlreadyConverted = request.SkipAlreadyConverted,
-                MaxEmails = request.MaxEmails,
-                MailboxFilter = request.MailboxFilter,
-                SenderDomainFilter = request.SenderDomainFilter,
-                SubjectContainsFilter = request.SubjectContainsFilter
-            };
-
-            await statusStore.CreateJobStatusAsync(
-                job.JobId.ToString(),
-                filters,
-                request.MaxEmails, // Estimated count - actual count determined during processing
-                cancellationToken);
-
-            logger.LogInformation(
-                "Submitted batch job {JobId} for date range {StartDate} to {EndDate}, MaxEmails={MaxEmails}",
-                job.JobId, request.StartDate, request.EndDate, request.MaxEmails);
-
-            telemetry.RecordBatchJobSubmitted(request.StartDate, request.EndDate, request.MaxEmails);
-
-            var statusUrl = $"/api/v1/emails/admin/batch-process/{job.JobId}/status";
-
-            return Results.Accepted(
-                statusUrl,
-                new BatchProcessEmailsResponse
-                {
-                    JobId = job.JobId.ToString(),
-                    CorrelationId = correlationId,
-                    StatusUrl = statusUrl,
-                    Message = $"Batch processing job submitted for emails from {request.StartDate:yyyy-MM-dd} to {request.EndDate:yyyy-MM-dd}",
-                    EstimatedEmailCount = request.MaxEmails, // Actual count determined during processing
-                    Filters = filters,
-                    SubmittedAt = DateTime.UtcNow
-                });
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error submitting batch process job, TraceId={TraceId}", traceId);
-            return Results.Problem(
-                title: "Batch Job Submission Failed",
-                detail: "An unexpected error occurred submitting the batch processing job",
-                statusCode: StatusCodes.Status500InternalServerError,
-                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
-        }
-    }
-
     /// <summary>
     /// Get email processing statistics for admin monitoring.
     /// Returns in-memory stats since service startup.
@@ -1014,62 +738,6 @@ public static class EmailEndpoints
                 title: "Failed to Retrieve Statistics",
                 detail: ex.Message,
                 statusCode: StatusCodes.Status500InternalServerError);
-        }
-    }
-
-    /// <summary>
-    /// Get the status of a batch processing job.
-    /// Returns progress, counts, errors, and estimated time remaining.
-    /// </summary>
-    private static async Task<IResult> GetBatchJobStatusAsync(
-        string jobId,
-        BatchJobStatusStore statusStore,
-        ILogger<Program> logger,
-        HttpContext context,
-        CancellationToken cancellationToken)
-    {
-        var traceId = context.TraceIdentifier;
-
-        try
-        {
-            logger.LogDebug("Retrieving batch job status for {JobId}", jobId);
-
-            // Validate job ID format
-            if (!Guid.TryParse(jobId, out _))
-            {
-                return Results.Problem(
-                    title: "Invalid Job ID",
-                    detail: "Job ID must be a valid GUID",
-                    statusCode: StatusCodes.Status400BadRequest,
-                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
-            }
-
-            var status = await statusStore.GetJobStatusAsync(jobId, cancellationToken);
-
-            if (status == null)
-            {
-                logger.LogWarning("Batch job status not found for {JobId}", jobId);
-                return Results.Problem(
-                    title: "Job Not Found",
-                    detail: $"No batch processing job found with ID '{jobId}'",
-                    statusCode: StatusCodes.Status404NotFound,
-                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
-            }
-
-            logger.LogDebug(
-                "Batch job {JobId} status: {Status}, Progress={Progress}%",
-                jobId, status.Status, status.ProgressPercent);
-
-            return Results.Ok(status);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error retrieving batch job status for {JobId}", jobId);
-            return Results.Problem(
-                title: "Status Retrieval Failed",
-                detail: "An unexpected error occurred retrieving job status",
-                statusCode: StatusCodes.Status500InternalServerError,
-                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
         }
     }
 
@@ -1215,25 +883,4 @@ public static class EmailEndpoints
                 extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
         }
     }
-}
-
-/// <summary>
-/// Response from seeding default email processing rules.
-/// </summary>
-public record SeedRulesResponse
-{
-    /// <summary>Number of rules created.</summary>
-    public int Created { get; init; }
-
-    /// <summary>Number of rules skipped (already existed).</summary>
-    public int Skipped { get; init; }
-
-    /// <summary>List of error messages if any operations failed.</summary>
-    public List<string> Errors { get; init; } = [];
-
-    /// <summary>Total number of default rules available to seed.</summary>
-    public int TotalRulesAvailable { get; init; }
-
-    /// <summary>Whether the operation completed successfully (no errors).</summary>
-    public bool Success { get; init; }
 }

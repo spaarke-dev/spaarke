@@ -1,0 +1,52 @@
+<task id="ECS-004" project="Email Communication Solution R2">
+  <metadata>
+    <title>Document Exchange Access Policy Setup</title>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>1 - Communication Account Entity (Phase A)</phase>
+    <tags>documentation, exchange</tags>
+    <dependencies>ECS-001</dependencies>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    Document the Exchange Online access policy setup steps for multi-tenant deployment.
+    Create runbook with security group creation, application access policy, and verification steps.
+    This is a manual admin task — document it as a deployment guide section.
+  </prompt>
+
+  <role>DevOps engineer documenting deployment procedures</role>
+
+  <goal>
+    Updated COMMUNICATION-DEPLOYMENT-GUIDE.md with Exchange access policy setup section
+    covering security group, application access policy, and verification for any tenant.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/design-communication-accounts.md</file>
+      <file>docs/guides/COMMUNICATION-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review Existing Guide">
+      Read COMMUNICATION-DEPLOYMENT-GUIDE.md for current content.
+    </step>
+    <step order="2" name="Add Exchange Setup Section">
+      Add section covering: security group creation, application access policy,
+      verification commands, adding new mailboxes. Use parameterized values
+      (not hardcoded) for multi-tenant readiness.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="docs">docs/guides/COMMUNICATION-DEPLOYMENT-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Guide includes parameterized PowerShell commands (no hardcoded IDs)</criterion>
+    <criterion testable="true">Guide covers security group creation, policy creation, verification</criterion>
+    <criterion testable="true">Guide covers adding new mailboxes to existing group</criterion>
+  </acceptance-criteria>
+</task>

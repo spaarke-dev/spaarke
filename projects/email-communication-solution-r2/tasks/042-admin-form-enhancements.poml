@@ -1,0 +1,47 @@
+<task id="ECS-042" project="Email Communication Solution R2">
+  <metadata>
+    <title>Admin Form Enhancements (Verification, Counts, Subscriptions)</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>5 - Verification and Admin UX (Phase D)</phase>
+    <tags>dataverse, admin-ux</tags>
+    <dependencies>ECS-040, ECS-041</dependencies>
+    <rigor>STANDARD</rigor>
+    <completed-date>2026-03-09</completed-date>
+  </metadata>
+
+  <prompt>
+    Enhance sprk_communicationaccount form with: verification status display,
+    verification button (triggers endpoint), send count display, subscription status
+    for receive-enabled accounts. System-managed fields displayed as read-only.
+  </prompt>
+
+  <role>Dataverse solution developer</role>
+
+  <goal>Admin form provides full visibility and verification capability.</goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/constraints/data.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Add Verification Section">Display status, last verified, message.</step>
+    <step order="2" name="Add Verify Button">Web resource button that calls verification endpoint.</step>
+    <step order="3" name="Add Send Count Section">Display sends today vs daily limit.</step>
+    <step order="4" name="Add Subscription Section">Display subscription status for receive-enabled.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">Dataverse form updates</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Verification status visible on form</criterion>
+    <criterion testable="true">Verify button triggers endpoint and updates form</criterion>
+    <criterion testable="true">Send count displayed</criterion>
+    <criterion testable="true">Subscription status displayed for receive-enabled</criterion>
+  </acceptance-criteria>
+</task>

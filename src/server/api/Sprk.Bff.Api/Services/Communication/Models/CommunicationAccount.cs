@@ -12,13 +12,22 @@ public sealed class CommunicationAccount
     public string? DisplayName { get; init; }
     public AccountType AccountType { get; init; }
 
-    /// <summary>Note: actual Dataverse field is sprk_sendenableds (trailing 's').</summary>
+    /// <summary>Maps to Dataverse field sprk_sendenabled.</summary>
     public bool SendEnabled { get; init; }
 
     public bool IsDefaultSender { get; init; }
     public bool ReceiveEnabled { get; init; }
     public string? MonitorFolder { get; init; }
     public bool AutoCreateRecords { get; init; }
+
+    /// <summary>Maps to Dataverse field sprk_archiveincomingoptin. Defaults to true if not set.</summary>
+    public bool? ArchiveIncomingOptIn { get; init; }
+
+    /// <summary>Maps to Dataverse field sprk_archiveoutgoingoptin. Defaults to true if not set.</summary>
+    public bool? ArchiveOutgoingOptIn { get; init; }
+
+    /// <summary>Maps to Dataverse lookup sprk_defaultregardingmatter. Used as fallback in association resolution.</summary>
+    public Guid? DefaultRegardingMatterId { get; init; }
 
     /// <summary>Graph subscription ID. Null means no subscription configured.</summary>
     public string? SubscriptionId { get; init; }
@@ -28,6 +37,15 @@ public sealed class CommunicationAccount
     public string? SecurityGroupName { get; init; }
     public VerificationStatus? VerificationStatus { get; init; }
     public DateTimeOffset? LastVerified { get; init; }
+
+    /// <summary>Maps to Dataverse field sprk_verificationmessage. Contains last verification result detail.</summary>
+    public string? VerificationMessage { get; init; }
+
+    /// <summary>Maps to Dataverse field sprk_sendstoday. Tracks outbound sends in current UTC day.</summary>
+    public int SendsToday { get; init; }
+
+    /// <summary>Maps to Dataverse field sprk_dailysendlimit. Null means unlimited.</summary>
+    public int? DailySendLimit { get; init; }
 
     /// <summary>
     /// Derives auth method from account type.

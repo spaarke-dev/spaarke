@@ -8,8 +8,11 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using System.Text.Json;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Communication.Models;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
 namespace Sprk.Bff.Api.Services.Communication;
@@ -26,6 +29,8 @@ public sealed class CommunicationService
     private readonly IDataverseService _dataverseService;
     private readonly EmlGenerationService _emlGenerationService;
     private readonly SpeFileStore _speFileStore;
+    private readonly CommunicationAccountService _accountService;
+    private readonly JobSubmissionService _jobSubmissionService;
     private readonly CommunicationOptions _options;
     private readonly ILogger<CommunicationService> _logger;
 
@@ -35,6 +40,8 @@ public sealed class CommunicationService
         IDataverseService dataverseService,
         EmlGenerationService emlGenerationService,
         SpeFileStore speFileStore,
+        CommunicationAccountService accountService,
+        JobSubmissionService jobSubmissionService,
         IOptions<CommunicationOptions> options,
         ILogger<CommunicationService> logger)
     {
@@ -43,6 +50,8 @@ public sealed class CommunicationService
         _dataverseService = dataverseService;
         _emlGenerationService = emlGenerationService;
         _speFileStore = speFileStore;
+        _accountService = accountService;
+        _jobSubmissionService = jobSubmissionService;
         _options = options.Value;
         _logger = logger;
     }
@@ -110,6 +119,39 @@ public sealed class CommunicationService
                 });
         }
 
+        // Step 2b: Check daily send limit
+        CommunicationAccount? senderAccount = null;
+        try
+        {
+            senderAccount = await _accountService.GetSendAccountByEmailAsync(senderResult.Email!, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to retrieve sender account for daily limit check (proceeding without limit check) | CorrelationId: {CorrelationId}",
+                correlationId);
+        }
+
+        if (senderAccount is { DailySendLimit: > 0 } && senderAccount.SendsToday >= senderAccount.DailySendLimit)
+        {
+            _logger.LogWarning(
+                "Daily send limit reached | CorrelationId: {CorrelationId}, AccountId: {AccountId}, SendsToday: {SendsToday}, DailySendLimit: {DailySendLimit}",
+                correlationId, senderAccount.Id, senderAccount.SendsToday, senderAccount.DailySendLimit);
+
+            throw new SdapProblemException(
+                code: "DAILY_SEND_LIMIT_REACHED",
+                title: "Daily Send Limit Reached",
+                detail: $"This mailbox has reached its daily send limit of {senderAccount.DailySendLimit}. Sends will reset at midnight UTC.",
+                statusCode: 429,
+                extensions: new Dictionary<string, object>
+                {
+                    ["correlationId"] = correlationId,
+                    ["sendsToday"] = senderAccount.SendsToday,
+                    ["dailySendLimit"] = senderAccount.DailySendLimit.Value
+                });
+        }
+
         // Step 3: Build Graph message
         var message = BuildGraphMessage(request, senderResult);
 
@@ -138,6 +180,22 @@ public sealed class CommunicationService
                 senderResult.Email,
                 request.To.Length);
 
+            // Step 4b: Increment daily send count (best-effort — don't fail the send)
+            if (senderAccount is not null)
+            {
+                try
+                {
+                    await _accountService.IncrementSendCountAsync(senderAccount.Id, cancellationToken);
+                }
+                catch (Exception incEx)
+                {
+                    _logger.LogWarning(
+                        incEx,
+                        "Failed to increment daily send count (non-fatal) | CorrelationId: {CorrelationId}, AccountId: {AccountId}",
+                        correlationId, senderAccount.Id);
+                }
+            }
+
             // Step 5: Create Dataverse communication record (best-effort)
             Guid? communicationId = null;
             try
@@ -153,9 +211,37 @@ public sealed class CommunicationService
             }
 
             // Step 6: Archive to SPE if requested (best-effort)
+            // Check ArchiveOutgoingOptIn on the sender's CommunicationAccount (default true if not set)
             Guid? archivedDocumentId = null;
             string? archivalWarning = null;
-            if (request.ArchiveToSpe && communicationId.HasValue)
+            bool archiveOutgoingOptIn = true;
+            if (request.ArchiveToSpe && senderResult.Email is not null)
+            {
+                try
+                {
+                    var archiveAccount = await _accountService.GetSendAccountByEmailAsync(senderResult.Email, cancellationToken);
+                    if (archiveAccount is not null)
+                    {
+                        archiveOutgoingOptIn = archiveAccount.ArchiveOutgoingOptIn ?? true;
+                    }
+                }
+                catch (Exception optInEx)
+                {
+                    _logger.LogWarning(
+                        optInEx,
+                        "Failed to check ArchiveOutgoingOptIn for sender {SenderEmail} (defaulting to true) | CorrelationId: {CorrelationId}",
+                        senderResult.Email, correlationId);
+                }
+            }
+
+            if (request.ArchiveToSpe && !archiveOutgoingOptIn)
+            {
+                archivalWarning = "Archival skipped: ArchiveOutgoingOptIn is disabled for this sender account.";
+                _logger.LogInformation(
+                    "SPE archival skipped — ArchiveOutgoingOptIn is false for sender {SenderEmail} | CorrelationId: {CorrelationId}",
+                    senderResult.Email, correlationId);
+            }
+            else if (request.ArchiveToSpe && communicationId.HasValue && archiveOutgoingOptIn)
             {
                 // Build a partial response for .eml generation (before archival fields are known)
                 var partialResponse = new SendCommunicationResponse
@@ -171,6 +257,9 @@ public sealed class CommunicationService
                 try
                 {
                     archivedDocumentId = await ArchiveToSpeAsync(request, partialResponse, communicationId.Value, cancellationToken);
+
+                    // Enqueue AI analysis for the archived .eml document (best-effort)
+                    await EnqueueDocumentAnalysisAsync(archivedDocumentId.Value, correlationId, cancellationToken);
                 }
                 catch (Exception archEx)
                 {
@@ -179,6 +268,29 @@ public sealed class CommunicationService
                         archEx,
                         "SPE archival failed (non-fatal) | CorrelationId: {CorrelationId}",
                         correlationId);
+                }
+
+                // Archive outbound attachments as child sprk_document records (best-effort)
+                if (archivedDocumentId.HasValue && request.AttachmentDocumentIds is { Length: > 0 })
+                {
+                    try
+                    {
+                        var driveId = _options.ArchiveContainerId;
+                        var attNames = fileAttachments?
+                            .Select(fa => fa.Name ?? "Unknown")
+                            .ToArray() ?? Array.Empty<string>();
+
+                        await ArchiveOutboundAttachmentsAsync(
+                            communicationId.Value, request.AttachmentDocumentIds, attNames,
+                            driveId!, correlationId, cancellationToken);
+                    }
+                    catch (Exception attArchEx)
+                    {
+                        _logger.LogWarning(
+                            attArchEx,
+                            "Outbound attachment archival failed (non-fatal) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                            communicationId.Value, correlationId);
+                    }
                 }
             }
             else if (request.ArchiveToSpe && !communicationId.HasValue)
@@ -405,9 +517,37 @@ public sealed class CommunicationService
             }
 
             // Step 6: Archive to SPE if requested (best-effort)
+            // For user mode, check ArchiveOutgoingOptIn via FromMailbox account if available (default true)
             Guid? archivedDocumentId = null;
             string? archivalWarning = null;
-            if (request.ArchiveToSpe && communicationId.HasValue)
+            bool archiveOutgoingOptIn = true;
+            if (request.ArchiveToSpe && request.FromMailbox is not null)
+            {
+                try
+                {
+                    var senderAccount = await _accountService.GetSendAccountByEmailAsync(request.FromMailbox, ct);
+                    if (senderAccount is not null)
+                    {
+                        archiveOutgoingOptIn = senderAccount.ArchiveOutgoingOptIn ?? true;
+                    }
+                }
+                catch (Exception optInEx)
+                {
+                    _logger.LogWarning(
+                        optInEx,
+                        "Failed to check ArchiveOutgoingOptIn for user sender {FromMailbox} (defaulting to true) | CorrelationId: {CorrelationId}",
+                        request.FromMailbox, correlationId);
+                }
+            }
+
+            if (request.ArchiveToSpe && !archiveOutgoingOptIn)
+            {
+                archivalWarning = "Archival skipped: ArchiveOutgoingOptIn is disabled for this sender account.";
+                _logger.LogInformation(
+                    "SPE archival skipped — ArchiveOutgoingOptIn is false for user sender {UserEmail} | CorrelationId: {CorrelationId}",
+                    userEmail, correlationId);
+            }
+            else if (request.ArchiveToSpe && communicationId.HasValue && archiveOutgoingOptIn)
             {
                 var partialResponse = new SendCommunicationResponse
                 {
@@ -422,6 +562,9 @@ public sealed class CommunicationService
                 try
                 {
                     archivedDocumentId = await ArchiveToSpeAsync(request, partialResponse, communicationId.Value, ct);
+
+                    // Enqueue AI analysis for the archived .eml document (best-effort)
+                    await EnqueueDocumentAnalysisAsync(archivedDocumentId.Value, correlationId, ct);
                 }
                 catch (Exception archEx)
                 {
@@ -430,6 +573,29 @@ public sealed class CommunicationService
                         archEx,
                         "SPE archival failed (non-fatal) | CorrelationId: {CorrelationId}",
                         correlationId);
+                }
+
+                // Archive outbound attachments as child sprk_document records (best-effort)
+                if (archivedDocumentId.HasValue && request.AttachmentDocumentIds is { Length: > 0 })
+                {
+                    try
+                    {
+                        var driveId = _options.ArchiveContainerId;
+                        var attNames = fileAttachments?
+                            .Select(fa => fa.Name ?? "Unknown")
+                            .ToArray() ?? Array.Empty<string>();
+
+                        await ArchiveOutboundAttachmentsAsync(
+                            communicationId.Value, request.AttachmentDocumentIds, attNames,
+                            driveId!, correlationId, ct);
+                    }
+                    catch (Exception attArchEx)
+                    {
+                        _logger.LogWarning(
+                            attArchEx,
+                            "Outbound attachment archival failed (non-fatal) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                            communicationId.Value, correlationId);
+                    }
                 }
             }
             else if (request.ArchiveToSpe && !communicationId.HasValue)
@@ -544,7 +710,7 @@ public sealed class CommunicationService
         var communication = new DataverseEntity("sprk_communication")
         {
             ["sprk_name"] = $"Email: {TruncateTo(request.Subject, 200)}",
-            ["sprk_communiationtype"] = new OptionSetValue((int)request.CommunicationType), // NOTE: typo "communiation" is intentional (actual Dataverse schema)
+            ["sprk_communicationtype"] = new OptionSetValue((int)request.CommunicationType),
             ["statuscode"] = new OptionSetValue((int)CommunicationStatus.Send),
             ["statecode"] = new OptionSetValue(0), // Active
             ["sprk_direction"] = new OptionSetValue((int)CommunicationDirection.Outgoing),
@@ -678,7 +844,7 @@ public sealed class CommunicationService
         var communication = new DataverseEntity("sprk_communication")
         {
             ["sprk_name"] = $"Email: {TruncateTo(request.Subject, 200)}",
-            ["sprk_communiationtype"] = new OptionSetValue((int)request.CommunicationType), // NOTE: typo "communiation" is intentional (actual Dataverse schema)
+            ["sprk_communicationtype"] = new OptionSetValue((int)request.CommunicationType),
             ["statuscode"] = new OptionSetValue((int)CommunicationStatus.Send),
             ["statecode"] = new OptionSetValue(0), // Active
             ["sprk_direction"] = new OptionSetValue((int)CommunicationDirection.Outgoing),
@@ -865,6 +1031,95 @@ public sealed class CommunicationService
             createdCount, communicationId, correlationId);
 
         return createdCount;
+    }
+
+    /// <summary>
+    /// Creates child sprk_document records for each outbound attachment and enqueues AI analysis jobs.
+    /// Each attachment gets a document record linked to the communication, with source type CommunicationArchive.
+    /// </summary>
+    private async Task ArchiveOutboundAttachmentsAsync(
+        Guid communicationId,
+        string[] attachmentDocumentIds,
+        string[] attachmentNames,
+        string driveId,
+        string correlationId,
+        CancellationToken ct)
+    {
+        for (var i = 0; i < attachmentDocumentIds.Length; i++)
+        {
+            var speItemId = attachmentDocumentIds[i];
+            var fileName = i < attachmentNames.Length ? attachmentNames[i] : $"Attachment {i + 1}";
+
+            try
+            {
+                var attachmentDoc = new DataverseEntity("sprk_document")
+                {
+                    ["sprk_name"] = TruncateTo(fileName, 200),
+                    ["sprk_documenttype"] = new OptionSetValue(100000000), // General
+                    ["sprk_sourcetype"] = new OptionSetValue(100000001), // CommunicationArchive
+                    ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+                    ["sprk_speitemid"] = speItemId,
+                    ["sprk_spedriveid"] = driveId,
+                };
+
+                var documentId = await _dataverseService.CreateAsync(attachmentDoc, ct);
+
+                _logger.LogInformation(
+                    "Created sprk_document for outbound attachment | DocumentId: {DocumentId}, FileName: {FileName}, CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                    documentId, fileName, communicationId, correlationId);
+
+                // Enqueue AI analysis for the attachment document (best-effort)
+                await EnqueueDocumentAnalysisAsync(documentId, correlationId, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to archive outbound attachment {Index}/{Total} (non-fatal) | SpeItemId: {SpeItemId}, FileName: {FileName}, CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                    i + 1, attachmentDocumentIds.Length, speItemId, fileName, communicationId, correlationId);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Enqueues an AppOnlyDocumentAnalysis job for a document record (best-effort).
+    /// Failures are logged but do not propagate.
+    /// </summary>
+    private async Task EnqueueDocumentAnalysisAsync(Guid documentId, string correlationId, CancellationToken ct)
+    {
+        try
+        {
+            var aiJob = new JobContract
+            {
+                JobId = Guid.NewGuid(),
+                JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName,
+                SubjectId = documentId.ToString(),
+                CorrelationId = correlationId,
+                IdempotencyKey = $"DocAnalysis:{documentId}",
+                Attempt = 1,
+                MaxAttempts = 2,
+                CreatedAt = DateTimeOffset.UtcNow,
+                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new
+                {
+                    DocumentId = documentId,
+                    Source = "OutboundEmailArchival",
+                    EnqueuedAt = DateTimeOffset.UtcNow
+                }))
+            };
+
+            await _jobSubmissionService.SubmitJobAsync(aiJob, ct);
+
+            _logger.LogInformation(
+                "Enqueued AI analysis job {JobId} for archived document {DocumentId} | CorrelationId: {CorrelationId}",
+                aiJob.JobId, documentId, correlationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to enqueue AI analysis job for document {DocumentId} (non-fatal) | CorrelationId: {CorrelationId}",
+                documentId, correlationId);
+        }
     }
 
     /// <summary>

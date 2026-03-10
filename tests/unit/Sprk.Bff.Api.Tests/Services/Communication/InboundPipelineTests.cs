@@ -15,6 +15,7 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
@@ -130,6 +131,17 @@ public class InboundPipelineTests
             })
             .Build();
         return config;
+    }
+
+    private static JobSubmissionService CreateMockJobSubmissionService()
+    {
+        var optionsMock = new Mock<IOptions<Sprk.Bff.Api.Configuration.ServiceBusOptions>>();
+        optionsMock.Setup(o => o.Value).Returns(new Sprk.Bff.Api.Configuration.ServiceBusOptions());
+        return new Mock<JobSubmissionService>(
+            MockBehavior.Loose,
+            optionsMock.Object,
+            Mock.Of<ILogger<JobSubmissionService>>(),
+            new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object).Object;
     }
 
     private static Message CreateGraphMessage(
@@ -477,6 +489,10 @@ public class InboundPipelineTests
             _graphClientFactoryMock.Object,
             _dataverseServiceMock.Object,
             accountService,
+            new IncomingAssociationResolver(
+                _dataverseServiceMock.Object,
+                _graphClientFactoryMock.Object,
+                Mock.Of<ILogger<IncomingAssociationResolver>>()),
             _attachmentProcessorMock.Object,
             new EmlGenerationService(Mock.Of<ILogger<EmlGenerationService>>()),
             null!, // SpeFileStore — not used when ArchiveContainerId is null
@@ -583,10 +599,10 @@ public class InboundPipelineTests
         direction.Should().NotBeNull();
         direction!.Value.Should().Be(100000000, "sprk_direction should be Incoming (100000000)");
 
-        // CommunicationType = Email (100000000) — NOTE: intentional typo in field name
-        var commType = entity.GetAttributeValue<OptionSetValue>("sprk_communiationtype");
+        // CommunicationType = Email (100000000)
+        var commType = entity.GetAttributeValue<OptionSetValue>("sprk_communicationtype");
         commType.Should().NotBeNull();
-        commType!.Value.Should().Be(100000000, "sprk_communiationtype should be Email (100000000)");
+        commType!.Value.Should().Be(100000000, "sprk_communicationtype should be Email (100000000)");
 
         // StatusCode = Delivered (659490003)
         var statusCode = entity.GetAttributeValue<OptionSetValue>("statuscode");
@@ -775,6 +791,10 @@ public class InboundPipelineTests
             _graphClientFactoryMock.Object,
             _dataverseServiceMock.Object,
             accountService,
+            new IncomingAssociationResolver(
+                _dataverseServiceMock.Object,
+                _graphClientFactoryMock.Object,
+                Mock.Of<ILogger<IncomingAssociationResolver>>()),
             _attachmentProcessorMock.Object,
             new EmlGenerationService(Mock.Of<ILogger<EmlGenerationService>>()),
             null!, // SpeFileStore intentionally null — upload throws but is caught (non-fatal)
@@ -915,6 +935,7 @@ public class InboundPipelineTests
         var sut = new InboundPollingBackupService(
             accountService,
             _graphClientFactoryMock.Object,
+            CreateMockJobSubmissionService(),
             Mock.Of<ILogger<InboundPollingBackupService>>());
 
         // Act
@@ -1010,6 +1031,7 @@ public class InboundPipelineTests
         var sut = new InboundPollingBackupService(
             accountService,
             _graphClientFactoryMock.Object,
+            CreateMockJobSubmissionService(),
             Mock.Of<ILogger<InboundPollingBackupService>>());
 
         // Act — Run two polling cycles to verify state tracking

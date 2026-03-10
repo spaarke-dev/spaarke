@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication.Models;
+using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Services.Communication;
 
@@ -11,11 +13,11 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// catching any emails missed by the Graph webhook subscription.
 ///
 /// Implements ADR-001 BackgroundService pattern with PeriodicTimer (5-minute interval).
-/// Follows the same pattern as EmailPollingBackupService (Jobs) and GraphSubscriptionManager.
+/// Follows the same pattern as GraphSubscriptionManager.
 ///
-/// Messages found by polling are logged for now; the actual processor (IncomingCommunicationJob
-/// from Task 072) will consume them once implemented. Deduplication via sprk_graphmessageid
-/// in sprk_communication prevents duplicate records.
+/// Messages found by polling are enqueued as IncomingCommunication jobs via JobSubmissionService.
+/// Deduplication is multi-layered: isRead eq false filter, ServiceBus IdempotencyKey,
+/// and Dataverse sprk_graphmessageid check in IncomingCommunicationProcessor.
 /// </summary>
 public sealed class InboundPollingBackupService : BackgroundService
 {
@@ -23,6 +25,7 @@ public sealed class InboundPollingBackupService : BackgroundService
 
     private readonly CommunicationAccountService _accountService;
     private readonly IGraphClientFactory _graphClientFactory;
+    private readonly JobSubmissionService _jobSubmissionService;
     private readonly ILogger<InboundPollingBackupService> _logger;
     private readonly TimeSpan _pollingInterval;
 
@@ -42,10 +45,12 @@ public sealed class InboundPollingBackupService : BackgroundService
     public InboundPollingBackupService(
         CommunicationAccountService accountService,
         IGraphClientFactory graphClientFactory,
+        JobSubmissionService jobSubmissionService,
         ILogger<InboundPollingBackupService> logger)
     {
         _accountService = accountService ?? throw new ArgumentNullException(nameof(accountService));
         _graphClientFactory = graphClientFactory ?? throw new ArgumentNullException(nameof(graphClientFactory));
+        _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _pollingInterval = DefaultPollingInterval;
     }
@@ -174,7 +179,7 @@ public sealed class InboundPollingBackupService : BackgroundService
             .Messages
             .GetAsync(config =>
             {
-                config.QueryParameters.Filter = $"receivedDateTime ge {filterDateTime}";
+                config.QueryParameters.Filter = $"receivedDateTime ge {filterDateTime} and isRead eq false";
                 config.QueryParameters.Top = 50;
                 config.QueryParameters.Select = new[] { "id", "receivedDateTime", "subject", "from", "isRead" };
                 config.QueryParameters.Orderby = new[] { "receivedDateTime desc" };
@@ -198,19 +203,37 @@ public sealed class InboundPollingBackupService : BackgroundService
             "correlation {CorrelationId}",
             messageList.Count, account.Id, account.EmailAddress, lastPollTime, correlationId);
 
-        // Log each message for now; actual processing is via IncomingCommunicationJob (Task 072)
+        // Enqueue IncomingCommunication jobs for each unread message
         foreach (var message in messageList)
         {
+            var messageId = message.Id;
+            var correlationIdForJob = Guid.NewGuid().ToString();
+
+            var jobPayload = JsonDocument.Parse(JsonSerializer.Serialize(new
+            {
+                Resource = $"users/{account.EmailAddress}/mailFolders/{monitorFolder}/messages/{messageId}",
+                MessageId = messageId,
+                TriggerSource = "BackupPolling",
+                AccountId = account.Id
+            }));
+
+            var job = new JobContract
+            {
+                JobType = "IncomingCommunication",
+                SubjectId = messageId ?? "unknown",
+                CorrelationId = correlationIdForJob,
+                IdempotencyKey = $"Communication:{messageId}:Process",
+                Payload = jobPayload,
+                MaxAttempts = 3
+            };
+
+            await _jobSubmissionService.SubmitJobAsync(job, ct);
+
             _logger.LogInformation(
-                "Unprocessed message found: GraphMessageId={MessageId}, Subject='{Subject}', " +
-                "ReceivedAt={ReceivedDateTime}, Account={AccountId} ({Email}), " +
+                "Enqueued IncomingCommunicationJob from polling | MessageId={MessageId}, " +
+                "Subject='{Subject}', Account={AccountId} ({Email}), " +
                 "correlation {CorrelationId}",
-                message.Id,
-                message.Subject,
-                message.ReceivedDateTime,
-                account.Id,
-                account.EmailAddress,
-                correlationId);
+                messageId, message.Subject, account.Id, account.EmailAddress, correlationIdForJob);
         }
 
         // Update last poll time to the start of this poll cycle

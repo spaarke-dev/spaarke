@@ -1,6 +1,7 @@
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
+using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication.Models;
@@ -332,7 +333,8 @@ public sealed class GraphSubscriptionManager : BackgroundService
         var fields = new Dictionary<string, object>
         {
             ["sprk_subscriptionid"] = subscriptionId,
-            ["sprk_subscriptionexpiry"] = expiry.UtcDateTime
+            ["sprk_subscriptionexpiry"] = expiry.UtcDateTime,
+            ["sprk_subscriptionstatus"] = new OptionSetValue(100000000) // Active
         };
 
         await _dataverseService.UpdateAsync("sprk_communicationaccount", accountId, fields, ct);

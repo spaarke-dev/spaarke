@@ -91,7 +91,13 @@ export interface IResultsListProps {
     onFindSimilar: (result: SearchResult) => void;
     onPreview: (result: SearchResult) => Promise<string | null>;
     onSummary: (result: SearchResult) => Promise<SummaryData>;
+    onEmailDocument: (result: SearchResult) => void;
+    onCopyLink: (result: SearchResult) => void;
+    onToggleWorkspace: (result: SearchResult) => void;
+    /** Check if a document is in the workspace. */
+    isInWorkspace: (result: SearchResult) => boolean;
     onViewAll: () => void;
+    onReload: () => void;
     compactMode: boolean;
 }
 
@@ -114,6 +120,10 @@ export interface IResultCardProps {
     onFindSimilar: () => void;
     onPreview: () => Promise<string | null>;
     onSummary: () => Promise<SummaryData>;
+    onEmailDocument: () => void;
+    onCopyLink: () => void;
+    onToggleWorkspace: () => void;
+    isInWorkspace: boolean;
     compactMode: boolean;
 }
 

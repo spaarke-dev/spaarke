@@ -6,7 +6,7 @@ namespace Sprk.Bff.Api.Services.Email;
 /// In-memory service for tracking email processing statistics.
 /// Provides readable counters for the admin monitoring PCF control.
 ///
-/// This service complements EmailTelemetry (which writes to OpenTelemetry)
+/// This service complements CommunicationTelemetry (which writes to OpenTelemetry)
 /// by keeping running totals that can be queried via API.
 /// </summary>
 public class EmailProcessingStatsService
@@ -47,7 +47,7 @@ public class EmailProcessingStatsService
     private readonly ConcurrentBag<long> _emlFileSizes = [];
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Recording Methods (called by EmailTelemetry)
+    // Recording Methods (called by CommunicationTelemetry)
     // ═══════════════════════════════════════════════════════════════════════════
 
     public void RecordConversionRequest() => Interlocked.Increment(ref _conversionRequests);

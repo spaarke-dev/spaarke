@@ -1,0 +1,79 @@
+<task id="ECS-030" project="Email Communication Solution R2">
+  <metadata>
+    <title>Create GraphMessageToEmlConverter</title>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>4 - Email-to-Document Migration (Phase E)</phase>
+    <tags>bff-api</tags>
+    <dependencies>ECS-027</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Create GraphMessageToEmlConverter that converts a Microsoft Graph Message object
+    (with expanded attachments) to RFC 2822 .eml format using MimeKit. This replaces
+    EmailToEmlConverter. Pure transformation — no I/O, no Dataverse calls.
+    Map all headers, body content, and attachments (inline + file).
+  </prompt>
+
+  <role>Senior .NET developer familiar with MimeKit and Microsoft Graph</role>
+
+  <goal>
+    GraphMessageToEmlConverter produces valid .eml files from Graph messages,
+    with all headers, body, and attachments correctly mapped. 90%+ test coverage.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>projects/email-communication-solution-r2/design-communication-accounts.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="project">Pure transformation — no I/O, no HTTP, no Dataverse</constraint>
+    <constraint source="project">Use MimeKit for RFC 2822 generation</constraint>
+    <constraint source="project">Handle both HTML and PlainText body types</constraint>
+    <constraint source="project">Map inline attachments with ContentId</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Review Design">
+      Read design doc GraphMessageToEmlConverter section for field mapping table.
+    </step>
+    <step order="2" name="Create Converter">
+      Map: from, to, cc, bcc → MimeMessage addresses.
+      Map: subject, body → MimeMessage content.
+      Map: receivedDateTime/sentDateTime → Date.
+      Map: internetMessageId → MessageId.
+      Map: internetMessageHeaders → In-Reply-To, References.
+      Map: FileAttachment[] → MimePart (base64 → binary, inline vs attachment).
+    </step>
+    <step order="3" name="Handle Edge Cases">
+      Null attachments, missing contentType, empty body, missing headers.
+    </step>
+    <step order="4" name="Write Tests">
+      Test: simple message, message with attachments, inline images,
+      HTML body, plain text body, threading headers, edge cases.
+    </step>
+    <step order="5" name="Build and Test">
+      dotnet build and dotnet test.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/GraphMessageToEmlConverter.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/GraphMessageToEmlConverterTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Valid .eml output for Graph messages with various content types</criterion>
+    <criterion testable="true">All header fields correctly mapped per design table</criterion>
+    <criterion testable="true">File attachments included with correct MIME types</criterion>
+    <criterion testable="true">Inline attachments have ContentId set</criterion>
+    <criterion testable="true">No I/O or external calls in converter</criterion>
+    <criterion testable="true">Tests cover happy path and edge cases</criterion>
+  </acceptance-criteria>
+</task>

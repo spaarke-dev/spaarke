@@ -1,9 +1,9 @@
 # Communication Service Architecture
 
-> **Last Updated**: February 21, 2026
-> **Purpose**: Architecture documentation for the Email Communication Service module — BFF API endpoints, Graph API integration, Dataverse tracking, SPE archival, and AI playbook integration.
-> **Status**: Implemented (R1 Complete)
-> **Branch**: `work/email-communication-solution-r1`
+> **Last Updated**: March 9, 2026
+> **Purpose**: Architecture documentation for the Communication Service module — outbound/inbound email via Microsoft Graph, Dataverse-managed mailbox accounts, SPE archival, and AI playbook integration.
+> **Status**: Implemented (R2 Complete)
+> **Branch**: `work/email-communication-solution-r2`
 
 ---
 
@@ -13,14 +13,19 @@
 - [Architecture Principles](#architecture-principles)
 - [System Architecture](#system-architecture)
 - [Component Inventory](#component-inventory)
-- [Send Pipeline](#send-pipeline)
+- [Outbound Send Pipeline](#outbound-send-pipeline)
+- [Inbound Pipeline](#inbound-pipeline)
 - [API Endpoints](#api-endpoints)
-- [Approved Sender Resolution](#approved-sender-resolution)
-- [Association Mapping](#association-mapping)
+- [Communication Accounts](#communication-accounts)
+- [Sender Resolution](#sender-resolution)
+- [Inbound Association Resolution](#inbound-association-resolution)
 - [Attachment Handling](#attachment-handling)
 - [EML Archival](#eml-archival)
+- [Background Services](#background-services)
 - [Dataverse Entity Schema](#dataverse-entity-schema)
 - [Configuration](#configuration)
+- [DI Registration](#di-registration)
+- [Telemetry](#telemetry)
 - [Error Handling](#error-handling)
 - [Security](#security)
 - [UI Integration](#ui-integration)
@@ -31,105 +36,147 @@
 
 ## Overview
 
-The Communication Service replaces heavyweight Dataverse email activities with a lightweight BFF-mediated approach using Microsoft Graph API. Instead of creating Dataverse `email` activities (which require complex activity party resolution), the service sends emails via Graph `sendMail` and creates a simple `sprk_communication` tracking record.
+The Communication Service provides unified email send and receive via Microsoft Graph API, replacing both Dataverse email activities (outbound) and Server-Side Sync (inbound). Mailboxes are managed as `sprk_communicationaccount` records in Dataverse with send/receive capabilities, verification, and daily send quotas.
 
 ### Key Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
 | Graph API over Dataverse email activities | Avoids complex activity party resolution, faster send, no plugin overhead |
+| Graph subscriptions over Server-Side Sync | Real-time webhooks (<60s), backup polling (<5 min), no Exchange dependency |
+| `sprk_communicationaccount` entity | Centralized mailbox management in Dataverse; replaces `appsettings.json`-only config |
 | Best-effort tracking | Email send is the critical path; Dataverse record, SPE archival, and attachment records are non-fatal |
-| Approved sender model | Prevents arbitrary sender spoofing; allows shared mailbox sending |
+| Dual send modes (SharedMailbox + User) | Shared mailbox via app-only auth; individual user via OBO |
 | Per-endpoint authorization filter | Follows ADR-008; avoids global middleware |
-| Singleton service registration | Follows ADR-010; stateless service with injected dependencies |
+| Feature module DI pattern | `CommunicationModule` registers all services; ADR-010 compliant |
+
+### R2 Changes from R1
+
+| Area | R1 | R2 |
+|------|----|----|
+| Mailbox management | `appsettings.json` only | `sprk_communicationaccount` entity in Dataverse |
+| Inbound email | Not implemented | Graph subscriptions + backup polling + `IncomingCommunicationProcessor` |
+| Send modes | Shared mailbox only | Shared mailbox + individual user (OBO) |
+| EML for inbound | N/A | `GraphMessageToEmlConverter` (pure transformation, no I/O) |
+| Attachment adapter | N/A | `GraphAttachmentAdapter` maps Graph → existing `EmailAttachmentInfo` |
+| Association resolution | Manual (outbound only) | Automatic 4-level cascade for inbound via `IncomingAssociationResolver` |
+| Mailbox verification | N/A | `MailboxVerificationService` tests send/read capabilities |
+| Daily send limits | N/A | `DailySendCountResetService` + quota check before send |
+| Telemetry | `EmailTelemetry` | `CommunicationTelemetry` (renamed, expanded metrics) |
+| Legacy components | `EmailFilterService`, `EmailRuleSeedService`, `EmailPollingBackupService`, `EmailToDocumentJobHandler`, `BatchProcessEmailsJobHandler` | All deleted |
 
 ---
 
 ## Architecture Principles
 
 1. **Graph Send is Critical Path**: If Graph `sendMail` fails, the entire operation fails with `SdapProblemException`. No partial success.
-2. **Best-Effort Tracking**: Dataverse record creation, SPE archival, and attachment record creation are wrapped in try/catch. Failures are logged as warnings and returned as `ArchivalWarning` or `AttachmentRecordWarning` in the response.
+2. **Best-Effort Tracking**: Dataverse record creation, SPE archival, attachment records, and AI analysis are wrapped in try/catch. Failures are logged as warnings.
 3. **No Retry Logic**: Failures are immediate. Callers (UI or AI playbook) handle retry decisions.
-4. **Sender Validation Before Send**: The approved sender list is validated synchronously before any Graph call.
-5. **Correlation ID Tracing**: Every operation is tagged with a `correlationId` for end-to-end tracing through logs.
+4. **Multi-Layer Deduplication**: Inbound emails are deduplicated at four levels: in-memory webhook cache → ServiceBus idempotency key → Dataverse `sprk_graphmessageid` query → Dataverse duplicate detection rule.
+5. **Sender Validation Before Send**: The approved sender list is validated synchronously before any Graph call.
+6. **Correlation ID Tracing**: Every operation is tagged with a `correlationId` for end-to-end tracing.
 
 ---
 
 ## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Model-Driven App (UCI)                       │
-│  ┌──────────────────────────┐  ┌─────────────────────────────┐ │
-│  │  Communication Form      │  │  Send Button (Ribbon)       │ │
-│  │  sprk_communication      │  │  sprk_communication_send.js │ │
-│  └──────────────────────────┘  └──────────┬──────────────────┘ │
-└───────────────────────────────────────────┼─────────────────────┘
-                                            │ POST /api/communications/send
-                                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        BFF API (.NET 8)                         │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  CommunicationEndpoints.cs                               │   │
-│  │  ├── POST /send          → SendCommunicationAsync        │   │
-│  │  ├── POST /send-bulk     → SendBulkCommunicationAsync    │   │
-│  │  └── GET  /{id}/status   → GetCommunicationStatusAsync   │   │
-│  └──────────────────┬───────────────────────────────────────┘   │
-│                     │                                           │
-│  ┌──────────────────▼───────────────────────────────────────┐   │
-│  │  CommunicationAuthorizationFilter (ADR-008)              │   │
-│  │  Validates: IsAuthenticated + oid/nameidentifier claim   │   │
-│  └──────────────────┬───────────────────────────────────────┘   │
-│                     │                                           │
-│  ┌──────────────────▼───────────────────────────────────────┐   │
-│  │  CommunicationService (sealed)                           │   │
-│  │  7-Step Send Pipeline:                                   │   │
-│  │                                                          │   │
-│  │  1. Validate Request (required fields)                   │   │
-│  │  2. Download Attachments from SPE (if any)               │   │
-│  │  3. Resolve Approved Sender                              │   │
-│  │  4. Build Graph Message payload                          │   │
-│  │  5. Send via Graph sendMail  ◄── CRITICAL PATH           │   │
-│  │  6. Create Dataverse record  ◄── best-effort             │   │
-│  │  7. Archive .eml to SPE      ◄── best-effort             │   │
-│  │  8. Create attachment records ◄── best-effort             │   │
-│  └──┬─────────┬──────────┬──────────┬───────────────────────┘   │
-│     │         │          │          │                            │
-│     ▼         ▼          ▼          ▼                            │
-│  ┌──────┐ ┌──────┐ ┌──────────┐ ┌────────────────┐             │
-│  │Graph │ │Dv Svc│ │SpeFile   │ │EmlGeneration   │             │
-│  │Client│ │      │ │Store     │ │Service         │             │
-│  │Factor│ │      │ │(ADR-007) │ │(MimeKit)       │             │
-│  └──┬───┘ └──┬───┘ └────┬─────┘ └───────┬────────┘             │
-└─────┼────────┼──────────┼────────────────┼──────────────────────┘
-      │        │          │                │
-      ▼        ▼          ▼                ▼
-  ┌──────┐ ┌───────┐ ┌──────────┐   ┌──────────────┐
-  │MS    │ │Dv Web │ │SharePoint│   │RFC 2822 .eml │
-  │Graph │ │API    │ │Embedded  │   │(in-memory)   │
-  │API   │ │       │ │(SPE)     │   │              │
-  └──────┘ └───────┘ └──────────┘   └──────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         Model-Driven App (UCI)                              │
+│  ┌────────────────────────┐  ┌──────────────────┐  ┌────────────────────┐  │
+│  │ Communication Form     │  │ Send Button       │  │ Account Admin Form │  │
+│  │ sprk_communication     │  │ (Ribbon)          │  │ sprk_comm_account  │  │
+│  └────────────────────────┘  └────────┬─────────┘  └────────────────────┘  │
+└───────────────────────────────────────┼─────────────────────────────────────┘
+                                        │ POST /api/communications/send
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          BFF API (.NET 8)                                    │
+│                                                                             │
+│  ┌─── CommunicationEndpoints.cs ──────────────────────────────────────────┐ │
+│  │  POST /send             → CommunicationService.SendAsync()             │ │
+│  │  POST /send-bulk        → CommunicationService (sequential, 100ms gap) │ │
+│  │  GET  /{id}/status      → Dataverse lookup                            │ │
+│  │  POST /accounts/{id}/verify → MailboxVerificationService.VerifyAsync() │ │
+│  │  POST /incoming-webhook → Graph notification → enqueue job (AllowAnon) │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│  ┌─── Outbound ──────────────────────┐  ┌─── Inbound ───────────────────┐  │
+│  │ CommunicationService (sealed)     │  │ IncomingCommunicationProcessor│  │
+│  │ ├── SharedMailbox: ForApp()       │  │ ├── Dedup check               │  │
+│  │ ├── User (OBO): ForUserAsync()    │  │ ├── Fetch Graph message       │  │
+│  │ ├── Daily limit check             │  │ ├── Create sprk_communication │  │
+│  │ ├── Send → Track → Archive        │  │ ├── Resolve associations      │  │
+│  │ └── Enqueue AI analysis           │  │ ├── Process attachments       │  │
+│  └───────┬──────┬────────┬───────────┘  │ ├── Archive .eml              │  │
+│          │      │        │              │ └── Mark as read               │  │
+│          ▼      ▼        ▼              └────────┬──────────────────────┘  │
+│  ┌──────┐ ┌──────┐ ┌──────────┐                 │                         │
+│  │Graph │ │Dv Svc│ │SpeFile   │                 ▼                         │
+│  │Client│ │      │ │Store     │  ┌──────────────────────────────────┐     │
+│  │Factry│ │      │ │(ADR-007) │  │ IncomingAssociationResolver     │     │
+│  └──────┘ └──────┘ └──────────┘  │ Thread > Sender > Subject >    │     │
+│                                   │ Mailbox context (4-level)      │     │
+│  ┌─── Background Services ────┐  └──────────────────────────────────┘     │
+│  │ GraphSubscriptionManager   │                                           │
+│  │   (30-min cycle)           │  ┌──────────────────────────────────┐     │
+│  │ InboundPollingBackupService│  │ EML Converters                   │     │
+│  │   (5-min cycle)            │  │ ├── EmlGenerationService (outbd) │     │
+│  │ DailySendCountResetService │  │ └── GraphMessageToEmlConverter   │     │
+│  │   (midnight UTC)           │  │     (inbound, pure transform)    │     │
+│  └────────────────────────────┘  └──────────────────────────────────┘     │
+│                                                                           │
+│  ┌─── Shared Services ────────┐  ┌──────────────────────────────────┐     │
+│  │ CommunicationAccountService│  │ CommunicationTelemetry           │     │
+│  │   (Redis-cached Dv queries)│  │ Meter: Sprk.Bff.Api.Communication│     │
+│  │ ApprovedSenderValidator    │  └──────────────────────────────────┘     │
+│  │ MailboxVerificationService │                                           │
+│  │ GraphAttachmentAdapter     │                                           │
+│  └────────────────────────────┘                                           │
+└─────────────┬────────────┬──────────────┬─────────────────────────────────┘
+              │            │              │
+              ▼            ▼              ▼
+         ┌──────┐    ┌───────┐     ┌──────────┐
+         │MS    │    │Dv Web │     │SharePoint│
+         │Graph │    │API    │     │Embedded  │
+         │API   │    │       │     │(SPE)     │
+         └──────┘    └───────┘     └──────────┘
 ```
 
 ---
 
 ## Component Inventory
 
-### Backend (BFF API)
+### Backend Services
 
 | File | Type | Purpose |
 |------|------|---------|
-| `Api/CommunicationEndpoints.cs` | Minimal API | Route definitions: `/send`, `/send-bulk`, `/{id}/status` |
+| `Api/CommunicationEndpoints.cs` | Minimal API | Route definitions: `/send`, `/send-bulk`, `/{id}/status`, `/accounts/{id}/verify`, `/incoming-webhook` |
 | `Api/Filters/CommunicationAuthorizationFilter.cs` | Endpoint Filter | Per-endpoint auth (ADR-008) |
-| `Services/Communication/CommunicationService.cs` | Service | Core 7-step send pipeline |
-| `Services/Communication/ApprovedSenderValidator.cs` | Service | Two-tier sender resolution (config + Dataverse + Redis) |
-| `Services/Communication/EmlGenerationService.cs` | Service | RFC 2822 .eml generation via MimeKit |
+| `Services/Communication/CommunicationService.cs` | Service | Core outbound send pipeline (shared + OBO modes) |
+| `Services/Communication/CommunicationAccountService.cs` | Service | `sprk_communicationaccount` CRUD with Redis caching |
+| `Services/Communication/ApprovedSenderValidator.cs` | Service | Two-tier sender resolution (config + Dataverse accounts) |
+| `Services/Communication/IncomingCommunicationProcessor.cs` | Service | Inbound email processing pipeline |
+| `Services/Communication/IncomingAssociationResolver.cs` | Service | 4-level association cascade for inbound |
+| `Services/Communication/GraphMessageToEmlConverter.cs` | Service | Pure transformation: Graph Message → RFC 2822 .eml (inbound) |
+| `Services/Communication/GraphAttachmentAdapter.cs` | Static | Maps Graph `FileAttachment` → `EmailAttachmentInfo` |
+| `Services/Communication/EmlGenerationService.cs` | Service | RFC 2822 .eml generation from request data (outbound) |
+| `Services/Communication/MailboxVerificationService.cs` | Service | Tests send/read capabilities for communication accounts |
+| `Services/Communication/GraphSubscriptionManager.cs` | BackgroundService | Graph webhook subscription lifecycle (create/renew/recreate) |
+| `Services/Communication/InboundPollingBackupService.cs` | BackgroundService | Backup polling for missed webhooks (5-min interval) |
+| `Services/Communication/DailySendCountResetService.cs` | BackgroundService | Resets `sprk_sendstoday` at midnight UTC |
+| `Telemetry/CommunicationTelemetry.cs` | Telemetry | OpenTelemetry metrics and distributed tracing |
+| `Infrastructure/DI/CommunicationModule.cs` | DI Module | Feature module registering all communication services |
 | `Configuration/CommunicationOptions.cs` | Options | `Communication` config section binding |
 
 ### Models
 
 | File | Type | Purpose |
 |------|------|---------|
+| `Models/CommunicationAccount.cs` | Entity | Account with send/receive config, verification, quotas |
+| `Models/SendMode.cs` | Enum | `SharedMailbox` (app-only) or `User` (OBO) |
+| `Models/AccountType.cs` | Enum | `SharedAccount`, `ServiceAccount`, `UserAccount` |
+| `Models/AuthMethod.cs` | Enum | `AppOnly` or `OnBehalfOf` (derived from AccountType) |
 | `Models/SendCommunicationRequest.cs` | DTO | POST /send request body |
 | `Models/SendCommunicationResponse.cs` | DTO | POST /send response body |
 | `Models/BulkSendRequest.cs` | DTO | POST /send-bulk request body |
@@ -140,7 +187,6 @@ The Communication Service replaces heavyweight Dataverse email activities with a
 | `Models/CommunicationStatus.cs` | Enum | Draft, Queued, Send, Delivered, Failed, Bounded, Recalled |
 | `Models/CommunicationDirection.cs` | Enum | Incoming, Outgoing |
 | `Models/BodyFormat.cs` | Enum | HTML, PlainText |
-| `Models/ApprovedSenderResult.cs` | DTO | Sender validation result |
 
 ### Frontend (Dataverse UI)
 
@@ -151,9 +197,11 @@ The Communication Service replaces heavyweight Dataverse email activities with a
 
 ---
 
-## Send Pipeline
+## Outbound Send Pipeline
 
-The `CommunicationService.SendAsync()` method executes a 7-step pipeline:
+`CommunicationService.SendAsync()` supports two modes based on `SendMode`:
+
+### SharedMailbox Mode (App-Only Auth)
 
 ```
 Step 1: ValidateRequest
@@ -176,6 +224,12 @@ Step 2: Resolve Approved Sender
   └── fromMailbox != null → validate against approved list
   ↓ (throws SdapProblemException if invalid)
 
+Step 2b: Check Daily Send Limit  ◄── NEW IN R2
+  ├── Query CommunicationAccountService.GetSendAccountByEmailAsync()
+  ├── If SendsToday >= DailySendLimit → throw DAILY_SEND_LIMIT_REACHED (HTTP 429)
+  └── Skip if no DailySendLimit configured
+  ↓
+
 Step 3: Build Graph Message
   ├── Map Subject, Body (HTML or PlainText)
   ├── Map From (resolved sender)
@@ -189,17 +243,23 @@ Step 4: Send via Graph API  ◄── CRITICAL PATH
   └── SaveToSentItems = true
   ↓ (throws SdapProblemException on ODataError)
 
+Step 4b: Increment Send Count  ◄── BEST-EFFORT, NEW IN R2
+  └── CommunicationAccountService.IncrementSendCountAsync()
+
 Step 5: Create Dataverse Record  ◄── BEST-EFFORT
-  ├── Build sprk_communication entity
+  ├── Build sprk_communication entity (Direction=Outgoing)
   ├── Map association fields (regarding lookup + denormalized)
   ├── Set status to Send (659490002)
   └── dataverseService.CreateAsync()
   ↓ (catch: log warning, continue)
 
-Step 6: Archive to SPE  ◄── BEST-EFFORT (if ArchiveToSpe=true)
+Step 6: Archive to SPE  ◄── BEST-EFFORT
+  ├── Check ArchiveOutgoingOptIn on account (default true)
   ├── Generate .eml via EmlGenerationService
   ├── Upload to SPE at /communications/{id}/{filename}.eml
-  └── Create sprk_document record linking to archived file
+  ├── Create sprk_document record
+  ├── Enqueue AI analysis job (best-effort)
+  └── Archive outbound attachments as child sprk_document records
   ↓ (catch: set ArchivalWarning, continue)
 
 Step 7: Create Attachment Records  ◄── BEST-EFFORT
@@ -209,6 +269,98 @@ Step 7: Create Attachment Records  ◄── BEST-EFFORT
   ↓ (catch: set AttachmentRecordWarning, continue)
 
 Return SendCommunicationResponse
+```
+
+### User Mode (OBO Auth) — NEW IN R2
+
+When `request.SendMode == SendMode.User`:
+
+```
+Step 1: Validate (same as shared)
+Step 1b: Download attachments (same as shared)
+Step 2: Resolve user identity from JWT claims
+  ├── Email from 'email' or 'preferred_username' claim
+  ├── OID from 'oid' claim → sprk_sentby
+  └── Skip ApprovedSenderValidator (user sends as themselves)
+Step 2b: Daily limit check (same as shared)
+Step 3: Build Graph Message (same as shared)
+Step 4: Send via OBO Graph client
+  ├── graphClient = GraphClientFactory.ForUserAsync(httpContext)
+  └── graphClient.Me.SendMail.PostAsync()
+Steps 5-7: Same as shared (best-effort tracking/archival)
+```
+
+---
+
+## Inbound Pipeline
+
+### Webhook Flow
+
+```
+Microsoft Graph
+  │ POST /api/communications/incoming-webhook
+  ▼
+CommunicationEndpoints.HandleIncomingWebhookAsync()
+  │
+  ├── 1. Handle Graph validation (echo validationToken)
+  ├── 2. Parse GraphChangeNotificationCollection
+  ├── 3. Validate clientState on each notification
+  ├── 4. Deduplicate (in-memory ConcurrentDictionary, 10-min window)
+  │       Key: {subscriptionId}:{resource}:{resourceDataId}
+  ├── 5. Extract mailbox + messageId from resource path
+  ├── 6. Enqueue IncomingCommunication job via ServiceBus
+  │       IdempotencyKey: Communication:{messageId}:Process
+  └── 7. Return 202 Accepted
+```
+
+### Processing Pipeline
+
+`IncomingCommunicationProcessor.ProcessAsync(mailboxEmail, graphMessageId)`:
+
+```
+Step 1: Deduplication check
+  └── Query sprk_communication by sprk_graphmessageid
+  ↓ (skip if already exists)
+
+Step 2: Get account details
+  ├── QueryReceiveEnabledAccountsAsync()
+  └── Check AutoCreateRecords flag
+  ↓
+
+Step 3: Fetch full message from Graph
+  ├── GraphClientFactory.ForApp()
+  ├── Users[email].Messages[messageId].GetAsync()
+  ├── Select: id, from, toRecipients, ccRecipients, subject, body, uniqueBody,
+  │           receivedDateTime, hasAttachments
+  └── Expand: attachments
+  ↓
+
+Step 4: Create sprk_communication record
+  ├── Direction = Incoming (100000000)
+  ├── CommunicationType = Email (100000000)
+  ├── StatusCode = Delivered (659490003)
+  └── Prefer uniqueBody over full body (strips reply chains)
+  ↓
+
+Step 4.5: Resolve associations  ◄── BEST-EFFORT
+  └── Delegate to IncomingAssociationResolver (4-level cascade)
+  ↓
+
+Step 5: Process attachments  ◄── BEST-EFFORT (if AutoCreateRecords=true)
+  ├── GraphAttachmentAdapter.ToAttachmentInfoList()
+  ├── Filter signature images via AttachmentFilterService
+  ├── Upload to SPE: /communications/{id}/attachments/{fileName}
+  └── Create sprk_communicationattachment records
+  ↓
+
+Step 6: Archive .eml to SPE  ◄── BEST-EFFORT (if ArchiveIncomingOptIn != false)
+  ├── GraphMessageToEmlConverter.ConvertToEml(graphMessage)
+  ├── Upload to SPE: /communications/{id}/{filename}.eml
+  └── Create sprk_document record
+  ↓
+
+Step 7: Mark message as read in Graph  ◄── BEST-EFFORT
+  └── PATCH isRead = true
 ```
 
 ---
@@ -221,9 +373,15 @@ Return SendCommunicationResponse
 /api/communications  (RequireAuthorization, Tag: "Communications")
 ```
 
-### POST /api/communications/send
+| Method | Route | Auth | Handler | Description |
+|--------|-------|------|---------|-------------|
+| POST | `/send` | `CommunicationAuthorizationFilter` | `SendCommunicationAsync` | Single email send (shared or OBO) |
+| POST | `/send-bulk` | `CommunicationAuthorizationFilter` | `SendBulkCommunicationAsync` | Bulk send (1-50, sequential, 100ms delay) |
+| GET | `/{id:guid}/status` | Group auth | `GetCommunicationStatusAsync` | Status lookup from Dataverse |
+| POST | `/accounts/{id:guid}/verify` | `CommunicationAuthorizationFilter` | `VerifyCommunicationAccountAsync` | Mailbox verification |
+| POST | `/incoming-webhook` | `AllowAnonymous` (clientState validation) | `HandleIncomingWebhookAsync` | Graph change notification receiver |
 
-Send a single email communication.
+### POST /api/communications/send
 
 **Request Body** (`SendCommunicationRequest`):
 
@@ -236,81 +394,101 @@ Send a single email communication.
 | `body` | `string` | Yes | — | Email body content |
 | `bodyFormat` | `BodyFormat` | No | `HTML` | `HTML` or `PlainText` |
 | `fromMailbox` | `string` | No | null | Sender mailbox (null = default) |
+| `sendMode` | `SendMode` | No | `SharedMailbox` | `SharedMailbox` (app-only) or `User` (OBO) |
 | `communicationType` | `CommunicationType` | No | `Email` | Channel type |
 | `associations` | `CommunicationAssociation[]` | No | null | Entity associations |
 | `correlationId` | `string` | No | auto-generated | Tracing correlation ID |
 | `archiveToSpe` | `bool` | No | `false` | Archive .eml to SPE |
 | `attachmentDocumentIds` | `string[]` | No | null | SPE document IDs to attach |
 
-**Response** (`SendCommunicationResponse`):
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `communicationId` | `Guid?` | Dataverse record ID (null if Dataverse failed) |
-| `graphMessageId` | `string` | Graph message tracking ID |
-| `status` | `CommunicationStatus` | Current status (typically `Send`) |
-| `sentAt` | `DateTimeOffset` | Send timestamp |
-| `from` | `string` | Sender email used |
-| `correlationId` | `string` | Tracing correlation ID |
-| `archivedDocumentId` | `Guid?` | SPE document ID (if archived) |
-| `archivalWarning` | `string?` | Warning if archival failed |
-| `attachmentCount` | `int` | Number of attachments sent |
-| `attachmentRecordWarning` | `string?` | Warning if attachment records failed |
-
-**Status Codes**: `200 OK`, `400 Bad Request`, `403 Forbidden`, `500 Internal Server Error`
+**Status Codes**: `200 OK`, `400 Bad Request`, `403 Forbidden`, `429 Too Many Requests` (daily limit), `500 Internal Server Error`
 
 ### POST /api/communications/send-bulk
 
 Send the same email to multiple recipients (1-50). Each recipient gets their own `sprk_communication` record.
 
-**Request Body** (`BulkSendRequest`):
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `recipients` | `BulkRecipient[]` | Yes | Array of recipients (1-50) |
-| `subject` | `string` | Yes | Shared subject line |
-| `body` | `string` | Yes | Shared body content |
-| `bodyFormat` | `BodyFormat` | No | `HTML` or `PlainText` |
-| `fromMailbox` | `string` | No | Sender mailbox |
-| `communicationType` | `CommunicationType` | No | Channel type |
-| `attachmentDocumentIds` | `string[]` | No | Shared attachments |
-| `archiveToSpe` | `bool` | No | Archive each send |
-| `associations` | `CommunicationAssociation[]` | No | Shared associations |
-
-**Response** (`BulkSendResponse`):
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `totalRecipients` | `int` | Total recipients in request |
-| `succeeded` | `int` | Count of successful sends |
-| `failed` | `int` | Count of failed sends |
-| `results` | `BulkSendResult[]` | Per-recipient results |
-
 **Status Codes**: `200 OK` (all succeeded), `207 Multi-Status` (partial), `400`, `403`, `500`
 
-**Rate Limiting**: 100ms inter-send delay between sequential sends for Graph API awareness.
+### POST /api/communications/accounts/{id}/verify
 
-### GET /api/communications/{id}/status
+Tests send and/or read capabilities for a communication account.
 
-Look up communication status from Dataverse.
-
-**Response** (`CommunicationStatusResponse`):
+**Response** (`VerificationResult`):
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `communicationId` | `Guid` | Record ID |
-| `status` | `CommunicationStatus` | Current status |
-| `graphMessageId` | `string?` | Graph tracking ID |
-| `sentAt` | `DateTimeOffset?` | Send timestamp |
-| `from` | `string?` | Sender email |
+| `accountId` | `Guid` | Account record ID |
+| `emailAddress` | `string` | Mailbox email tested |
+| `status` | `VerificationStatus` | `Verified` or `Failed` |
+| `verifiedAt` | `DateTimeOffset` | Verification timestamp |
+| `sendCapabilityVerified` | `bool` | Send test passed |
+| `readCapabilityVerified` | `bool` | Read test passed |
+| `failureReason` | `string?` | Error detail if failed |
 
-**Status Codes**: `200 OK`, `404 Not Found`
+### POST /api/communications/incoming-webhook
+
+Graph change notification endpoint. Anonymous access with `clientState` validation.
+
+Returns `200 OK` (validation echo) or `202 Accepted` (notification processed).
 
 ---
 
-## Approved Sender Resolution
+## Communication Accounts
 
-The `ApprovedSenderValidator` uses a two-tier model to validate sender mailboxes:
+### sprk_communicationaccount Entity
+
+Centralized mailbox management replacing `appsettings.json`-only configuration.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sprk_name` | String | Display name |
+| `sprk_emailaddress` | String | Mailbox email address |
+| `sprk_displayname` | String | Sender display name |
+| `sprk_accounttype` | OptionSet | SharedAccount (100000000), ServiceAccount (100000001), UserAccount (100000002) |
+| `sprk_sendenabled` | Boolean | Can send email |
+| `sprk_isdefaultsender` | Boolean | Default sender for shared mailbox sends |
+| `sprk_receiveenabled` | Boolean | Inbound monitoring enabled |
+| `sprk_monitorfolder` | String | Graph mail folder to monitor (default: "Inbox") |
+| `sprk_autocreaterecords` | Boolean | Auto-create communication records for inbound |
+| `sprk_archiveincomingoptin` | Boolean | Archive inbound .eml to SPE |
+| `sprk_archiveoutgoingoptin` | Boolean | Archive outbound .eml to SPE |
+| `sprk_subscriptionid` | String | Graph subscription ID (auto-managed) |
+| `sprk_subscriptionexpiry` | DateTime | Subscription expiration (auto-managed) |
+| `sprk_subscriptionstatus` | OptionSet | Active, Expired, Failed |
+| `sprk_securitygroupid` | String | Exchange Application Access Policy group ID |
+| `sprk_securitygroupname` | String | Security group display name |
+| `sprk_verificationstatus` | OptionSet | NotVerified, Pending, Verified, Failed |
+| `sprk_lastverified` | DateTime | Last verification timestamp |
+| `sprk_verificationmessage` | String | Verification result message |
+| `sprk_sendstoday` | Integer | Emails sent today (auto-incremented, reset at midnight UTC) |
+| `sprk_dailysendlimit` | Integer | Max sends per day (null = unlimited) |
+
+### CommunicationAccountService
+
+Redis-cached Dataverse queries for account data.
+
+| Method | Cache Key | TTL | Description |
+|--------|-----------|-----|-------------|
+| `QuerySendEnabledAccountsAsync()` | `comm:accounts:send-enabled` | 5 min | All active send-enabled accounts |
+| `QueryReceiveEnabledAccountsAsync()` | `comm:accounts:receive-enabled` | 5 min | All active receive-enabled accounts |
+| `GetDefaultSendAccountAsync()` | (uses send-enabled cache) | — | Account with `IsDefaultSender=true`, fallback to first |
+| `GetSendAccountByEmailAsync(email)` | (uses send-enabled cache) | — | Case-insensitive email match |
+| `IncrementSendCountAsync(accountId)` | (invalidates send-enabled cache) | — | Read + increment + update `sprk_sendstoday` |
+| `ResetAllSendCountsAsync()` | (invalidates cache) | — | Bulk reset `sprk_sendstoday` to 0 for all accounts |
+
+### Auth Method Derivation
+
+| AccountType | AuthMethod | Graph Client |
+|-------------|------------|--------------|
+| SharedAccount | AppOnly | `GraphClientFactory.ForApp()` |
+| ServiceAccount | AppOnly | `GraphClientFactory.ForApp()` |
+| UserAccount | OnBehalfOf | `GraphClientFactory.ForUserAsync(httpContext)` |
+
+---
+
+## Sender Resolution
+
+The `ApprovedSenderValidator` uses a two-tier model:
 
 ### Tier 1: Configuration (Synchronous)
 
@@ -318,115 +496,115 @@ The `ApprovedSenderValidator` uses a two-tier model to validate sender mailboxes
 {
   "Communication": {
     "ApprovedSenders": [
-      {
-        "Email": "noreply@spaarke.com",
-        "DisplayName": "Spaarke Notifications",
-        "IsDefault": true
-      },
-      {
-        "Email": "legal@spaarke.com",
-        "DisplayName": "Legal Department",
-        "IsDefault": false
-      }
+      { "Email": "noreply@spaarke.com", "DisplayName": "Spaarke Notifications", "IsDefault": true }
     ],
     "DefaultMailbox": "noreply@spaarke.com"
   }
 }
 ```
 
-### Tier 2: Dataverse + Redis Cache (Asynchronous)
+### Tier 2: Dataverse Accounts + Redis Cache
 
-1. Check Redis cache (key: `communication:approved-senders`, TTL: 5 minutes)
-2. If cache miss: query Dataverse `sprk_approvedsender` entity for active records
-3. Merge: config senders as base, Dataverse senders overlay (Dataverse wins on email match)
-4. Cache merged result in Redis
+1. `CommunicationAccountService.QuerySendEnabledAccountsAsync()` (Redis-cached, 5-min TTL)
+2. Merge: config senders as base, Dataverse accounts overlay (Dataverse wins on email match)
 
 ### Resolution Priority
 
 | `fromMailbox` | Behavior |
 |---------------|----------|
 | `null` | Return sender with `IsDefault=true`, else `DefaultMailbox` match, else first sender |
-| `"legal@spaarke.com"` | Match against approved list (case-insensitive). If found, return it. If not, return error `INVALID_SENDER` |
-
-### Error Codes
-
-| Code | Scenario |
-|------|----------|
-| `INVALID_SENDER` | Requested sender not in approved list |
-| `NO_DEFAULT_SENDER` | No sender configured and no default available |
+| `"legal@spaarke.com"` | Match against approved list (case-insensitive). If not found → `INVALID_SENDER` |
 
 ---
 
-## Association Mapping
+## Inbound Association Resolution
 
-Communications can be linked to 8 entity types via the `associations[]` field:
+`IncomingAssociationResolver` uses a 4-level priority cascade. First match wins.
 
-### Regarding Lookup Map
+### Level 1: Thread Matching
 
-| Entity Type | Lookup Field | Entity Set Name |
-|-------------|-------------|-----------------|
-| `sprk_matter` | `sprk_regardingmatter` | `sprk_matters` |
-| `sprk_project` | `sprk_regardingproject` | `sprk_projects` |
-| `sprk_organization` | `sprk_regardingorganization` | `sprk_organizations` |
-| `contact` | `sprk_regardingperson` | `contacts` |
-| `sprk_analysis` | `sprk_regardinganalysis` | `sprk_analysises` |
-| `sprk_budget` | `sprk_regardingbudget` | `sprk_budgets` |
-| `sprk_invoice` | `sprk_regardinginvoice` | `sprk_invoices` |
-| `sprk_workassignment` | `sprk_regardingworkassignment` | `sprk_workassignments` |
+- Fetches `In-Reply-To` header from Graph internet message headers
+- Looks up parent `sprk_communication` by message ID
+- Copies regarding fields from parent record
 
-### Mapping Behavior
+### Level 2: Sender Matching
 
-- `associations[0]` (primary) → sets the regarding lookup field + denormalized text fields
-- Denormalized fields: `sprk_regardingrecordname`, `sprk_regardingrecordid`, `sprk_regardingrecordurl`
-- `sprk_associationcount` → total number of associations provided
-- Unknown entity types → warning logged, lookup not set
+- Queries `contact` by sender email address
+- Queries `account` by sender email domain (skips common providers: gmail.com, outlook.com, etc.)
+
+### Level 3: Subject Pattern Matching
+
+Applies 4 regex patterns against subject line:
+
+| Pattern | Entity Lookup |
+|---------|---------------|
+| `MAT-(\d+)` | `sprk_matter` by `sprk_referencenumber` |
+| `Matter\s*#(\d+)` | `sprk_matter` by `sprk_referencenumber` |
+| `SPRK-(\d+)` | `sprk_matter` by `sprk_referencenumber` |
+| `[MATTER:(\d+)]` | `sprk_matter` by `sprk_referencenumber` |
+
+### Level 4: Mailbox Context
+
+Falls back to `account.DefaultRegardingMatterId` if configured on the communication account.
+
+### Association Status
+
+| Status | Value | Set When |
+|--------|-------|----------|
+| Resolved | 100000000 | Match found at any level |
+| Pending Review | 100000001 | No match found at any level |
 
 ---
 
 ## Attachment Handling
 
-### Limits
+### Outbound Limits
 
 | Limit | Value | Enforced At |
 |-------|-------|-------------|
 | Max attachment count | 150 | `DownloadAndBuildAttachmentsAsync` |
 | Max total size | 35 MB (36,700,160 bytes) | Cumulative check during download |
 
-### Flow
+### Inbound Attachment Processing
 
 ```
-Request.AttachmentDocumentIds[]
-  │
-  ▼ (for each ID)
-  SpeFileStore.GetFileMetadataAsync(driveId, itemId)
-  → validate cumulative size
-  SpeFileStore.DownloadFileAsync(driveId, itemId)
-  → read to byte[]
-  → build Graph FileAttachment {Name, ContentType, ContentBytes}
+Graph Message.Attachments[]
   │
   ▼
-  Attach to Graph Message.Attachments[]
+GraphAttachmentAdapter.ToAttachmentInfoList()
+  → Filters to FileAttachment only, excludes empty content
+  → Maps: FileName, MimeType, Content (MemoryStream), SizeBytes, IsInline, ContentId
   │
-  ▼ (after Graph send succeeds)
-  Create sprk_communicationattachment records in Dataverse (best-effort)
+  ▼
+AttachmentFilterService.ShouldFilterAttachment()
+  → Filters signature images (small inline images)
+  │
+  ▼
+Upload to SPE: /communications/{id}/attachments/{fileName}
+  │
+  ▼
+Create sprk_communicationattachment records in Dataverse
 ```
-
-### Content Type Inference
-
-The service infers MIME types from file extensions for 20+ common types (PDF, DOCX, XLSX, PNG, etc.), falling back to `application/octet-stream` for unknown extensions.
 
 ---
 
 ## EML Archival
 
-When `archiveToSpe=true`, the service archives the sent email as an RFC 2822 `.eml` file:
+### Outbound (EmlGenerationService)
 
-### Generation (EmlGenerationService)
+- Builds .eml from `SendCommunicationRequest` data
+- Uses **MimeKit** for RFC 2822 compliance
+- Supports HTML/PlainText body formats and multipart/mixed for attachments
 
-- Uses **MimeKit** library for RFC 2822 compliance
-- Supports HTML and PlainText body formats
-- Supports multipart/mixed for attachments (base64 encoded)
-- File naming: `{sanitized_subject}_{yyyyMMdd_HHmmss}.eml`
+### Inbound (GraphMessageToEmlConverter) — NEW IN R2
+
+- **Pure transformation** — no I/O, no Dataverse calls, no constructor dependencies
+- Converts Microsoft Graph `Message` (with expanded attachments) directly to .eml
+- Preserves `InternetMessageId`, `In-Reply-To`, `References` headers for thread continuity
+- Handles three attachment layouts:
+  - Only inline → `multipart/related`
+  - Both inline and regular → `multipart/mixed` wrapping `multipart/related`
+  - Only regular → `multipart/mixed`
 
 ### Storage Path
 
@@ -444,6 +622,48 @@ After upload, creates a `sprk_document` record:
 
 ---
 
+## Background Services
+
+Three `BackgroundService` implementations following ADR-001:
+
+### GraphSubscriptionManager
+
+| Setting | Value |
+|---------|-------|
+| Tick interval | 30 minutes |
+| Renewal threshold | 24 hours before expiry |
+| Subscription lifetime | 3 days (Graph maximum for mail) |
+
+**Decision logic per account**:
+
+| Condition | Action |
+|-----------|--------|
+| No SubscriptionId | CREATE new subscription |
+| Expiry < 24h from now | RENEW (PATCH expiration) |
+| Renewal fails (404/error) | DELETE old + CREATE new |
+| Otherwise | SKIP (healthy) |
+
+Subscription resource: `users/{email}/mailFolders/{monitorFolder}/messages` with `changeType=created`.
+
+### InboundPollingBackupService
+
+| Setting | Value |
+|---------|-------|
+| Polling interval | 5 minutes |
+| Initial lookback window | 15 minutes (on startup/restart) |
+| Max messages per poll | 50 |
+
+Queries `isRead eq false` messages filtered by `receivedDateTime`. Enqueues `IncomingCommunication` jobs with idempotency key `Communication:{messageId}:Process`.
+
+### DailySendCountResetService
+
+- Fires at midnight UTC daily
+- Calls `CommunicationAccountService.ResetAllSendCountsAsync()`
+- On error, retries after 1-minute delay (avoids tight error loops)
+- `CalculateDelayUntilMidnightUtc()` is `internal static` for testability
+
+---
+
 ## Dataverse Entity Schema
 
 ### sprk_communication
@@ -451,10 +671,10 @@ After upload, creates a `sprk_document` record:
 | Field | Type | Description |
 |-------|------|-------------|
 | `sprk_name` | String(200) | Auto-generated: "Email: {subject}" |
-| `sprk_communiationtype` | OptionSet | Email, TeamsMessage, SMS, Notification |
-| `statuscode` | OptionSet | Draft(1), Queued, Send, Delivered, Failed, Bounded, Recalled |
+| `sprk_communicationtype` | OptionSet | Email (100000000), TeamsMessage, SMS, Notification |
+| `statuscode` | OptionSet | Draft(1), Queued(659490001), Send(659490002), Delivered(659490003), Failed(659490004), Bounded(659490005), Recalled(659490006) |
 | `statecode` | OptionSet | Active(0), Inactive(1) |
-| `sprk_direction` | OptionSet | Incoming(0), Outgoing(1) |
+| `sprk_direction` | OptionSet | Incoming(100000000), Outgoing(100000001) |
 | `sprk_bodyformat` | OptionSet | HTML(0), PlainText(1) |
 | `sprk_to` | String | Semicolon-delimited recipient list |
 | `sprk_cc` | String | Semicolon-delimited CC list |
@@ -462,12 +682,14 @@ After upload, creates a `sprk_document` record:
 | `sprk_from` | String | Sender email address |
 | `sprk_subject` | String | Email subject |
 | `sprk_body` | Multiline | Email body content |
-| `sprk_graphmessageid` | String | Graph message / correlation ID |
-| `sprk_sentat` | DateTime | Send timestamp |
+| `sprk_graphmessageid` | String | Graph message ID (used for deduplication) |
+| `sprk_sentat` | DateTime | Send/receive timestamp |
 | `sprk_correlationid` | String | Tracing correlation ID |
+| `sprk_sentby` | String | OID of sending user (User mode only) |
 | `sprk_hasattachments` | Boolean | Whether attachments were included |
 | `sprk_attachmentcount` | Integer | Number of attachments |
 | `sprk_associationcount` | Integer | Number of entity associations |
+| `sprk_associationstatus` | OptionSet | Resolved(100000000), PendingReview(100000001) |
 | `sprk_regardingrecordname` | String(100) | Denormalized: primary association name |
 | `sprk_regardingrecordid` | String(100) | Denormalized: primary association ID |
 | `sprk_regardingrecordurl` | String(200) | Denormalized: primary association URL |
@@ -481,18 +703,6 @@ After upload, creates a `sprk_document` record:
 | `sprk_communication` | Lookup | Parent communication record |
 | `sprk_document` | Lookup | SPE document record |
 | `sprk_attachmenttype` | OptionSet | File(100000000) |
-
-### Communication Status Values
-
-| Value | Label | Description |
-|-------|-------|-------------|
-| 1 | Draft | New record, not yet sent |
-| 659490001 | Queued | Queued for sending |
-| 659490002 | Send | Successfully sent via Graph |
-| 659490003 | Delivered | Delivery confirmed |
-| 659490004 | Failed | Send failed |
-| 659490005 | Bounded | Bounced back |
-| 659490006 | Recalled | Recalled by sender |
 
 ---
 
@@ -511,22 +721,72 @@ After upload, creates a `sprk_document` record:
       }
     ],
     "DefaultMailbox": "noreply@spaarke.com",
-    "ArchiveContainerId": "{spe-container-drive-id}"
+    "ArchiveContainerId": "{spe-container-drive-id}",
+    "WebhookNotificationUrl": "https://spe-api-dev-67e2xz.azurewebsites.net/api/communications/incoming-webhook",
+    "WebhookClientState": "{secret-value}"
   }
 }
 ```
 
-### DI Registration
+### CommunicationOptions
 
-All services are registered as singletons per ADR-010:
+| Property | Type | Description |
+|----------|------|-------------|
+| `ApprovedSenders` | `ApprovedSenderConfig[]` | Config-based approved senders (required, min 1) |
+| `DefaultMailbox` | `string?` | Fallback sender when no default configured |
+| `ArchiveContainerId` | `string?` | SPE container/drive ID for .eml archival |
+
+---
+
+## DI Registration
+
+`CommunicationModule.AddCommunicationModule()` registers all services per ADR-010:
 
 ```csharp
+// Options
 services.Configure<CommunicationOptions>(config.GetSection("Communication"));
-services.AddSingleton<CommunicationService>();
+
+// Singletons
+services.AddSingleton<CommunicationAccountService>();
 services.AddSingleton<ApprovedSenderValidator>();
+services.AddSingleton<CommunicationService>();
 services.AddSingleton<EmlGenerationService>();
-services.AddSingleton<CommunicationAuthorizationFilter>();
+services.AddSingleton<GraphMessageToEmlConverter>();
+services.AddSingleton<MailboxVerificationService>();
+services.AddSingleton<IncomingAssociationResolver>();
+services.AddSingleton<IncomingCommunicationProcessor>();
+services.AddSingleton<SendCommunicationToolHandler>();
+
+// Scoped (job handler)
+services.AddScoped<IJobHandler, IncomingCommunicationJobHandler>();
+
+// Background Services (ADR-001)
+services.AddHostedService<GraphSubscriptionManager>();
+services.AddHostedService<InboundPollingBackupService>();
+services.AddHostedService<DailySendCountResetService>();
 ```
+
+---
+
+## Telemetry
+
+### CommunicationTelemetry
+
+Meter: `Sprk.Bff.Api.Communication` (v1.0.0)
+
+| Category | Counters | Histograms |
+|----------|----------|------------|
+| Conversion | `communication.conversion.requests`, `.successes`, `.failures` | `communication.conversion.duration` (ms) |
+| Webhook | `communication.webhook.received`, `.enqueued`, `.rejected` | `communication.webhook.duration` (ms) |
+| Polling | `communication.polling.runs`, `.emails_found`, `.emails_enqueued` | — |
+| Filter | `communication.filter.evaluations`, `.matched`, `.default_action` | — |
+| Job Processing | `communication.job.processed`, `.succeeded`, `.failed`, `.skipped_duplicate` | `communication.job.duration` (ms) |
+| Files | `communication.attachments.processed` | `communication.eml.file_size` (bytes) |
+| AI Jobs | `communication.ai_job.enqueued`, `.enqueue_failures` | — |
+| RAG Jobs | `communication.rag_job.enqueued`, `.enqueue_failures`, `.skipped` | — |
+| DLQ | `communication.dlq.list_operations`, `.redrive_attempts`, `.redrive_successes`, `.redrive_failures` | — |
+
+**Dimensions**: `communication.trigger` (manual/webhook/polling), `communication.status`, `communication.error_code`, `communication.filter.action`, `communication.document_type`, `communication.skip_reason`
 
 ---
 
@@ -541,6 +801,7 @@ All errors use `SdapProblemException` which produces RFC 7807 ProblemDetails res
 | `VALIDATION_ERROR` | 400 | Missing To, Subject, or Body |
 | `INVALID_SENDER` | 400 | Sender not in approved list |
 | `NO_DEFAULT_SENDER` | 400 | No sender configured |
+| `DAILY_SEND_LIMIT_REACHED` | 429 | `SendsToday >= DailySendLimit` |
 | `ATTACHMENT_LIMIT_EXCEEDED` | 400 | >150 attachments or >35MB total |
 | `ATTACHMENT_NOT_FOUND` | 404 | SPE document not found |
 | `ATTACHMENT_DOWNLOAD_FAILED` | 502 | Failed to download from SPE |
@@ -562,17 +823,29 @@ All error responses include:
 
 ### Authentication
 
-- All endpoints require authentication via `RequireAuthorization()`
+- All endpoints require authentication via `RequireAuthorization()` except `/incoming-webhook` (anonymous with clientState validation)
 - `CommunicationAuthorizationFilter` validates:
   - `user.Identity.IsAuthenticated == true`
   - Valid `oid` or `NameIdentifier` claim present
-- Graph API calls use app-only authentication via `GraphClientFactory.ForApp()`
+- Graph API calls: App-only via `GraphClientFactory.ForApp()` or OBO via `GraphClientFactory.ForUserAsync()`
+
+### Webhook Security
+
+- `clientState` from config is set on subscription creation and validated on each notification
+- In-memory deduplication prevents replay (10-minute window)
+- Webhook does not process messages directly — enqueues to ServiceBus for isolated processing
 
 ### Sender Controls
 
-- Only mailboxes in the approved senders list can be used as `From`
-- Config-based senders are the baseline; Dataverse senders can extend the list
+- SharedMailbox mode: Only mailboxes in the approved senders list can be used as `From`
+- User mode: Sender is derived from JWT claims (no spoofing possible)
 - All sender resolution is case-insensitive
+
+### Exchange Application Access Policy
+
+- Restricts which mailboxes the app registration can access
+- Configured via security groups in Azure AD
+- `sprk_securitygroupid` / `sprk_securitygroupname` on communication account track the policy group
 
 ### Data Protection
 
@@ -621,7 +894,7 @@ The `SendCommunicationToolHandler` implements `IAiToolHandler` (ADR-013) to allo
 
 ### Tool Registration
 
-The handler is auto-discovered via the `IAiToolHandler` interface and registered in the AI Tool Framework.
+Registered explicitly in `CommunicationModule` as singleton (not auto-discovered).
 
 ### Tool Parameters
 
@@ -639,55 +912,13 @@ The handler is auto-discovered via the `IAiToolHandler` interface and registered
 
 | ADR | Compliance | Implementation |
 |-----|-----------|----------------|
-| ADR-001 | ✅ | Minimal API endpoints in `CommunicationEndpoints.cs` |
-| ADR-007 | ✅ | `SpeFileStore` facade for all SPE operations (attachment download, .eml upload) |
+| ADR-001 | ✅ | Minimal API endpoints + 3 BackgroundServices (GraphSubscriptionManager, InboundPollingBackupService, DailySendCountResetService) |
+| ADR-007 | ✅ | `SpeFileStore` facade for all SPE operations (attachment download/upload, .eml upload) |
 | ADR-008 | ✅ | `CommunicationAuthorizationFilter` as endpoint filter, not global middleware |
-| ADR-010 | ✅ | All services registered as singletons; concrete types (no unnecessary interfaces) |
+| ADR-010 | ✅ | All services registered via `CommunicationModule`; concrete types, singletons |
 | ADR-013 | ✅ | `SendCommunicationToolHandler` extends BFF via `IAiToolHandler` |
 | ADR-019 | ✅ | `SdapProblemException` for all error responses with ProblemDetails format |
 
 ---
 
-## Appendix: Sequence Diagram — Single Send
-
-```
-Client          Endpoints       AuthFilter      CommService     SenderValidator    Graph           Dataverse       SPE
-  │                │                │               │                │               │               │              │
-  │ POST /send     │                │               │                │               │               │              │
-  │───────────────>│                │               │                │               │               │              │
-  │                │ InvokeAsync    │               │                │               │               │              │
-  │                │───────────────>│               │                │               │               │              │
-  │                │      OK       │               │                │               │               │              │
-  │                │<──────────────│               │                │               │               │              │
-  │                │                                │                │               │               │              │
-  │                │ SendAsync(req)                 │                │               │               │              │
-  │                │──────────────────────────────->│                │               │               │              │
-  │                │                                │ Resolve(from)  │               │               │              │
-  │                │                                │───────────────>│               │               │              │
-  │                │                                │   sender       │               │               │              │
-  │                │                                │<───────────────│               │               │              │
-  │                │                                │                                │               │              │
-  │                │                                │ sendMail(msg)                  │               │              │
-  │                │                                │───────────────────────────────>│               │              │
-  │                │                                │              OK               │               │              │
-  │                │                                │<──────────────────────────────│               │              │
-  │                │                                │                                               │              │
-  │                │                                │ CreateAsync(sprk_communication)                │              │
-  │                │                                │──────────────────────────────────────────────>│              │
-  │                │                                │              recordId                         │              │
-  │                │                                │<─────────────────────────────────────────────│              │
-  │                │                                │                                                             │
-  │                │                                │ UploadSmallAsync(.eml)                                      │
-  │                │                                │────────────────────────────────────────────────────────────>│
-  │                │                                │              fileHandle                                    │
-  │                │                                │<───────────────────────────────────────────────────────────│
-  │                │                                │                                                             │
-  │                │   SendCommunicationResponse    │                                                             │
-  │                │<──────────────────────────────│                                                             │
-  │  200 OK        │                                                                                              │
-  │<───────────────│                                                                                              │
-```
-
----
-
-*Architecture document for the Email Communication Solution R1. See also: [Deployment Guide](../guides/COMMUNICATION-DEPLOYMENT-GUIDE.md) | [User Guide](../guides/communication-user-guide.md)*
+*Architecture document for the Communication Service (R2). See also: [Admin Guide](../guides/COMMUNICATION-ADMIN-GUIDE.md) | [Deployment Guide](../guides/COMMUNICATION-DEPLOYMENT-GUIDE.md)*

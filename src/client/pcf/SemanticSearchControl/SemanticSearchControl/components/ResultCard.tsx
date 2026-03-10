@@ -19,10 +19,6 @@ import {
     Text,
     Button,
     Tooltip,
-    Popover,
-    PopoverTrigger,
-    PopoverSurface,
-    Spinner,
     shorthands,
 } from "@fluentui/react-components";
 import {
@@ -38,6 +34,7 @@ import {
     DocumentSearchRegular,
     FolderOpenRegular,
 } from "@fluentui/react-icons";
+import { AiSummaryPopover } from "@spaarke/ui-components/dist/components/AiSummaryPopover";
 import { IResultCardProps } from "../types";
 import { FilePreviewDialog } from "./FilePreviewDialog";
 
@@ -204,30 +201,6 @@ const useStyles = makeStyles({
         flexShrink: 0,
         marginLeft: tokens.spacingHorizontalL,
     },
-    // Summary popover
-    summaryPopover: {
-        width: "480px",
-        maxHeight: "400px",
-        overflowY: "auto",
-        display: "flex",
-        flexDirection: "column",
-        gap: tokens.spacingVerticalS,
-    },
-    summaryHeader: {
-        fontWeight: tokens.fontWeightSemibold,
-        fontSize: tokens.fontSizeBase400,
-        paddingBottom: tokens.spacingVerticalXS,
-        borderBottomWidth: "1px",
-        borderBottomStyle: "solid",
-        borderBottomColor: tokens.colorNeutralStroke2,
-    },
-    centered: {
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        height: "100%",
-        ...shorthands.padding("16px"),
-    },
 });
 
 // ---------------------------------------------------------------------------
@@ -278,17 +251,16 @@ export const ResultCard: React.FC<IResultCardProps> = ({
     onFindSimilar,
     onPreview,
     onSummary,
+    onEmailDocument,
+    onCopyLink,
+    onToggleWorkspace,
+    isInWorkspace,
     compactMode,
 }) => {
     const styles = useStyles();
 
     // FilePreviewDialog state
     const [previewOpen, setPreviewOpen] = useState(false);
-
-    // Summary popover state
-    const [summaryData, setSummaryData] = useState<{ summary: string | null; tldr: string | null } | null>(null);
-    const [summaryLoading, setSummaryLoading] = useState(false);
-    const [summaryError, setSummaryError] = useState(false);
 
     // Resolve file icon
     const IconComponent = getFileIcon(result.fileType);
@@ -419,62 +391,20 @@ export const ResultCard: React.FC<IResultCardProps> = ({
                         </Tooltip>
 
                         {/* 2. Summary */}
-                        <Popover
-                            positioning="after"
-                            withArrow
-                            onOpenChange={(_ev, data) => {
-                                if (data.open && !summaryData && !summaryLoading) {
-                                    setSummaryLoading(true);
-                                    setSummaryError(false);
-                                    void onSummary()
-                                        .then((sd) => {
-                                            setSummaryData(sd);
-                                            setSummaryLoading(false);
-                                            return sd;
-                                        })
-                                        .catch(() => {
-                                            setSummaryError(true);
-                                            setSummaryLoading(false);
-                                        });
-                                }
-                            }}
-                        >
-                            <PopoverTrigger disableButtonEnhancement>
-                                <Tooltip content="Summary" relationship="label">
+                        <AiSummaryPopover
+                            onFetchSummary={onSummary}
+                            trigger={
+                                <Tooltip content="AI Summary" relationship="label">
                                     <Button
                                         appearance="subtle"
                                         size="medium"
                                         icon={<Sparkle20Regular aria-hidden="true" />}
-                                        aria-label="Summary"
+                                        aria-label="AI Summary"
                                         onClick={(ev) => ev.stopPropagation()}
                                     />
                                 </Tooltip>
-                            </PopoverTrigger>
-                            <PopoverSurface className={styles.summaryPopover}>
-                                <Text className={styles.summaryHeader}>Summary</Text>
-                                {summaryLoading && (
-                                    <div className={styles.centered}>
-                                        <Spinner size="small" label="Loading summary..." />
-                                    </div>
-                                )}
-                                {summaryError && (
-                                    <Text>Summary not available for this document.</Text>
-                                )}
-                                {summaryData && !summaryLoading && (
-                                    <>
-                                        {summaryData.tldr && (
-                                            <Text weight="semibold">{summaryData.tldr}</Text>
-                                        )}
-                                        {summaryData.summary && (
-                                            <Text style={{ whiteSpace: "pre-wrap" }}>{summaryData.summary}</Text>
-                                        )}
-                                        {!summaryData.summary && !summaryData.tldr && (
-                                            <Text>No summary available for this document.</Text>
-                                        )}
-                                    </>
-                                )}
-                            </PopoverSurface>
-                        </Popover>
+                            }
+                        />
 
                         {/* 3. Open File */}
                         <Tooltip content="Open file" relationship="label">
@@ -512,6 +442,10 @@ export const ResultCard: React.FC<IResultCardProps> = ({
                 fetchPreviewUrl={onPreview}
                 onOpenFile={onOpenFile}
                 onOpenRecord={handleOpenRecord}
+                onEmailDocument={onEmailDocument}
+                onCopyLink={onCopyLink}
+                onToggleWorkspace={onToggleWorkspace}
+                isInWorkspace={isInWorkspace}
             />
         </>
     );

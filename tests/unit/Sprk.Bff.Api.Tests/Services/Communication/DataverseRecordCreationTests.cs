@@ -76,6 +76,8 @@ public class DataverseRecordCreationTests
             _dataverseServiceMock.Object,
             emlGenerationService,
             speFileStore,
+            null!, // CommunicationAccountService — not tested here
+            null!, // JobSubmissionService — not tested here
             Options.Create(opts),
             _loggerMock.Object);
     }
@@ -145,12 +147,12 @@ public class DataverseRecordCreationTests
 
     #endregion
 
-    #region Communication Type Field (sprk_communiationtype - intentional typo)
+    #region Communication Type Field (sprk_communicationtype)
 
     [Fact]
     public async Task SendAsync_SetsSprkCommuniationType_ToEmailValue()
     {
-        // Arrange - note the intentional typo "communiation" matching actual Dataverse schema
+        // Arrange
         var service = CreateService();
         var request = CreateValidRequest(communicationType: CommunicationType.Email);
 
@@ -159,7 +161,7 @@ public class DataverseRecordCreationTests
 
         // Assert
         _capturedEntity.Should().NotBeNull();
-        var optionSet = _capturedEntity!["sprk_communiationtype"] as OptionSetValue;
+        var optionSet = _capturedEntity!["sprk_communicationtype"] as OptionSetValue;
         optionSet.Should().NotBeNull();
         optionSet!.Value.Should().Be(100000000, "CommunicationType.Email = 100000000");
     }

@@ -1,7 +1,7 @@
 namespace Sprk.Bff.Api.Services.Communication.Models;
 
 /// <summary>
-/// Communication channel type. Maps to Dataverse sprk_communiationtype (note: typo is intentional — actual Dataverse logical name).
+/// Communication channel type. Maps to Dataverse field sprk_communicationtype.
 /// </summary>
 public enum CommunicationType
 {

@@ -22,7 +22,9 @@ public static class CommunicationModule
         services.AddSingleton<ApprovedSenderValidator>();
         services.AddSingleton<CommunicationService>();
         services.AddSingleton<EmlGenerationService>();
+        services.AddSingleton<GraphMessageToEmlConverter>();
         services.AddSingleton<MailboxVerificationService>();
+        services.AddSingleton<IncomingAssociationResolver>();
         services.AddSingleton<IncomingCommunicationProcessor>();
 
         // AI tool handler (IAiToolHandler — not auto-discovered by ToolFramework which scans IAnalysisToolHandler only)
@@ -38,6 +40,9 @@ public static class CommunicationModule
 
         // Background service: backup polling for missed webhooks (ADR-001)
         services.AddHostedService<InboundPollingBackupService>();
+
+        // Background service: reset daily send counts at midnight UTC (ADR-001)
+        services.AddHostedService<DailySendCountResetService>();
 
         return services;
     }

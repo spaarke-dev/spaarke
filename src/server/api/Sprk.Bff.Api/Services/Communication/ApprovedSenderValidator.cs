@@ -15,7 +15,7 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// </summary>
 public sealed class ApprovedSenderValidator
 {
-    private const string CacheKey = "communication:approved-senders";
+    private const string CacheKey = "communication:accounts:merged";
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
 
     private readonly CommunicationOptions _options;

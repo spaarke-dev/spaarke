@@ -1,0 +1,68 @@
+<task id="ECS-002" project="Email Communication Solution R2">
+  <metadata>
+    <title>Complete Communication Account Admin UX (Dataverse Forms/Views)</title>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1 - Communication Account Entity (Phase A)</phase>
+    <tags>dataverse, admin-ux</tags>
+    <dependencies>ECS-001</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Create or update Dataverse forms and views for sprk_communicationaccount entity.
+    Admin users need to manage all communication accounts via model-driven app.
+    Forms should group fields logically: Core Identity, Outbound Config, Inbound Config,
+    Graph Integration (system-managed), Security, Archival Options.
+  </prompt>
+
+  <role>Dataverse solution developer</role>
+
+  <goal>
+    Complete admin forms and views for sprk_communicationaccount entity deployed
+    to Dataverse, allowing admins to manage all mailbox configuration.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>projects/email-communication-solution-r2/design-communication-accounts.md</file>
+      <file>docs/data-model/sprk_communicationaccount.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review Existing Forms">
+      Check what forms/views already exist for sprk_communicationaccount in the solution.
+    </step>
+    <step order="2" name="Design Form Layout">
+      Plan form sections: Core Identity, Outbound, Inbound, Graph Integration (read-only),
+      Security, Archival (sprk_ArchiveOutgoingOptIn, sprk_ArchiveIncomingOptIn).
+    </step>
+    <step order="3" name="Create/Update Forms">
+      Create main form with all field groups. System-managed fields (subscription, verification)
+      should be read-only. Archive opt-in fields default to Yes.
+    </step>
+    <step order="4" name="Create Views">
+      Create views: Active Accounts, Send-Enabled, Receive-Enabled, By Account Type,
+      Verification Status (failed/pending).
+    </step>
+    <step order="5" name="Seed Default Record">
+      Document/create seed data for mailbox-central@spaarke.com as default send-enabled account.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="docs">Dataverse form and view definitions</output>
+    <output type="docs">Seed data documentation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Main form displays all entity fields in logical groups</criterion>
+    <criterion testable="true">System-managed fields are read-only on the form</criterion>
+    <criterion testable="true">Views filter by send-enabled, receive-enabled, account type</criterion>
+    <criterion testable="true">Archive opt-in fields visible and default to Yes</criterion>
+  </acceptance-criteria>
+</task>

@@ -13,6 +13,18 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Services.Email;
 
 /// <summary>
+/// Fake token credential for testing (returns a dummy token).
+/// </summary>
+internal class FakeTokenCredential : TokenCredential
+{
+    public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
+        => new("fake-token", DateTimeOffset.UtcNow.AddHours(1));
+
+    public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+        => new(new AccessToken("fake-token", DateTimeOffset.UtcNow.AddHours(1)));
+}
+
+/// <summary>
 /// Unit tests for EmailToEmlConverter.ExtractAttachments method.
 /// Tests extraction of attachments from .eml files using MimeKit.
 /// </summary>

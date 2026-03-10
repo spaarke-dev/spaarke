@@ -1,0 +1,89 @@
+<task id="ECS-021" project="Email Communication Solution R2">
+  <metadata>
+    <title>Complete Graph Subscription Lifecycle Management</title>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>3 - Inbound Shared Mailbox Monitoring (Phase C)</phase>
+    <tags>bff-api, graph</tags>
+    <dependencies>ECS-020</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Complete GraphSubscriptionManager BackgroundService to create, renew, and recreate
+    Graph subscriptions for all receive-enabled communication accounts. Subscriptions
+    target /users/{email}/mailFolders/{folder}/messages with changeType: created.
+    Max lifetime 3 days; renew when less than 24h remaining. Update sprk_communicationaccount
+    fields (subscriptionId, expiry, status). Use per-environment webhook secret from config.
+  </prompt>
+
+  <role>Senior .NET developer familiar with Microsoft Graph subscriptions</role>
+
+  <goal>
+    GraphSubscriptionManager reliably maintains Graph subscriptions for all receive-enabled
+    accounts, auto-renewing before expiry and recreating on failure. All subscription state
+    persisted to Dataverse.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-001">Use BackgroundService pattern</constraint>
+    <constraint source="Graph API">Mail subscription max lifetime: 3 days</constraint>
+    <constraint source="project">Renew when less than 24h remaining</constraint>
+    <constraint source="project">Recreate on failure (delete old, create new)</constraint>
+    <constraint source="project">Per-environment webhook secret in config</constraint>
+    <constraint source="project">Multi-tenant: no hardcoded URLs or tenant IDs</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Review Existing Manager">
+      Read GraphSubscriptionManager.cs, identify gaps.
+    </step>
+    <step order="2" name="Implement Subscription Create">
+      POST /subscriptions with resource, changeType, notificationUrl, expirationDateTime, clientState.
+    </step>
+    <step order="3" name="Implement Subscription Renew">
+      PATCH /subscriptions/{id} when expiry less than 24h.
+    </step>
+    <step order="4" name="Implement Subscription Recreate">
+      On failure: DELETE old subscription, POST new one.
+    </step>
+    <step order="5" name="Update Dataverse Fields">
+      Write sprk_graphsubscriptionid, sprk_subscriptionexpiry, sprk_subscriptionstatus.
+    </step>
+    <step order="6" name="Timer Loop">
+      Run on startup + every 30 minutes.
+    </step>
+    <step order="7" name="Write Tests">
+      Unit tests for create, renew, recreate, and error scenarios.
+    </step>
+    <step order="8" name="Build and Test">
+      dotnet build and dotnet test.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Subscriptions created for all receive-enabled accounts on startup</criterion>
+    <criterion testable="true">Subscriptions renewed when less than 24h before expiry</criterion>
+    <criterion testable="true">Failed subscriptions recreated (delete + create)</criterion>
+    <criterion testable="true">Dataverse fields updated with subscription state</criterion>
+    <criterion testable="true">Webhook secret sourced from configuration (not hardcoded)</criterion>
+    <criterion testable="true">All tests pass</criterion>
+  </acceptance-criteria>
+</task>

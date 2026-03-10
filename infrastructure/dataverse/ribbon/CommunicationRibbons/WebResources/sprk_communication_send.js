@@ -357,9 +357,9 @@ Sprk.Communication.Send._buildRequest = function (formContext, sendModeResult) {
     var toArray = Sprk.Communication.Send._parseRecipients(toValue);
     var ccArray = ccValue ? Sprk.Communication.Send._parseRecipients(ccValue) : null;
 
-    // Get communication type (sprk_communiationtype - intentional typo in Dataverse)
+    // Get communication type (sprk_communicationtype)
     var communicationType = "Email";
-    var typeAttr = formContext.getAttribute("sprk_communiationtype");
+    var typeAttr = formContext.getAttribute("sprk_communicationtype");
     if (typeAttr && typeAttr.getValue() !== null) {
         var typeValue = typeAttr.getValue();
         // Map option set values to string: 100000000=Email, 100000001=TeamsMessage, etc.
@@ -754,7 +754,7 @@ Sprk.Communication.Send._getAuthTokenSsoFallback = function (msalInstance, scope
  * Query send-enabled shared accounts from sprk_communicationaccount.
  * Results are cached for the duration of the session.
  *
- * Queries: sprk_communicationaccount where sprk_sendenableds = true
+ * Queries: sprk_communicationaccount where sprk_sendenabled = true
  * Returns: Array of {name, email, isDefault} objects
  *
  * @returns {Promise<Array>} Array of send-enabled account objects
@@ -788,8 +788,8 @@ Sprk.Communication.Send._loadSendEnabledAccounts = function () {
     Sprk.Communication.Send._sendAccountsLoading = true;
 
     // Query sprk_communicationaccount where send is enabled
-    // Uses actual Dataverse field names: sprk_sendenableds (trailing 's'), sprk_emailaddress, etc.
-    var filter = "?$filter=sprk_sendenableds eq true and statecode eq 0" +
+    // Uses actual Dataverse field names: sprk_sendenabled, sprk_emailaddress, etc.
+    var filter = "?$filter=sprk_sendenabled eq true and statecode eq 0" +
         "&$select=sprk_name,sprk_emailaddress,sprk_displayname,sprk_isdefaultsender,sprk_accounttype" +
         "&$orderby=sprk_isdefaultsender desc,sprk_name asc";
 

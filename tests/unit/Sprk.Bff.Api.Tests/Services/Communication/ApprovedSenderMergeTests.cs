@@ -82,7 +82,7 @@ public class ApprovedSenderMergeTests
         entity["sprk_name"] = name;
         entity["sprk_displayname"] = name;
         entity["sprk_isdefaultsender"] = isDefault;
-        entity["sprk_sendenableds"] = true;
+        entity["sprk_sendenabled"] = true;
         entity["sprk_accounttype"] = new OptionSetValue(100000000); // SharedAccount
         return entity;
     }
@@ -415,7 +415,7 @@ public class ApprovedSenderMergeTests
         dvEntity["sprk_name"] = "Mapped Display Name";
         dvEntity["sprk_displayname"] = "Mapped Display Name";
         dvEntity["sprk_isdefaultsender"] = true;
-        dvEntity["sprk_sendenableds"] = true;
+        dvEntity["sprk_sendenabled"] = true;
         dvEntity["sprk_accounttype"] = new OptionSetValue(100000000);
 
         _dataverseServiceMock

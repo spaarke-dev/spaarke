@@ -80,7 +80,45 @@ function detectDarkModeFromNavbar(): boolean | null {
 }
 
 /**
+ * Detect dark mode from the Dataverse page background color.
+ * This checks the actual rendered page rather than OS system preferences,
+ * ensuring the PCF follows the Dataverse app theme setting.
+ */
+function detectDarkModeFromPageBackground(): boolean | null {
+    try {
+        // Check body background first
+        const bodyBg = window.getComputedStyle(document.body).backgroundColor;
+        const rgbMatch = bodyBg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+        if (rgbMatch) {
+            const luminance =
+                0.299 * parseInt(rgbMatch[1]) +
+                0.587 * parseInt(rgbMatch[2]) +
+                0.114 * parseInt(rgbMatch[3]);
+            return luminance < 128;
+        }
+        // Try parent frame body (PCF in iframe)
+        try {
+            const parentBg = window.getComputedStyle(window.parent.document.body).backgroundColor;
+            const parentMatch = parentBg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+            if (parentMatch) {
+                const luminance =
+                    0.299 * parseInt(parentMatch[1]) +
+                    0.587 * parseInt(parentMatch[2]) +
+                    0.114 * parseInt(parentMatch[3]);
+                return luminance < 128;
+            }
+        } catch {
+            // Cross-origin parent access blocked
+        }
+    } catch {
+        // DOM access failed
+    }
+    return null;
+}
+
+/**
  * Detect if system prefers dark mode.
+ * Last resort fallback — only used if no other signal is available.
  */
 function getSystemPrefersDark(): boolean {
     try {
@@ -115,7 +153,11 @@ export function getEffectiveDarkMode(
     const navbarDark = detectDarkModeFromNavbar();
     if (navbarDark !== null) return navbarDark;
 
-    // 5. System preference
+    // 5. Page background color detection (Dataverse app theme)
+    const pageBgDark = detectDarkModeFromPageBackground();
+    if (pageBgDark !== null) return pageBgDark;
+
+    // 6. System preference (last resort)
     return getSystemPrefersDark();
 }
 
@@ -127,7 +169,8 @@ export function getEffectiveDarkMode(
  * 2. URL flag (themeOption parameter)
  * 3. PCF context (fluentDesignLanguage)
  * 4. Navbar color detection
- * 5. System preference
+ * 5. Page background color detection (Dataverse app theme)
+ * 6. System preference (last resort)
  *
  * @param context - PCF context with fluentDesignLanguage
  * @returns Fluent Theme object

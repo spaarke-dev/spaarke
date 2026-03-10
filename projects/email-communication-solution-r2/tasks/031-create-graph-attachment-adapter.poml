@@ -1,0 +1,57 @@
+<task id="ECS-031" project="Email Communication Solution R2">
+  <metadata>
+    <title>Create GraphAttachmentAdapter</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>4 - Email-to-Document Migration (Phase E)</phase>
+    <tags>bff-api</tags>
+    <dependencies>ECS-027</dependencies>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Create GraphAttachmentAdapter that maps Microsoft Graph FileAttachment objects to
+    EmailAttachmentInfo objects, preserving compatibility with existing AttachmentFilterService
+    and EmailAttachmentProcessor. This allows reuse of all existing filtering and
+    processing logic without modification.
+  </prompt>
+
+  <role>Senior .NET developer</role>
+
+  <goal>
+    GraphAttachmentAdapter correctly maps Graph attachments to EmailAttachmentInfo,
+    allowing existing filter and processing logic to work unchanged.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/design-communication-accounts.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review Design">Read adapter code sample in design doc.</step>
+    <step order="2" name="Review EmailAttachmentInfo">Read existing model to understand fields.</step>
+    <step order="3" name="Create Adapter">
+      Static class with ToAttachmentInfo(FileAttachment) method.
+      Map: Name, ContentType, ContentBytes, Size, IsInline, ContentId.
+    </step>
+    <step order="4" name="Write Tests">
+      Test mapping for file attachments, inline images, missing fields.
+    </step>
+    <step order="5" name="Build and Test">dotnet build and dotnet test.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/GraphAttachmentAdapter.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/GraphAttachmentAdapterTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FileAttachment correctly mapped to EmailAttachmentInfo</criterion>
+    <criterion testable="true">AttachmentFilterService accepts adapter output without errors</criterion>
+    <criterion testable="true">Tests cover file, inline, and edge case attachments</criterion>
+  </acceptance-criteria>
+</task>

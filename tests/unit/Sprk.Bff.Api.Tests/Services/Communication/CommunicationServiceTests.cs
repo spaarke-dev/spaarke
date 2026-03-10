@@ -57,6 +57,8 @@ public class CommunicationServiceTests
             Mock.Of<IDataverseService>(),
             null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here
+            null!, // CommunicationAccountService — not tested here
+            null!, // JobSubmissionService — not tested here
             Options.Create(options),
             _loggerMock.Object);
     }
@@ -136,6 +138,8 @@ public class CommunicationServiceTests
             Mock.Of<IDataverseService>(),
             null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here
+            null!, // CommunicationAccountService — not tested here
+            null!, // JobSubmissionService — not tested here
             Options.Create(options),
             _loggerMock.Object);
     }
@@ -307,7 +311,7 @@ public class CommunicationServiceTests
         response.CorrelationId.Should().Be("test-corr-123");
         response.GraphMessageId.Should().Be("test-corr-123");
         response.SentAt.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
-        response.CommunicationId.Should().BeNull("Phase 1 does not create Dataverse records");
+        response.CommunicationId.Should().Be(Guid.Empty, "Mock IDataverseService.CreateAsync returns Guid.Empty");
     }
 
     #endregion

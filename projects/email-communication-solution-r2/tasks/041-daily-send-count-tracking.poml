@@ -1,0 +1,49 @@
+<task id="ECS-041" project="Email Communication Solution R2">
+  <metadata>
+    <title>Daily Send Count Tracking and Reset</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>5 - Verification and Admin UX (Phase D)</phase>
+    <tags>bff-api</tags>
+    <dependencies>ECS-037</dependencies>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Track sprk_sendstoday on each outbound send. Implement daily reset mechanism
+    (BackgroundService timer). Warn when approaching sprk_dailysendlimit.
+  </prompt>
+
+  <role>Senior .NET developer</role>
+
+  <goal>Send counts tracked per account with daily reset and limit warnings.</goal>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r2/spec.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Increment on Send">Update sprk_sendstoday after each successful send.</step>
+    <step order="2" name="Limit Check">If dailysendlimit set, check before send. Return error if exceeded.</step>
+    <step order="3" name="Daily Reset">BackgroundService timer resets sprk_sendstoday at midnight UTC.</step>
+    <step order="4" name="Write Tests">Test increment, limit check, reset.</step>
+    <step order="5" name="Build and Test">dotnet build and dotnet test.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Send count incremented after each send</criterion>
+    <criterion testable="true">Send blocked when daily limit reached</criterion>
+    <criterion testable="true">Daily reset clears count</criterion>
+    <criterion testable="true">All tests pass</criterion>
+  </acceptance-criteria>
+</task>

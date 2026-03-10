@@ -1,20 +1,27 @@
-# Communication Account Administration Guide
+# Communication Account Administration Guide - Release 2
 
-> **Last Updated**: February 22, 2026
-> **Purpose**: Step-by-step procedures for managing communication accounts in Dataverse — adding new mailboxes, configuring send/receive settings, running verification, and troubleshooting.
+> **Last Updated**: March 9, 2026
+> **Purpose**: Complete administrative guide for managing the Email Communication Service R2 in Dataverse — covering communication account management, send modes, inbound monitoring, document archival, verification, and troubleshooting.
 > **Applies To**: Dev environment (`spaarkedev1.crm.dynamics.com`, `spe-api-dev-67e2xz.azurewebsites.net`)
+> **Release**: R2 (replaces email activities, Server-Side Sync retirement)
 
 ---
 
 ## Table of Contents
 
 - [Overview](#overview)
+- [Key Concepts](#key-concepts)
 - [How to Add a New Communication Account](#how-to-add-a-new-communication-account)
-- [Account Types](#account-types)
-- [Field Reference](#field-reference)
-- [Verification Status](#verification-status)
-- [Subscription Monitoring](#subscription-monitoring)
+- [Account Types and Send Modes](#account-types-and-send-modes)
+- [Field Reference - Complete Schema](#field-reference)
+- [Inbound Monitoring Configuration](#inbound-monitoring-configuration)
+- [Document Archival Configuration](#document-archival-configuration)
+- [Daily Send Limits and Tracking](#daily-send-limits-and-tracking)
+- [Association Resolution](#association-resolution)
+- [Verification Status and Testing](#verification-status-and-testing)
+- [Graph Subscription Lifecycle](#graph-subscription-lifecycle)
 - [Security Configuration](#security-configuration)
+- [Admin Views and Forms](#admin-views-and-forms)
 - [Common Scenarios](#common-scenarios)
 - [Troubleshooting](#troubleshooting)
 
@@ -22,13 +29,31 @@
 
 ## Overview
 
-Communication accounts (`sprk_communicationaccount`) are the central configuration point for all email communication in Spaarke. Each account represents a mailbox that the BFF API can send from, receive to, or both. Accounts are managed entirely through the Dataverse model-driven app UI.
+Communication accounts (`sprk_communicationaccount`) are the central configuration point for all email communication in Spaarke R2. Each account represents a mailbox that the BFF API can send from, receive to, or both. This replaces the previous fragmented approach (appsettings.json + Server-Side Sync) with a unified Graph-based system.
 
-**Key Concepts**:
-- **Send-enabled accounts** appear in the sender dropdown when composing communications
-- **Receive-enabled accounts** are monitored for incoming email via Graph subscription webhooks
-- **Account type** determines the authentication method (app-only vs. OBO delegated)
-- The BFF queries `sprk_communicationaccount` records at runtime with a 5-minute Redis cache
+**Release 2 Highlights**:
+- **Unified Configuration**: All mailbox settings in Dataverse — no code deployments needed
+- **Graph-Based Inbound**: Webhook subscriptions + backup polling replace Server-Side Sync
+- **Send Modes**: Shared mailbox (app-only) and Individual (OBO delegated)
+- **Document Archival**: Email and attachments automatically archived as .eml + linked documents
+- **Archival Control**: Opt-in/opt-out configuration for incoming and outgoing email
+- **Admin Verification**: Test mailbox connectivity with one click
+
+---
+
+## Key Concepts
+
+| Concept | Description |
+|---------|------------|
+| **Communication Account** | A mailbox configuration record in Dataverse (`sprk_communicationaccount`). Represents a shared mailbox, service account, or user account that the system can send from or monitor for incoming email. |
+| **Send Mode** | How an email is sent. **Shared Mailbox** (app-only auth to shared mailbox, default) or **User** (delegated OBO auth to user's own mailbox). |
+| **Account Type** | The authentication method: **Shared Account** or **Service Account** (both app-only, differ by licensing), or **User Account** (OBO delegated). Determines which send modes are available. |
+| **Receive-Enabled** | When Yes, the BFF API monitors this mailbox for incoming email via Graph webhooks + backup polling. Creates `sprk_communication` records automatically. |
+| **Archive Opt-In/Out** | When both defaults are Yes, incoming and outgoing email are automatically archived as .eml files to SharePoint Embedded + linked as documents. Can be toggled per direction. |
+| **Verification** | Admin-initiated test that confirms the BFF API has send and/or read permissions on the mailbox. Updates `sprk_verificationstatus` and `sprk_lastverified`. |
+| **Graph Subscription** | A webhook subscription created by the BFF's `GraphSubscriptionManager` service. Notifies the system when new email arrives. Expires every 3 days and is auto-renewed. |
+| **Backup Polling** | A fallback service (`InboundPollingBackupService`) that queries for missed messages every 5 minutes if webhooks fail. Ensures no email is lost. |
+| **Association Resolution** | Automatic linking of incoming emails to matters, contacts, accounts, or other Dataverse entities based on email thread, sender, subject, or mailbox context. |
 
 ---
 
@@ -51,7 +76,7 @@ Navigate to the **Communication Accounts** entity in the model-driven app and cr
 
 | Field | Logical Name | Notes |
 |-------|-------------|-------|
-| Send Enableds | `sprk_sendenableds` | Set to **Yes** to allow outbound sending. Note the trailing 's' in the field name. |
+| Send Enabled | `sprk_sendenabled` | Set to **Yes** to allow outbound sending. |
 | Is Default Sender | `sprk_isdefaultsender` | Set to **Yes** if this is the fallback sender. Only ONE account should be the default. |
 
 **Receive Configuration**:
@@ -75,17 +100,17 @@ Save the record.
 
 If this is a new mailbox that the BFF API has not previously been granted access to, you must add it to the Exchange Application Access Policy security group.
 
-> **Skip this step** if the mailbox is already a member of the "BFF-Mailbox-Access" security group.
+> **Skip this step** if the mailbox is already a member of the "SDAP Mailbox Access" security group.
 
 ```powershell
 # Connect to Exchange Online
 Connect-ExchangeOnline
 
 # Add mailbox to the security group
-Add-DistributionGroupMember -Identity "BFF-Mailbox-Access" -Member "new-mailbox@spaarke.com"
+Add-DistributionGroupMember -Identity "SDAP Mailbox Access" -Member "new-mailbox@spaarke.com"
 
 # Verify membership
-Get-DistributionGroupMember -Identity "BFF-Mailbox-Access" | Format-Table DisplayName, PrimarySmtpAddress
+Get-DistributionGroupMember -Identity "SDAP Mailbox Access" | Format-Table DisplayName, PrimarySmtpAddress
 
 # Disconnect
 Disconnect-ExchangeOnline -Confirm:$false
@@ -137,22 +162,199 @@ The following fields are auto-populated by the system:
 
 ---
 
-## Account Types
+## Account Types and Send Modes
 
-| Value | Label | Auth Method | When to Use |
-|-------|-------|-------------|-------------|
-| 100000000 | Shared Account | App-only (`GraphClientFactory.ForApp()`) | Most common. Exchange shared mailbox. No license required. Used for firm-wide outbound and inbound monitoring. |
-| 100000001 | Service Account | App-only (`GraphClientFactory.ForApp()`) | Dedicated licensed service mailbox. Same auth as Shared Account but has its own Exchange license. |
-| 100000002 | User Account | OBO delegated (`GraphClientFactory.ForUserAsync()`) | Individual user's mailbox. User must authenticate and consent. Used for "Send as me" functionality. |
+### Account Types
 
-**Choosing the Right Type**:
-- For **firm-wide outbound email** (notifications, correspondence): Use **Shared Account**
-- For **department-specific mailbox** with its own license: Use **Service Account**
-- For **individual user sending** (personal follow-ups): Use **User Account**
+| Type | Value | Auth Method | Licensing | Send Modes | Receive | When to Use |
+|------|-------|-------------|-----------|-----------|---------|------------|
+| **Shared Account** | 100000000 | App-only | No license required | Shared Mailbox only | Yes | Firm-wide outbound and inbound monitoring. Most common. |
+| **Service Account** | 100000001 | App-only | Has own license | Shared Mailbox only | Yes | Department-specific mailbox (e.g., "Finance Notifications") with its own license. |
+| **User Account** | 100000002 | OBO Delegated | User's own license | User (send as self) only | No (out of scope) | Individual user sending via "Send as me" mode. |
+
+### Send Modes
+
+| Mode | Requires Account Type | Auth Method | From Address | Use Case |
+|------|----------------------|------------|--------------|----------|
+| **Shared Mailbox** (default) | Shared Account or Service Account | App-only (`Mail.Send` Application permission) | Mailbox address from `sprk_communicationaccount.sprk_emailaddress` | Firm-wide email, system notifications, shared mailbox correspondence |
+| **User** (OBO) | User Account | Delegated OBO (`Mail.Send` Delegated permission) | Signed-in user's mailbox address | "Send as me" — individual follow-ups sent from user's own mailbox |
+
+### Choosing the Right Configuration
+
+| Need | Account Type | Send Mode | Setup |
+|------|--------------|-----------|-------|
+| Send from firm-wide mailbox (e.g., legal@domain.com) | Shared Account | Shared Mailbox | Create account, add to Exchange security group, set `sprk_sendenabled = Yes` |
+| Monitor shared mailbox for incoming email | Shared Account | (N/A — monitoring separate from send mode) | Create account, set `sprk_receiveenabled = Yes`, wait for subscription |
+| Allow user to send from their own mailbox | User Account | User | Create account with user's email, user must consent to app, user selects "Send as me" on form |
+| Department-specific mailbox (Finance, HR, etc.) | Service Account | Shared Mailbox | Create account for dept mailbox, add to security group, set `sprk_sendenabled = Yes` |
 
 ---
 
-## Field Reference
+## Inbound Monitoring Configuration
+
+When `sprk_receiveenabled = Yes` on a communication account, the BFF API automatically monitors that mailbox for incoming email via two complementary mechanisms:
+
+### 1. Graph Webhook Subscriptions (Primary)
+
+The `GraphSubscriptionManager` background service:
+- Creates a Graph webhook subscription on startup and every 30 minutes
+- Automatically renews subscriptions before they expire (within 24 hours of the 3-day max lifetime)
+- Recreates subscriptions that fail or expire
+
+**What you need to do**: Just set `sprk_receiveenabled = Yes` on the account. The system handles the rest.
+
+**Fields auto-populated by the system** (read-only):
+- `sprk_subscriptionid` — The Graph webhook subscription GUID
+- `sprk_subscriptionexpiry` — When the subscription must be renewed (within 3 days)
+- `sprk_subscriptionstatus` — Active, Failed, or Pending
+
+### 2. Backup Polling Service (Safety Net)
+
+The `InboundPollingBackupService` runs every 5 minutes as a fallback:
+- Queries Graph for messages since the last poll
+- Skips messages already processed (checks `sprk_graphmessageid` on existing records)
+- Enqueues any missed messages for processing
+
+This ensures no incoming email is lost even if the webhook subscription temporarily fails.
+
+### Configuration Fields
+
+| Field | Logical Name | Value | Purpose |
+|-------|-------------|-------|---------|
+| Receive Enabled | `sprk_receiveenabled` | Yes/No | Enable/disable inbound monitoring for this mailbox |
+| Monitor Folder | `sprk_monitorfolder` | Inbox, Sent, Drafts, etc. | Which folder to watch (default: Inbox) |
+| Auto Create Records | `sprk_autocreaterecords` | Yes/No | Auto-create `sprk_communication` records when email arrives |
+| Processing Rules | `sprk_processingrules` | JSON object | Filter rules for which messages to process (optional) |
+
+**Example Folder Values**:
+- Leave blank for **Inbox** (default)
+- `"Sent"` to monitor sent emails
+- `"Drafts"` to monitor draft folder (uncommon)
+- Any custom folder name created in Outlook
+
+---
+
+## Document Archival Configuration
+
+Incoming and outgoing emails can be automatically archived as .eml (RFC 2822) files to SharePoint Embedded + linked as Dataverse documents. This replaces the old server-side sync attachment pipeline.
+
+### Archival Options
+
+| Option | Field Name | Default | Purpose |
+|--------|-----------|---------|---------|
+| Archive Incoming | `sprk_ArchiveIncomingOptIn` | Yes | Archive incoming email to mailbox as .eml + linked document |
+| Archive Outgoing | `sprk_ArchiveOutgoingOptIn` | Yes | Archive outgoing email sent from this mailbox as .eml + linked document |
+
+**Both default to Yes** — set to No to skip archival for that direction.
+
+### What Gets Archived
+
+#### Incoming Email
+1. Email as `.eml` file → SharePoint Embedded
+2. `sprk_document` record created with:
+   - `sprk_communication` lookup pointing to the incoming `sprk_communication` record
+   - Email metadata (subject, from, to, cc, date, message ID)
+   - Child `sprk_document` records for each attachment
+3. Attachments filtered per `AttachmentFilterService` rules (e.g., no .exe files)
+4. AI analysis enqueued for the document
+
+#### Outgoing Email
+1. Email as `.eml` file → SharePoint Embedded
+2. `sprk_document` record created with:
+   - `sprk_communication` lookup pointing to the sent `sprk_communication` record
+   - Email metadata
+   - Child `sprk_document` records for each attachment
+3. Attachments filtered and archived as child documents
+4. AI analysis enqueued
+
+### File Paths in SharePoint Embedded
+
+| Type | Path Pattern |
+|------|-------------|
+| Email .eml | `/communications/{communicationId}/{filename}.eml` |
+| Attachment | `/communications/attachments/{documentId}/{filename}` |
+
+### Troubleshooting Archival
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Documents created but no .eml file in SPE | Archive container ID not configured | Set `Communication__ArchiveContainerId` in BFF App Service settings |
+| Archival not happening at all | `sprk_ArchiveIncomingOptIn` or `sprk_ArchiveOutgoingOptIn` = No | Toggle to Yes on account record |
+| Error "Failed to archive document" | SPE container quota exceeded or permissions issue | Check BFF API logs; verify `SpeFileStore` facade has write access |
+
+---
+
+## Daily Send Limits and Tracking
+
+Each communication account can have a daily send limit to prevent spam or runaway processes.
+
+### Configuration
+
+| Field | Logical Name | Type | Purpose |
+|-------|-------------|------|---------|
+| Daily Send Limit | `sprk_dailysendlimit` | Integer | Maximum emails to send from this account per day. Blank/0 = unlimited. |
+| Sends Today | `sprk_sendstoday` | Integer | Current count of emails sent today (auto-updated by system, read-only) |
+
+### How It Works
+
+- **Increment**: Each time `CommunicationService.SendAsync()` completes successfully, `sprk_sendstoday` increments by 1
+- **Reset**: Resets to 0 at midnight UTC
+- **Enforcement**: If `sprk_sendstoday >= sprk_dailysendlimit`, send is rejected with error message
+- **Logging**: Send limit exceeded errors logged for admin monitoring
+
+### Example Configuration
+
+| Mailbox | Limit | Reason |
+|---------|-------|--------|
+| mailbox-central@spaarke.com | Blank (unlimited) | Primary firm mailbox; no restriction |
+| noreply@spaarke.com | 5,000 | Notification mailbox; prevent runaway batch jobs |
+| billing-notifications@spaarke.com | 500 | Department notifications; conservative limit |
+
+### Admin Monitoring
+
+Check the **My Communications** view (activity-based) or create a custom view to see:
+- `sprk_sendstoday` (current daily count)
+- `sprk_dailysendlimit` (configured limit)
+- Alerts if approaching limit
+
+---
+
+## Association Resolution
+
+When incoming email arrives, the BFF API automatically attempts to link it to relevant Dataverse entities (matters, contacts, accounts, etc.) using a priority cascade:
+
+### Resolution Cascade (Priority Order)
+
+1. **Thread Match** — If In-Reply-To header references an existing `sprk_graphmessageid`, link to that communication's associated entity
+2. **Sender Match** — If email is from a contact/account already in Dataverse, auto-link to that entity
+3. **Subject Pattern** — If subject contains a known matter ID or pattern, auto-link
+4. **Mailbox Context** — If the account has default associations (rare), use those
+
+### What Gets Linked
+
+The system populates association fields on the incoming `sprk_communication` record:
+- `sprk_regardingobjectid` — Primary associated entity (matter, contact, account, etc.)
+- `sprk_contactid` — If sender is a known contact
+- `sprk_accountid` — If sender is from a known account
+- Additional association fields as configured
+
+### Limitations & Scope
+
+- **Out of Scope in R2**: Complex rule-based assignment (coming in Phase D+)
+- **Best Effort**: Resolution is based on available data; manual linking is easy if auto-resolution fails
+- **Privacy**: Only processes email headers; does not read message body for sensitive data
+
+### Admin Configuration
+
+Currently, association resolution uses the built-in cascade. To customize:
+
+1. Open the account record
+2. Note which entities are most commonly associated with email to this mailbox
+3. Communicate with development team to adjust cascade priorities if needed
+
+---
+
+## Field Reference - Complete Schema
 
 ### Complete `sprk_communicationaccount` Field List
 
@@ -169,7 +371,7 @@ The following fields are auto-populated by the system:
 
 | Display Name | Logical Name | Type | Default |
 |-------------|-------------|------|---------|
-| Send Enableds | `sprk_sendenableds` | Yes/No | No |
+| Send Enabled | `sprk_sendenabled` | Yes/No | No |
 | Is Default Sender | `sprk_isdefaultsender` | Yes/No | No |
 
 **Inbound Configuration**:
@@ -179,6 +381,21 @@ The following fields are auto-populated by the system:
 | Receive Enabled | `sprk_receiveenabled` | Yes/No | No |
 | Monitor Folder | `sprk_monitorfolder` | Text (100) | (blank = Inbox) |
 | Auto Create Records | `sprk_autocreaterecords` | Yes/No | No |
+| Processing Rules | `sprk_processingrules` | Text (max) | (blank = no filtering) |
+
+**Archival Configuration**:
+
+| Display Name | Logical Name | Type | Default |
+|-------------|-------------|------|---------|
+| Archive Outgoing Opt In | `sprk_ArchiveOutgoingOptIn` | Yes/No | Yes |
+| Archive Incoming Opt In | `sprk_ArchiveIncomingOptIn` | Yes/No | Yes |
+
+**Daily Send Limits**:
+
+| Display Name | Logical Name | Type | Default |
+|-------------|-------------|------|---------|
+| Daily Send Limit | `sprk_dailysendlimit` | Integer | Blank (unlimited) |
+| Sends Today | `sprk_sendstoday` | Integer (read-only) | 0 |
 
 **Graph Integration (System-Managed — Do Not Edit)**:
 
@@ -186,6 +403,7 @@ The following fields are auto-populated by the system:
 |-------------|-------------|------|
 | Subscription Id | `sprk_subscriptionid` | Text (100) |
 | Subscription Expiry | `sprk_subscriptionexpiry` | DateTime |
+| Subscription Status | `sprk_subscriptionstatus` | Choice |
 
 **Security**:
 
@@ -199,56 +417,112 @@ The following fields are auto-populated by the system:
 | Display Name | Logical Name | Type |
 |-------------|-------------|------|
 | Verification Status | `sprk_verificationstatus` | Choice |
+| Verification Message | `sprk_verificationmessage` | Text |
 | Last Verified | `sprk_lastverified` | DateTime |
 
-> **Important field name note**: The send-enabled field is `sprk_sendenableds` (with a trailing 's'). This is the actual Dataverse logical name. Do not confuse with `sprk_sendenabled` (without the 's').
+---
+
+## Verification Status and Testing
+
+### How Verification Works
+
+The **Verify** action (either via button on the form or `POST /api/communications/accounts/{id}/verify` endpoint):
+1. Tests **send access** if `sprk_sendenabled = Yes` (sends a test email from the mailbox)
+2. Tests **read access** if `sprk_receiveenabled = Yes` (reads recent messages from the mailbox)
+3. Updates the account record with results
+
+### Verification Statuses
+
+| Value | Label | Meaning | Next Action |
+|-------|-------|---------|------------|
+| 100000000 | Verified | Send and/or read access confirmed | None — account is ready to use |
+| 100000001 | Failed | Verification failed — see error message | Fix the issue (see troubleshooting) and re-run verify |
+| 100000002 | Pending | Verification in progress or not yet attempted | Run verify action |
+
+### Verification Result Fields
+
+| Field | Meaning |
+|-------|---------|
+| `sprk_verificationstatus` | Pass/Fail status |
+| `sprk_verificationmessage` | Detailed error message if failed (e.g., "Access Denied — mailbox not in security group") |
+| `sprk_lastverified` | Timestamp of last verification attempt |
+
+### When to Verify
+
+- **After creating a new account** — to confirm basic connectivity
+- **After adding to Exchange security group** — to confirm policy propagation (wait 30 minutes first)
+- **After changing Graph API permissions** — to confirm permissions are effective
+- **If subscription is failing** — to confirm read access is working
+- **Periodically** — as part of routine health checks (monthly recommended)
+- **After mailbox is moved or reconfigured** — to confirm new configuration is working
+
+### How to Verify
+
+**Option 1: Via Dataverse Form**
+1. Open the Communication Account record
+2. Click the **Verify** button in the command bar
+3. Wait for the action to complete (10-30 seconds)
+4. Check `sprk_verificationstatus` and `sprk_verificationmessage`
+
+**Option 2: Via API**
+```bash
+curl -X POST \
+  "https://spe-api-dev-67e2xz.azurewebsites.net/api/communications/accounts/{account-id}/verify" \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json"
+```
+
+Replace `{account-id}` with the `sprk_communicationaccountid` GUID.
 
 ---
 
-## Verification Status
+## Graph Subscription Lifecycle
 
-| Value | Label | Meaning |
-|-------|-------|---------|
-| 100000000 | Verified | Account connectivity confirmed — send and/or read access works |
-| 100000001 | Failed | Verification failed — check permissions and Exchange configuration |
-| 100000002 | Pending | Verification in progress or not yet attempted |
+### How Subscriptions Are Managed
 
-**When to Re-verify**:
-- After adding a new mailbox to the Exchange security group
-- After changing Graph API permissions on the app registration
-- After modifying Exchange Application Access Policy
-- If subscription creation is failing for a receive-enabled account
-- Periodically as part of admin health checks
+The `GraphSubscriptionManager` background service automatically handles the complete lifecycle:
 
----
+1. **On BFF Startup**: Queries all receive-enabled accounts and creates subscriptions for those without one
+2. **Every 30 Minutes**: Checks subscription status and:
+   - Creates new subscriptions for accounts without one
+   - Renews subscriptions when expiry < 24 hours away
+   - Recreates subscriptions that failed or expired
+3. **On Notification**: When an email arrives, Graph sends a change notification to `POST /api/communications/incoming-webhook`
+4. **Processing**: The webhook enqueues the message for processing (< 3 seconds response time required)
 
-## Subscription Monitoring
+### Subscription Lifetime
 
-### How Graph Subscriptions Work
-
-1. `GraphSubscriptionManager` runs as a `BackgroundService` in the BFF API
-2. On startup and every 30 minutes, it queries all receive-enabled accounts
-3. For each account without a valid subscription, it creates a new Graph webhook subscription
-4. Subscriptions expire after 3 days (Graph API maximum for mail)
-5. The manager renews subscriptions when expiry is less than 24 hours away
-6. If renewal fails, the subscription is recreated from scratch
+| Property | Value |
+|----------|-------|
+| Max lifetime (Graph API limit) | 3 days |
+| Renewal threshold | < 24 hours remaining |
+| Renewal interval (automatic) | Every 30 minutes via `GraphSubscriptionManager` |
+| Polling backup interval | Every 5 minutes via `InboundPollingBackupService` |
 
 ### Checking Subscription Health
 
-Open the Communication Account record in Dataverse and check:
-- **Subscription Id** (`sprk_subscriptionid`): Should be populated for receive-enabled accounts
-- **Subscription Expiry** (`sprk_subscriptionexpiry`): Should be in the future (within 3 days)
+Open a Communication Account record where `sprk_receiveenabled = Yes` and check:
 
-If both fields are empty for a receive-enabled account, the `GraphSubscriptionManager` has not yet processed it or is encountering errors. Check the BFF API logs.
+| Field | Expected Value | What It Means |
+|-------|----------------|---------------|
+| `sprk_subscriptionid` | A GUID (e.g., `1a2b3c4d-5e6f-...`) | Subscription is created and active |
+| `sprk_subscriptionexpiry` | Future date/time within 3 days | Subscription is valid; system will renew before expiry |
+| `sprk_subscriptionstatus` | Active | Subscription is healthy and receiving notifications |
 
-### Backup Polling
+**Troubleshooting**:
+- If `sprk_subscriptionid` is blank for a receive-enabled account, wait up to 30 minutes for the `GraphSubscriptionManager` to cycle
+- If `sprk_subscriptionstatus` = Failed, check BFF API logs for subscription creation errors
+- If `sprk_subscriptionexpiry` is more than 3 days in the future, it's incorrect; the manager will fix it on next cycle
 
-The `InboundPollingBackupService` runs every 5 minutes as a safety net. For each receive-enabled account, it:
-1. Queries Graph for messages since the last poll
-2. Skips messages already tracked (checks `sprk_graphmessageid` on existing `sprk_communication` records)
-3. Enqueues any missed messages for processing
+### Backup Polling (Safety Net)
 
-This ensures no incoming email is lost even if the webhook subscription temporarily fails.
+If for any reason the webhook subscription is down or delayed, the `InboundPollingBackupService`:
+1. Runs every 5 minutes for each receive-enabled account
+2. Queries Graph for messages received since the last poll
+3. Deduplicates using `sprk_graphmessageid` (skips already-processed messages)
+4. Enqueues any missed messages for processing
+
+**Result**: No incoming email is lost even if webhooks are temporarily unavailable.
 
 ---
 
@@ -260,13 +534,13 @@ Each communication account can reference its own Exchange security group via:
 - `sprk_securitygroupid` — The Azure AD group GUID
 - `sprk_securitygroupname` — Display name (informational only)
 
-This allows different accounts to be scoped to different security groups if needed. However, the most common pattern is a single "BFF-Mailbox-Access" security group containing all mailboxes.
+This allows different accounts to be scoped to different security groups if needed. However, the most common pattern is a single "SDAP Mailbox Access" security group containing all mailboxes.
 
 ### Graph API Permissions Required
 
 | Permission | Type | Purpose | Required When |
 |------------|------|---------|---------------|
-| `Mail.Send` | Application | Send email from shared/service mailboxes | Account has `sprk_sendenableds = Yes` and type is Shared or Service |
+| `Mail.Send` | Application | Send email from shared/service mailboxes | Account has `sprk_sendenabled = Yes` and type is Shared or Service |
 | `Mail.Read` | Application | Monitor mailbox for incoming email | Account has `sprk_receiveenabled = Yes` |
 | `Mail.Send` | Delegated | Send email as the authenticated user | Account type is User Account (OBO flow) |
 
@@ -278,16 +552,103 @@ See [COMMUNICATION-DEPLOYMENT-GUIDE.md](COMMUNICATION-DEPLOYMENT-GUIDE.md#exchan
 
 ---
 
+## Admin Views and Forms
+
+### Available Views
+
+| View Name | Entity | Purpose | Shows |
+|-----------|--------|---------|-------|
+| **Active Communications Accounts** | Communication Account | All enabled accounts | All accounts with `statecode = Active` |
+| **Inactive Accounts** | Communication Account | Decommissioned accounts | Accounts with `statecode = Inactive` (for archival) |
+| **Send-Enabled Accounts** | Communication Account | Accounts for sending | Filter: `sprk_sendenabled = Yes` |
+| **Receive-Enabled Accounts** | Communication Account | Accounts for inbound | Filter: `sprk_receiveenabled = Yes` |
+| **Subscriptions Due for Renewal** | Communication Account | Maintenance view | Filter: `sprk_subscriptionexpiry < TODAY() + 1 day` |
+| **Active Communications** | Communication | User's outgoing email | Direction = Outgoing, user is sender |
+| **My Communications** | Communication | User's communications | User is involved (sent or received) |
+| **Pending Review** | Communication | Requires attention | Direction = Incoming, unlinked to entities |
+| **Failed Sends** | Communication | Error tracking | Status = Failed, with error message |
+
+### Administration Form
+
+The **Communication Account** form includes the following sections:
+
+#### Summary Section
+- Account Name
+- Email Address
+- Display Name
+- Account Type dropdown
+- Current verification status
+- **Verify** button
+
+#### Send Configuration Section
+- Send Enabled toggle
+- Is Default Sender toggle
+- Daily Send Limit (integer)
+- Sends Today (read-only counter)
+
+#### Receive Configuration Section
+- Receive Enabled toggle
+- Monitor Folder text (leave blank for Inbox)
+- Auto Create Records toggle
+- Processing Rules (JSON, advanced users only)
+
+#### Archival Settings Section
+- Archive Outgoing Opt In (default Yes)
+- Archive Incoming Opt In (default Yes)
+
+#### Graph Integration Section (Read-Only)
+- Subscription ID
+- Subscription Expiry
+- Subscription Status
+
+#### Security Section
+- Security Group ID
+- Security Group Name
+- (Optional) Auth Method
+
+#### Verification History Section (Read-Only)
+- Last Verified timestamp
+- Verification Status
+- Verification Message (if failed)
+
+### Creating a New Account — Form Walkthrough
+
+1. **Navigate**: Communications → Communication Accounts → New
+2. **Summary Section**:
+   - Fill **Name** (e.g., "Central Mailbox")
+   - Fill **Email Address** (e.g., `mailbox-central@spaarke.com`)
+   - Fill **Display Name** (e.g., "Spaarke Legal")
+   - Select **Account Type** (Shared, Service, or User)
+3. **Send Configuration** (if outbound):
+   - Toggle **Send Enabled** to Yes
+   - Toggle **Is Default Sender** to Yes (if this is the fallback account) — only ONE account should be default
+   - Set **Daily Send Limit** (optional, e.g., 5000 for unlimited, 500 for restricted)
+4. **Receive Configuration** (if inbound):
+   - Toggle **Receive Enabled** to Yes
+   - Leave **Monitor Folder** blank for Inbox, or enter folder name
+   - Toggle **Auto Create Records** to Yes to auto-create `sprk_communication` records
+5. **Archival Settings**:
+   - Both default to Yes — email and attachments are archived automatically
+   - Toggle either to No to skip archival for that direction
+6. **Security Section**:
+   - After account is created, admin will populate **Security Group ID** and **Security Group Name** (Exchange configuration)
+7. **Save** and **Verify**:
+   - Save the record
+   - Click **Verify** to test connectivity
+   - If Verify succeeds, account is ready to use
+
+---
+
 ## Common Scenarios
 
 ### Scenario 1: Add a New Shared Mailbox for Outbound Only
 
 1. Create Exchange shared mailbox in Azure AD (or use existing)
-2. Add mailbox to "BFF-Mailbox-Access" security group
+2. Add mailbox to "SDAP Mailbox Access" security group
 3. Wait 30 minutes for Exchange policy propagation
 4. Create `sprk_communicationaccount` record:
    - Account Type: Shared Account (100000000)
-   - `sprk_sendenableds`: Yes
+   - `sprk_sendenabled`: Yes
    - `sprk_receiveenabled`: No
    - `sprk_isdefaultsender`: No (unless replacing the default)
 5. Run verification: `POST /api/communications/accounts/{id}/verify`
@@ -309,7 +670,7 @@ See [COMMUNICATION-DEPLOYMENT-GUIDE.md](COMMUNICATION-DEPLOYMENT-GUIDE.md#exchan
 2. User must have consented to the application (admin consent or individual consent)
 3. Create `sprk_communicationaccount` record:
    - Account Type: User Account (100000002)
-   - `sprk_sendenableds`: Yes
+   - `sprk_sendenabled`: Yes
    - `sprk_receiveenabled`: No (individual inbound is out of scope)
    - `sprk_isdefaultsender`: No
 4. User selects "My Mailbox" send mode on the Communication form
@@ -318,12 +679,12 @@ See [COMMUNICATION-DEPLOYMENT-GUIDE.md](COMMUNICATION-DEPLOYMENT-GUIDE.md#exchan
 ### Scenario 4: Decommission a Communication Account
 
 1. Open the `sprk_communicationaccount` record
-2. Set `sprk_sendenableds` to No
+2. Set `sprk_sendenabled` to No
 3. Set `sprk_receiveenabled` to No
 4. The `GraphSubscriptionManager` will stop renewing the webhook subscription
 5. Subscription will expire naturally after up to 3 days
 6. Optionally deactivate the record (set `statecode` to Inactive)
-7. Remove mailbox from "BFF-Mailbox-Access" security group if no longer needed
+7. Remove mailbox from "SDAP Mailbox Access" security group if no longer needed
 
 ---
 
@@ -351,7 +712,7 @@ See [COMMUNICATION-DEPLOYMENT-GUIDE.md](COMMUNICATION-DEPLOYMENT-GUIDE.md#exchan
 
 | Cause | Fix |
 |-------|-----|
-| Mailbox not in Exchange security group | Add to "BFF-Mailbox-Access" group; wait 30 minutes |
+| Mailbox not in Exchange security group | Add to "SDAP Mailbox Access" group; wait 30 minutes |
 | Exchange policy not yet propagated | Wait 30 minutes; re-run verification |
 | Mailbox does not exist in Azure AD | Verify mailbox exists: `Get-Mailbox -Identity "address@domain.com"` |
 | App registration missing permissions | Check `Mail.Send` (Application) and `Mail.Read` (Application) in Azure AD |
@@ -390,9 +751,9 @@ See [COMMUNICATION-DEPLOYMENT-GUIDE.md](COMMUNICATION-DEPLOYMENT-GUIDE.md#exchan
 | Cause | Fix |
 |-------|-----|
 | Missing `Mail.Send` application permission | Grant permission + admin consent |
-| Mailbox not in Exchange security group | Add to "BFF-Mailbox-Access" group; wait 30 minutes |
-| `sprk_sendenableds` not set to Yes | Update the account record |
-| Approved sender configuration not found | Ensure account record is active and `sprk_sendenableds = Yes` |
+| Mailbox not in Exchange security group | Add to "SDAP Mailbox Access" group; wait 30 minutes |
+| `sprk_sendenabled` not set to Yes | Update the account record |
+| Approved sender configuration not found | Ensure account record is active and `sprk_sendenabled = Yes` |
 | BFF Redis cache stale (5-min TTL) | Wait for cache expiry or restart API |
 
 ---

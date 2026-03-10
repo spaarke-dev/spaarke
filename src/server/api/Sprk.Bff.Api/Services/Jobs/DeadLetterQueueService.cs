@@ -14,14 +14,14 @@ namespace Sprk.Bff.Api.Services.Jobs;
 public class DeadLetterQueueService
 {
     private readonly ServiceBusClient _serviceBusClient;
-    private readonly EmailTelemetry _telemetry;
+    private readonly CommunicationTelemetry _telemetry;
     private readonly ILogger<DeadLetterQueueService> _logger;
     private readonly string _queueName;
     private readonly string _dlqPath;
 
     public DeadLetterQueueService(
         ServiceBusClient serviceBusClient,
-        EmailTelemetry telemetry,
+        CommunicationTelemetry telemetry,
         IOptions<ServiceBusOptions> serviceBusOptions,
         ILogger<DeadLetterQueueService> logger)
     {
