@@ -1,7 +1,7 @@
 <task id="ECS-090" project="Email Communication Solution R2">
   <metadata>
     <title>Project Wrap-Up</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <phase>Wrap-Up</phase>
     <tags>documentation, cleanup</tags>

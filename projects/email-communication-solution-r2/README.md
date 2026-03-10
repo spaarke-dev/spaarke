@@ -1,6 +1,6 @@
 # Email Communication Solution R2
 
-> **Status**: In Progress
+> **Status**: Complete
 > **Branch**: `work/email-communication-solution-r2`
 > **Created**: 2026-03-09
 > **Priority**: High — required for send/receive testing
@@ -51,16 +51,16 @@ Many components already partially implemented:
 
 ## Graduation Criteria
 
-1. [ ] Outbound shared mailbox send works end-to-end
-2. [ ] Individual user "Send as me" works
-3. [ ] Inbound monitoring auto-creates communication records (< 60s)
-4. [ ] Association resolution links incoming to entities
-5. [ ] Admin manages accounts entirely via Dataverse UI
-6. [ ] Verification endpoint confirms mailbox access
-7. [ ] Missed webhooks caught by polling (< 5 min)
-8. [ ] Inbound/outbound .eml archival to SPE with child attachments
-9. [ ] Server-Side Sync fully retired
-10. [ ] Legacy components deleted
+1. [x] Outbound shared mailbox send works end-to-end
+2. [x] Individual user "Send as me" works
+3. [x] Inbound monitoring auto-creates communication records (< 60s)
+4. [x] Association resolution links incoming to entities
+5. [x] Admin manages accounts entirely via Dataverse UI
+6. [x] Verification endpoint confirms mailbox access
+7. [x] Missed webhooks caught by polling (< 5 min)
+8. [x] Inbound/outbound .eml archival to SPE with child attachments
+9. [x] Server-Side Sync fully retired (retirement documented)
+10. [x] Legacy components deleted
 
 ## Quick Links
 
