@@ -1,6 +1,6 @@
 # VisualHost PCF Control - Setup & Configuration Guide
 
-> **Version**: 1.2.48 | **Last Updated**: February 16, 2026
+> **Version**: 1.3.0 | **Last Updated**: March 10, 2026
 >
 > **Audience**: Dataverse administrators, form designers, solution configurators
 >
@@ -21,9 +21,10 @@
 9. [Drill-Through Target Configuration](#drill-through-target-configuration)
 10. [Data Querying Options](#data-querying-options)
 11. [Field Pivot Data Mode](#field-pivot-data-mode)
-12. [Use Cases: Visual Type Setup Walkthroughs](#use-cases-visual-type-setup-walkthroughs)
-13. [Troubleshooting](#troubleshooting)
-14. [Adding the ReportCardMetric Visual Type](#adding-the-reportcardmetric-visual-type)
+12. [AI Summary Configuration](#ai-summary-configuration)
+13. [Use Cases: Visual Type Setup Walkthroughs](#use-cases-visual-type-setup-walkthroughs)
+14. [Troubleshooting](#troubleshooting)
+15. [Adding the ReportCardMetric Visual Type](#adding-the-reportcardmetric-visual-type)
 
 ---
 
@@ -31,7 +32,7 @@
 
 The **VisualHost** PCF control renders configuration-driven visualizations inside Dataverse model-driven app forms. Instead of building separate PCF controls for each chart type, a single VisualHost instance reads a `sprk_chartdefinition` record to determine:
 
-- **What** to display (visual type: bar chart, donut, metric card, grade card, due date cards, etc.)
+- **What** to display (visual type: bar chart, donut, metric card, grade card, due date cards, gauge, horizontal stacked bar, etc.)
 - **Where** to get data (entity, view, custom FetchXML, PCF override, or field pivot from a single record)
 - **How** to aggregate (count, sum, average, min, max — or field pivot: read N fields from one record with per-field formatting)
 - **What happens on click** (open record, open side pane, navigate to page)
@@ -72,7 +73,7 @@ One chart definition record = one visual instance on a form.
 
 ## Step 2: Configure Visual Type Settings
 
-### Chart Types (MetricCard, BarChart, LineChart, DonutChart, StatusBar, Calendar, MiniTable, ReportCardMetric)
+### Chart Types (MetricCard, BarChart, LineChart, DonutChart, StatusBar, Calendar, MiniTable, ReportCardMetric, Gauge, HorizontalStackedBar)
 
 > **v1.2.44+ Note:** ReportCardMetric is now a **fallthrough case** in ChartRenderer — it shares the exact same code path as MetricCard with grade preset defaults auto-applied by `cardConfigResolver`. Features: configurable card shapes (`sprk_metriccardshape`), per-field value formatting, sign-based coloring, responsive typography, PCF-level title controls, show/hide version badge (v1.2.47), restructured card layout with independent icon/value positioning (v1.2.47), and content-driven card height with no whitespace (v1.2.48).
 
@@ -618,6 +619,140 @@ The Configuration JSON format is still supported and now feeds into the `ICardCo
 
 ---
 
+### Gauge (100000011) — v1.3.0
+
+SVG semicircular arc gauge for displaying progress, compliance, or ratio metrics. Each field pivot entry renders as an independent gauge arc with color-coded fill based on value thresholds.
+
+**Two Modes:**
+
+| Mode | Description | Field Pivot Entry |
+|------|-------------|-------------------|
+| `single` | Each field is a 0-1 value; arc fill = value, formatted per `valueFormat` (letterGrade, percentage, etc.) | `{ "field": "sprk_fieldname", "label": "Display Label" }` |
+| `ratio` | Each field has a paired `totalField`; arc fill = field / totalField | `{ "field": "sprk_fieldname", "label": "Display Label", "totalField": "sprk_totalfieldname" }` |
+
+**No-data state:** When a field value is null, the gauge displays "Not yet assessed" with a grey arc.
+
+**Chart Definition Settings:**
+
+| Field | Value | Notes |
+|-------|-------|-------|
+| Visual Type | Gauge (100000011) | |
+| Entity Logical Name | Entity with gauge fields (e.g., `sprk_matter`) | Required |
+| Options JSON (`sprk_optionsjson`) | Must contain `fieldPivot`, `gaugeMode`, and `colorThresholds` | See examples below |
+
+**Options JSON Example (single mode — grade gauges):**
+```json
+{
+  "fieldPivot": {
+    "fields": [
+      { "field": "sprk_budgetcompliancegrade_current", "label": "Budget Controls" },
+      { "field": "sprk_guidelinecompliancegrade_current", "label": "Guidelines Compliance" },
+      { "field": "sprk_outcomecompliancegrade_current", "label": "Outcomes Success" }
+    ]
+  },
+  "gaugeMode": "single",
+  "valueFormat": "letterGrade",
+  "colorSource": "valueThreshold",
+  "colorThresholds": [
+    { "range": [0.85, 1.00], "tokenSet": "brand" },
+    { "range": [0.70, 0.84], "tokenSet": "warning" },
+    { "range": [0.00, 0.69], "tokenSet": "danger" }
+  ]
+}
+```
+
+**Options JSON Example (ratio mode — budget usage):**
+```json
+{
+  "fieldPivot": {
+    "fields": [
+      { "field": "sprk_totalspend", "label": "Budget Usage", "totalField": "sprk_totalbudget" }
+    ]
+  },
+  "gaugeMode": "ratio",
+  "valueFormat": "currency",
+  "colorSource": "valueThreshold",
+  "colorThresholds": [
+    { "range": [0.00, 0.70], "tokenSet": "success" },
+    { "range": [0.70, 0.90], "tokenSet": "warning" },
+    { "range": [0.90, 1.00], "tokenSet": "danger" }
+  ]
+}
+```
+
+**Configuration JSON Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `gaugeMode` | string | Yes | `"single"` (0-1 value per field) or `"ratio"` (field/totalField) |
+| `fieldPivot` | object | Yes | Field pivot config with `fields[]` array |
+| `valueFormat` | string | No | Format for the displayed value: `letterGrade`, `percentage`, `currency`, etc. |
+| `colorSource` | string | No | Set to `"valueThreshold"` to use `colorThresholds` for arc coloring |
+| `colorThresholds` | array | No | Array of `{ "range": [min, max], "tokenSet": "brand"|"warning"|"danger"|"success" }` for arc color |
+
+---
+
+### HorizontalStackedBar (100000012) — v1.3.0
+
+Financial progress bar showing current vs. total values with a computed remaining segment. Uses field pivot with exactly two fields: the first field is the current/spent value and the second field is the total/budget value. The remaining value (total - current) is computed automatically.
+
+**Layout:** Three labels accompany the bar:
+- **Top-right:** Total value (e.g., "$500,000")
+- **Bottom-left:** Spent/current value (e.g., "$350,000")
+- **Bottom-right:** Remaining value (e.g., "$150,000")
+
+**Chart Definition Settings:**
+
+| Field | Value | Notes |
+|-------|-------|-------|
+| Visual Type | HorizontalStackedBar (100000012) | |
+| Entity Logical Name | Entity with financial fields (e.g., `sprk_matter`) | Required |
+| Options JSON (`sprk_optionsjson`) | Must contain `fieldPivot` with exactly 2 fields | See example below |
+
+**Options JSON Example (financial budget bar):**
+```json
+{
+  "fieldPivot": {
+    "fields": [
+      { "field": "sprk_totalspend", "label": "spent" },
+      { "field": "sprk_totalbudget", "label": "budget" }
+    ]
+  },
+  "valueFormat": "currency",
+  "colorSource": "none"
+}
+```
+
+Color thresholds can be applied to the fill ratio (spent / budget):
+```json
+{
+  "fieldPivot": {
+    "fields": [
+      { "field": "sprk_totalspend", "label": "spent" },
+      { "field": "sprk_totalbudget", "label": "budget" }
+    ]
+  },
+  "valueFormat": "currency",
+  "colorSource": "valueThreshold",
+  "colorThresholds": [
+    { "range": [0.00, 0.70], "tokenSet": "success" },
+    { "range": [0.70, 0.90], "tokenSet": "warning" },
+    { "range": [0.90, 1.00], "tokenSet": "danger" }
+  ]
+}
+```
+
+**Configuration JSON Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `fieldPivot` | object | Yes | Must contain exactly 2 fields: first = current/spent, second = total/budget |
+| `valueFormat` | string | No | Format for all displayed values: `currency`, `percentage`, `shortNumber`, etc. |
+| `colorSource` | string | No | Set to `"valueThreshold"` to color the fill bar based on the ratio |
+| `colorThresholds` | array | No | Array of `{ "range": [min, max], "tokenSet": "..." }` applied to the fill ratio |
+
+---
+
 ## Click Actions Configuration
 
 Configure what happens when a user clicks on a chart element or card.
@@ -896,6 +1031,7 @@ Add a `fieldPivot` object to the **Options JSON** (`sprk_optionsjson`) field on 
 | `fieldValue` | any | No | Value passed to icon/color resolution (e.g., option set value for `iconMap` keys). Defaults to `label`. |
 | `sortOrder` | number | No | Explicit sort order. Defaults to array index. |
 | `valueFormat` | string | No | (v1.2.44) Per-field value format override. Values: `shortNumber`, `letterGrade`, `percentage`, `wholeNumber`, `decimal`, `currency`, `signedPercentage`. Takes highest priority for this card. |
+| `totalField` | string | No | (v1.3.0) Paired total field for Gauge ratio mode. When `gaugeMode` = `"ratio"`, the arc fill is computed as `field / totalField`. Only used by Gauge visual type. |
 
 ### Chart Definition Setup (Field Pivot)
 
@@ -992,6 +1128,59 @@ Field pivot produces `IAggregatedDataPoint[]` — the same shape as aggregation.
   ]
 }
 ```
+
+---
+
+## AI Summary Configuration
+
+### Overview (v1.3.0)
+
+Any visual type can display an optional **AI Summary** icon in the toolbar above the visual. This is a sparkle icon that, when clicked, opens a popover containing a pre-populated text summary from a Dataverse field on the current record. This is **not** an AI API call — it simply reads and displays an existing text field value.
+
+### Toolbar Layout
+
+The toolbar row sits above the visual content and contains:
+- **Left:** AI Summary sparkle icon (if `aiSummaryField` is configured)
+- **Right:** View Details / expand icon (if `showToolbar` is enabled)
+
+### Configuration
+
+Add the `aiSummaryField` key to the **Options JSON** (`sprk_optionsjson`) on any chart definition record. The value is the logical name of a Dataverse text field on the current record's entity that contains the summary text.
+
+**Options JSON (add to any visual's existing config):**
+```json
+{
+  "aiSummaryField": "sprk_financialsummary"
+}
+```
+
+**Example: Gauge with AI Summary:**
+```json
+{
+  "fieldPivot": {
+    "fields": [
+      { "field": "sprk_totalspend", "label": "Budget Usage", "totalField": "sprk_totalbudget" }
+    ]
+  },
+  "gaugeMode": "ratio",
+  "valueFormat": "currency",
+  "aiSummaryField": "sprk_financialsummary"
+}
+```
+
+### Behavior
+
+| Condition | Result |
+|-----------|--------|
+| `aiSummaryField` is set and field has a value | Sparkle icon appears; clicking opens popover with summary text |
+| `aiSummaryField` is set but field is null/empty | Sparkle icon does not appear |
+| `aiSummaryField` is not set | No sparkle icon in toolbar |
+
+### Requirements
+
+- The field specified in `aiSummaryField` must exist on the entity identified by `sprk_entitylogicalname` on the chart definition
+- The field should be a text field (single-line or multi-line) that is pre-populated by an external process (e.g., a BFF API endpoint, plugin, or flow)
+- VisualHost reads the field via `context.webAPI.retrieveRecord()` — no additional PCF properties are needed
 
 ---
 
@@ -1136,7 +1325,7 @@ The MetricCard uses the **DataAggregationService** which fetches records from th
 ### ReportCardMetric not rendering (blank space)
 - Verify `sprk_visualtype` is set to `100000010` on the chart definition record
 - If the Visual Type choice field doesn't have a "ReportCardMetric" option, you need to add it — see [Adding the ReportCardMetric Visual Type](#adding-the-reportcardmetric-visual-type) below
-- Ensure VisualHost PCF solution v1.2.48 or later is imported
+- Ensure VisualHost PCF solution v1.3.0 or later is imported
 - Check browser console (F12) for rendering errors
 
 ### Field Pivot Cards Show "0" Instead of Actual Values
@@ -1163,7 +1352,7 @@ The MetricCard uses the **DataAggregationService** which fetches records from th
 ### Version Badge Not Updating
 - Verify the solution was imported successfully
 - Clear browser cache (Ctrl+Shift+Delete)
-- Check the version badge in the lower-left corner of the control (should show v1.2.48)
+- Check the version badge in the lower-left corner of the control (should show v1.3.0)
 - Verify the `showVersion` PCF property is set to Yes (default). If set to No, the badge is hidden.
 
 ### Whitespace Below Cards
@@ -1449,6 +1638,124 @@ The grade field names are the same on both entities. Only the Entity Logical Nam
 
 ---
 
+### Use Case 7: Gauge — Performance Grade Arcs on a Matter Form (v1.3.0)
+
+**Goal:** Display three semicircular gauge arcs on a Matter form showing compliance grades (Guidelines, Budget, Outcomes) with color-coded fills and letter grade labels.
+
+**Step-by-step:**
+
+1. **Create Chart Definition:**
+
+   | Field | Value |
+   |-------|-------|
+   | Name | Compliance Grade Gauges |
+   | Visual Type | Gauge (100000011) |
+   | Entity Logical Name | `sprk_matter` |
+   | Options JSON (`sprk_optionsjson`) | See below |
+
+   Leave Group By Field, Aggregation Type, Aggregation Field, and Base View ID **empty** — Gauge uses field pivot mode.
+
+   **Options JSON (`sprk_optionsjson`):**
+   ```json
+   {
+     "fieldPivot": {
+       "fields": [
+         { "field": "sprk_budgetcompliancegrade_current", "label": "Budget Controls" },
+         { "field": "sprk_guidelinecompliancegrade_current", "label": "Guidelines Compliance" },
+         { "field": "sprk_outcomecompliancegrade_current", "label": "Outcomes Success" }
+       ]
+     },
+     "gaugeMode": "single",
+     "valueFormat": "letterGrade",
+     "colorSource": "valueThreshold",
+     "colorThresholds": [
+       { "range": [0.85, 1.00], "tokenSet": "brand" },
+       { "range": [0.70, 0.84], "tokenSet": "warning" },
+       { "range": [0.00, 0.69], "tokenSet": "danger" }
+     ]
+   }
+   ```
+
+2. **Add VisualHost control to the Matter form:**
+   - Place in a full-width section on the Report Card tab
+   - Set `chartDefinitionId` to the chart definition GUID (or bind a lookup)
+   - Leave `contextFieldName` empty — field pivot reads from the current form record directly
+
+3. **How it works at runtime:**
+   - VisualHost loads the chart definition and detects `fieldPivot` + `gaugeMode`
+   - FieldPivotService reads the three grade fields from the current matter record
+   - Each field renders as a semicircular SVG arc gauge
+   - Arc fill corresponds to the decimal value (0-1); the formatted value (letter grade) is displayed inside the arc
+   - Color thresholds determine arc color: blue (0.85+), yellow (0.70-0.84), red (below 0.70)
+   - If a field is null, the gauge shows "Not yet assessed" with a grey arc
+
+---
+
+### Use Case 8: HorizontalStackedBar — Financial Budget Tracker on a Matter Form (v1.3.0)
+
+**Goal:** Display a horizontal progress bar on a Matter form showing total spend vs. total budget, with the remaining amount computed automatically.
+
+**Step-by-step:**
+
+1. **Create Chart Definition:**
+
+   | Field | Value |
+   |-------|-------|
+   | Name | Budget Progress |
+   | Visual Type | HorizontalStackedBar (100000012) |
+   | Entity Logical Name | `sprk_matter` |
+   | Options JSON (`sprk_optionsjson`) | See below |
+
+   Leave Group By Field, Aggregation Type, Aggregation Field, and Base View ID **empty** — HorizontalStackedBar uses field pivot mode.
+
+   **Options JSON (`sprk_optionsjson`):**
+   ```json
+   {
+     "fieldPivot": {
+       "fields": [
+         { "field": "sprk_totalspend", "label": "spent" },
+         { "field": "sprk_totalbudget", "label": "budget" }
+       ]
+     },
+     "valueFormat": "currency",
+     "colorSource": "none"
+   }
+   ```
+
+   To add color thresholds on the fill ratio:
+   ```json
+   {
+     "fieldPivot": {
+       "fields": [
+         { "field": "sprk_totalspend", "label": "spent" },
+         { "field": "sprk_totalbudget", "label": "budget" }
+       ]
+     },
+     "valueFormat": "currency",
+     "colorSource": "valueThreshold",
+     "colorThresholds": [
+       { "range": [0.00, 0.70], "tokenSet": "success" },
+       { "range": [0.70, 0.90], "tokenSet": "warning" },
+       { "range": [0.90, 1.00], "tokenSet": "danger" }
+     ]
+   }
+   ```
+
+2. **Add VisualHost control to the Matter form:**
+   - Place in a section on the financial overview tab
+   - Set `chartDefinitionId` to the chart definition GUID (or bind a lookup)
+   - Leave `contextFieldName` empty — field pivot reads from the current form record directly
+
+3. **How it works at runtime:**
+   - VisualHost loads the chart definition and detects `fieldPivot` with HorizontalStackedBar visual type
+   - FieldPivotService reads `sprk_totalspend` and `sprk_totalbudget` from the current record
+   - The bar renders with two segments: spent (filled) and remaining (unfilled, computed as budget - spent)
+   - Three labels are displayed: total budget (top-right), spent (bottom-left), remaining (bottom-right)
+   - All values are formatted using `valueFormat` (currency in this example)
+   - If color thresholds are configured, the filled segment color reflects the spend ratio
+
+---
+
 ## Quick Reference: Common Configurations
 
 ### Bar Chart on Matter Form (Documents by Document Type — Choice Field)
@@ -1593,7 +1900,7 @@ The grade field names are the same on both entities. Only the Entity Logical Nam
 | chartDefinitionId | *(GUID of chart definition)* |
 | contextFieldName | *(leave empty)* |
 
-> **Note:** Field pivot reads grade fields directly from the current matter record — no views, no aggregation, no Group By Field needed. One VisualHost PCF renders all 3 cards. Requires VisualHost v1.2.44+. Current version: v1.2.48. Each field entry can optionally specify its own `valueFormat` for mixed formatting.
+> **Note:** Field pivot reads grade fields directly from the current matter record — no views, no aggregation, no Group By Field needed. One VisualHost PCF renders all 3 cards. Requires VisualHost v1.2.44+. Current version: v1.3.0. Each field entry can optionally specify its own `valueFormat` for mixed formatting.
 
 ### Bar Chart with Drill-Through to Events Page
 
@@ -1650,6 +1957,39 @@ After adding the option:
 2. Click the **Visual Type** dropdown
 3. Confirm **ReportCardMetric** appears in the list
 4. Create a test record with Visual Type = ReportCardMetric to verify it saves correctly
+
+---
+
+### Adding the Gauge and HorizontalStackedBar Visual Types (v1.3.0)
+
+If the `sprk_visualtype` choice field on `sprk_chartdefinition` does not yet include the **Gauge** and **HorizontalStackedBar** options, you need to add them before creating gauge or stacked bar definitions.
+
+#### Option Set Values
+
+| Label | Value |
+|-------|-------|
+| Gauge | 100000011 |
+| HorizontalStackedBar | 100000012 |
+
+#### How to Add (Manual)
+
+Follow the same process as adding the ReportCardMetric option above:
+
+1. Navigate to **Settings** > **Customizations** > **Customize the System**
+2. Expand **Entities** > **Chart Definition** (`sprk_chartdefinition`) > **Fields**
+3. Open the **Visual Type** (`sprk_visualtype`) field
+4. In the **Options** section, click **Add** for each new option:
+   - **Label**: `Gauge` / **Value**: `100000011`
+   - **Label**: `HorizontalStackedBar` / **Value**: `100000012`
+5. Save and **Publish All Customizations**
+
+#### Verification
+
+After adding the options:
+1. Open any Chart Definition record
+2. Click the **Visual Type** dropdown
+3. Confirm **Gauge** and **HorizontalStackedBar** appear in the list
+4. Create a test record with Visual Type = Gauge to verify it saves correctly
 
 ---
 

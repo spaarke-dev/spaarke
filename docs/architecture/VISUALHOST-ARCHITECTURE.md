@@ -1,6 +1,6 @@
 # VisualHost - Architecture Documentation
 
-> **Version**: 1.2.48 | **Last Updated**: February 16, 2026
+> **Version**: 1.3.0 | **Last Updated**: March 10, 2026
 >
 > **Audience**: Developers, solution architects, AI coding agents
 >
@@ -20,24 +20,27 @@
 8. [Click Action Framework](#click-action-framework)
 9. [Drill-Through Navigation System](#drill-through-navigation-system)
 10. [Events Page as Universal Dataset Grid](#events-page-as-universal-dataset-grid)
-11. [Caching Strategy](#caching-strategy)
-12. [Reusability: PCF, Custom Pages, and Beyond](#reusability-pcf-custom-pages-and-beyond)
-13. [Solution Packaging](#solution-packaging)
-14. [Technology Stack](#technology-stack)
-15. [Extension Guide](#extension-guide)
-16. [Future Enhancement Context](#future-enhancement-context)
+11. [AI Summary Integration](#ai-summary-integration)
+12. [Caching Strategy](#caching-strategy)
+13. [Reusability: PCF, Custom Pages, and Beyond](#reusability-pcf-custom-pages-and-beyond)
+14. [Solution Packaging](#solution-packaging)
+15. [Technology Stack](#technology-stack)
+16. [Extension Guide](#extension-guide)
+17. [Future Enhancement Context](#future-enhancement-context)
 
 ---
 
 ## Architecture Overview
 
-VisualHost is a **configuration-driven visualization framework** for Dataverse model-driven apps. A single PCF control renders 11 different visual types based on a `sprk_chartdefinition` entity record (10 base types + ReportCardMetric as a MetricCard preset). It supports three data source modes: **view/basic aggregation** (grouped records), **field pivot** (multiple fields from a single record), and **self-managed** (DueDateCard types). It also provides **drill-through navigation** that opens web resource-based dataset grids (such as the Events Page) in Dataverse dialogs with full context filtering.
+VisualHost is a **configuration-driven visualization framework** for Dataverse model-driven apps. A single PCF control renders 13 different visual types based on a `sprk_chartdefinition` entity record (12 base types + ReportCardMetric as a MetricCard preset). It supports three data source modes: **view/basic aggregation** (grouped records), **field pivot** (multiple fields from a single record), and **self-managed** (DueDateCard types). It also provides **drill-through navigation** that opens web resource-based dataset grids (such as the Events Page) in Dataverse dialogs with full context filtering.
 
 **v1.2.44 highlights:** ReportCardMetric consolidated as a MetricCard fallthrough case (single code path), configurable card shapes (`sprk_metriccardshape`), per-field value formatting on field pivot entries, sign-based conditional coloring for finance variance, signed percentage format, responsive typography via container queries, and PCF-level title visibility/font size controls.
 
 **v1.2.47 highlights:** Card layout restructured to CSS Grid (`gridTemplateRows: "auto 1fr auto"`) with label top-left, icon center-left (absolute positioned), value center-center, description bottom. Added `showVersion` PCF property to show/hide the version badge.
 
 **v1.2.48 highlights:** Fixed whitespace below MetricCard/MetricCardMatrix — cards now use content-driven height (no 300px minimum). Chart types (BarChart, LineChart, DonutChart) retain the 300px default canvas height.
+
+**v1.3.0 highlights:** Two new visual types: Gauge (SVG semicircular arc with color thresholds, single/ratio data binding modes) and HorizontalStackedBar (financial progress bar with spent/remaining/budget). AI Summary integration across all visuals via `AiSummaryPopover` from `@spaarke/ui-components` — sparkle icon reads a pre-populated Dataverse text field (not an AI API call). Toolbar repositioned above visual content as a flex row with AI Summary icon (left) and View Details/expand icon (right). Added `totalField` to `IFieldPivotEntry` for ratio-mode gauge pairing.
 
 ```
                     ┌──────────────────────────────┐
@@ -74,7 +77,7 @@ VisualHost is a **configuration-driven visualization framework** for Dataverse m
                     └──┬──┬──┬──┬──┬──┘  └────────────────────┘
                        │  │  │  │  │
               Chart Components    Card Components
-              (11 visual types)   (shared library)
+              (13 visual types)   (shared library)
 ```
 
 ### Design Principles
@@ -113,6 +116,8 @@ src/client/pcf/VisualHost/
 │   │   ├── DueDateCard.tsx           # Single event card (172 lines)
 │   │   ├── DueDateCardList.tsx       # Event card list (265 lines)
 │   │   ├── TrendCard.tsx             # Trend sparkline card (255 lines)
+│   │   ├── GaugeVisual.tsx           # SVG semicircular arc gauge with color thresholds (v1.3.0)
+│   │   ├── HorizontalStackedBar.tsx  # Financial progress bar — spent/remaining/budget (v1.3.0)
 │   │   ├── GradeMetricCard.tsx       # [DEPRECATED] Legacy — use MetricCard with ReportCardMetric visual type (234 lines)
 │   │   └── ErrorBoundary.tsx         # React error boundary wrapper (80 lines)
 │   ├── configurations/
@@ -147,7 +152,7 @@ src/client/pcf/VisualHost/
 VisualHostRoot
 ├── ErrorBoundary (React error boundary wrapper)
 ├── ThemeProvider (Fluent UI theme integration)
-├── Toolbar (expand button + tooltip)
+├── Toolbar (flex row above visual: AI Summary icon left, View Details/expand icon right)
 ├── Loading State (Spinner)
 ├── Error State (MessageBar)
 ├── ChartRenderer
@@ -165,6 +170,8 @@ VisualHostRoot
 │   ├── CalendarVisual
 │   ├── MiniTable
 │   ├── TrendCard (trend sparkline visualization)
+│   ├── GaugeVisual (SVG semicircular arc, single/ratio modes, v1.3.0)
+│   ├── HorizontalStackedBar (spent/remaining/budget progress bar, v1.3.0)
 │   ├── DueDateCardVisual
 │   │   └── EventDueDateCard (from @spaarke/ui-components)
 │   └── DueDateCardListVisual
@@ -172,7 +179,7 @@ VisualHostRoot
 │       └── "View All" Link
 ├── Drill-Through Dialog (opened via handleExpandClick)
 │   └── Web Resource (e.g., Events Page) with context params
-└── Version Badge (v1.2.47 — controlled by showVersion PCF property, default: visible)
+└── Version Badge (v1.3.0 — controlled by showVersion PCF property, default: visible)
 
 Deprecated (still present, scheduled for removal):
 └── GradeMetricCard — replaced by MetricCard with ReportCardMetric visual type preset
@@ -308,7 +315,8 @@ ChartRenderer: Routes to DueDateCardVisual or DueDateCardListVisual
 {
   "fieldPivot": {
     "fields": [
-      { "field": "sprk_some_field", "label": "Display Label", "fieldValue": 1, "sortOrder": 1, "valueFormat": "currency" }
+      { "field": "sprk_some_field", "label": "Display Label", "fieldValue": 1, "sortOrder": 1, "valueFormat": "currency" },
+      { "field": "sprk_score", "label": "Score", "totalField": "sprk_totalpossible", "valueFormat": "percentage" }
     ]
   }
 }
@@ -320,6 +328,7 @@ Each entry maps to:
 - `fieldValue` → Value for icon/color resolution (optional, defaults to label)
 - `sortOrder` → Sort order (optional, defaults to array index)
 - `valueFormat` → Per-field format override (v1.2.44, optional). Priority: `dp.valueFormat` > `cardConfig.valueFormat` > default
+- `totalField` → Paired total/denominator field for ratio-mode gauges (v1.3.0, optional). When present, the gauge displays `field / totalField` as a ratio
 
 **Null handling:** If a field is `null` or `undefined` on the record, the value defaults to `0` and a warning is logged.
 
@@ -412,6 +421,8 @@ These components are defined within the VisualHost PCF control and render specif
 | **CalendarVisual** | events, title, showNavigation | IChartData.dataPoints → ICalendarEvent[] |
 | **MiniTable** | items, columns, title, topN, showRank | IChartData.dataPoints → IMiniTableItem[] |
 | **TrendCard** | trend data, sparkline visualization | Trend data series |
+| **GaugeVisual** | dataPoints, gaugeMode ("single"/"ratio"), totalField, color thresholds, valueFormat (grade/percentage/currency) | IChartData.dataPoints (single: [0], ratio: [0]=current + totalField for denominator). Uses `resolveCardConfig()`. SVG semicircular arc, responsive CSS Grid layout. No-data state: "Not yet assessed". |
+| **HorizontalStackedBar** | dataPoints, color thresholds, valueFormat | IChartData.dataPoints[0]=current/spent, dataPoints[1]=total/budget. Remaining computed automatically. Uses `formatValue()` for all formats. Animated 400ms bar fill transition. Color thresholds on fill ratio. |
 | **ErrorBoundary** | children, fallback | Wraps components for error isolation |
 | ~~**GradeMetricCard**~~ | ~~grade, area, icon, colorRules~~ | ~~DEPRECATED: Use MetricCard with `sprk_visualtype = ReportCardMetric` (100000010)~~ |
 
@@ -420,6 +431,7 @@ These components are defined within the VisualHost PCF control and render specif
 | Component | Package | Used By |
 |-----------|---------|---------|
 | **EventDueDateCard** | `@spaarke/ui-components/dist/components/EventDueDateCard` | DueDateCard, DueDateCardList |
+| **AiSummaryPopover** | `@spaarke/ui-components` | All visual types (v1.3.0) — sparkle icon popover for pre-populated AI summary text |
 
 The `EventDueDateCard` renders a single event card with:
 - Event name and type name
@@ -461,6 +473,7 @@ interface IFieldPivotEntry {
   fieldValue?: unknown;             // Value for icon/color resolution
   sortOrder?: number;               // Explicit sort order (default: array index)
   valueFormat?: ValueFormatType;    // Per-field format override (v1.2.44)
+  totalField?: string;              // Paired total/denominator field for ratio-mode gauges (v1.3.0)
 }
 
 // Card components map Dataverse records to this interface:
@@ -538,6 +551,13 @@ This preset pattern allows domain-specific card configurations without creating 
 **v1.2.48 Additions:**
 - **Content-Driven Card Height**: MetricCard and MetricCardMatrix no longer receive a default 300px minimum height. The ChartRenderer `height` parameter has no default — it is `undefined` unless explicitly set via the PCF `height` property. Chart types (BarChart, LineChart, DonutChart) still default to 300px canvas height via `height ?? 300`. This eliminates whitespace below card grids.
 - **Height Cascade Fix**: Removed `height: "100%"` from PCF container, FluentProvider, and VisualHostRoot container. Removed `flex: 1` from chartContainer. Cards size to fit their content naturally.
+
+**v1.3.0 Additions:**
+- **Gauge Visual** (`GaugeVisual.tsx`): SVG semicircular arc gauge with color thresholds and responsive CSS Grid layout. Supports grade, percentage, and currency formatting. Two data binding modes configured via `gaugeMode` in the options JSON: `"single"` (renders a 0-1 field value as a filled arc) and `"ratio"` (uses `field` as current and `totalField` as denominator). Uses `resolveCardConfig()` for configuration resolution. No-data state shows "Not yet assessed".
+- **HorizontalStackedBar Visual** (`HorizontalStackedBar.tsx`): Financial progress bar showing spent/remaining/budget segments. Data binding: `dataPoints[0]` = current/spent, `dataPoints[1]` = total/budget; remaining is computed automatically. Uses `formatValue()` for all value formats (currency, percentage, etc.). Color thresholds applied on fill ratio (spent/budget). Animated bar fill with 400ms CSS transition.
+- **AI Summary Integration**: All visuals can show a sparkle icon (SparkleRegular from `@fluentui/react-icons`) that opens the `AiSummaryPopover` from `@spaarke/ui-components`. Configured via `"aiSummaryField"` in the options JSON — reads a pre-populated Dataverse text field via `context.webAPI.retrieveRecord()` (no AI API call at render time).
+- **Toolbar Repositioning**: The expand/View Details button and AI Summary sparkle icon now sit in a toolbar row **above** the visual content (not overlapping it). Layout: AI Summary icon (left) + View Details icon (right) in a flex row with `justifyContent: "space-between"`.
+- **`totalField` on IFieldPivotEntry**: New optional field for ratio-mode gauges where each pivot entry has a paired total/denominator field.
 
 ---
 
@@ -858,6 +878,45 @@ src/client/pcf/VisualHost/                 src/solutions/EventsPage/src/
 
 ---
 
+## AI Summary Integration
+
+### Overview (v1.3.0)
+
+All visual types can display an **AI Summary** via a sparkle icon (SparkleRegular from `@fluentui/react-icons`) in the toolbar. Clicking the icon opens the `AiSummaryPopover` component (from `@spaarke/ui-components` shared library), which displays a pre-populated summary text read from a Dataverse field.
+
+**Key design decision:** The AI Summary does **not** make an AI API call at render time. Instead, it reads a pre-populated text field from the current record via `context.webAPI.retrieveRecord()`. The summary text is generated and stored by an upstream process (e.g., a background service or plugin).
+
+### Configuration
+
+The AI Summary is configured via the `"aiSummaryField"` property in the chart definition's `sprk_optionsjson`:
+
+```json
+{
+  "aiSummaryField": "sprk_aisummary"
+}
+```
+
+When `aiSummaryField` is present and non-empty, the sparkle icon appears in the toolbar. When the user clicks it, the control calls `context.webAPI.retrieveRecord()` to fetch the field value from the current record and displays it in the `AiSummaryPopover`.
+
+### Toolbar Layout (v1.3.0)
+
+The toolbar was repositioned from an overlay on top of the visual content to a **dedicated row above** the visual. Layout uses flexbox with `justifyContent: "space-between"`:
+
+```
+┌─────────────────────────────────────┐
+│ ✨ AI Summary        🔍 View Details │  ← Toolbar row (above visual)
+├─────────────────────────────────────┤
+│                                     │
+│         Visual Content              │  ← Chart/card/gauge content
+│                                     │
+└─────────────────────────────────────┘
+```
+
+- **Left**: AI Summary sparkle icon (only visible when `aiSummaryField` is configured)
+- **Right**: View Details / expand icon (existing drill-through button)
+
+---
+
 ## Caching Strategy
 
 Three independent cache layers with different TTLs:
@@ -901,6 +960,7 @@ These are pure React components with no Dataverse dependencies. They accept data
 
 **Components:**
 - `EventDueDateCard` - Due date card with overdue indicators
+- `AiSummaryPopover` - Sparkle icon popover for AI-generated summary text (v1.3.0)
 - *(Future: Extracted chart components)*
 
 **How to reuse:**
@@ -1050,7 +1110,7 @@ Version must be updated in **5 locations** for each release:
 ### Solution Contents
 
 ```
-VisualHostSolution_v1.2.48.zip
+VisualHostSolution_v1.3.0.zip
 ├── [Content_Types].xml
 ├── solution.xml
 ├── customizations.xml
@@ -1096,6 +1156,8 @@ These are provided by the Dataverse runtime (not bundled):
    export enum VisualType {
      // ... existing types
      ReportCardMetric = 100000010,
+     Gauge = 100000011,              // v1.3.0
+     HorizontalStackedBar = 100000012, // v1.3.0
    }
    ```
 
@@ -1163,7 +1225,7 @@ This section captures architectural context relevant to the next project that wi
 |------|--------------|------------------|
 | **Drill-through target** | Single `sprk_drillthroughtarget` field (web resource name) | Could support multiple targets per click action type, or per-visual-type targets |
 | **Context params** | Fixed set: entityName, filterField, filterValue, viewId, mode | Extensible via `sprk_optionsjson` for additional custom params |
-| **Visual types** | 11 types (enum 100000000–100000010), with ReportCardMetric as a MetricCard fallthrough (v1.2.44), plus TrendCard | Add new types by extending the enum and ChartRenderer switch; card configuration is extensible via ICardConfig without new components; new presets can use the fallthrough pattern |
+| **Visual types** | 13 types (enum 100000000–100000012), with ReportCardMetric as a MetricCard fallthrough (v1.2.44), Gauge and HorizontalStackedBar (v1.3.0), plus TrendCard | Add new types by extending the enum and ChartRenderer switch; card configuration is extensible via ICardConfig without new components; new presets can use the fallthrough pattern |
 | **Click actions** | 4 actions + expand button | Could add: open in new tab, navigate to URL, trigger Power Automate flow |
 | **Data services** | Client-side aggregation + field pivot with per-field valueFormat (v1.2.44) | Could add server-side aggregation via BFF API for large datasets |
 
@@ -1201,7 +1263,7 @@ URL params (data property) ───────────────── p
 |-------------|-----------------|-------------------|
 | New drill-through params | `VisualHostRoot.tsx` (handleExpandClick) | `App.tsx` (parseDrillThroughParams, DrillThroughParams interface) |
 | New context filter logic | `VisualHostRoot.tsx` (param building) | `GridSection.tsx` (ContextFilter, FetchXML injection) |
-| New visual types | `types/index.ts`, `ChartRenderer.tsx`, new component file | N/A |
+| New visual types | `types/index.ts`, `ChartRenderer.tsx`, new component file (e.g., `GaugeVisual.tsx`, `HorizontalStackedBar.tsx`) | N/A |
 | New chart definition fields | `types/index.ts`, `ConfigurationLoader.ts` | N/A |
 | Dialog UI changes | N/A | `App.tsx` (IS_DIALOG_MODE conditionals) |
 | Entity-agnostic grid | N/A | `GridSection.tsx` (entity name, columns, FetchXML) |

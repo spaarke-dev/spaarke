@@ -24,6 +24,8 @@ import { CalendarVisual, type ICalendarEvent } from "./CalendarVisual";
 import { MiniTable, type IMiniTableItem, type IMiniTableColumn } from "./MiniTable";
 import { DueDateCardVisual } from "./DueDateCard";
 import { DueDateCardListVisual } from "./DueDateCardList";
+import { GaugeVisual } from "./GaugeVisual";
+import { HorizontalStackedBar } from "./HorizontalStackedBar";
 import { resolveCardConfig } from "../utils/cardConfigResolver";
 import type { IConfigWebApi } from "../services/ConfigurationLoader";
 
@@ -129,6 +131,10 @@ const getVisualTypeName = (visualType: VisualType): string => {
       return "Due Date Card List";
     case VT.ReportCardMetric:
       return "Metric Card (Grade Preset)";
+    case VT.Gauge:
+      return "Gauge";
+    case VT.HorizontalStackedBar:
+      return "Horizontal Stacked Bar";
     default:
       return `Unknown (${visualType})`;
   }
@@ -167,7 +173,9 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
     if (sprk_visualtype !== VT.MetricCard
       && sprk_visualtype !== VT.ReportCardMetric
       && sprk_visualtype !== VT.DueDateCard
-      && sprk_visualtype !== VT.DueDateCardList) {
+      && sprk_visualtype !== VT.DueDateCardList
+      && sprk_visualtype !== VT.Gauge
+      && sprk_visualtype !== VT.HorizontalStackedBar) {
       return (
         <div className={styles.placeholder}>
           <Text size={400}>No data available</Text>
@@ -399,6 +407,41 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
           onClickAction={onClickAction}
           onViewListClick={onViewListClick}
           fetchXmlOverride={fetchXmlOverride}
+        />
+      );
+    }
+
+    case VT.Gauge: {
+      const cardConfig = resolveCardConfig(chartDefinition, {
+        valueFormatOverride: valueFormatOverride || undefined,
+        columns,
+        showTitle: showTitlePcf ?? undefined,
+        titleFontSize: titleFontSizePcf || undefined,
+      });
+      return (
+        <GaugeVisual
+          title={cardConfig.showTitle ? sprk_name : undefined}
+          dataPoints={dataPoints}
+          cardConfig={cardConfig}
+          columns={columns}
+          width={width}
+          height={height}
+        />
+      );
+    }
+
+    case VT.HorizontalStackedBar: {
+      const cardConfig = resolveCardConfig(chartDefinition, {
+        valueFormatOverride: valueFormatOverride || undefined,
+        showTitle: showTitlePcf ?? undefined,
+        titleFontSize: titleFontSizePcf || undefined,
+      });
+      return (
+        <HorizontalStackedBar
+          title={cardConfig.showTitle ? sprk_name : undefined}
+          dataPoints={dataPoints}
+          cardConfig={cardConfig}
+          height={height}
         />
       );
     }

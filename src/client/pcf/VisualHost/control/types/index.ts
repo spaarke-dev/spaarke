@@ -19,6 +19,8 @@ export enum VisualType {
   DueDateCard = 100000008,
   DueDateCardList = 100000009,
   ReportCardMetric = 100000010,
+  Gauge = 100000011,
+  HorizontalStackedBar = 100000012,
 }
 
 /**
@@ -298,4 +300,6 @@ export interface IFieldPivotEntry {
   sortOrder?: number;
   /** Per-field value format override (e.g., "currency", "letterGrade", "signedPercentage") */
   valueFormat?: ValueFormatType;
+  /** For ratio-mode gauges: the total/denominator field logical name */
+  totalField?: string;
 }

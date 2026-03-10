@@ -15,7 +15,11 @@ import {
   tokens,
   Text,
 } from "@fluentui/react-components";
-import { OpenRegular } from "@fluentui/react-icons";
+import { OpenRegular, SparkleRegular } from "@fluentui/react-icons";
+import {
+  AiSummaryPopover,
+  type ISummaryData,
+} from "../../../../shared/Spaarke.UI.Components/src/components/AiSummaryPopover";
 import { IInputs } from "../generated/ManifestTypes";
 import { IChartDefinition, IChartData, DrillInteraction } from "../types";
 import { ChartRenderer } from "./ChartRenderer";
@@ -51,11 +55,14 @@ const useStyles = makeStyles({
     position: "relative",
     overflow: "hidden", // Prevent content overflow from affecting form column sizing
   },
-  expandButton: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    zIndex: 10,
+  toolbar: {
+    display: "flex",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    minHeight: "28px",
+    flexShrink: 0,
+    marginBottom: "10px",
+    gap: "10px",
   },
   chartContainer: {
     display: "flex",
@@ -145,6 +152,41 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
   // v1.2.35: Column position for multi-column coordination
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const columnPosition = (context.parameters as any).columnPosition?.raw as number | null;
+
+  // v1.3.0: Parse aiSummaryField from chart definition config JSON
+  const aiSummaryField = React.useMemo(() => {
+    if (!chartDefinition?.sprk_configurationjson) return null;
+    try {
+      const config = JSON.parse(chartDefinition.sprk_configurationjson);
+      return (config.aiSummaryField as string) || null;
+    } catch {
+      return null;
+    }
+  }, [chartDefinition?.sprk_configurationjson]);
+
+  /**
+   * Fetch AI summary from the configured Dataverse text field on the current record.
+   * Called lazily by AiSummaryPopover on first open.
+   */
+  const handleFetchAiSummary = useCallback(async (): Promise<ISummaryData> => {
+    if (!aiSummaryField || !chartDefinition?.sprk_entitylogicalname || !contextRecordId) {
+      return { summary: null, tldr: null };
+    }
+    try {
+      const entityName = chartDefinition.sprk_entitylogicalname;
+      const recordId = contextRecordId.replace(/[{}]/g, "");
+      const record = await context.webAPI.retrieveRecord(
+        entityName,
+        recordId,
+        `?$select=${aiSummaryField}`
+      );
+      const summaryText = record[aiSummaryField] as string | null;
+      return { summary: summaryText || null, tldr: null };
+    } catch (err) {
+      logger.error("VisualHostRoot", "Failed to fetch AI summary", err);
+      return { summary: null, tldr: null };
+    }
+  }, [aiSummaryField, chartDefinition, contextRecordId, context.webAPI]);
 
   useEffect(() => {
     if (!chartDefinitionId) {
@@ -498,23 +540,40 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
 
   return (
     <div className={styles.container} style={containerStyle}>
-      {/* Expand button - upper right, aligned with chart title */}
-      {showToolbar && enableDrillThrough && chartDefinition && (
-        <div className={styles.expandButton}>
-          <Tooltip content="View details" relationship="label">
-            <Button
-              appearance="subtle"
-              icon={<OpenRegular />}
-              onClick={handleExpandClick}
-              aria-label="View details in expanded workspace"
+      {/* Toolbar row — AI Summary (left) + View Details (right), above the visual */}
+      {showToolbar && chartDefinition && (aiSummaryField || enableDrillThrough) && (
+        <div className={styles.toolbar}>
+          {aiSummaryField && (
+            <AiSummaryPopover
+              trigger={
+                <Tooltip content="AI Summary" relationship="label">
+                  <Button
+                    appearance="subtle"
+                    icon={<SparkleRegular />}
+                    aria-label="View AI summary"
+                  />
+                </Tooltip>
+              }
+              onFetchSummary={handleFetchAiSummary}
+              positioning="below"
             />
-          </Tooltip>
+          )}
+          {enableDrillThrough && (
+            <Tooltip content="View details" relationship="label">
+              <Button
+                appearance="subtle"
+                icon={<OpenRegular />}
+                onClick={handleExpandClick}
+                aria-label="View details in expanded workspace"
+              />
+            </Tooltip>
+          )}
         </div>
       )}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
       {showVersion && (
-        <span className={styles.versionBadge}>v1.2.50 • 2026-02-16</span>
+        <span className={styles.versionBadge}>v1.3.5 • 2026-03-10</span>
       )}
 
       {/* Main chart area */}
