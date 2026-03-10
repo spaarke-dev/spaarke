@@ -13,7 +13,7 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// catching any emails missed by the Graph webhook subscription.
 ///
 /// Implements ADR-001 BackgroundService pattern with PeriodicTimer (5-minute interval).
-/// Follows the same pattern as EmailPollingBackupService (Jobs) and GraphSubscriptionManager.
+/// Follows the same pattern as GraphSubscriptionManager.
 ///
 /// Messages found by polling are enqueued as IncomingCommunication jobs via JobSubmissionService.
 /// Deduplication is multi-layered: isRead eq false filter, ServiceBus IdempotencyKey,

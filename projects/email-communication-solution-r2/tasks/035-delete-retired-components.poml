@@ -1,7 +1,7 @@
 <task id="ECS-035" project="Email Communication Solution R2">
   <metadata>
     <title>Delete Retired Components (Legacy Email Pipeline)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>4 - Email-to-Document Migration (Phase E)</phase>
     <tags>bff-api, cleanup</tags>

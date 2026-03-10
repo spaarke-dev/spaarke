@@ -394,28 +394,20 @@ public class EmailTelemetry : IDisposable
     /// <summary>
     /// Record filter evaluation result.
     /// </summary>
-    public void RecordFilterEvaluation(Services.Email.EmailFilterAction action, bool ruleMatched, string? ruleName = null)
+    public void RecordFilterEvaluation(string action, bool ruleMatched, string? ruleName = null)
     {
         _filterEvaluations.Add(1);
-
-        var actionStr = action switch
-        {
-            Services.Email.EmailFilterAction.AutoSave => "process",
-            Services.Email.EmailFilterAction.Ignore => "ignore",
-            Services.Email.EmailFilterAction.ReviewRequired => "review",
-            _ => "unknown"
-        };
 
         if (ruleMatched)
         {
             _filterMatched.Add(1,
-                new KeyValuePair<string, object?>("email.filter.action", actionStr),
+                new KeyValuePair<string, object?>("email.filter.action", action),
                 new KeyValuePair<string, object?>("email.filter.rule", ruleName ?? "unknown"));
         }
         else
         {
             _filterDefaultAction.Add(1,
-                new KeyValuePair<string, object?>("email.filter.action", actionStr));
+                new KeyValuePair<string, object?>("email.filter.action", action));
         }
 
         _statsService?.RecordFilterEvaluation(ruleMatched);
