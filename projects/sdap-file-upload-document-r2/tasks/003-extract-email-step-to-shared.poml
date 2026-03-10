@@ -1,0 +1,53 @@
+<task id="003" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Extract SendEmailStep to shared</title>
+    <phase>1 - Shared Component Extraction</phase>
+    <tags>shared-components, email, extraction</tags>
+    <estimate>2-3 hours</estimate>
+    <priority>high</priority>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Genericize and extract SendEmailStep, LookupField, and emailHelpers from LegalWorkspace to src/client/shared/components/EmailStep/.</goal>
+    <context>
+      LegalWorkspace has two email step variants (SendEmailStep in CreateMatter, SummarizeSendEmailStep in SummarizeFiles). Both use the same pattern: LookupField for recipients, pre-filled subject/body, Dataverse email activity. The shared version should accept configurable templates via props.
+    </context>
+    <constraints>
+      - Genericize — accept defaultSubject, defaultBody, regardingEntityType/Id via props
+      - LookupField must search systemuser table (reusable)
+      - extractEmailFromUserName helper stays generic
+      - Fluent UI v9 only (ADR-021)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/solutions/LegalWorkspace/src/components/CreateMatter/SendEmailStep.tsx" reason="Primary email step source" />
+      <file path="src/solutions/LegalWorkspace/src/components/SummarizeFiles/SummarizeSendEmailStep.tsx" reason="Secondary variant for reference" />
+      <file path=".claude/adr/ADR-012.md" reason="Shared component library constraints" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read both email step variants to identify common pattern vs domain-specific parts</step>
+    <step>Design generic ISendEmailStepProps interface (defaultSubject, defaultBody, regarding, controlled fields)</step>
+    <step>Create src/client/shared/components/EmailStep/ directory</step>
+    <step>Extract genericized SendEmailStep.tsx, LookupField.tsx, emailHelpers.ts</step>
+    <step>Create index.ts barrel export</step>
+  </steps>
+
+  <outputs>
+    <output>src/client/shared/components/EmailStep/SendEmailStep.tsx</output>
+    <output>src/client/shared/components/EmailStep/LookupField.tsx</output>
+    <output>src/client/shared/components/EmailStep/emailHelpers.ts</output>
+    <output>src/client/shared/components/EmailStep/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SendEmailStep accepts generic props (no CreateMatter-specific types)</criterion>
+    <criterion>LookupField is reusable for any entity search</criterion>
+    <criterion>Both existing LegalWorkspace wizards could use the shared version</criterion>
+  </acceptance-criteria>
+</task>

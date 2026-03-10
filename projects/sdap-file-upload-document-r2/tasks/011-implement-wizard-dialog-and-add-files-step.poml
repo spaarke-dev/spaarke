@@ -1,0 +1,59 @@
+<task id="011" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Implement DocumentUploadWizardDialog and AddFilesStep</title>
+    <phase>2 - Document Upload Wizard Code Page</phase>
+    <tags>code-page, wizard, file-upload, frontend</tags>
+    <estimate>3-4 hours</estimate>
+    <priority>high</priority>
+    <dependencies>010</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement the domain-specific wizard dialog component with the AddFilesStep (Step 1). The AddFilesStep uses FileUploadZone from shared for file selection with drag-and-drop, displays the file list, and shows the "Related To" parent entity.</goal>
+    <context>
+      DocumentUploadWizardDialog is modeled after LegalWorkspace's WizardDialog — it manages domain state (file state, form values, selected actions), configures WizardShell steps, and handles dynamic step injection. Step 1 focuses on file selection only; upload execution happens on "Next" transition.
+    </context>
+    <constraints>
+      - Use WizardShell from shared (not local)
+      - Use FileUploadZone and UploadedFileList from shared
+      - File validation: configurable limits (owner wants increased limits via chunked upload)
+      - State management: useReducer for file state, useState for other state
+      - Use Refs for closure safety in renderContent callbacks (prevent stale closures)
+      - Fluent UI v9 semantic tokens only
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/solutions/LegalWorkspace/src/components/CreateMatter/WizardDialog.tsx" reason="Domain wizard pattern reference" />
+      <file path="src/client/shared/components/Wizard/wizardShellTypes.ts" reason="Step config interface" />
+      <file path="src/client/shared/components/FileUpload/FileUploadZone.tsx" reason="File selection component" />
+      <file path=".claude/adr/ADR-021.md" reason="Fluent UI v9 design system" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create src/solutions/DocumentUploadWizard/src/DocumentUploadWizardDialog.tsx</step>
+    <step>Set up state management: fileState (useReducer), step2/3 state (useState), Refs for closures</step>
+    <step>Configure 3 base wizard steps (add-files, summary, next-steps)</step>
+    <step>Create src/solutions/DocumentUploadWizard/src/components/AddFilesStep.tsx</step>
+    <step>Implement file selection with FileUploadZone, validation, file list display</step>
+    <step>Display "Related To" parent entity from URL params</step>
+    <step>Implement canAdvance predicate (at least 1 file selected)</step>
+    <step>Verify build and render</step>
+  </steps>
+
+  <outputs>
+    <output>src/solutions/DocumentUploadWizard/src/DocumentUploadWizardDialog.tsx</output>
+    <output>src/solutions/DocumentUploadWizard/src/components/AddFilesStep.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>WizardShell renders with 3 steps in sidebar</criterion>
+    <criterion>AddFilesStep shows drag-drop zone and file list</criterion>
+    <criterion>File validation enforces limits</criterion>
+    <criterion>"Related To" displays parent entity name</criterion>
+    <criterion>Next button enabled only when files selected</criterion>
+  </acceptance-criteria>
+</task>

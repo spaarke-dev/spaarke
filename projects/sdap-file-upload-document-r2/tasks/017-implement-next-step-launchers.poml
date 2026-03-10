@@ -1,0 +1,50 @@
+<task id="017" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Implement next step launchers for Analysis Builder and Find Similar</title>
+    <phase>2 - Document Upload Wizard Code Page</phase>
+    <tags>code-page, services, navigation</tags>
+    <estimate>1-2 hours</estimate>
+    <priority>medium</priority>
+    <dependencies>016</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create nextStepLauncher.ts utility that handles opening Analysis Builder (navigateTo sprk_analysisbuilder) and rendering FindSimilarDialog inline from the success screen.</goal>
+    <context>
+      The success screen action buttons need to navigate to other Code Pages or render inline dialogs. Analysis Builder opens via Xrm.Navigation.navigateTo. Find Similar renders the shared FindSimilarDialog component inline within the wizard.
+    </context>
+    <constraints>
+      - Analysis Builder: use Xrm.Navigation.navigateTo with sprk_analysisbuilder
+      - Find Similar: render shared FindSimilarDialog inline (not a separate navigateTo)
+      - Pass document context (documentId, containerId) to launched pages
+      - Handle cases where Xrm.Navigation is not available (graceful fallback)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/shared/components/FindSimilar/FindSimilarDialog.tsx" reason="Find similar dialog component" />
+      <file path=".claude/patterns/webresource/custom-dialogs-in-dataverse.md" reason="Dialog navigation patterns" />
+      <file path=".claude/patterns/pcf/dialog-patterns.md" reason="PCF dialog opening patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read dialog navigation patterns for Code Pages</step>
+    <step>Create nextStepLauncher.ts with openAnalysisBuilder() function</step>
+    <step>Implement navigateTo call for sprk_analysisbuilder with document parameters</step>
+    <step>Create renderFindSimilar() function that mounts FindSimilarDialog inline</step>
+    <step>Wire launchers into SuccessScreen action buttons</step>
+  </steps>
+
+  <outputs>
+    <output>src/solutions/DocumentUploadWizard/src/services/nextStepLauncher.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Analysis Builder opens via navigateTo with correct document context</criterion>
+    <criterion>Find Similar dialog renders inline in the wizard</criterion>
+    <criterion>Graceful handling when Xrm.Navigation unavailable</criterion>
+  </acceptance-criteria>
+</task>

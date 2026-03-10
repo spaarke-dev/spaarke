@@ -1,0 +1,51 @@
+<task id="030" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Build Code Page web resource with webpack inline HTML</title>
+    <phase>4 - Ribbon Integration &amp; Deployment</phase>
+    <tags>code-page, deploy, webpack</tags>
+    <estimate>1-2 hours</estimate>
+    <priority>high</priority>
+    <dependencies>017</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Build the DocumentUploadWizard Code Page using the two-step webpack pipeline (bundle JS → inline into HTML). Create the sprk_documentuploadwizard web resource ready for Dataverse import.</goal>
+    <context>
+      Code Pages follow a two-step build: (1) webpack bundles React 18 + all dependencies into a single JS file, (2) HTML template inlines the JS bundle. The resulting single HTML file is deployed as a Dataverse web resource.
+    </context>
+    <constraints>
+      - Follow code-page-deploy skill for build pipeline
+      - Webpack config must match CreateDocument Code Page pattern
+      - Output: single HTML file with inlined JS
+      - Web resource name: sprk_documentuploadwizard
+      - Verify build succeeds without errors
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/code-pages/CreateDocument/" reason="Code Page build reference" />
+      <file path=".claude/constraints/webresource.md" reason="Web resource bundling rules" />
+      <file path=".claude/patterns/webresource/full-page-custom-page.md" reason="Code Page scaffold pattern" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Verify webpack.config.js produces correct output</step>
+    <step>Run webpack build (npm run build in DocumentUploadWizard)</step>
+    <step>Verify single HTML file with inlined JS is produced</step>
+    <step>Validate HTML file size is reasonable for Dataverse import</step>
+    <step>Name web resource: sprk_documentuploadwizard</step>
+  </steps>
+
+  <outputs>
+    <output>src/solutions/DocumentUploadWizard/dist/documentuploadwizard.html</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Webpack build completes without errors</criterion>
+    <criterion>Single HTML file produced with inlined JS bundle</criterion>
+    <criterion>HTML file loads in browser without errors</criterion>
+  </acceptance-criteria>
+</task>

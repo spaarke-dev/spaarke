@@ -1,0 +1,52 @@
+<task id="023" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Test search profile generation end-to-end</title>
+    <phase>3 - Search Profile Integration</phase>
+    <tags>testing, bff-api, ai</tags>
+    <estimate>1-2 hours</estimate>
+    <priority>medium</priority>
+    <dependencies>022</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Verify that sprk_searchprofile is correctly populated after the Document Profile playbook runs. Validate content quality and BM25 optimization of the generated search profile text.</goal>
+    <context>
+      After tasks 020-022, the Document Profile pipeline should produce sprk_searchprofile as a deterministic output. This task validates the integration works end-to-end and the generated search profile text is well-formed for Azure AI Search BM25 ranking.
+    </context>
+    <constraints>
+      - Use Test-SdapBffApi.ps1 script for BFF API testing
+      - Verify sprk_searchprofile is populated in Dataverse after profile completes
+      - Validate search profile text structure and content quality
+      - Test with various document types (PDF, DOCX) and entity contexts
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="scripts/Test-SdapBffApi.ps1" reason="BFF API testing script" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/DocumentProfileFieldMapper.cs" reason="Implementation to test" />
+      <file path="docs/guides/RAG-ARCHITECTURE.md" reason="RAG and search context" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Run Document Profile playbook for a test document via BFF API</step>
+    <step>Verify sprk_searchprofile field is populated in Dataverse record</step>
+    <step>Validate search profile text contains expected components (type, TL;DR, entities, keywords)</step>
+    <step>Test with document that has minimal profile outputs (verify graceful handling)</step>
+    <step>Test with document that produces all profile outputs (verify complete profile)</step>
+    <step>Verify existing profile fields (summary, TL;DR, etc.) still work correctly</step>
+  </steps>
+
+  <outputs>
+    <output>Test results documented in project notes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>sprk_searchprofile populated after Document Profile playbook runs</criterion>
+    <criterion>Search profile text contains relevant document metadata</criterion>
+    <criterion>Graceful handling when some profile outputs are missing</criterion>
+    <criterion>Existing profile outputs unaffected by search profile addition</criterion>
+  </acceptance-criteria>
+</task>

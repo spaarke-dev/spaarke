@@ -1,0 +1,49 @@
+<task id="032" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Deploy web resource and ribbon changes to Dataverse</title>
+    <phase>4 - Ribbon Integration &amp; Deployment</phase>
+    <tags>deploy, dataverse</tags>
+    <estimate>1-2 hours</estimate>
+    <priority>high</priority>
+    <dependencies>031</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Import the DocumentUploadWizard web resource and updated ribbon commands into Dataverse. Publish all customizations.</goal>
+    <context>
+      Deploy the built Code Page HTML web resource and updated ribbon command scripts to the Dataverse dev environment. Follow dataverse-deploy and code-page-deploy skills.
+    </context>
+    <constraints>
+      - Use code-page-deploy skill for Code Page web resource
+      - Use dataverse-deploy skill for solution import
+      - Publish customizations after import
+      - Verify web resource is accessible after deployment
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="scripts/Deploy-PCFWebResources.ps1" reason="Web resource deployment script" />
+      <file path=".claude/constraints/webresource.md" reason="Web resource constraints" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Deploy DocumentUploadWizard web resource to Dataverse</step>
+    <step>Deploy updated ribbon command scripts</step>
+    <step>Publish all customizations</step>
+    <step>Verify web resource loads in Dataverse environment</step>
+  </steps>
+
+  <outputs>
+    <output>Deployed web resource: sprk_documentuploadwizard</output>
+    <output>Updated ribbon commands deployed</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Web resource imported and published in Dataverse</criterion>
+    <criterion>Ribbon commands updated and published</criterion>
+    <criterion>Web resource accessible via navigateTo</criterion>
+  </acceptance-criteria>
+</task>

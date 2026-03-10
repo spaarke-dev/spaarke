@@ -1,0 +1,68 @@
+<task id="010" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Scaffold DocumentUploadWizard Code Page solution</title>
+    <phase>2 - Document Upload Wizard Code Page</phase>
+    <tags>code-page, scaffold, webpack, react-18</tags>
+    <estimate>2-3 hours</estimate>
+    <priority>high</priority>
+    <dependencies>001,005</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create the src/solutions/DocumentUploadWizard/ Code Page solution with index.html, webpack.config.js, package.json, tsconfig.json, main.tsx, and App.tsx. Follow the CreateDocument Code Page pattern.</goal>
+    <context>
+      Code Pages are standalone React 18 HTML web resources deployed to Dataverse. They bundle their own React, use Fluent UI v9, authenticate via @spaarke/auth MSAL, and are opened via Xrm.Navigation.navigateTo. The CreateDocument Code Page is the canonical reference.
+    </context>
+    <constraints>
+      - React 18 with createRoot (ADR-022)
+      - Fluent UI v9 exclusively (ADR-021)
+      - FluentProvider with theme detection (light/dark)
+      - Webpack with esbuild-loader, single bundle, no code splitting
+      - @spaarke/auth for MSAL authentication
+      - Parse URL parameters (parentEntityType, parentEntityId, parentEntityName, containerId)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/code-pages/CreateDocument/index.html" reason="HTML template reference" />
+      <file path="src/client/code-pages/CreateDocument/webpack.config.js" reason="Webpack config reference" />
+      <file path="src/client/code-pages/CreateDocument/package.json" reason="Dependencies reference" />
+      <file path="src/client/code-pages/CreateDocument/src/index.tsx" reason="Entry point reference" />
+      <file path="src/solutions/LegalWorkspace/index.html" reason="Alternative HTML reference" />
+      <file path=".claude/patterns/webresource/full-page-custom-page.md" reason="Code Page scaffold pattern" />
+      <file path=".claude/adr/ADR-006.md" reason="Code Page requirements" />
+      <file path=".claude/adr/ADR-022.md" reason="React 18 bundling" />
+      <file path=".claude/constraints/webresource.md" reason="Web resource constraints" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create src/solutions/DocumentUploadWizard/ directory structure</step>
+    <step>Create index.html with minimal reset styles and root div</step>
+    <step>Create package.json with React 18, Fluent v9, @spaarke/auth dependencies</step>
+    <step>Create tsconfig.json matching CreateDocument config</step>
+    <step>Create webpack.config.js with esbuild-loader, single bundle, @spaarke/auth alias</step>
+    <step>Create src/main.tsx — parse URL params, createRoot, FluentProvider with theme</step>
+    <step>Create src/App.tsx — placeholder component rendering WizardShell from shared</step>
+    <step>Verify npm install and npm run build succeed</step>
+  </steps>
+
+  <outputs>
+    <output>src/solutions/DocumentUploadWizard/index.html</output>
+    <output>src/solutions/DocumentUploadWizard/webpack.config.js</output>
+    <output>src/solutions/DocumentUploadWizard/package.json</output>
+    <output>src/solutions/DocumentUploadWizard/tsconfig.json</output>
+    <output>src/solutions/DocumentUploadWizard/src/main.tsx</output>
+    <output>src/solutions/DocumentUploadWizard/src/App.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>npm install completes without errors</criterion>
+    <criterion>npm run build produces bundle.js</criterion>
+    <criterion>App renders WizardShell with placeholder steps</criterion>
+    <criterion>URL parameters parsed correctly</criterion>
+    <criterion>Theme detection works (light/dark)</criterion>
+  </acceptance-criteria>
+</task>

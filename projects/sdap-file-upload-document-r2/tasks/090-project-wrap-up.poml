@@ -1,0 +1,50 @@
+<task id="090" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Project wrap-up and archive</title>
+    <phase>5 - Wrap-Up</phase>
+    <tags>documentation, wrap-up</tags>
+    <estimate>1 hour</estimate>
+    <priority>low</priority>
+    <dependencies>040</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Update README status to Complete, create lessons-learned.md, archive project artifacts, and run repo-cleanup.</goal>
+    <context>
+      Standard project wrap-up procedure. All implementation tasks are complete. Final cleanup and archival.
+    </context>
+    <constraints>
+      - Follow standard project wrap-up procedure
+      - Update README status
+      - Create concise lessons-learned
+      - Run /repo-cleanup
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/sdap-file-upload-document-r2/README.md" reason="Update status" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Update README.md status to "Complete"</step>
+    <step>Create lessons-learned.md with key insights</step>
+    <step>Verify all task statuses are updated in TASK-INDEX.md</step>
+    <step>Run /repo-cleanup for structure validation</step>
+    <step>Prompt user to run /merge-to-master when ready</step>
+  </steps>
+
+  <outputs>
+    <output>projects/sdap-file-upload-document-r2/README.md (updated status)</output>
+    <output>projects/sdap-file-upload-document-r2/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README status shows Complete</criterion>
+    <criterion>Lessons-learned documented</criterion>
+    <criterion>All tasks marked complete in TASK-INDEX.md</criterion>
+    <criterion>Repo-cleanup passes</criterion>
+  </acceptance-criteria>
+</task>

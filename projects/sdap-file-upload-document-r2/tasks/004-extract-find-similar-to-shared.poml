@@ -1,0 +1,58 @@
+<task id="004" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Extract FindSimilar dialog to shared</title>
+    <phase>1 - Shared Component Extraction</phase>
+    <tags>shared-components, find-similar, extraction, ai</tags>
+    <estimate>2-3 hours</estimate>
+    <priority>high</priority>
+    <dependencies>001</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Move FindSimilarDialog and supporting components from LegalWorkspace to src/client/shared/components/FindSimilar/.</goal>
+    <context>
+      FindSimilarDialog is a two-step wizard (upload files → search results) using WizardShell. It searches documents, matters, and projects via hybrid semantic search. The dialog will be used by both the Workspace and the new DocumentUploadWizard.
+    </context>
+    <constraints>
+      - Depends on WizardShell being in shared (task 001)
+      - findSimilarService.ts calls BFF API endpoints — keep API paths configurable
+      - FilePreviewDialog must be included
+      - Fluent UI v9 only (ADR-021)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/solutions/LegalWorkspace/src/components/FindSimilar/FindSimilarDialog.tsx" reason="Main dialog" />
+      <file path="src/solutions/LegalWorkspace/src/components/FindSimilar/FindSimilarResultsStep.tsx" reason="Results display" />
+      <file path="src/solutions/LegalWorkspace/src/components/FindSimilar/findSimilarService.ts" reason="Search service" />
+      <file path="src/solutions/LegalWorkspace/src/components/FindSimilar/findSimilarTypes.ts" reason="Type definitions" />
+      <file path=".claude/adr/ADR-013.md" reason="AI architecture constraints" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read all FindSimilar source files and audit dependencies</step>
+    <step>Create src/client/shared/components/FindSimilar/ directory</step>
+    <step>Copy all FindSimilar components to shared</step>
+    <step>Update WizardShell import to reference shared path</step>
+    <step>Update FileUploadZone import to reference shared path (task 002)</step>
+    <step>Create index.ts barrel export</step>
+  </steps>
+
+  <outputs>
+    <output>src/client/shared/components/FindSimilar/FindSimilarDialog.tsx</output>
+    <output>src/client/shared/components/FindSimilar/FindSimilarResultsStep.tsx</output>
+    <output>src/client/shared/components/FindSimilar/findSimilarService.ts</output>
+    <output>src/client/shared/components/FindSimilar/findSimilarTypes.ts</output>
+    <output>src/client/shared/components/FindSimilar/FilePreviewDialog.tsx</output>
+    <output>src/client/shared/components/FindSimilar/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All FindSimilar components in shared with updated imports</criterion>
+    <criterion>WizardShell imported from shared (not local)</criterion>
+    <criterion>findSimilarService endpoints are configurable or use standard BFF base URL</criterion>
+  </acceptance-criteria>
+</task>

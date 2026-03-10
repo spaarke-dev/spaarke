@@ -1,0 +1,50 @@
+<task id="002" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Extract FileUpload components to shared</title>
+    <phase>1 - Shared Component Extraction</phase>
+    <tags>shared-components, file-upload, extraction</tags>
+    <estimate>1-2 hours</estimate>
+    <priority>high</priority>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Move FileUploadZone and UploadedFileList from LegalWorkspace to src/client/shared/components/FileUpload/.</goal>
+    <context>
+      FileUploadZone provides drag-and-drop file selection with validation. UploadedFileList displays selected files with remove buttons. Both are used by CreateMatter wizard and FindSimilar dialog, and will be needed by the new DocumentUploadWizard.
+    </context>
+    <constraints>
+      - Fluent UI v9 only (ADR-021)
+      - No domain-specific logic — generic file selection components
+      - Must support file validation callbacks (size, count, type)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/solutions/LegalWorkspace/src/components/CreateMatter/" reason="Source components" />
+      <file path=".claude/adr/ADR-012.md" reason="Shared component library constraints" />
+      <file path=".claude/adr/ADR-021.md" reason="Fluent UI v9 design system" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Locate FileUploadZone.tsx and UploadedFileList.tsx in LegalWorkspace</step>
+    <step>Audit imports for domain-specific dependencies</step>
+    <step>Create src/client/shared/components/FileUpload/ directory</step>
+    <step>Copy components, removing any domain-specific coupling</step>
+    <step>Create index.ts barrel export</step>
+  </steps>
+
+  <outputs>
+    <output>src/client/shared/components/FileUpload/FileUploadZone.tsx</output>
+    <output>src/client/shared/components/FileUpload/UploadedFileList.tsx</output>
+    <output>src/client/shared/components/FileUpload/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Components exist in shared with no domain-specific imports</criterion>
+    <criterion>Barrel export exposes all public types and components</criterion>
+  </acceptance-criteria>
+</task>

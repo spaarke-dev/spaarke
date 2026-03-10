@@ -1,0 +1,48 @@
+<task id="020" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Add searchprofile mapping to DocumentProfileFieldMapper</title>
+    <phase>3 - Search Profile Integration</phase>
+    <tags>bff-api, services, ai</tags>
+    <estimate>1-2 hours</estimate>
+    <priority>high</priority>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add "searchprofile" → "sprk_searchprofile" mapping to DocumentProfileFieldMapper's GetFieldName switch and SupportedOutputTypes list.</goal>
+    <context>
+      The DocumentProfileFieldMapper currently maps: tl;dr, summary, keywords, document type, entities. Adding searchprofile as another output type enables the Document Profile playbook to populate the sprk_searchprofile field. The actual value is built by a deterministic function (task 021), not by AI.
+    </context>
+    <constraints>
+      - Add to existing GetFieldName switch statement
+      - Add to SupportedOutputTypes collection
+      - Follow existing code patterns exactly
+      - No breaking changes to existing mappings
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/DocumentProfileFieldMapper.cs" reason="Field mapper to modify" />
+      <file path=".claude/adr/ADR-013.md" reason="AI architecture constraints" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read DocumentProfileFieldMapper.cs current implementation</step>
+    <step>Add "searchprofile" case to GetFieldName switch → return "sprk_searchprofile"</step>
+    <step>Add "searchprofile" to SupportedOutputTypes</step>
+    <step>Verify no breaking changes to existing mappings</step>
+  </steps>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/DocumentProfileFieldMapper.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>GetFieldName("searchprofile") returns "sprk_searchprofile"</criterion>
+    <criterion>SupportedOutputTypes includes "searchprofile"</criterion>
+    <criterion>Existing mappings unchanged</criterion>
+  </acceptance-criteria>
+</task>

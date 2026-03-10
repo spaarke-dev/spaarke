@@ -1,0 +1,45 @@
+<task id="040" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Update documentation for new upload wizard</title>
+    <phase>5 - Wrap-Up</phase>
+    <tags>documentation</tags>
+    <estimate>1-2 hours</estimate>
+    <priority>low</priority>
+    <dependencies>033</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Update relevant documentation to reflect the new DocumentUploadWizard Code Page, shared component extraction, and search profile integration.</goal>
+    <context>
+      Documentation should reflect the migration from Custom Page + PCF to Code Page wizard, the shared component library additions, and the new search profile feature.
+    </context>
+    <constraints>
+      - Update only docs that are directly affected by changes
+      - Don't create new documentation files unless necessary
+      - Keep updates concise and factual
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="docs/guides/WORKSPACE-ENTITY-CREATION-GUIDE.md" reason="May reference upload patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Identify documentation that references the old Custom Page upload flow</step>
+    <step>Update references to point to new Code Page wizard</step>
+    <step>Document shared component library additions if relevant guides exist</step>
+    <step>Update search profile documentation if relevant</step>
+  </steps>
+
+  <outputs>
+    <output>Updated documentation files</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No documentation references outdated Custom Page upload flow</criterion>
+    <criterion>New upload wizard documented where applicable</criterion>
+  </acceptance-criteria>
+</task>

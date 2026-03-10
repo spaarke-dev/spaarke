@@ -1,0 +1,54 @@
+<task id="007" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Update LegalWorkspace imports to shared</title>
+    <phase>1 - Shared Component Extraction</phase>
+    <tags>shared-components, legal-workspace, imports, testing</tags>
+    <estimate>2-3 hours</estimate>
+    <priority>high</priority>
+    <dependencies>001,002,003,004</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Update all imports in LegalWorkspace to reference shared components (Wizard, FileUpload, EmailStep, FindSimilar) instead of local paths. Verify build succeeds.</goal>
+    <context>
+      After extracting components to shared, LegalWorkspace must be updated to import from the new shared locations. This includes CreateMatter wizard, ProjectWizard, QuickStartWizard, SummarizeFiles, and FindSimilar dialog. The local copies should be removed after imports are updated.
+    </context>
+    <constraints>
+      - Must not break any existing LegalWorkspace functionality
+      - Remove local copies of extracted components after import update
+      - Build must succeed (npm run build)
+      - All wizards must still render correctly
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/solutions/LegalWorkspace/src/components/CreateMatter/WizardDialog.tsx" reason="Uses WizardShell, EmailStep, FileUpload" />
+      <file path="src/solutions/LegalWorkspace/src/components/CreateProject/ProjectWizardDialog.tsx" reason="Uses WizardShell" />
+      <file path="src/solutions/LegalWorkspace/src/components/QuickStart/QuickStartWizardDialog.tsx" reason="Uses WizardShell" />
+      <file path="src/solutions/LegalWorkspace/src/components/SummarizeFiles/SummarizeFilesDialog.tsx" reason="Uses WizardShell, EmailStep" />
+      <file path="src/solutions/LegalWorkspace/package.json" reason="May need path alias for shared" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Grep all imports of local Wizard, FileUpload, EmailStep, FindSimilar in LegalWorkspace</step>
+    <step>Update imports to shared paths (relative or via package alias)</step>
+    <step>Add shared path alias to LegalWorkspace webpack/tsconfig if needed</step>
+    <step>Remove local copies of extracted components from LegalWorkspace</step>
+    <step>Run npm run build and fix any TypeScript errors</step>
+    <step>Verify all wizards render (manual or automated check)</step>
+  </steps>
+
+  <outputs>
+    <output>Updated import paths across LegalWorkspace source files</output>
+    <output>Removed local copies of extracted components</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>LegalWorkspace builds successfully (npm run build)</criterion>
+    <criterion>No local copies of WizardShell, FileUploadZone, SendEmailStep, FindSimilar remain</criterion>
+    <criterion>All wizards (CreateMatter, CreateProject, QuickStart, SummarizeFiles, FindSimilar) function correctly</criterion>
+  </acceptance-criteria>
+</task>

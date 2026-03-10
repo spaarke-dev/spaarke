@@ -1,0 +1,48 @@
+<task id="006" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Extract useAiSummary hook to shared</title>
+    <phase>1 - Shared Component Extraction</phase>
+    <tags>shared-components, hooks, ai, streaming</tags>
+    <estimate>1-2 hours</estimate>
+    <priority>high</priority>
+    <dependencies>005</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Move useAiSummary SSE streaming hook from UniversalQuickCreate to src/client/shared/hooks/.</goal>
+    <context>
+      useAiSummary manages concurrent SSE streams for Document Profile playbook execution. It handles stream lifecycle, progress tracking, and enqueueing incomplete analyses. It depends on SdapApiClient for the API call.
+    </context>
+    <constraints>
+      - Must work with the shared SdapApiClient (task 005)
+      - Already a React hook — minimal changes expected
+      - ADR-013: AI calls through BFF endpoints only
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/UniversalQuickCreate/control/services/useAiSummary.ts" reason="Source hook" />
+      <file path=".claude/patterns/ai/streaming-endpoints.md" reason="SSE streaming patterns" />
+      <file path=".claude/adr/ADR-013.md" reason="AI architecture constraints" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read useAiSummary source and audit dependencies</step>
+    <step>Create src/client/shared/hooks/ directory</step>
+    <step>Copy useAiSummary.ts, update SdapApiClient import to shared</step>
+    <step>Verify hook signature and types are exported</step>
+  </steps>
+
+  <outputs>
+    <output>src/client/shared/hooks/useAiSummary.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Hook works with shared SdapApiClient</criterion>
+    <criterion>SSE streaming functionality preserved</criterion>
+    <criterion>All types exported for consumers</criterion>
+  </acceptance-criteria>
+</task>

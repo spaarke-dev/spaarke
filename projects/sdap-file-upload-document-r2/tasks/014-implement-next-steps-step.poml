@@ -1,0 +1,55 @@
+<task id="014" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Implement NextStepsStep with dynamic step injection</title>
+    <phase>2 - Document Upload Wizard Code Page</phase>
+    <tags>code-page, components, wizard</tags>
+    <estimate>2-3 hours</estimate>
+    <priority>high</priority>
+    <dependencies>011</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create NextStepsStep.tsx with checkbox cards for Send Email, Work on Analysis, and Find Similar. Implement dynamic step injection for Send Email using WizardShell's addDynamicStep() with a Skip button.</goal>
+    <context>
+      The NextStepsStep is Step 3 of the wizard. Users select desired follow-up actions via checkbox cards. Send Email injects a dynamic wizard step (same pattern as LegalWorkspace's CreateMatter wizard). Work on Analysis and Find Similar are handled in the success screen.
+    </context>
+    <constraints>
+      - Use WizardShell's addDynamicStep() and removeDynamicStep() APIs
+      - Dynamic steps must include footerActions with Skip button
+      - Checkbox cards use Fluent UI v9 Card component
+      - Follow canonical ordering pattern from WizardShell
+      - ADR-021: Fluent UI v9, semantic tokens, dark mode
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/shared/components/Wizard/WizardShell.tsx" reason="Dynamic step injection API" />
+      <file path="src/client/shared/components/Wizard/wizardShellTypes.ts" reason="IWizardStepConfig, canonical ordering" />
+      <file path="src/solutions/LegalWorkspace/src/components/CreateMatter/NextStepsStep.tsx" reason="Reference implementation" />
+      <file path=".claude/adr/ADR-021.md" reason="Fluent UI v9 design system" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read LegalWorkspace NextStepsStep.tsx for reference pattern</step>
+    <step>Create NextStepsStep.tsx with checkbox card layout (Send Email, Work on Analysis, Find Similar)</step>
+    <step>Implement Send Email toggle → addDynamicStep/removeDynamicStep</step>
+    <step>Add Skip button via footerActions on injected email step</step>
+    <step>Store selected next steps in wizard state for success screen</step>
+    <step>Wire NextStepsStep into DocumentUploadWizardDialog</step>
+  </steps>
+
+  <outputs>
+    <output>src/solutions/DocumentUploadWizard/src/components/NextStepsStep.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Three checkbox cards render correctly</criterion>
+    <criterion>Send Email toggle injects/removes dynamic wizard step</criterion>
+    <criterion>Dynamic email step has Skip button in footer</criterion>
+    <criterion>Selected next steps persist through wizard navigation</criterion>
+    <criterion>Fluent UI v9 with dark mode support</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,51 @@
+<task id="022" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Integrate BuildSearchProfile into CreateFieldMapping pipeline</title>
+    <phase>3 - Search Profile Integration</phase>
+    <tags>bff-api, services, ai</tags>
+    <estimate>1-2 hours</estimate>
+    <priority>high</priority>
+    <dependencies>021</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Call BuildSearchProfile after all other Document Profile outputs are collected in the CreateFieldMapping method. Add the resulting sprk_searchprofile value to the field mapping dictionary.</goal>
+    <context>
+      The CreateFieldMapping method assembles the Dataverse update payload from Document Profile outputs. After all AI-generated outputs are mapped, we call BuildSearchProfile deterministically to create the search profile field value and add it to the same mapping dictionary.
+    </context>
+    <constraints>
+      - Call BuildSearchProfile at the end of CreateFieldMapping, after all other outputs mapped
+      - Only add to dictionary if BuildSearchProfile returns non-null
+      - Pass available context: parent entity name/type from orchestration context, file name
+      - No changes to the AI pipeline itself — this is post-processing
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/DocumentProfileFieldMapper.cs" reason="CreateFieldMapping method to modify" />
+      <file path=".claude/adr/ADR-013.md" reason="AI architecture constraints" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read CreateFieldMapping method to understand the mapping pipeline</step>
+    <step>Identify where to call BuildSearchProfile (after all outputs are processed)</step>
+    <step>Add BuildSearchProfile call with collected outputs dictionary</step>
+    <step>Add sprk_searchprofile to field mapping if result is non-null</step>
+    <step>Ensure parent entity context and file name are available at this point</step>
+    <step>Test integration with existing Document Profile flow</step>
+  </steps>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/DocumentProfileFieldMapper.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>BuildSearchProfile is called after all other outputs are mapped</criterion>
+    <criterion>sprk_searchprofile added to field mapping when BuildSearchProfile returns non-null</criterion>
+    <criterion>Existing field mappings unaffected</criterion>
+    <criterion>No additional AI calls introduced</criterion>
+  </acceptance-criteria>
+</task>

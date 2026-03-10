@@ -1,0 +1,54 @@
+<task id="008" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Update UniversalQuickCreate imports to shared</title>
+    <phase>1 - Shared Component Extraction</phase>
+    <tags>shared-components, pcf, imports, testing</tags>
+    <estimate>2-3 hours</estimate>
+    <priority>high</priority>
+    <dependencies>005,006</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Update UniversalQuickCreate PCF control to import upload services and useAiSummary from shared. Verify PCF build succeeds.</goal>
+    <context>
+      The PCF control uses React 16 APIs (platform-provided). The shared services must work with both PCF context (context.webAPI) and Code Page context (direct OData). The PCF will use the PCF-specific IDataverseClient implementation and PCF-specific ITokenProvider.
+    </context>
+    <constraints>
+      - PCF uses React 16 APIs — shared hooks must be compatible (ADR-022)
+      - Must provide PCF-specific ITokenProvider and IDataverseClient implementations
+      - PCF build must succeed (npm run build)
+      - No behavior changes — extraction only
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/UniversalQuickCreate/control/components/DocumentUploadForm.tsx" reason="Main form consuming services" />
+      <file path="src/client/pcf/CLAUDE.md" reason="PCF development context" />
+      <file path=".claude/adr/ADR-022.md" reason="PCF platform library constraints" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Grep all service imports in UniversalQuickCreate control</step>
+    <step>Create PCF-specific adapter implementations (PcfTokenProvider, PcfDataverseClient)</step>
+    <step>Update imports to shared services</step>
+    <step>Remove local copies of extracted services</step>
+    <step>Run npm run build and fix any TypeScript errors</step>
+    <step>Verify PCF control builds to under 5MB bundle</step>
+  </steps>
+
+  <outputs>
+    <output>Updated import paths in UniversalQuickCreate</output>
+    <output>PCF-specific adapter implementations</output>
+    <output>Removed local service copies</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>UniversalQuickCreate PCF builds successfully</criterion>
+    <criterion>Bundle size under 5MB</criterion>
+    <criterion>No local copies of extracted services remain</criterion>
+    <criterion>DocumentUploadForm still functions with PCF adapters</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,57 @@
+<task id="021" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Implement BuildSearchProfile deterministic builder function</title>
+    <phase>3 - Search Profile Integration</phase>
+    <tags>bff-api, services, ai</tags>
+    <estimate>2-3 hours</estimate>
+    <priority>high</priority>
+    <dependencies>020</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement the BuildSearchProfile static function in DocumentProfileFieldMapper that deterministically assembles a BM25-optimized search profile from other Document Profile outputs (type, TL;DR, entities, keywords) plus contextual metadata (parent entity, file name). No additional AI call required.</goal>
+    <context>
+      The search profile is a text field optimized for Azure AI Search BM25 ranking. It concatenates structured outputs from the Document Profile playbook into a single searchable string. This runs server-side after all other profile outputs are collected — zero extra AI cost.
+    </context>
+    <constraints>
+      - Static method on DocumentProfileFieldMapper
+      - Input: Dictionary of collected outputs + optional parent entity name/type + file name
+      - Output: concatenated BM25-optimized string or null if insufficient data
+      - Must handle missing/null outputs gracefully (skip missing parts)
+      - Minimum 2 parts required to produce a profile (return null otherwise)
+      - Include helper to extract entity names from JSON entity output
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/DocumentProfileFieldMapper.cs" reason="Class to add BuildSearchProfile to" />
+      <file path="docs/guides/RAG-ARCHITECTURE.md" reason="RAG indexing and search profile context" />
+      <file path=".claude/adr/ADR-013.md" reason="AI architecture constraints" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read DocumentProfileFieldMapper.cs to understand current structure</step>
+    <step>Implement BuildSearchProfile static method with signature: (Dictionary outputs, string? parentEntityName, string? parentEntityType, string? fileName) → string?</step>
+    <step>Build concatenation: DocumentType + TL;DR + Entities (extracted names) + Keywords + ParentEntity + FileName</step>
+    <step>Implement ExtractEntityNames helper for parsing entity JSON output</step>
+    <step>Add null/empty checks for each part; skip missing parts</step>
+    <step>Return null if fewer than 2 parts assembled</step>
+    <step>Add unit tests for BuildSearchProfile with various input combinations</step>
+  </steps>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/DocumentProfileFieldMapper.cs (modified)</output>
+    <output>tests/Sprk.Bff.Api.Tests/Services/Ai/DocumentProfileFieldMapperTests.cs (new or modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>BuildSearchProfile produces BM25-optimized string from available outputs</criterion>
+    <criterion>Missing outputs are gracefully skipped</criterion>
+    <criterion>Returns null when fewer than 2 parts available</criterion>
+    <criterion>Entity names correctly extracted from JSON entity output</criterion>
+    <criterion>Unit tests cover: all fields present, partial fields, minimal fields, empty input</criterion>
+  </acceptance-criteria>
+</task>

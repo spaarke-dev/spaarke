@@ -1,0 +1,58 @@
+<task id="013" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Implement SummaryStep with Document Profile streaming</title>
+    <phase>2 - Document Upload Wizard Code Page</phase>
+    <tags>code-page, components, ai, streaming</tags>
+    <estimate>3-4 hours</estimate>
+    <priority>high</priority>
+    <dependencies>011, 006</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create SummaryStep.tsx that displays Document Profile streaming results using the shared useAiSummary hook. Show per-document profile cards with TL;DR, document type, keywords, and entity extraction results.</goal>
+    <context>
+      After files are uploaded (Step 1), the Document Profile playbook runs via JPS orchestration. The SummaryStep receives SSE streaming updates and renders profile cards in real-time. This step uses the shared useAiSummary hook extracted in task 006.
+    </context>
+    <constraints>
+      - Use shared useAiSummary hook for SSE streaming
+      - Fluent UI v9 exclusively (ADR-021)
+      - Dark mode support via semantic tokens
+      - Show progress indicators per document while profiling
+      - Display profile fields: TL;DR, summary, document type, keywords, entities
+      - Handle partial results gracefully (show available fields as they arrive)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/shared/hooks/useAiSummary.ts" reason="SSE streaming hook (extracted in task 006)" />
+      <file path="src/solutions/LegalWorkspace/src/components/CreateMatter/DocumentProfileCard.tsx" reason="Existing profile card pattern" />
+      <file path=".claude/adr/ADR-021.md" reason="Fluent UI v9 design system" />
+      <file path=".claude/adr/ADR-013.md" reason="AI architecture constraints" />
+      <file path=".claude/patterns/ai/streaming-endpoints.md" reason="SSE streaming patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read existing DocumentProfileCard pattern from LegalWorkspace</step>
+    <step>Create SummaryStep.tsx with per-document profile cards layout</step>
+    <step>Integrate useAiSummary hook for SSE streaming updates</step>
+    <step>Implement progress indicators (spinner per document until profile complete)</step>
+    <step>Render profile fields as they arrive (TL;DR, type, keywords, entities)</step>
+    <step>Handle error states inline (failed profiles show error, don't crash wizard)</step>
+    <step>Wire SummaryStep into DocumentUploadWizardDialog step configuration</step>
+  </steps>
+
+  <outputs>
+    <output>src/solutions/DocumentUploadWizard/src/components/SummaryStep.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Profile cards render per uploaded document</criterion>
+    <criterion>SSE streaming updates display fields in real-time</criterion>
+    <criterion>Progress indicators show while profiling is in progress</criterion>
+    <criterion>Failed profiles show inline error without crashing wizard</criterion>
+    <criterion>All Fluent UI v9 with dark mode support</criterion>
+  </acceptance-criteria>
+</task>

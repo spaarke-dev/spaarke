@@ -1,0 +1,61 @@
+<task id="012" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Implement upload orchestrator with chunked upload support</title>
+    <phase>2 - Document Upload Wizard Code Page</phase>
+    <tags>code-page, services, upload, api</tags>
+    <estimate>3-4 hours</estimate>
+    <priority>high</priority>
+    <dependencies>011</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create uploadOrchestrator.ts that coordinates the 4-phase pipeline (SPE upload, Dataverse records, Document Profile, RAG indexing) and add chunked upload support for large files. Wire it into the AddFilesStep "Next" transition.</goal>
+    <context>
+      The orchestrator runs when the user clicks "Next" on Step 1. It must: (1) upload files to SPE via MultiFileUploadService (with chunked upload for large files), (2) create sprk_document records via DocumentRecordService (using direct OData for Code Page context), (3) kick off Document Profile playbook in background, (4) fire-and-forget RAG indexing. Progress callbacks update the UI.
+    </context>
+    <constraints>
+      - Use shared services (MultiFileUploadService, DocumentRecordService, SdapApiClient)
+      - Code Page auth: @spaarke/auth ITokenProvider implementation
+      - Code Page Dataverse: OData IDataverseClient implementation
+      - Chunked upload: detect file size, use POST /api/containers/{id}/upload + PUT /api/upload-session/chunk
+      - RAG indexing is fire-and-forget (don't block UI)
+      - ADR-007: All SPE operations through BFF API
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/shared/services/document-upload/MultiFileUploadService.ts" reason="File upload service" />
+      <file path="src/client/shared/services/document-upload/DocumentRecordService.ts" reason="Record creation service" />
+      <file path="src/client/shared/services/document-upload/SdapApiClient.ts" reason="BFF API client" />
+      <file path=".claude/adr/ADR-007.md" reason="SpeFileStore facade" />
+      <file path=".claude/patterns/auth/msal-client.md" reason="MSAL auth for Code Pages" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create Code Page-specific ITokenProvider (using @spaarke/auth)</step>
+    <step>Create Code Page-specific IDataverseClient (using direct OData)</step>
+    <step>Create uploadOrchestrator.ts with 4-phase pipeline</step>
+    <step>Implement chunked upload detection and session management</step>
+    <step>Add progress callback support (per-file progress)</step>
+    <step>Wire orchestrator into DocumentUploadWizardDialog's step transition</step>
+    <step>Create FileUploadProgress.tsx component for progress display</step>
+  </steps>
+
+  <outputs>
+    <output>src/solutions/DocumentUploadWizard/src/services/uploadOrchestrator.ts</output>
+    <output>src/solutions/DocumentUploadWizard/src/services/codePageTokenProvider.ts</output>
+    <output>src/solutions/DocumentUploadWizard/src/services/codePageDataverseClient.ts</output>
+    <output>src/solutions/DocumentUploadWizard/src/components/FileUploadProgress.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>4-phase pipeline executes in correct order</criterion>
+    <criterion>Progress updates per-file in real-time</criterion>
+    <criterion>Chunked upload works for files exceeding single-PUT limit</criterion>
+    <criterion>RAG indexing fires without blocking UI</criterion>
+    <criterion>Errors displayed inline without crashing wizard</criterion>
+  </acceptance-criteria>
+</task>

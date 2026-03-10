@@ -1,0 +1,56 @@
+<task id="015" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Implement Send Email dynamic wizard step</title>
+    <phase>2 - Document Upload Wizard Code Page</phase>
+    <tags>code-page, components, email</tags>
+    <estimate>2-3 hours</estimate>
+    <priority>medium</priority>
+    <dependencies>014, 003</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Wire the shared SendEmailStep into the DocumentUploadWizard as a dynamic step. Pre-fill subject/body templates with parent entity and document links. Use shared LookupField for recipients.</goal>
+    <context>
+      When the user checks "Send Email" in NextStepsStep, a dynamic wizard step is injected. This step reuses the shared SendEmailStep component (extracted in task 003) with document-upload-specific templates pre-filled.
+    </context>
+    <constraints>
+      - Use shared SendEmailStep and LookupField from src/client/shared/components/EmailStep/
+      - Pre-fill subject with parent entity name + "Document Upload"
+      - Pre-fill body with document links (SPE sharing links)
+      - Code Page auth: use @spaarke/auth for Graph API email send
+      - ADR-007: SPE sharing links via BFF API
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/shared/components/EmailStep/SendEmailStep.tsx" reason="Shared email step component" />
+      <file path="src/client/shared/components/EmailStep/LookupField.tsx" reason="Recipient lookup" />
+      <file path="src/client/shared/components/EmailStep/emailHelpers.ts" reason="Email template helpers" />
+      <file path="src/solutions/LegalWorkspace/src/components/CreateMatter/SendEmailStep.tsx" reason="Reference integration" />
+      <file path=".claude/adr/ADR-007.md" reason="SPE operations through BFF" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read shared SendEmailStep component API and props</step>
+    <step>Create email template builder for document upload context</step>
+    <step>Wire SendEmailStep into the dynamic step injected by NextStepsStep</step>
+    <step>Implement pre-fill logic for subject and body with parent entity + document links</step>
+    <step>Configure LookupField for recipient selection</step>
+    <step>Handle email send via Graph API through BFF (Code Page auth)</step>
+  </steps>
+
+  <outputs>
+    <output>src/solutions/DocumentUploadWizard/src/components/DocumentEmailStep.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Email step renders when user selects "Send Email" in next steps</criterion>
+    <criterion>Subject and body pre-filled with parent entity and document links</criterion>
+    <criterion>LookupField allows recipient selection</criterion>
+    <criterion>Skip button advances past email step without sending</criterion>
+    <criterion>Email sends successfully via BFF API</criterion>
+  </acceptance-criteria>
+</task>

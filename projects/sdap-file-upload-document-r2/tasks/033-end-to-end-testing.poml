@@ -1,0 +1,89 @@
+<task id="033" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>End-to-end testing of full upload wizard flow</title>
+    <phase>4 - Ribbon Integration &amp; Deployment</phase>
+    <tags>testing, e2e-test</tags>
+    <estimate>2-3 hours</estimate>
+    <priority>high</priority>
+    <dependencies>032, 023</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Test the complete flow: ribbon button → wizard opens → file upload → Document Profile streaming → next steps selection → email send → success screen actions. Test with multiple parent entity types.</goal>
+    <context>
+      Full end-to-end validation of the wizard from ribbon button click through all steps to completion. Tests must cover the happy path and key error scenarios.
+    </context>
+    <constraints>
+      - Test from at least 2 different parent entity types
+      - Test single file and multi-file upload
+      - Test chunked upload with large file (if available)
+      - Test all next step combinations (email, analysis, find similar)
+      - Verify Document Profile results and search profile populated
+      - Test error handling (network failure simulation if possible)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="scripts/Test-SdapBffApi.ps1" reason="BFF API testing" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Open wizard from sprk_document form ribbon button</step>
+    <step>Upload 2-3 files in AddFilesStep, verify upload completes</step>
+    <step>Verify Document Profile streaming results in SummaryStep</step>
+    <step>Select all next steps, verify dynamic email step injection</step>
+    <step>Complete email step (or skip), verify success screen</step>
+    <step>Test "Work on Analysis" document picker and launcher</step>
+    <step>Test "Find Similar" inline dialog</step>
+    <step>Repeat from a different parent entity type</step>
+    <step>Verify sprk_searchprofile populated in Dataverse</step>
+    <step>Verify RAG indexing triggered (check Service Bus or logs)</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Full Upload Flow">
+      <url>https://spaarkedev1.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=sprk_matter</url>
+      <steps>
+        <step>Navigate to a matter record form</step>
+        <step>Click "Upload Documents" ribbon button</step>
+        <step>Verify wizard dialog opens at 85% width/height</step>
+        <step>Drop 2 test files into upload zone</step>
+        <step>Click Next — verify upload progress</step>
+        <step>Verify Document Profile streaming cards appear</step>
+        <step>Click Next to NextStepsStep</step>
+        <step>Check "Send Email" checkbox</step>
+        <step>Verify email step injected with Skip button</step>
+        <step>Click Skip to bypass email</step>
+        <step>Verify success screen with document count</step>
+        <step>Click Close to dismiss wizard</step>
+      </steps>
+      <expected>Wizard completes full flow, documents uploaded, profiles generated</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps>
+        <step>Toggle dark mode in Dataverse settings</step>
+        <step>Open DocumentUploadWizard</step>
+        <step>Verify all colors adapt to dark theme</step>
+        <step>Check file upload zone, profile cards, checkbox cards</step>
+      </steps>
+      <expected>All colors use semantic tokens per ADR-021</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output>E2E test results documented in project notes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Full wizard flow completes without errors from ribbon button</criterion>
+    <criterion>Files uploaded to SPE and Dataverse records created</criterion>
+    <criterion>Document Profile streaming results display correctly</criterion>
+    <criterion>sprk_searchprofile populated in Dataverse records</criterion>
+    <criterion>Dynamic email step injection and skip work correctly</criterion>
+    <criterion>Success screen actions (analysis, find similar) launch correctly</criterion>
+    <criterion>Works from multiple parent entity types</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,63 @@
+<task id="001" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Extract WizardShell components to shared</title>
+    <phase>1 - Shared Component Extraction</phase>
+    <tags>shared-components, wizard, extraction, fluent-ui</tags>
+    <estimate>2-3 hours</estimate>
+    <priority>high</priority>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Move the domain-free WizardShell components from LegalWorkspace to src/client/shared/components/Wizard/ so they can be reused by multiple Code Page solutions.</goal>
+    <context>
+      The WizardShell is a generic, domain-free wizard container with sidebar stepper, content area, navigation state management, dynamic step injection, and success screen. It currently lives in LegalWorkspace but needs to be shared by the new DocumentUploadWizard and potentially other future Code Pages.
+    </context>
+    <constraints>
+      - Components must remain React 18-compatible (used by Code Pages)
+      - Must use Fluent UI v9 exclusively (ADR-021)
+      - No PCF-specific APIs in shared components (ADR-012)
+      - Must support dark mode via semantic tokens
+      - DO NOT modify component behavior — extraction only
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/solutions/LegalWorkspace/src/components/Wizard/WizardShell.tsx" reason="Source component to extract" />
+      <file path="src/solutions/LegalWorkspace/src/components/Wizard/wizardShellTypes.ts" reason="Type definitions" />
+      <file path="src/solutions/LegalWorkspace/src/components/Wizard/wizardShellReducer.ts" reason="State management" />
+      <file path="src/solutions/LegalWorkspace/src/components/Wizard/WizardSuccessScreen.tsx" reason="Success screen component" />
+      <file path="src/solutions/LegalWorkspace/src/components/CreateMatter/WizardStepper.tsx" reason="Stepper component" />
+      <file path=".claude/adr/ADR-012.md" reason="Shared component library constraints" />
+      <file path=".claude/adr/ADR-021.md" reason="Fluent UI v9 design system" />
+      <file path=".claude/constraints/webresource.md" reason="Web resource constraints" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read all WizardShell source files to audit imports and dependencies</step>
+    <step>Create src/client/shared/components/Wizard/ directory</step>
+    <step>Copy WizardShell.tsx, wizardShellTypes.ts, wizardShellReducer.ts, WizardSuccessScreen.tsx, WizardStepper.tsx to shared</step>
+    <step>Audit and update imports — ensure no LegalWorkspace-specific dependencies</step>
+    <step>Create index.ts barrel export for the Wizard module</step>
+    <step>Verify all Fluent UI v9 imports are correct and no v8 dependencies</step>
+  </steps>
+
+  <outputs>
+    <output>src/client/shared/components/Wizard/WizardShell.tsx</output>
+    <output>src/client/shared/components/Wizard/wizardShellTypes.ts</output>
+    <output>src/client/shared/components/Wizard/wizardShellReducer.ts</output>
+    <output>src/client/shared/components/Wizard/WizardSuccessScreen.tsx</output>
+    <output>src/client/shared/components/Wizard/WizardStepper.tsx</output>
+    <output>src/client/shared/components/Wizard/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 5 Wizard components exist in src/client/shared/components/Wizard/</criterion>
+    <criterion>No imports reference LegalWorkspace-specific paths</criterion>
+    <criterion>Barrel export (index.ts) exports all public types and components</criterion>
+    <criterion>All Fluent UI imports are v9 (@fluentui/react-components)</criterion>
+  </acceptance-criteria>
+</task>

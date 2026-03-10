@@ -1,0 +1,53 @@
+<task id="031" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Update ribbon commands to open new wizard dialog</title>
+    <phase>4 - Ribbon Integration &amp; Deployment</phase>
+    <tags>ribbon, webresource, deploy</tags>
+    <estimate>2-3 hours</estimate>
+    <priority>high</priority>
+    <dependencies>030</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Update ribbon button scripts on sprk_document (and other entity forms) to open the new DocumentUploadWizard dialog via Xrm.Navigation.navigateTo. Pass parentEntityType, parentEntityId, parentEntityName, and containerId as URL parameters.</goal>
+    <context>
+      The existing "Upload Documents" ribbon button currently opens the Custom Page + PCF pattern. It needs to be updated to open the new Code Page wizard via navigateTo webresource. The button exists on multiple entity forms (any entity that can have documents).
+    </context>
+    <constraints>
+      - Use Xrm.Navigation.navigateTo with pageType: "webresource"
+      - Pass parameters via data query string
+      - Follow ribbon-edit skill for solution export/import
+      - Dialog dimensions: 85% width, 85% height (target: 2)
+      - Must work for all parent entity types (not just sprk_document)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/webresources/js/" reason="Existing ribbon command scripts" />
+      <file path=".claude/patterns/webresource/custom-dialogs-in-dataverse.md" reason="Dialog navigation" />
+      <file path=".claude/patterns/pcf/dialog-patterns.md" reason="Dialog patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Identify all ribbon command scripts that open the document upload dialog</step>
+    <step>Update navigateTo calls to use new web resource name (sprk_documentuploadwizard)</step>
+    <step>Pass parentEntityType, parentEntityId, parentEntityName, containerId as URL parameters</step>
+    <step>Set dialog dimensions: width 85%, height 85%, target: 2</step>
+    <step>Test ribbon button on sprk_document form</step>
+    <step>Verify parameters are correctly passed and parsed by the wizard</step>
+  </steps>
+
+  <outputs>
+    <output>src/client/webresources/js/ (modified ribbon command scripts)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Ribbon button opens new DocumentUploadWizard Code Page dialog</criterion>
+    <criterion>URL parameters correctly passed (parentEntityType, parentEntityId, parentEntityName, containerId)</criterion>
+    <criterion>Dialog renders at 85% width/height</criterion>
+    <criterion>Works from multiple parent entity types</criterion>
+  </acceptance-criteria>
+</task>

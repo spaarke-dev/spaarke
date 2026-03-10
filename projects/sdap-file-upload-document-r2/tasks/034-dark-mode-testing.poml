@@ -1,0 +1,62 @@
+<task id="034" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Dark mode and accessibility testing</title>
+    <phase>4 - Ribbon Integration &amp; Deployment</phase>
+    <tags>testing, fluent-ui, e2e-test</tags>
+    <estimate>1-2 hours</estimate>
+    <priority>medium</priority>
+    <dependencies>032</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Verify all wizard UI renders correctly in dark mode, light mode, and high-contrast mode. Ensure all Fluent UI v9 semantic tokens are used correctly per ADR-021.</goal>
+    <context>
+      ADR-021 requires all UI to support dark mode via Fluent UI v9 semantic tokens. No hard-coded colors. This task validates visual correctness across all theme modes.
+    </context>
+    <constraints>
+      - ADR-021: Fluent UI v9, semantic tokens, no hard-coded colors
+      - Test dark mode, light mode, high-contrast
+      - Check all wizard steps and components
+      - Fix any hard-coded colors found
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021.md" reason="Fluent UI v9 design system requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Open wizard in light mode — verify all components render correctly</step>
+    <step>Switch to dark mode — verify all colors adapt via semantic tokens</step>
+    <step>Switch to high-contrast — verify accessibility</step>
+    <step>Check each wizard step: AddFiles, Summary, NextSteps, Email, Success</step>
+    <step>Fix any hard-coded colors or styling issues found</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Dark Mode Full Wizard">
+      <steps>
+        <step>Enable dark mode in Dataverse</step>
+        <step>Open DocumentUploadWizard</step>
+        <step>Navigate through all wizard steps</step>
+        <step>Verify: file upload zone, progress bars, profile cards, checkbox cards, email form, success screen</step>
+      </steps>
+      <expected>All components use semantic tokens, no hard-coded colors visible</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output>Dark mode test results documented</output>
+    <output>Any styling fixes applied to components</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All wizard components render correctly in dark mode</criterion>
+    <criterion>All wizard components render correctly in light mode</criterion>
+    <criterion>No hard-coded colors found in any component</criterion>
+    <criterion>High-contrast mode is usable</criterion>
+  </acceptance-criteria>
+</task>

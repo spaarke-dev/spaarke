@@ -1,0 +1,59 @@
+<task id="016" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Implement success screen with document picker and action buttons</title>
+    <phase>2 - Document Upload Wizard Code Page</phase>
+    <tags>code-page, components, wizard</tags>
+    <estimate>2-3 hours</estimate>
+    <priority>medium</priority>
+    <dependencies>014</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create the WizardSuccessScreen configuration for DocumentUploadWizard with document count summary, warnings, and action buttons for selected next steps (Work on Analysis with document picker, Find Similar inline dialog, Close).</goal>
+    <context>
+      After all wizard steps complete, the success screen shows a summary and provides action buttons based on what the user selected in NextStepsStep. "Work on Analysis" requires a document picker (user selects which document to analyze). "Find Similar" opens the shared FindSimilarDialog inline.
+    </context>
+    <constraints>
+      - Use shared WizardSuccessScreen from src/client/shared/components/Wizard/
+      - Document picker for "Work on Analysis" (user selects one document)
+      - Find Similar uses shared FindSimilarDialog (extracted in task 004)
+      - Show document count and any warnings (partial failures)
+      - Close button closes the wizard dialog
+      - ADR-021: Fluent UI v9, dark mode
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/shared/components/Wizard/WizardSuccessScreen.tsx" reason="Shared success screen" />
+      <file path="src/client/shared/components/FindSimilar/FindSimilarDialog.tsx" reason="Shared find similar" />
+      <file path="src/solutions/LegalWorkspace/src/components/CreateMatter/WizardDialog.tsx" reason="Success screen configuration reference" />
+      <file path=".claude/adr/ADR-021.md" reason="Fluent UI v9 design system" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read WizardSuccessScreen API and LegalWorkspace success screen configuration</step>
+    <step>Create success screen configuration with document count summary</step>
+    <step>Implement document picker component for "Work on Analysis" selection</step>
+    <step>Wire "Work on Analysis" button to open Analysis Builder with selected document</step>
+    <step>Wire "Find Similar" button to open shared FindSimilarDialog inline</step>
+    <step>Implement "Close" button to close wizard dialog</step>
+    <step>Handle partial failure warnings (some documents failed upload/profile)</step>
+  </steps>
+
+  <outputs>
+    <output>src/solutions/DocumentUploadWizard/src/components/SuccessScreen.tsx</output>
+    <output>src/solutions/DocumentUploadWizard/src/components/DocumentPicker.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Success screen shows document count and status summary</criterion>
+    <criterion>Document picker allows selecting one document for Analysis</criterion>
+    <criterion>Action buttons match user's NextStepsStep selections</criterion>
+    <criterion>Find Similar opens shared dialog with uploaded documents</criterion>
+    <criterion>Close button closes the wizard dialog window</criterion>
+    <criterion>Partial failures show warnings without blocking success</criterion>
+  </acceptance-criteria>
+</task>

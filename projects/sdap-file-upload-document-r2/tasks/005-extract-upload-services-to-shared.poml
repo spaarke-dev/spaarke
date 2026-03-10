@@ -1,0 +1,65 @@
+<task id="005" project="sdap-file-upload-document-r2">
+  <metadata>
+    <title>Extract upload services to shared</title>
+    <phase>1 - Shared Component Extraction</phase>
+    <tags>shared-components, services, upload, auth</tags>
+    <estimate>3-4 hours</estimate>
+    <priority>high</priority>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Extract MultiFileUploadService, FileUploadService, SdapApiClient, DocumentRecordService, and types from UniversalQuickCreate to src/client/shared/services/document-upload/. Adapt for dual API context (PCF context.webAPI + direct OData for Code Pages).</goal>
+    <context>
+      These services currently live in the UniversalQuickCreate PCF control and are tightly coupled to the PCF context (context.webAPI for Dataverse, PCF-specific auth). The shared versions must work in both PCF context AND Code Page context (direct OData + @spaarke/auth MSAL).
+    </context>
+    <constraints>
+      - SdapApiClient must accept a token provider function (not hardcoded PCF auth)
+      - DocumentRecordService needs a strategy pattern: IDataverseClient interface with PCF and OData implementations
+      - MultiFileUploadService and FileUploadService should be context-agnostic (they only call SdapApiClient)
+      - Must preserve dynamic navigation property lookup (case-sensitive @odata.bind)
+      - ADR-007: All SPE operations through BFF API
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/UniversalQuickCreate/control/services/MultiFileUploadService.ts" reason="Multi-file upload orchestrator" />
+      <file path="src/client/pcf/UniversalQuickCreate/control/services/FileUploadService.ts" reason="Single file upload" />
+      <file path="src/client/pcf/UniversalQuickCreate/control/services/SdapApiClient.ts" reason="BFF API client" />
+      <file path="src/client/pcf/UniversalQuickCreate/control/services/DocumentRecordService.ts" reason="Dataverse record creation" />
+      <file path=".claude/adr/ADR-007.md" reason="SpeFileStore facade" />
+      <file path=".claude/patterns/auth/msal-client.md" reason="MSAL browser auth pattern" />
+      <file path=".claude/patterns/dataverse/web-api-client.md" reason="Direct Dataverse OData" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read all upload service source files and map dependencies</step>
+    <step>Create src/client/shared/services/document-upload/ directory</step>
+    <step>Design ITokenProvider interface for auth abstraction</step>
+    <step>Design IDataverseClient interface with PCF and OData implementations</step>
+    <step>Extract SdapApiClient with ITokenProvider parameter</step>
+    <step>Extract FileUploadService and MultiFileUploadService (minimal changes)</step>
+    <step>Extract DocumentRecordService with IDataverseClient strategy</step>
+    <step>Extract shared types (SpeFileMetadata, UploadFilesResult, CreateResult, etc.)</step>
+    <step>Create index.ts barrel export</step>
+  </steps>
+
+  <outputs>
+    <output>src/client/shared/services/document-upload/MultiFileUploadService.ts</output>
+    <output>src/client/shared/services/document-upload/FileUploadService.ts</output>
+    <output>src/client/shared/services/document-upload/SdapApiClient.ts</output>
+    <output>src/client/shared/services/document-upload/DocumentRecordService.ts</output>
+    <output>src/client/shared/services/document-upload/types.ts</output>
+    <output>src/client/shared/services/document-upload/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SdapApiClient accepts ITokenProvider — works with both PCF and MSAL auth</criterion>
+    <criterion>DocumentRecordService uses IDataverseClient interface — PCF and OData implementations</criterion>
+    <criterion>Dynamic navigation property lookup preserved</criterion>
+    <criterion>All SPE operations go through BFF API (ADR-007)</criterion>
+  </acceptance-criteria>
+</task>
