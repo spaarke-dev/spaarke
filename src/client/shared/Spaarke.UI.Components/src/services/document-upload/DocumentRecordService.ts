@@ -157,18 +157,30 @@ export class DocumentRecordService {
                 throw new Error(`Unsupported entity type: ${parentContext.parentEntityName}`);
             }
 
-            // Query navigation property metadata dynamically via BFF API
+            // Query navigation property metadata dynamically via BFF API.
+            // Falls back to hardcoded config.navigationPropertyName if NavMap is unavailable.
             this.logger.info('DocumentRecordService', `Querying navigation metadata for ${parentContext.parentEntityName}`);
 
-            const navMetadata = await this.navMapClient.getLookupNavigation(
-                'sprk_document',
-                config.relationshipSchemaName
-            );
+            let navigationPropertyName: string;
+            let targetEntitySetName: string;
 
-            const navigationPropertyName = navMetadata.navigationPropertyName;
-            const targetEntitySetName = navMetadata.targetEntity + 's';
-
-            this.logger.info('DocumentRecordService', `Using navigation property: ${navigationPropertyName} (source: ${navMetadata.source})`);
+            try {
+                const navMetadata = await this.navMapClient.getLookupNavigation(
+                    'sprk_document',
+                    config.relationshipSchemaName
+                );
+                navigationPropertyName = navMetadata.navigationPropertyName;
+                targetEntitySetName = navMetadata.targetEntity + 's';
+                this.logger.info('DocumentRecordService', `Using navigation property: ${navigationPropertyName} (source: ${navMetadata.source})`);
+            } catch (navError) {
+                if (config.navigationPropertyName) {
+                    navigationPropertyName = config.navigationPropertyName;
+                    targetEntitySetName = config.entitySetName;
+                    this.logger.warn('DocumentRecordService', `NavMap failed, using hardcoded fallback: ${navigationPropertyName}`, navError);
+                } else {
+                    throw navError;
+                }
+            }
 
             // Build record payload with correct navigation property
             const payload = this.buildRecordPayload(

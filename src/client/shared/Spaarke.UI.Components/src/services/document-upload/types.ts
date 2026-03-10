@@ -352,6 +352,13 @@ export interface EntityDocumentConfig {
     /** Relationship schema name for metadata queries (e.g., "sprk_matter_document") */
     relationshipSchemaName: string;
 
+    /**
+     * Hardcoded navigation property name for @odata.bind fallback.
+     * Used when NavMap API is unavailable. CASE-SENSITIVE.
+     * Example: "sprk_Matter" (capital M)
+     */
+    navigationPropertyName?: string;
+
     /** Container ID field name on parent entity */
     containerIdField: string;
 
