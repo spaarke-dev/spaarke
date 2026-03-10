@@ -88,6 +88,8 @@ public class AssociationMappingTests
             _dataverseServiceMock.Object,
             emlGenerationService,
             speFileStore,
+            null!, // CommunicationAccountService — not tested here
+            null!, // JobSubmissionService — not tested here
             Options.Create(options),
             _loggerMock.Object);
     }

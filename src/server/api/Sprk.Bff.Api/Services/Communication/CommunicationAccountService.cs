@@ -40,7 +40,7 @@ public sealed class CommunicationAccountService
         return await GetCachedAccountsAsync(
             SendEnabledCacheKey,
             "sprk_sendenabled eq true and statecode eq 0",
-            "sprk_emailaddress,sprk_displayname,sprk_isdefaultsender,sprk_accounttype,sprk_securitygroupid,sprk_securitygroupname,sprk_name,sprk_verificationstatus,sprk_lastverified",
+            "sprk_emailaddress,sprk_displayname,sprk_isdefaultsender,sprk_accounttype,sprk_securitygroupid,sprk_securitygroupname,sprk_name,sprk_verificationstatus,sprk_lastverified,sprk_archiveoutgoingoptin",
             ct);
     }
 
@@ -149,6 +149,9 @@ public sealed class CommunicationAccountService
             AutoCreateRecords = entity.GetAttributeValue<bool>("sprk_autocreaterecords"),
             ArchiveIncomingOptIn = entity.Contains("sprk_archiveincomingoptin")
                 ? entity.GetAttributeValue<bool?>("sprk_archiveincomingoptin")
+                : null,
+            ArchiveOutgoingOptIn = entity.Contains("sprk_archiveoutgoingoptin")
+                ? entity.GetAttributeValue<bool?>("sprk_archiveoutgoingoptin")
                 : null,
             SubscriptionId = entity.GetAttributeValue<string>("sprk_subscriptionid"),
             SubscriptionExpiry = entity.Contains("sprk_subscriptionexpiry")

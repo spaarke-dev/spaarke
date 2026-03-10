@@ -152,6 +152,8 @@ public class CommunicationIntegrationTests
             dataverseMock.Object,
             null!, // EmlGenerationService - not used when ArchiveToSpe=false
             null!, // SpeFileStore - not used when ArchiveToSpe=false
+            null!, // CommunicationAccountService — not tested here
+            null!, // JobSubmissionService — not tested here
             Options.Create(opts),
             Mock.Of<ILogger<CommunicationService>>());
     }

@@ -52,8 +52,8 @@
 | 030 | Create GraphMessageToEmlConverter | ✅ | 027 | FULL |
 | 031 | Create GraphAttachmentAdapter | ✅ | 027 | FULL |
 | 032 | Update sprk_document Entity Schema | ✅ | 027 | STANDARD |
-| 033 | Integrate Inbound Document Archival | 🔲 | 030, 031, 032 | FULL |
-| 034 | Enhance Outbound Archival | 🔲 | 032 | FULL |
+| 033 | Integrate Inbound Document Archival | ✅ | 030, 031, 032 | FULL |
+| 034 | Enhance Outbound Archival | ✅ | 032 | FULL |
 | 035 | Delete Retired Components | 🔲 | 033, 034 | FULL |
 | 036 | Rename Telemetry, Consolidate Config | 🔲 | 035 | STANDARD |
 | 037 | End-to-End Archival Test | 🔲 | 036 | STANDARD |

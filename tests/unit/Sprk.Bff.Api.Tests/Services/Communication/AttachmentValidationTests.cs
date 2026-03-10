@@ -71,6 +71,8 @@ public class AttachmentValidationTests
             Mock.Of<IDataverseService>(),
             null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here
+            null!, // CommunicationAccountService — not tested here
+            null!, // JobSubmissionService — not tested here
             Options.Create(opts),
             _loggerMock.Object);
     }
