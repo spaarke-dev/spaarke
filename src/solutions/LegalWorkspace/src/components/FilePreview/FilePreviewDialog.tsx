@@ -244,26 +244,40 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
     })();
   }, [documentId]);
 
-  // Open File: fetch open links and cascade desktop → web → preview fallback.
-  // PDFs lack a desktop protocol URL — skip desktopUrl for PDF MIME types
-  // to avoid Access Denied errors from protocol handlers.
+  // Open File: desktop protocol for Office files, download for everything else.
+  // SPE webUrl requires SharePoint permissions users may not have in browser,
+  // so for non-Office files we download via BFF /content endpoint which triggers
+  // the OS default app (e.g. Adobe Acrobat for PDFs).
   const handleOpenFile = React.useCallback(async () => {
     const links = await getDocumentOpenLinks(documentId);
-    if (links) {
-      const isPdf = links.mimeType?.toLowerCase() === 'application/pdf';
-      if (!isPdf && links.desktopUrl) {
-        window.location.href = links.desktopUrl;
-        return;
-      }
-      if (links.webUrl) {
-        window.open(links.webUrl, '_blank', 'noopener,noreferrer');
-        return;
-      }
+    if (links?.desktopUrl) {
+      window.location.href = links.desktopUrl;
+      return;
     }
+    // No desktop protocol — download file via BFF and let the OS open with default app
+    try {
+      const contentUrl = `${getBffBaseUrl()}/documents/${encodeURIComponent(documentId)}/content`;
+      const response = await authenticatedFetch(contentUrl);
+      if (response.ok) {
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = links?.fileName ?? documentName ?? 'document';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(objectUrl);
+        return;
+      }
+    } catch (err) {
+      console.error('[FilePreviewDialog] Download failed:', err);
+    }
+    // Final fallback — open preview in new tab
     if (previewUrl) {
       window.open(previewUrl, '_blank', 'noopener,noreferrer');
     }
-  }, [documentId, previewUrl]);
+  }, [documentId, documentName, previewUrl]);
 
   // Open Document Record (new tab)
   const handleOpenRecord = React.useCallback(() => {

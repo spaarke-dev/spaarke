@@ -19,8 +19,6 @@ import {
   Dialog,
   DialogSurface,
   DialogBody,
-  DialogTitle,
-  DialogContent,
   shorthands,
 } from "@fluentui/react-components";
 import {
@@ -33,8 +31,10 @@ import type { IDocument } from "../../types/entities";
 import { getFileTypeIcon } from "../../utils/fileIconMap";
 import { navigateToEntity } from "../../utils/navigation";
 import { getEffectiveDarkMode } from "../../providers/ThemeProvider";
-import { getTenantId } from "../../services/authInit";
+import { getTenantId, authenticatedFetch } from "../../services/authInit";
 import { getDocumentOpenLinks } from "../../services/DocumentApiService";
+import { getBffBaseUrl } from "../../config/bffConfig";
+import { AiSummaryPopover, type ISummaryData } from "@spaarke/ui-components";
 import { FilePreviewDialog } from "../FilePreview/FilePreviewDialog";
 
 // ---------------------------------------------------------------------------
@@ -162,11 +162,6 @@ const useStyles = makeStyles({
     height: "100%",
     borderWidth: "0px",
   },
-  // Summary dialog
-  summarySurface: {
-    maxWidth: "480px",
-    maxHeight: "400px",
-  },
 });
 
 // ---------------------------------------------------------------------------
@@ -244,9 +239,6 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
       null
     );
 
-    // ----- Summary dialog state -----
-    const [summaryOpen, setSummaryOpen] = React.useState(false);
-
     // ----- Card double-click → open record in new tab -----
     const handleCardDoubleClick = React.useCallback(() => {
       navigateToEntity({
@@ -285,15 +277,24 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
         e.stopPropagation();
         try {
           const links = await getDocumentOpenLinks(doc.sprk_documentid);
-          if (links) {
-            if (links.desktopUrl) {
-              window.location.href = links.desktopUrl;
-              return;
-            }
-            if (links.webUrl) {
-              window.open(links.webUrl, "_blank", "noopener,noreferrer");
-              return;
-            }
+          if (links?.desktopUrl) {
+            window.location.href = links.desktopUrl;
+            return;
+          }
+          // No desktop protocol — download via BFF and let OS open with default app
+          const contentUrl = `${getBffBaseUrl()}/documents/${encodeURIComponent(doc.sprk_documentid)}/content`;
+          const response = await authenticatedFetch(contentUrl);
+          if (response.ok) {
+            const blob = await response.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = objectUrl;
+            a.download = links?.fileName ?? doc.sprk_name ?? "document";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(objectUrl);
+            return;
           }
         } catch (err) {
           console.error("[DocumentCard] Open file error:", err);
@@ -333,25 +334,19 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
       e.stopPropagation();
     }, []);
 
-    // ----- Summary action -----
-    const handleSummaryClick = React.useCallback(() => {
-      setSummaryOpen(true);
-    }, []);
-
-    // ----- Summary text -----
-    // Prefer the human-readable TL;DR; fall back to file summary only if
-    // it looks like plain text (not structured JSON / entity extraction).
-    const summaryText = React.useMemo(() => {
-      if (doc.sprk_filetldr) return doc.sprk_filetldr;
-      if (doc.sprk_filesummary) {
-        const trimmed = doc.sprk_filesummary.trim();
-        // Skip structured data (JSON blobs, markdown code fences)
+    // ----- Summary fetch callback for AiSummaryPopover -----
+    const handleFetchSummary = React.useCallback(async (): Promise<ISummaryData> => {
+      // Data is already on the document record — resolve synchronously
+      const tldr = doc.sprk_filetldr ?? null;
+      let summary = doc.sprk_filesummary ?? null;
+      // Skip structured data (JSON blobs, markdown code fences)
+      if (summary) {
+        const trimmed = summary.trim();
         if (trimmed.startsWith("{") || trimmed.startsWith("[") || trimmed.startsWith("```")) {
-          return "No summary available.";
+          summary = null;
         }
-        return doc.sprk_filesummary;
       }
-      return "No summary available.";
+      return { summary, tldr };
     }, [doc.sprk_filetldr, doc.sprk_filesummary]);
 
     // Build card aria label
@@ -427,18 +422,20 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
                   onClick={handlePreviewClick}
                 />
               </Tooltip>
-              <Tooltip content="Summary" relationship="label">
-                <Button
-                  appearance="subtle"
-                  size="medium"
-                  icon={<SparkleRegular aria-hidden="true" />}
-                  aria-label="Summary"
-                  onClick={(e: React.MouseEvent) => {
-                    e.stopPropagation();
-                    handleSummaryClick();
-                  }}
-                />
-              </Tooltip>
+              <AiSummaryPopover
+                onFetchSummary={handleFetchSummary}
+                trigger={
+                  <Tooltip content="AI Summary" relationship="label">
+                    <Button
+                      appearance="subtle"
+                      size="medium"
+                      icon={<SparkleRegular aria-hidden="true" />}
+                      aria-label="AI Summary"
+                      onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                    />
+                  </Tooltip>
+                }
+              />
               <Tooltip content="Open file" relationship="label">
                 <Button
                   appearance="subtle"
@@ -480,23 +477,6 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
                   className={styles.findSimilarFrame}
                 />
               )}
-            </DialogBody>
-          </DialogSurface>
-        </Dialog>
-
-        {/* Summary dialog */}
-        <Dialog
-          open={summaryOpen}
-          onOpenChange={(_, data) => {
-            if (!data.open) setSummaryOpen(false);
-          }}
-        >
-          <DialogSurface className={styles.summarySurface}>
-            <DialogBody>
-              <DialogTitle>Summary</DialogTitle>
-              <DialogContent>
-                <Text size={200}>{summaryText}</Text>
-              </DialogContent>
             </DialogBody>
           </DialogSurface>
         </Dialog>

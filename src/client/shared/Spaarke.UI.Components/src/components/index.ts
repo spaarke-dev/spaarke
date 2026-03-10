@@ -39,3 +39,6 @@ export * from "./LookupField";
 
 // SendEmailDialog - Reusable email composition dialog
 export * from "./SendEmailDialog";
+
+// AiSummaryPopover - Reusable AI summary popover with lazy fetch and copy
+export * from "./AiSummaryPopover";

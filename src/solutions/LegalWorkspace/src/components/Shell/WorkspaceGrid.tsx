@@ -7,7 +7,7 @@ import {
   Button,
   Spinner,
 } from "@fluentui/react-components";
-import { OpenRegular, ArrowClockwiseRegular } from "@fluentui/react-icons";
+import { OpenRegular, ArrowClockwiseRegular, DocumentAddRegular } from "@fluentui/react-icons";
 import { GetStartedRow } from "../GetStarted";
 import { QuickSummaryRow } from "../QuickSummary";
 import { ActivityFeed } from "../ActivityFeed/ActivityFeed";
@@ -339,6 +339,82 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     navigateToEntityList("sprk_document", "1ab4a862-3317-f111-8342-7c1e525abd8b");
   }, []);
 
+  // Open DocumentUploadWizard Code Page dialog (Integration Pattern C — frame-walking)
+  const handleAddDocument = React.useCallback(async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm: any =
+      (window as any)?.Xrm ??
+      (window.parent as any)?.Xrm ??
+      (window.top as any)?.Xrm;
+    if (!xrm?.Navigation?.navigateTo) {
+      console.warn("[WorkspaceGrid] Xrm.Navigation not available");
+      return;
+    }
+
+    // Resolve container ID from business unit
+    let containerId = "";
+    try {
+      const userSettings = xrm.Utility.getGlobalContext().userSettings;
+      const uid = userSettings.userId.replace(/[{}]/g, "");
+      const user = await xrm.WebApi.retrieveRecord(
+        "systemuser", uid, "?$select=_businessunitid_value"
+      );
+      const buId = user["_businessunitid_value"] as string;
+      if (buId) {
+        const bu = await xrm.WebApi.retrieveRecord(
+          "businessunit", buId, "?$select=sprk_containerid"
+        );
+        containerId = (bu["sprk_containerid"] as string) ?? "";
+      }
+    } catch (err) {
+      console.warn("[WorkspaceGrid] Failed to resolve container ID:", err);
+    }
+    if (!containerId) {
+      console.error("[WorkspaceGrid] No container ID available");
+      return;
+    }
+
+    // Detect theme
+    let theme = "light";
+    try {
+      const bodyBg = window.getComputedStyle(document.body).backgroundColor;
+      const rgbMatch = bodyBg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+      if (rgbMatch) {
+        const luminance =
+          0.299 * parseInt(rgbMatch[1]) +
+          0.587 * parseInt(rgbMatch[2]) +
+          0.114 * parseInt(rgbMatch[3]);
+        if (luminance < 128) theme = "dark";
+      }
+    } catch { /* ignore */ }
+
+    const dataString =
+      "parentEntityType=sprk_document" +
+      "&parentEntityId=" +
+      "&parentEntityName=" +
+      "&containerId=" + containerId +
+      "&theme=" + theme;
+
+    try {
+      await xrm.Navigation.navigateTo(
+        {
+          pageType: "webresource",
+          webresourceName: "sprk_documentuploadwizard",
+          data: encodeURIComponent(dataString),
+        },
+        {
+          target: 2,
+          width: { value: 60, unit: "%" },
+          height: { value: 70, unit: "%" },
+        }
+      );
+    } catch (error: any) {
+      if (error?.errorCode !== 2) {
+        console.error("[WorkspaceGrid] Upload dialog error:", error);
+      }
+    }
+  }, []);
+
   // -------------------------------------------------------------------------
   // Full card click handler map: Create Matter (wizard) + 6 Analysis Builder
   // -------------------------------------------------------------------------
@@ -472,10 +548,18 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
               <Button
                 appearance="subtle"
                 size="small"
+                icon={<DocumentAddRegular />}
+                onClick={handleAddDocument}
+                aria-label="Add document"
+                style={{ marginLeft: "auto" }}
+              />
+              <Button
+                appearance="subtle"
+                size="small"
                 icon={<OpenRegular />}
                 onClick={handleOpenDocumentsDialog}
                 aria-label="Open all documents"
-                style={{ marginLeft: "auto" }}
+                style={{ marginLeft: tokens.spacingHorizontalS }}
               />
             </div>
             <div className={styles.sectionContent} style={{ overflow: "visible" }}>

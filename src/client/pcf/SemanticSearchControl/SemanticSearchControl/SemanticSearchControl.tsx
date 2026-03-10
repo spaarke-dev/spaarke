@@ -408,20 +408,39 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     // since search results do not pre-populate fileUrl.
     const handleOpenFile = useCallback(
         (result: SearchResult, mode: "web" | "desktop") => {
-            apiService.getOpenLinks(result.documentId).then((openLinks) => {
-                if (mode === "web") {
-                    return window.open(openLinks.webUrl, "_blank", "noopener,noreferrer");
-                }
-                // Desktop: use protocol URL if available, otherwise fall back to web
+            apiService.getOpenLinks(result.documentId).then(async (openLinks) => {
+                // Desktop protocol available (Word, Excel, PowerPoint) — open in native app
                 if (openLinks.desktopUrl) {
                     return window.open(openLinks.desktopUrl, "_self");
                 }
+                // No desktop protocol — download via BFF and let OS open with default app
+                // (e.g. Adobe Acrobat for PDFs). SPE webUrl requires SharePoint permissions
+                // users may not have, so we stream through the BFF's /content endpoint.
+                try {
+                    const contentUrl = `${apiBaseUrl}/api/documents/${encodeURIComponent(result.documentId)}/content`;
+                    const response = await authenticatedFetch(contentUrl);
+                    if (response.ok) {
+                        const blob = await response.blob();
+                        const objectUrl = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = objectUrl;
+                        a.download = openLinks.fileName ?? result.name ?? "document";
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(objectUrl);
+                        return;
+                    }
+                } catch (err) {
+                    console.error("[SemanticSearchControl] Download failed, falling back:", err);
+                }
+                // Final fallback to webUrl
                 return window.open(openLinks.webUrl, "_blank", "noopener,noreferrer");
             }).catch((err) => {
                 console.error("[SemanticSearchControl] Failed to open file:", err);
             });
         },
-        [apiService]
+        [apiService, apiBaseUrl]
     );
 
     // Handle open record
@@ -440,6 +459,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     const handleViewAll = useCallback(() => {
         void navigationService.viewAllResults(query, searchScope, scopeId, filters);
     }, [navigationService, query, searchScope, scopeId, filters]);
+
+    // Handle reload — re-run the current search query
+    const handleReload = useCallback(() => {
+        if (query) {
+            void search(query, filters);
+        }
+    }, [query, search, filters]);
 
     // Handle Find Similar — opens DocumentRelationshipViewer as an in-page iframe dialog
     const handleFindSimilar = useCallback(
@@ -505,13 +531,19 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         [context.webAPI]
     );
 
-    // Handle Add Document — opens document upload dialog custom page
+    // Handle Add Document — opens DocumentUploadWizard Code Page dialog
     const handleAddDocument = useCallback(() => {
         void navigationService.openAddDocument(
             scopeId,
-            searchScope !== "all" ? searchScope : null
+            searchScope !== "all" ? searchScope : null,
+            () => {
+                // Refresh search results after upload completes
+                if (query) {
+                    void search(query, filters);
+                }
+            },
         );
-    }, [navigationService, scopeId, searchScope]);
+    }, [navigationService, scopeId, searchScope, query, search, filters]);
 
     // Handle Email Document — opens SendEmailDialog with result context
     const handleEmailDocument = useCallback(
@@ -535,42 +567,79 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         [context]
     );
 
-    // Workspace flag tracking — local set of document IDs added to workspace
+    // Workspace flag tracking — local set of document IDs marked as "in workspace"
     const [workspaceSet, setWorkspaceSet] = useState<Set<string>>(new Set());
 
-    // Handle Toggle Workspace — toggles the sprk_inworkspace flag on the document
+    // Load initial workspace flags from Dataverse when search results change
+    useEffect(() => {
+        if (results.length === 0) return;
+
+        const documentIds = results.map(r => r.documentId);
+        // Build OData filter: sprk_documentid eq 'id1' or sprk_documentid eq 'id2' ...
+        const filterClauses = documentIds.map(id => `sprk_documentid eq '${id}'`);
+        // Batch in groups of 50 to avoid overly long filter strings
+        const batchSize = 50;
+        const batches: string[][] = [];
+        for (let i = 0; i < filterClauses.length; i += batchSize) {
+            batches.push(filterClauses.slice(i, i + batchSize));
+        }
+
+        const loadWorkspaceFlags = async () => {
+            const inWorkspaceIds = new Set<string>();
+            for (const batch of batches) {
+                try {
+                    const filter = batch.join(" or ");
+                    const resp = await context.webAPI.retrieveMultipleRecords(
+                        "sprk_document",
+                        `?$select=sprk_documentid,sprk_inworkspace&$filter=(${filter}) and sprk_inworkspace eq true`
+                    );
+                    for (const entity of (resp.entities || [])) {
+                        const docId = entity.sprk_documentid as string;
+                        if (docId) inWorkspaceIds.add(docId);
+                    }
+                } catch (err) {
+                    console.warn("[SemanticSearchControl] Failed to load workspace flags:", err);
+                }
+            }
+            setWorkspaceSet(inWorkspaceIds);
+        };
+
+        void loadWorkspaceFlags();
+    }, [results, context.webAPI]);
+
+    // Handle Toggle Workspace — toggles the sprk_inworkspace flag on the document.
+    // Uses functional setState to avoid stale-closure issues with workspaceSet.
     const handleToggleWorkspace = useCallback(
         (result: SearchResult) => {
-            const isCurrentlyIn = workspaceSet.has(result.documentId);
-            const newFlag = !isCurrentlyIn;
-            // Optimistic update
             setWorkspaceSet(prev => {
+                const isCurrentlyIn = prev.has(result.documentId);
+                const newFlag = !isCurrentlyIn;
                 const next = new Set(prev);
                 if (newFlag) {
                     next.add(result.documentId);
                 } else {
                     next.delete(result.documentId);
                 }
+                // Update Dataverse (fire-and-forget with revert on failure)
+                context.webAPI.updateRecord("sprk_document", result.documentId, {
+                    sprk_inworkspace: newFlag,
+                }).catch((err: unknown) => {
+                    console.error("[SemanticSearchControl] Failed to toggle workspace flag:", err);
+                    // Revert on failure
+                    setWorkspaceSet(revert => {
+                        const reverted = new Set(revert);
+                        if (isCurrentlyIn) {
+                            reverted.add(result.documentId);
+                        } else {
+                            reverted.delete(result.documentId);
+                        }
+                        return reverted;
+                    });
+                });
                 return next;
             });
-            // Update Dataverse
-            context.webAPI.updateRecord("sprk_document", result.documentId, {
-                sprk_inworkspace: newFlag,
-            }).catch((err: unknown) => {
-                console.error("[SemanticSearchControl] Failed to toggle workspace flag:", err);
-                // Revert on failure
-                setWorkspaceSet(prev => {
-                    const next = new Set(prev);
-                    if (isCurrentlyIn) {
-                        next.add(result.documentId);
-                    } else {
-                        next.delete(result.documentId);
-                    }
-                    return next;
-                });
-            });
         },
-        [context.webAPI, workspaceSet]
+        [context.webAPI]
     );
 
     // Check if a document is in the workspace
@@ -711,6 +780,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
                     onToggleWorkspace={handleToggleWorkspace}
                     isInWorkspace={isInWorkspace}
                     onViewAll={handleViewAll}
+                    onReload={handleReload}
                     compactMode={compactMode}
                 />
             );
@@ -791,7 +861,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
             {/* Version Footer (always visible) */}
             <div className={styles.versionFooter}>
-                <Text size={100}>v1.1.3 • Built 2026-03-10</Text>
+                <Text size={100}>v1.1.9 • Built 2026-03-10</Text>
             </div>
 
             {/* Find Similar — iframe dialog (no Dataverse chrome) */}

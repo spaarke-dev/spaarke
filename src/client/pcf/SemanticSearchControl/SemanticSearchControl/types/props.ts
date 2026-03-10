@@ -97,6 +97,7 @@ export interface IResultsListProps {
     /** Check if a document is in the workspace. */
     isInWorkspace: (result: SearchResult) => boolean;
     onViewAll: () => void;
+    onReload: () => void;
     compactMode: boolean;
 }
 

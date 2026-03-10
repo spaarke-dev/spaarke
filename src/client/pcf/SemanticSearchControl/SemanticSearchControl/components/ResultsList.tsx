@@ -22,7 +22,7 @@ import {
     PopoverSurface,
     Tooltip,
 } from "@fluentui/react-components";
-import { Info20Regular } from "@fluentui/react-icons";
+import { ArrowClockwise20Regular, Info20Regular } from "@fluentui/react-icons";
 import { IResultsListProps, SearchResult } from "../types";
 import { ResultCard } from "./ResultCard";
 import { useInfiniteScroll } from "../hooks";
@@ -135,6 +135,7 @@ export const ResultsList: React.FC<IResultsListProps> = ({
     onToggleWorkspace,
     isInWorkspace,
     onViewAll,
+    onReload,
     compactMode,
 }) => {
     const styles = useStyles();
@@ -248,23 +249,34 @@ export const ResultsList: React.FC<IResultsListProps> = ({
                 <Text className={styles.resultCount}>
                     {getResultCountMessage()}
                 </Text>
-                <Popover
-                    open={infoOpen}
-                    onOpenChange={(_ev, data) => setInfoOpen(data.open)}
-                    positioning="below-end"
-                    withArrow
-                >
-                    <PopoverTrigger disableButtonEnhancement>
-                        <Tooltip content="How semantic search works" relationship="label">
-                            <Button
-                                className={styles.infoButton}
-                                appearance="subtle"
-                                size="small"
-                                icon={<Info20Regular />}
-                                aria-label="Search info"
-                            />
-                        </Tooltip>
-                    </PopoverTrigger>
+                <div style={{ display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS }}>
+                    <Tooltip content="Reload results" relationship="label">
+                        <Button
+                            className={styles.infoButton}
+                            appearance="subtle"
+                            size="small"
+                            icon={<ArrowClockwise20Regular />}
+                            aria-label="Reload results"
+                            onClick={onReload}
+                        />
+                    </Tooltip>
+                    <Popover
+                        open={infoOpen}
+                        onOpenChange={(_ev, data) => setInfoOpen(data.open)}
+                        positioning="below-end"
+                        withArrow
+                    >
+                        <PopoverTrigger disableButtonEnhancement>
+                            <Tooltip content="How semantic search works" relationship="label">
+                                <Button
+                                    className={styles.infoButton}
+                                    appearance="subtle"
+                                    size="small"
+                                    icon={<Info20Regular />}
+                                    aria-label="Search info"
+                                />
+                            </Tooltip>
+                        </PopoverTrigger>
                     <PopoverSurface className={styles.infoPopover}>
                         <Text className={styles.infoHeading}>How Semantic Search Works</Text>
                         <Text className={styles.infoText}>
@@ -292,6 +304,7 @@ export const ResultsList: React.FC<IResultsListProps> = ({
                         </Text>
                     </PopoverSurface>
                 </Popover>
+                </div>
             </div>
 
             {/* Scrollable results area */}
