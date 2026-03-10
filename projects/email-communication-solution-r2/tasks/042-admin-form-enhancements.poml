@@ -1,12 +1,13 @@
 <task id="ECS-042" project="Email Communication Solution R2">
   <metadata>
     <title>Admin Form Enhancements (Verification, Counts, Subscriptions)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>5 - Verification and Admin UX (Phase D)</phase>
     <tags>dataverse, admin-ux</tags>
     <dependencies>ECS-040, ECS-041</dependencies>
     <rigor>STANDARD</rigor>
+    <completed-date>2026-03-09</completed-date>
   </metadata>
 
   <prompt>

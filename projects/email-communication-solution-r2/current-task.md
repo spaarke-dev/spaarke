@@ -5,21 +5,21 @@
 
 ## Active Task
 
-- **Task ID**: 005
-- **Task File**: tasks/005-e2e-outbound-shared-mailbox-test.poml
-- **Title**: End-to-End Outbound Shared Mailbox Test
-- **Phase**: 1 - Communication Account Entity (Phase A)
-- **Status**: not-started
-- **Started**: —
+- **Task ID**: 042
+- **Task File**: tasks/042-admin-form-enhancements.poml
+- **Title**: Admin Form Enhancements (Verification, Counts, Subscriptions)
+- **Phase**: 5 - Verification and Admin UX (Phase D)
+- **Status**: completed
+- **Started**: 2026-03-09
 
 ## Quick Recovery
 
 | Field | Value |
 |-------|-------|
-| **Task** | 005 - End-to-End Outbound Shared Mailbox Test |
-| **Step** | Ready to begin |
-| **Status** | not-started |
-| **Next Action** | Execute task 005 |
+| **Task** | 042 - Admin Form Enhancements (Verification, Counts, Subscriptions) |
+| **Step** | Complete |
+| **Status** | completed |
+| **Artifact** | notes/research/admin-form-enhancements.md |
 
 ## Completed Steps
 
@@ -27,6 +27,7 @@
 - [x] Task 002: Admin UX design — form/view spec at notes/research/002-admin-ux-design.md
 - [x] Task 003: Field name fixes — 46 edits across 18 files, legacy method removed, cache key updated
 - [x] Task 004: Exchange policy docs — guide already complete, assessment at notes/research/004-exchange-policy-assessment.md
+- [x] Task 042: Admin Form Enhancements — comprehensive documentation at notes/research/admin-form-enhancements.md
 
 ## Files Modified (Task 003)
 
