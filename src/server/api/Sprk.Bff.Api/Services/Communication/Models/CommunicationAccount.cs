@@ -23,6 +23,9 @@ public sealed class CommunicationAccount
     /// <summary>Maps to Dataverse field sprk_archiveincomingoptin. Defaults to true if not set.</summary>
     public bool? ArchiveIncomingOptIn { get; init; }
 
+    /// <summary>Maps to Dataverse lookup sprk_defaultregardingmatter. Used as fallback in association resolution.</summary>
+    public Guid? DefaultRegardingMatterId { get; init; }
+
     /// <summary>Graph subscription ID. Null means no subscription configured.</summary>
     public string? SubscriptionId { get; init; }
 

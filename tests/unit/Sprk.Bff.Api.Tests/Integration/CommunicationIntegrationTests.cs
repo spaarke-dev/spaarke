@@ -1343,6 +1343,10 @@ public class CommunicationIntegrationTests
             graphFactoryMock.Object,
             dataverseMock.Object,
             accountService,
+            new IncomingAssociationResolver(
+                dataverseMock.Object,
+                graphFactoryMock.Object,
+                Mock.Of<ILogger<IncomingAssociationResolver>>()),
             Mock.Of<IEmailAttachmentProcessor>(),
             new EmlGenerationService(Mock.Of<ILogger<EmlGenerationService>>()),
             null!, // SpeFileStore - ArchiveContainerId not configured in tests, so archival path is skipped

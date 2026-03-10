@@ -1,7 +1,7 @@
 <task id="ECS-025" project="Email Communication Solution R2">
   <metadata>
     <title>Complete Backup Polling Service</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>3 - Inbound Shared Mailbox Monitoring (Phase C)</phase>
     <tags>bff-api, graph</tags>

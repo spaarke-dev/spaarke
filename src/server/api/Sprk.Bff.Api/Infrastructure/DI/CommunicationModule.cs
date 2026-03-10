@@ -23,6 +23,7 @@ public static class CommunicationModule
         services.AddSingleton<CommunicationService>();
         services.AddSingleton<EmlGenerationService>();
         services.AddSingleton<MailboxVerificationService>();
+        services.AddSingleton<IncomingAssociationResolver>();
         services.AddSingleton<IncomingCommunicationProcessor>();
 
         // AI tool handler (IAiToolHandler — not auto-discovered by ToolFramework which scans IAnalysisToolHandler only)

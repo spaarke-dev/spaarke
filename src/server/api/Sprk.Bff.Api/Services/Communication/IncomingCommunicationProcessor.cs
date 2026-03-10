@@ -13,12 +13,8 @@ namespace Sprk.Bff.Api.Services.Communication;
 
 /// <summary>
 /// Processes incoming email notifications by fetching full message details from Graph,
-/// creating a sprk_communication record with Direction=Incoming, processing attachments,
-/// and archiving the .eml file.
-///
-/// IMPORTANT: This processor does NOT set any regarding/association fields
-/// (sprk_regardingmatter, sprk_regardingorganization, sprk_regardingperson).
-/// Association resolution is a separate AI project.
+/// creating a sprk_communication record with Direction=Incoming, resolving associations
+/// via IncomingAssociationResolver, processing attachments, and archiving the .eml file.
 ///
 /// Registered as concrete type in AddCommunicationModule() per ADR-010.
 /// Uses GraphClientFactory.ForApp() for fetching messages per ADR-007.
@@ -28,6 +24,7 @@ public sealed class IncomingCommunicationProcessor
     private readonly IGraphClientFactory _graphClientFactory;
     private readonly IDataverseService _dataverseService;
     private readonly CommunicationAccountService _accountService;
+    private readonly IncomingAssociationResolver _associationResolver;
     private readonly IEmailAttachmentProcessor _attachmentProcessor;
     private readonly EmlGenerationService _emlGenerationService;
     private readonly SpeFileStore _speFileStore;
@@ -38,6 +35,7 @@ public sealed class IncomingCommunicationProcessor
         IGraphClientFactory graphClientFactory,
         IDataverseService dataverseService,
         CommunicationAccountService accountService,
+        IncomingAssociationResolver associationResolver,
         IEmailAttachmentProcessor attachmentProcessor,
         EmlGenerationService emlGenerationService,
         SpeFileStore speFileStore,
@@ -47,6 +45,7 @@ public sealed class IncomingCommunicationProcessor
         _graphClientFactory = graphClientFactory;
         _dataverseService = dataverseService;
         _accountService = accountService;
+        _associationResolver = associationResolver;
         _attachmentProcessor = attachmentProcessor;
         _emlGenerationService = emlGenerationService;
         _speFileStore = speFileStore;
@@ -134,13 +133,29 @@ public sealed class IncomingCommunicationProcessor
         // Direction = Incoming (100000000)
         // CommunicationType = Email (100000000)
         // StatusCode = Delivered (659490003)
-        // IMPORTANT: Do NOT set sprk_regardingmatter, sprk_regardingorganization, sprk_regardingperson
+        // Note: Regarding fields are set in step 4.5 by IncomingAssociationResolver
         var communicationId = await CreateCommunicationRecordAsync(message, mailboxEmail, graphMessageId, ct);
 
         _logger.LogInformation(
             "Created sprk_communication record | CommunicationId: {CommunicationId}, " +
             "Direction: Incoming, GraphMessageId: {GraphMessageId}",
             communicationId, graphMessageId);
+
+        // ── Step 4.5: Resolve associations (non-fatal) ────────────────────────────
+        try
+        {
+            await _associationResolver.ResolveAsync(
+                communicationId, mailboxEmail, graphMessageId, message, account, ct);
+        }
+        catch (Exception ex)
+        {
+            // Association resolution failure is non-fatal
+            _logger.LogWarning(
+                ex,
+                "Association resolution failed (non-fatal) | CommunicationId: {CommunicationId}, " +
+                "GraphMessageId: {GraphMessageId}",
+                communicationId, graphMessageId);
+        }
 
         // ── Step 5: Process attachments (if account has sprk_autocreaterecords) ──
         if (account?.AutoCreateRecords == true && message.HasAttachments == true
@@ -308,9 +323,8 @@ public sealed class IncomingCommunicationProcessor
             ["sprk_sentat"] = message.ReceivedDateTime?.UtcDateTime ?? DateTime.UtcNow,
             ["sprk_receivedat"] = message.ReceivedDateTime?.UtcDateTime ?? DateTime.UtcNow,
 
-            // IMPORTANT: Do NOT set any regarding fields.
-            // Association resolution (sprk_regardingmatter, sprk_regardingorganization,
-            // sprk_regardingperson) is a separate AI project.
+            // Note: Regarding fields (sprk_regardingmatter, sprk_regardingorganization,
+            // sprk_regardingperson) are set in step 4.5 by IncomingAssociationResolver.
         };
 
         // Set CC if present

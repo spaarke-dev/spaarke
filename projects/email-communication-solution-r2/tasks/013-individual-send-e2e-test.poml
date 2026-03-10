@@ -1,7 +1,7 @@
 <task id="ECS-013" project="Email Communication Solution R2">
   <metadata>
     <title>End-to-End Individual User Send Test</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <phase>2 - Individual User Outbound (Phase B)</phase>
     <tags>testing, deploy</tags>

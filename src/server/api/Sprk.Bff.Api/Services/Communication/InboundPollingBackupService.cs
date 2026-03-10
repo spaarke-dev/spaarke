@@ -15,9 +15,9 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// Implements ADR-001 BackgroundService pattern with PeriodicTimer (5-minute interval).
 /// Follows the same pattern as EmailPollingBackupService (Jobs) and GraphSubscriptionManager.
 ///
-/// Messages found by polling are logged for now; the actual processor (IncomingCommunicationJob
-/// from Task 072) will consume them once implemented. Deduplication via sprk_graphmessageid
-/// in sprk_communication prevents duplicate records.
+/// Messages found by polling are enqueued as IncomingCommunication jobs via JobSubmissionService.
+/// Deduplication is multi-layered: isRead eq false filter, ServiceBus IdempotencyKey,
+/// and Dataverse sprk_graphmessageid check in IncomingCommunicationProcessor.
 /// </summary>
 public sealed class InboundPollingBackupService : BackgroundService
 {

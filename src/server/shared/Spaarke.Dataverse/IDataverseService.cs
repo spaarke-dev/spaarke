@@ -484,4 +484,45 @@ public interface IDataverseService
     /// <param name="ct">Cancellation token</param>
     /// <returns>True if a record with this sprk_graphmessageid already exists</returns>
     Task<bool> ExistsCommunicationByGraphMessageIdAsync(string graphMessageId, CancellationToken ct = default);
+
+    // ========================================
+    // Communication Association Queries (Email Communication R2 — Task 024)
+    // ========================================
+
+    /// <summary>
+    /// Query sprk_communication record by Graph message ID and return association fields.
+    /// Used for thread-based association resolution (copy parent's associations).
+    /// </summary>
+    /// <param name="graphMessageId">The Graph message ID to look up</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Entity with association fields, or null if not found</returns>
+    Task<Entity?> GetCommunicationByGraphMessageIdAsync(string graphMessageId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Query contact records by email address (emailaddress1).
+    /// Used for sender-based association resolution.
+    /// </summary>
+    /// <param name="emailAddress">Email address to match</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>First matching contact entity, or null</returns>
+    Task<Entity?> QueryContactByEmailAsync(string emailAddress, CancellationToken ct = default);
+
+    /// <summary>
+    /// Query account records where emailaddress1 contains the given domain.
+    /// Skips common providers (gmail, outlook, etc.).
+    /// Used for sender domain-based organization association.
+    /// </summary>
+    /// <param name="domain">Email domain to match (e.g., "contoso.com")</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>First matching account entity, or null</returns>
+    Task<Entity?> QueryAccountByDomainAsync(string domain, CancellationToken ct = default);
+
+    /// <summary>
+    /// Query sprk_matter by reference number.
+    /// Used for subject-pattern-based association resolution.
+    /// </summary>
+    /// <param name="referenceNumber">Matter reference number to match</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>First matching matter entity, or null</returns>
+    Task<Entity?> QueryMatterByReferenceNumberAsync(string referenceNumber, CancellationToken ct = default);
 }

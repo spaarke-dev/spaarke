@@ -1,7 +1,7 @@
 <task id="ECS-026" project="Email Communication Solution R2">
   <metadata>
     <title>Create Incoming Communication Dataverse Views</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <phase>3 - Inbound Shared Mailbox Monitoring (Phase C)</phase>
     <tags>dataverse</tags>

@@ -489,6 +489,10 @@ public class InboundPipelineTests
             _graphClientFactoryMock.Object,
             _dataverseServiceMock.Object,
             accountService,
+            new IncomingAssociationResolver(
+                _dataverseServiceMock.Object,
+                _graphClientFactoryMock.Object,
+                Mock.Of<ILogger<IncomingAssociationResolver>>()),
             _attachmentProcessorMock.Object,
             new EmlGenerationService(Mock.Of<ILogger<EmlGenerationService>>()),
             null!, // SpeFileStore — not used when ArchiveContainerId is null
@@ -787,6 +791,10 @@ public class InboundPipelineTests
             _graphClientFactoryMock.Object,
             _dataverseServiceMock.Object,
             accountService,
+            new IncomingAssociationResolver(
+                _dataverseServiceMock.Object,
+                _graphClientFactoryMock.Object,
+                Mock.Of<ILogger<IncomingAssociationResolver>>()),
             _attachmentProcessorMock.Object,
             new EmlGenerationService(Mock.Of<ILogger<EmlGenerationService>>()),
             null!, // SpeFileStore intentionally null — upload throws but is caught (non-fatal)

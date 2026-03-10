@@ -1853,4 +1853,28 @@ public class DataverseWebApiService : IDataverseService
             "ExistsCommunicationByGraphMessageIdAsync is implemented in DataverseServiceClientImpl. " +
             "Configure DI to use ServiceClient implementation for communication dedup queries.");
     }
+
+    public Task<Entity?> GetCommunicationByGraphMessageIdAsync(string graphMessageId, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "GetCommunicationByGraphMessageIdAsync is implemented in DataverseServiceClientImpl.");
+    }
+
+    public Task<Entity?> QueryContactByEmailAsync(string emailAddress, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "QueryContactByEmailAsync is implemented in DataverseServiceClientImpl.");
+    }
+
+    public Task<Entity?> QueryAccountByDomainAsync(string domain, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "QueryAccountByDomainAsync is implemented in DataverseServiceClientImpl.");
+    }
+
+    public Task<Entity?> QueryMatterByReferenceNumberAsync(string referenceNumber, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "QueryMatterByReferenceNumberAsync is implemented in DataverseServiceClientImpl.");
+    }
 }

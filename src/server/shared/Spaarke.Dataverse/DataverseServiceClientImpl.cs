@@ -1840,6 +1840,83 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return exists;
     }
 
+    // ========================================
+    // Communication Association Queries (Email Communication R2 — Task 024)
+    // ========================================
+
+    public async Task<Entity?> GetCommunicationByGraphMessageIdAsync(string graphMessageId, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying sprk_communication by GraphMessageId for association: {GraphMessageId}", graphMessageId);
+
+        var query = new QueryExpression("sprk_communication")
+        {
+            ColumnSet = new ColumnSet(
+                "sprk_communicationid", "sprk_regardingmatter",
+                "sprk_regardingorganization", "sprk_regardingperson",
+                "sprk_associationstatus"),
+            TopCount = 1
+        };
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("sprk_graphmessageid", ConditionOperator.Equal, graphMessageId));
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        return results.Entities.Count > 0 ? results.Entities[0] : null;
+    }
+
+    public async Task<Entity?> QueryContactByEmailAsync(string emailAddress, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying contact by email: {Email}", emailAddress);
+
+        var query = new QueryExpression("contact")
+        {
+            ColumnSet = new ColumnSet("contactid", "fullname", "parentcustomerid"),
+            TopCount = 1
+        };
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("emailaddress1", ConditionOperator.Equal, emailAddress));
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("statecode", ConditionOperator.Equal, 0)); // Active only
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        return results.Entities.Count > 0 ? results.Entities[0] : null;
+    }
+
+    public async Task<Entity?> QueryAccountByDomainAsync(string domain, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying account by domain: {Domain}", domain);
+
+        var query = new QueryExpression("account")
+        {
+            ColumnSet = new ColumnSet("accountid", "name"),
+            TopCount = 1
+        };
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("emailaddress1", ConditionOperator.Contains, domain));
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("statecode", ConditionOperator.Equal, 0)); // Active only
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        return results.Entities.Count > 0 ? results.Entities[0] : null;
+    }
+
+    public async Task<Entity?> QueryMatterByReferenceNumberAsync(string referenceNumber, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying sprk_matter by reference number: {ReferenceNumber}", referenceNumber);
+
+        var query = new QueryExpression("sprk_matter")
+        {
+            ColumnSet = new ColumnSet("sprk_matterid", "sprk_name"),
+            TopCount = 1
+        };
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("sprk_referencenumber", ConditionOperator.Equal, referenceNumber));
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("statecode", ConditionOperator.Equal, 0)); // Active only
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        return results.Entities.Count > 0 ? results.Entities[0] : null;
+    }
+
     public void Dispose()
     {
         if (!_disposed)
