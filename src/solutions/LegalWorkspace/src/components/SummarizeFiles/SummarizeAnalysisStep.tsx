@@ -17,11 +17,14 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { PlaybookCardGrid } from '../Playbook/PlaybookCardGrid';
-import { loadPlaybooks, loadPlaybookScopes } from '../Playbook/playbookService';
-import { createAndAssociate } from '../Playbook/analysisService';
+import {
+  PlaybookCardGrid,
+  loadPlaybooks,
+  loadPlaybookScopes,
+  createAndAssociate,
+} from '@spaarke/ui-components/components/Playbook';
+import type { IPlaybook } from '@spaarke/ui-components/components/Playbook';
 import { navigateToEntity } from '../../utils/navigation';
-import type { IPlaybook } from '../Playbook/types';
 import type { IWebApi } from '../../types/xrm';
 
 // ---------------------------------------------------------------------------

@@ -11,7 +11,10 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      "@playbook": path.resolve(__dirname, "../LegalWorkspace/src/components/Playbook"),
+      "@spaarke/ui-components": path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
+      // Ensure shared library files resolve @fluentui from AnalysisBuilder's node_modules
+      "@fluentui/react-components": path.resolve(__dirname, "node_modules/@fluentui/react-components"),
+      "@fluentui/react-icons": path.resolve(__dirname, "node_modules/@fluentui/react-icons"),
     },
   },
   build: {

@@ -26,12 +26,10 @@
  * @see ADR-021  - Fluent UI v9 design system (makeStyles + semantic tokens)
  */
 
-import { useReducer, useState, useCallback, useRef, useMemo, useEffect, lazy, Suspense } from "react";
+import { useReducer, useState, useCallback, useRef, useMemo, useEffect } from "react";
 import {
     makeStyles,
     tokens,
-    Text,
-    Spinner,
 } from "@fluentui/react-components";
 
 import { getAuthProvider, authenticatedFetch } from "@spaarke/auth";
@@ -42,8 +40,6 @@ import type {
     IWizardShellHandle,
     IWizardSuccessConfig,
 } from "@spaarke/ui-components/components/Wizard";
-import type { IFindSimilarServiceConfig, INavigationMessage } from "@spaarke/ui-components/components/FindSimilar/findSimilarTypes";
-import type { IFilePreviewServices } from "@spaarke/ui-components/components/FilePreview/filePreviewTypes";
 
 import type {
     IDocumentUploadWizardDialogProps,
@@ -75,7 +71,7 @@ import type {
 } from "./services/uploadOrchestrator";
 import { FileUploadProgress } from "./components/FileUploadProgress";
 import { buildSuccessConfig } from "./components/SuccessScreen";
-import { openAnalysisBuilder } from "./services/nextStepLauncher";
+// nextStepLauncher is no longer used here — inline playbook/find-similar in NextStepsStep
 
 // ---------------------------------------------------------------------------
 // AutoUploadTrigger — starts the upload pipeline on mount (step 2 entry)
@@ -92,46 +88,7 @@ function AutoUploadTrigger({ onStart }: { onStart: () => void }): null {
     return null;
 }
 
-// ---------------------------------------------------------------------------
-// Lazy-loaded FindSimilarDialog (chunk only fetched on user interaction)
-// ---------------------------------------------------------------------------
-
-const LazyFindSimilarDialog = lazy(
-    () => import("@spaarke/ui-components/components/FindSimilar/FindSimilarDialog")
-);
-
-// ---------------------------------------------------------------------------
-// FindSimilarDialog service configuration (stable singletons)
-// ---------------------------------------------------------------------------
-
-const findSimilarServiceConfig: IFindSimilarServiceConfig = {
-    getBffBaseUrl,
-    authenticatedFetch,
-};
-
-/**
- * Stub file preview services for the FindSimilarDialog.
- * The Document Upload Wizard does not need full file preview capabilities
- * within the Find Similar results, so these are minimal no-op implementations.
- * If richer preview is needed later, wire in real BFF-backed implementations.
- */
-const findSimilarFilePreviewServices: IFilePreviewServices = {
-    getDocumentPreviewUrl: async () => null,
-    getDocumentOpenLinks: async () => null,
-    navigateToEntity: (params) => {
-        // Open Dataverse record in new tab via Xrm or URL fallback
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm = (window as any).Xrm ?? (window as any).parent?.Xrm;
-        if (xrm?.Navigation?.navigateTo) {
-            xrm.Navigation.navigateTo(
-                { pageType: "entityrecord", entityName: params.entityName, entityId: params.entityId },
-                { target: params.openInNewWindow ? 1 : 2 },
-            );
-        }
-    },
-    copyDocumentLink: async () => false,
-    setWorkspaceFlag: async () => false,
-};
+// (FindSimilarDialog is no longer inline — opens in new tab via nextStepLauncher)
 
 // ---------------------------------------------------------------------------
 // File state reducer
@@ -283,8 +240,7 @@ export function DocumentUploadWizardDialog({
     // ── Step 3 state: selected next steps ──────────────────────────────
     const [selectedNextSteps, setSelectedNextSteps] = useState<NextStepActionId[]>([]);
 
-    // ── Find Similar state (inline rendering) ───────────────────────────
-    const [isFindSimilarOpen, setIsFindSimilarOpen] = useState(false);
+    // (Find Similar now opens in a new tab via nextStepLauncher — no inline state needed)
 
     // ── Refs for closure safety in renderContent callbacks ───────────────────
     // WizardShell step configs use renderContent callbacks that may capture
@@ -467,21 +423,31 @@ export function DocumentUploadWizardDialog({
                 ),
             });
             steps.push({
-                id: "summary",
-                label: "Summary",
+                id: "review",
+                label: "Review",
+                canAdvance: () => true,
+                renderContent: (_handle: IWizardShellHandle) => (
+                    <SummaryStep
+                        files={fileState.selectedFiles}
+                        apiBaseUrl={bffBaseUrl}
+                        getToken={bffTokenProvider}
+                        uploadedDocumentMap={uploadedDocumentMap}
+                        onProcessingChange={setIsProfileProcessing}
+                        reviewOnly={true}
+                        parentEntityName={effectiveParentEntityName}
+                    />
+                ),
+            });
+
+            steps.push({
+                id: "processing",
+                label: "Processing",
                 canAdvance: () => {
-                    // Can advance once upload is done (Phases 1-2 complete)
-                    // Profiling (Phase 3) is non-blocking -- user can advance anytime
                     const result = uploadResultRef.current;
                     return result !== null && !isUploadingRef.current;
                 },
                 renderContent: (_handle: IWizardShellHandle) => {
-                    // During upload: show per-file upload progress (Phases 1-2)
-                    if (isUploading || (!uploadResult && orchestratorProgress.length > 0)) {
-                        return <FileUploadProgress fileProgress={orchestratorProgress} />;
-                    }
-
-                    // After upload: show SummaryStep with Document Profile streaming
+                    // After upload completes: show SummaryStep with Document Profile streaming
                     if (uploadResult && uploadedDocumentMap.size > 0) {
                         return (
                             <SummaryStep
@@ -494,16 +460,16 @@ export function DocumentUploadWizardDialog({
                         );
                     }
 
-                    // Upload complete but all files failed -- show progress with errors
+                    // Upload complete but all files failed — show progress with errors
                     if (uploadResult) {
                         return <FileUploadProgress fileProgress={orchestratorProgress} />;
                     }
 
-                    // Auto-trigger upload when entering step 2
+                    // Auto-trigger upload when entering Processing step
                     return (
                         <>
                             <AutoUploadTrigger onStart={() => void runUploadPipeline()} />
-                            <FileUploadProgress fileProgress={[]} />
+                            <FileUploadProgress fileProgress={orchestratorProgress} />
                         </>
                     );
                 },
@@ -520,14 +486,11 @@ export function DocumentUploadWizardDialog({
                         onNextStepsChanged={setSelectedNextSteps}
                         wizardShellRef={wizardRef}
                         emailStepProps={emailStepProps}
-                        onLaunchAnalysis={() => {
-                            // Launch analysis for the first successfully uploaded document
-                            const firstDoc = uploadedDocumentMapRef.current.values().next().value;
-                            if (firstDoc) {
-                                handleLaunchAnalysis(firstDoc.documentId);
-                            }
-                        }}
-                        onLaunchFindSimilar={handleLaunchFindSimilar}
+                        uploadedDocumentMap={uploadedDocumentMapRef.current}
+                        uploadedFiles={fileStateRef.current.selectedFiles}
+                        containerId={effectiveContainerId}
+                        bffBaseUrl={bffBaseUrl}
+                        bffTokenProvider={bffTokenProvider}
                     />
                 ),
             });
@@ -555,69 +518,17 @@ export function DocumentUploadWizardDialog({
         ]
     );
 
-    // ── Next-step launcher callbacks ────────────────────────────────────
-
-    const handleLaunchAnalysis = useCallback(
-        (documentRecordId: string) => {
-            console.log("[DocumentUploadWizard] Launching Analysis Builder for:", documentRecordId);
-            openAnalysisBuilder(documentRecordId, effectiveContainerId);
-        },
-        [effectiveContainerId],
-    );
-
-    const handleLaunchFindSimilar = useCallback(() => {
-        console.log("[DocumentUploadWizard] Opening Find Similar dialog (inline).");
-        setIsFindSimilarOpen(true);
-    }, []);
-
-    const handleCloseFindSimilar = useCallback(() => {
-        setIsFindSimilarOpen(false);
-    }, []);
-
-    const handleFindSimilarNavigate = useCallback((message: INavigationMessage) => {
-        findSimilarFilePreviewServices.navigateToEntity({
-            action: message.action === "openRecord" ? "openRecord" : "openRecord",
-            entityName: message.entityName,
-            entityId: message.entityId ?? "",
-            openInNewWindow: message.openInNewWindow,
-        });
-    }, []);
-
     // ── Finish handler ──────────────────────────────────────────────────────
 
     const handleFinish = useCallback(async (): Promise<IWizardSuccessConfig | void> => {
-        // Wait for in-progress upload or trigger if not started
-        let result = uploadResultRef.current;
+        // Upload is guaranteed complete by the Processing step.
+        const result = uploadResultRef.current;
 
-        if (!result && !isUploadingRef.current) {
-            try {
-                result = await runUploadPipeline();
-            } catch (err) {
-                const message = err instanceof Error ? err.message : "Upload failed";
-                throw new Error(message);
-            }
-        } else if (!result && isUploadingRef.current) {
-            // Upload is in progress — wait for it to finish
-            await new Promise<void>((resolve) => {
-                const interval = setInterval(() => {
-                    if (uploadResultRef.current) {
-                        clearInterval(interval);
-                        result = uploadResultRef.current;
-                        resolve();
-                    }
-                }, 200);
-            });
-        }
-
-        // Build success/failure screen via shared SuccessScreen component
         return buildSuccessConfig({
             uploadResults: result,
-            selectedNextSteps: selectedNextStepsRef.current,
-            onLaunchAnalysis: handleLaunchAnalysis,
-            onLaunchFindSimilar: handleLaunchFindSimilar,
             onClose,
         });
-    }, [onClose, runUploadPipeline, handleLaunchAnalysis, handleLaunchFindSimilar]);
+    }, [onClose]);
 
     // ── Render ──────────────────────────────────────────────────────────────
 
@@ -627,6 +538,7 @@ export function DocumentUploadWizardDialog({
                 ref={wizardRef}
                 open={true}
                 embedded={true}
+                hideTitle={true}
                 title={
                     effectiveParentEntityName
                         ? `Upload Files \u2014 ${effectiveParentEntityName}`
@@ -641,18 +553,7 @@ export function DocumentUploadWizardDialog({
                 finishingLabel="Processing..."
             />
 
-            {/* Find Similar dialog — rendered inline, lazy-loaded on first open */}
-            {isFindSimilarOpen && (
-                <Suspense fallback={<Spinner label="Loading Find Similar..." />}>
-                    <LazyFindSimilarDialog
-                        open={isFindSimilarOpen}
-                        onClose={handleCloseFindSimilar}
-                        serviceConfig={findSimilarServiceConfig}
-                        onNavigateToEntity={handleFindSimilarNavigate}
-                        filePreviewServices={findSimilarFilePreviewServices}
-                    />
-                </Suspense>
-            )}
+            {/* Find Similar now opens in a new tab via nextStepLauncher */}
         </div>
     );
 }

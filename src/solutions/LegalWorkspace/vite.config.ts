@@ -20,6 +20,7 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
       "@spaarke/ui-components": path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
+      "@spaarke/auth": path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
     },
     // Force all shared packages to resolve from THIS project's node_modules
     dedupe: [

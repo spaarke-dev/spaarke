@@ -45,3 +45,6 @@ export * from "./AiSummaryPopover";
 
 // FindSimilarDialog - Reusable iframe dialog for DocumentRelationshipViewer
 export * from "./FindSimilarDialog";
+
+// Playbook - Shared playbook card grid, scope configuration, and analysis services
+export * from "./Playbook";
