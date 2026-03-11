@@ -4,13 +4,16 @@
  * Fetches the count of semantically related documents for a given document ID
  * from the BFF visualization API using the countOnly=true parameter.
  *
- * Uses a simple fetch pattern with token acquisition from the PCF context.
+ * Uses @spaarke/auth authenticatedFetch for proper MSAL token management,
+ * matching the pattern used by SemanticSearchControl and DocumentRelationshipViewer.
+ *
  * React 16 compatible (useState + useEffect + useCallback only, per ADR-022).
  *
  * @see ADR-022 - React 16 APIs only in PCF controls
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { authenticatedFetch } from "@spaarke/auth";
 
 /**
  * API response shape for countOnly=true calls.
@@ -40,52 +43,16 @@ export interface UseRelatedDocumentCountResult {
     refetch: () => void;
 }
 
-/**
- * Acquire a bearer token using the Xrm.Utility.getGlobalContext() token provider.
- * Falls back to null if Xrm is not available (e.g., test harness).
- *
- * @param apiBaseUrl - The BFF API base URL (used to construct the resource scope)
- * @returns Bearer token string or null
- */
-async function acquireToken(apiBaseUrl: string): Promise<string | null> {
-    try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm = (window as any).Xrm;
-        if (xrm?.Utility?.getGlobalContext) {
-            const context = xrm.Utility.getGlobalContext();
-            // Attempt to get token from the Xrm auth context
-            if (context.getCurrentAppUrl && typeof context.getCurrentAppUrl === "function") {
-                // In Dataverse, use the WebApi token which is already available
-                const token = await xrm.Utility.getGlobalContext().authenticateToken?.();
-                if (token) return token;
-            }
-        }
-    } catch {
-        // Xrm not available or auth failed
-    }
-
-    // TODO: Migrate to @spaarke/auth (authenticatedFetch) once the auth library
-    // dist is built and available. See DocumentRelationshipViewer for the pattern.
-    // For now, fetch without auth - the BFF API may accept Dataverse session cookies.
-    return null;
-}
+/** Default BFF API URL when not configured via PCF properties */
+const DEFAULT_API_BASE_URL = "https://spe-api-dev-67e2xz.azurewebsites.net";
 
 /**
  * Hook to fetch the count of semantically related documents.
  *
  * @param documentId - Source document GUID
  * @param tenantId - Azure AD tenant ID for multi-tenant routing
- * @param apiBaseUrl - BFF API base URL
+ * @param apiBaseUrl - BFF API base URL (defaults to dev endpoint)
  * @returns State object with count, loading, error, lastUpdated, and refetch
- *
- * @example
- * ```tsx
- * const { count, isLoading, error, lastUpdated, refetch } = useRelatedDocumentCount(
- *   "abc-123",
- *   "tenant-1",
- *   "https://spe-api-dev-67e2xz.azurewebsites.net"
- * );
- * ```
  */
 export function useRelatedDocumentCount(
     documentId: string,
@@ -111,8 +78,9 @@ export function useRelatedDocumentCount(
     }, []);
 
     const fetchCount = useCallback(async () => {
-        // Skip if missing required parameters
-        if (!documentId || documentId.trim() === "" || !apiBaseUrl) {
+        // Skip if missing document ID
+        if (!documentId || documentId.trim() === "") {
+            console.warn("[useRelatedDocumentCount] No documentId available — skipping fetch.");
             setCount(0);
             setError(null);
             setIsLoading(false);
@@ -125,25 +93,15 @@ export function useRelatedDocumentCount(
 
         try {
             // Build URL with countOnly=true for lightweight response
-            const baseUrl = apiBaseUrl.replace(/\/$/, "");
-            const url = new URL(`${baseUrl}/api/ai/visualization/related/${documentId}`);
-            url.searchParams.set("countOnly", "true");
-            if (tenantId) {
-                url.searchParams.set("tenantId", tenantId);
-            }
+            const baseUrl = (apiBaseUrl || DEFAULT_API_BASE_URL).replace(/\/$/, "");
+            const url = `${baseUrl}/api/ai/visualization/related/${documentId}?countOnly=true${tenantId ? `&tenantId=${encodeURIComponent(tenantId)}` : ""}`;
 
-            // Acquire auth token (best-effort)
-            const token = await acquireToken(apiBaseUrl);
-            const headers: Record<string, string> = {
-                "Content-Type": "application/json",
-            };
-            if (token) {
-                headers["Authorization"] = `Bearer ${token}`;
-            }
+            console.log("[useRelatedDocumentCount] Fetching count:", { documentId, baseUrl, url });
 
-            const response = await fetch(url.toString(), {
+            // Use authenticatedFetch from @spaarke/auth — handles MSAL token acquisition
+            const response = await authenticatedFetch(url, {
                 method: "GET",
-                headers,
+                headers: { "Content-Type": "application/json" },
             });
 
             // Guard against stale responses (documentId changed while fetching)
@@ -152,7 +110,6 @@ export function useRelatedDocumentCount(
             }
 
             if (!response.ok) {
-                // Handle specific HTTP errors with user-friendly messages
                 if (response.status === 404) {
                     setCount(0);
                     setLastUpdated(new Date());
@@ -172,7 +129,9 @@ export function useRelatedDocumentCount(
                 return;
             }
 
-            setCount(data.metadata?.totalResults ?? 0);
+            const total = data.metadata?.totalResults ?? 0;
+            console.log("[useRelatedDocumentCount] Got count:", total);
+            setCount(total);
             setLastUpdated(new Date());
         } catch (err) {
             if (!mountedRef.current || currentFetchId !== fetchIdRef.current) {
