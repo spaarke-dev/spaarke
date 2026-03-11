@@ -125,7 +125,7 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
     const effectiveError = authError || error;
 
     return (
-        <div data-pcf-version="1.0.3">
+        <div data-pcf-version="1.0.4">
             <RelationshipCountCard
                 count={count}
                 isLoading={effectiveIsLoading}

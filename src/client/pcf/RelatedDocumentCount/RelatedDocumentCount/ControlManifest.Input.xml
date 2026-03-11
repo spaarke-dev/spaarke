@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Pcf.RelatedDocumentCount" constructor="RelatedDocumentCount" version="1.0.3"
+  <control namespace="Spaarke.Pcf.RelatedDocumentCount" constructor="RelatedDocumentCount" version="1.0.4"
            display-name-key="Related Document Count"
-           description-key="PCF control displaying a count of semantically related documents with drill-through (v1.0.3)"
+           description-key="PCF control displaying a count of semantically related documents with drill-through (v1.0.4)"
            control-type="virtual">
 
     <external-service-usage enabled="true">
