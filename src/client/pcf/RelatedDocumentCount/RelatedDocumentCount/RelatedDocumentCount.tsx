@@ -105,7 +105,7 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
     }, []);
 
     return (
-        <>
+        <div data-pcf-version="1.0.1">
             <RelationshipCountCard
                 title={cardTitle}
                 count={count}
@@ -119,7 +119,7 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
                 onClose={handleClose}
                 url={isDialogOpen ? viewerUrl : null}
             />
-        </>
+        </div>
     );
 };
 
