@@ -20,8 +20,14 @@ import {
     Dialog,
     DialogSurface,
     DialogBody,
+    Button,
+    Tooltip,
     shorthands,
 } from "@fluentui/react-components";
+import {
+    DismissRegular,
+    ArrowExpandRegular,
+} from "@fluentui/react-icons";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -52,6 +58,19 @@ const useStyles = makeStyles({
         ...shorthands.overflow("hidden"),
         ...shorthands.borderRadius(tokens.borderRadiusXLarge),
     },
+    titleBar: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "flex-end",
+        gap: tokens.spacingHorizontalXS,
+        paddingTop: tokens.spacingVerticalXS,
+        paddingRight: tokens.spacingHorizontalS,
+        paddingBottom: tokens.spacingVerticalXS,
+        paddingLeft: tokens.spacingHorizontalS,
+        backgroundColor: tokens.colorNeutralBackground3,
+        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        flexShrink: 0,
+    },
     body: {
         padding: "0px",
         flex: 1,
@@ -80,6 +99,12 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
 }) => {
     const styles = useStyles();
 
+    const handleExpand = React.useCallback(() => {
+        if (url) {
+            window.open(url, "_blank", "noopener,noreferrer");
+        }
+    }, [url]);
+
     return (
         <Dialog
             open={open}
@@ -88,6 +113,26 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
             }}
         >
             <DialogSurface className={styles.surface}>
+                <div className={styles.titleBar}>
+                    <Tooltip content="Open in new tab" relationship="label">
+                        <Button
+                            appearance="subtle"
+                            icon={<ArrowExpandRegular />}
+                            size="small"
+                            onClick={handleExpand}
+                            aria-label="Open in new tab"
+                        />
+                    </Tooltip>
+                    <Tooltip content="Close" relationship="label">
+                        <Button
+                            appearance="subtle"
+                            icon={<DismissRegular />}
+                            size="small"
+                            onClick={onClose}
+                            aria-label="Close"
+                        />
+                    </Tooltip>
+                </div>
                 <DialogBody className={styles.body}>
                     {url && (
                         <iframe
