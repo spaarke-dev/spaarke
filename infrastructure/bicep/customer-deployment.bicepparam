@@ -54,6 +54,20 @@ param appServiceSku = '#{APP_SERVICE_SKU:B1}#'
 param aiSearchSku = '#{AI_SEARCH_SKU:basic}#'
 
 // =============================================================================
+// REQUIRED: Communication (Email Processing)
+// =============================================================================
+
+// SPE container/drive ID for email archival (from SPE provisioning)
+param communicationArchiveContainerId = '#{SPE_COMMUNICATION_ARCHIVE_CONTAINER_ID}#'
+
+// Default mailbox for sending/receiving email
+// Must be a shared mailbox with Graph API access
+param communicationDefaultMailbox = '#{COMMUNICATION_DEFAULT_MAILBOX}#'
+
+// Display name shown in "From" field of sent emails
+param communicationDefaultDisplayName = '#{COMMUNICATION_DEFAULT_DISPLAY_NAME}#'
+
+// =============================================================================
 // OPTIONAL: Resource Tags
 // =============================================================================
 

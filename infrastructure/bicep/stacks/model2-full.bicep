@@ -34,6 +34,15 @@ param appServiceSku string = 'B1'
 @allowed(['basic', 'standard', 'standard2'])
 param aiSearchSku string = 'basic'
 
+@description('SPE container/drive ID for communication email archival')
+param communicationArchiveContainerId string = ''
+
+@description('Default mailbox email address for communication')
+param communicationDefaultMailbox string = ''
+
+@description('Display name for the default communication mailbox')
+param communicationDefaultDisplayName string = ''
+
 @description('Tags applied to all resources')
 param tags object = {
   customer: customerId
@@ -119,7 +128,7 @@ module serviceBus '../modules/service-bus.bicep' = {
     serviceBusName: '${baseName}-sb'
     location: location
     sku: 'Standard'
-    queueNames: ['sdap-jobs', 'document-indexing', 'ai-indexing']
+    queueNames: ['sdap-jobs', 'document-indexing', 'ai-indexing', 'sdap-communication']
     tags: tags
   }
 }
@@ -191,6 +200,18 @@ module bffApi '../modules/app-service.bicep' = {
       // Monitoring
       APPLICATIONINSIGHTS_CONNECTION_STRING: monitoring.outputs.connectionString
       ApplicationInsightsAgent_EXTENSION_VERSION: '~3'
+
+      // Communication (email processing)
+      Communication__ArchiveContainerId: communicationArchiveContainerId
+      Communication__DefaultMailbox: communicationDefaultMailbox
+      Communication__WebhookNotificationUrl: 'https://${baseName}-api.azurewebsites.net/api/communications/incoming-webhook'
+      Communication__WebhookClientState: '@Microsoft.KeyVault(VaultName=${keyVault.outputs.keyVaultName};SecretName=communication-webhook-secret)'
+      Communication__ApprovedSenders__0__Email: communicationDefaultMailbox
+      Communication__ApprovedSenders__0__DisplayName: communicationDefaultDisplayName
+      Communication__ApprovedSenders__0__IsDefault: 'true'
+
+      // Service Bus queue name for communication jobs
+      ServiceBus__CommunicationQueueName: 'sdap-communication'
     }
     tags: tags
   }

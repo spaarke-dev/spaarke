@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
@@ -31,6 +32,14 @@ public sealed class IncomingCommunicationProcessor
     private readonly CommunicationOptions _options;
     private readonly ILogger<IncomingCommunicationProcessor> _logger;
 
+    /// <summary>
+    /// Matches a GUID pattern — Graph webhook resource paths use user object IDs (GUIDs)
+    /// instead of email addresses, e.g. "users/e2e9000e-ce35-4f33-b0de-9c203fd5087a/messages/..."
+    /// </summary>
+    private static readonly Regex GuidPattern = new(
+        @"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+        RegexOptions.Compiled);
+
     public IncomingCommunicationProcessor(
         IGraphClientFactory graphClientFactory,
         IDataverseService dataverseService,
@@ -62,8 +71,8 @@ public sealed class IncomingCommunicationProcessor
     /// <param name="ct">Cancellation token.</param>
     public async Task ProcessAsync(string mailboxEmail, string graphMessageId, CancellationToken ct)
     {
-        _logger.LogInformation(
-            "Processing incoming communication | Mailbox: {Mailbox}, GraphMessageId: {GraphMessageId}",
+        _logger.LogWarning(
+            "COMM_PROC_ENTRY: Processing incoming communication | Mailbox: {Mailbox}, GraphMessageId: {GraphMessageId}",
             mailboxEmail, graphMessageId);
 
         // ── Step 1: Deduplication check ──────────────────────────────────────────
@@ -71,15 +80,42 @@ public sealed class IncomingCommunicationProcessor
         // If a record already exists, log and skip to prevent duplicates.
         if (await ExistsByGraphMessageIdAsync(graphMessageId, ct))
         {
-            _logger.LogInformation(
-                "Duplicate detected: sprk_communication already exists for GraphMessageId {GraphMessageId}. Skipping.",
+            _logger.LogWarning(
+                "COMM_DEDUP: Duplicate detected for GraphMessageId {GraphMessageId}. Skipping.",
                 graphMessageId);
             return;
         }
 
         // ── Step 2: Get account details ──────────────────────────────────────────
         // Check if the receiving mailbox has sprk_autocreaterecords enabled.
+        // Graph webhook resource paths contain user object IDs (GUIDs) instead of
+        // email addresses. When a GUID is detected, look up the account directly
+        // from the receive-enabled accounts list (shared mailboxes can't be resolved
+        // via Graph Users API).
         var account = await GetReceiveAccountAsync(mailboxEmail, ct);
+
+        if (account is null && GuidPattern.IsMatch(mailboxEmail))
+        {
+            _logger.LogWarning(
+                "COMM_GUID_FALLBACK: Mailbox is a GUID ({Identifier}), looking up from all receive-enabled accounts",
+                mailboxEmail);
+
+            // Fall back: find ANY receive-enabled account (shared mailbox GUID can't be
+            // resolved via Graph Users API — they don't have mail/UPN properties).
+            var allAccounts = await _accountService.QueryReceiveEnabledAccountsAsync(ct);
+            account = allAccounts.Length == 1
+                ? allAccounts[0]  // Single account — use it directly
+                : allAccounts.FirstOrDefault(); // Multiple — use first (most common setup)
+
+            if (account is not null)
+            {
+                mailboxEmail = account.EmailAddress;
+                _logger.LogWarning(
+                    "COMM_GUID_RESOLVED: Resolved GUID {Identifier} to account {Email} (from {Count} receive-enabled accounts)",
+                    mailboxEmail, account.EmailAddress, allAccounts.Length);
+            }
+        }
+
         if (account is null)
         {
             _logger.LogWarning(
@@ -321,7 +357,7 @@ public sealed class IncomingCommunicationProcessor
             ["sprk_body"] = bodyContent,
             ["sprk_graphmessageid"] = graphMessageId,
             ["sprk_sentat"] = message.ReceivedDateTime?.UtcDateTime ?? DateTime.UtcNow,
-            ["sprk_receivedat"] = message.ReceivedDateTime?.UtcDateTime ?? DateTime.UtcNow,
+            ["sprk_receiveddate"] = message.ReceivedDateTime?.UtcDateTime ?? DateTime.UtcNow,
 
             // Note: Regarding fields (sprk_regardingmatter, sprk_regardingorganization,
             // sprk_regardingperson) are set in step 4.5 by IncomingAssociationResolver.
@@ -414,11 +450,11 @@ public sealed class IncomingCommunicationProcessor
                     ["sprk_attachmenttype"] = new OptionSetValue(100000000), // File
                 };
 
-                // Link to SPE if upload succeeded
+                // Link to SPE if upload succeeded (consistent with sprk_document naming)
                 if (fileHandle?.Id is not null)
                 {
-                    attachmentRecord["sprk_speitemid"] = fileHandle.Id;
-                    attachmentRecord["sprk_spedriveid"] = driveId;
+                    attachmentRecord["sprk_graphitemid"] = fileHandle.Id;
+                    attachmentRecord["sprk_graphdriveid"] = driveId;
                 }
 
                 await _dataverseService.CreateAsync(attachmentRecord, ct);
@@ -506,8 +542,8 @@ public sealed class IncomingCommunicationProcessor
             ["sprk_documenttype"] = new OptionSetValue(100000002), // Communication
             ["sprk_sourcetype"] = new OptionSetValue(100000001), // CommunicationArchive
             ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
-            ["sprk_speitemid"] = fileHandle?.Id,
-            ["sprk_spedriveid"] = driveId,
+            ["sprk_graphitemid"] = fileHandle?.Id,
+            ["sprk_graphdriveid"] = driveId,
         };
 
         var documentId = await _dataverseService.CreateAsync(document, ct);

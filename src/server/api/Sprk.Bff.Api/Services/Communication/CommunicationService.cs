@@ -977,8 +977,8 @@ public sealed class CommunicationService
             ["sprk_documenttype"] = new OptionSetValue(100000002), // Communication
             ["sprk_sourcetype"] = new OptionSetValue(100000001), // CommunicationArchive
             ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
-            ["sprk_speitemid"] = fileHandle?.Id,
-            ["sprk_spedriveid"] = driveId,
+            ["sprk_graphitemid"] = fileHandle?.Id,
+            ["sprk_graphdriveid"] = driveId,
         };
 
         var documentId = await _dataverseService.CreateAsync(document, ct);
@@ -1062,8 +1062,8 @@ public sealed class CommunicationService
                     ["sprk_documenttype"] = new OptionSetValue(100000000), // General
                     ["sprk_sourcetype"] = new OptionSetValue(100000001), // CommunicationArchive
                     ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
-                    ["sprk_speitemid"] = speItemId,
-                    ["sprk_spedriveid"] = driveId,
+                    ["sprk_graphitemid"] = speItemId,
+                    ["sprk_graphdriveid"] = driveId,
                 };
 
                 var documentId = await _dataverseService.CreateAsync(attachmentDoc, ct);

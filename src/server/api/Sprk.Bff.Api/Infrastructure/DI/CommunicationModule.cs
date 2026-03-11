@@ -1,7 +1,6 @@
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Communication;
-using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -32,8 +31,13 @@ public static class CommunicationModule
 
         // Job handler: processes incoming email notifications from Graph webhooks (Task 072)
         // Extracts message details from Graph, creates sprk_communication record, handles attachments.
-        // JobType: "IncomingCommunication" (enqueued by HandleIncomingWebhookAsync)
-        services.AddScoped<IJobHandler, IncomingCommunicationJobHandler>();
+        // JobType: "IncomingCommunication" — processed by dedicated CommunicationJobProcessor (not shared queue).
+        // Registered as concrete type for direct resolution (no GetServices<IJobHandler> enumeration).
+        services.AddScoped<IncomingCommunicationJobHandler>();
+
+        // Background service: dedicated processor for the sdap-communication queue
+        // Isolates email job processing from the shared sdap-jobs queue to prevent cross-domain failures.
+        services.AddHostedService<CommunicationJobProcessor>();
 
         // Background service: manages Graph webhook subscriptions for inbound email monitoring (ADR-001)
         services.AddHostedService<GraphSubscriptionManager>();
