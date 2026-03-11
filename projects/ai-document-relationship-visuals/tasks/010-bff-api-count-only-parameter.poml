@@ -1,0 +1,100 @@
+<task id="010" project="ai-document-relationship-visuals">
+  <metadata>
+    <title>Add countOnly Parameter to BFF API Visualization Endpoint</title>
+    <phase>2</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>bff-api, api</tags>
+    <dependencies></dependencies>
+    <blocks>011, 031</blocks>
+    <status>not-started</status>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include bff-api; modifies .cs files; ADR-001/008/010 compliance</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Add countOnly query parameter to GET /api/ai/visualization/related/{documentId} endpoint</goal>
+    <context>
+      <background>
+        The BFF API has an existing visualization endpoint that returns document relationship
+        graph data (nodes, edges, metadata). This task adds a countOnly parameter that when
+        true, skips the graph topology computation and returns only metadata with totalResults.
+        This provides a fast path (~50-200ms) for the RelatedDocumentCount PCF card.
+
+        When countOnly=true:
+        - Skip graph node/edge computation
+        - Return: { nodes: [], edges: [], metadata: { totalResults: N, ... } }
+        - Target response time: less than 200ms
+      </background>
+      <relevant-files>
+        <file>src/server/api/Sprk.Bff.Api/</file>
+        <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      </relevant-files>
+    </context>
+    <constraints>
+      <constraint source="ADR-001">Must use Minimal API pattern (.MapGet)</constraint>
+      <constraint source="ADR-001">Must return ProblemDetails for all errors</constraint>
+      <constraint source="ADR-008">Must use endpoint filters for authorization, not global middleware</constraint>
+      <constraint source="ADR-010">If adding new service, register as concrete in feature module</constraint>
+      <constraint source="ADR-010">Keep DI registrations at or below 15 non-framework lines</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-relationship-visuals/spec.md</file>
+      <file>projects/ai-document-relationship-visuals/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-008.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern>api/endpoint-definition.md</pattern>
+      <pattern>api/endpoint-filters.md</pattern>
+      <pattern>api/error-handling.md</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Find the existing visualization endpoint handler for GET /api/ai/visualization/related/{documentId}</step>
+    <step order="2">Read the endpoint handler to understand current implementation</step>
+    <step order="3">Add countOnly boolean query parameter to the endpoint signature</step>
+    <step order="4">Implement early return when countOnly=true:
+      - Call only the count/metadata portion of the service
+      - Return empty nodes[] and edges[] with populated metadata
+      - Ensure totalResults is accurate</step>
+    <step order="5">Verify endpoint filter authorization still applies to countOnly path</step>
+    <step order="6">Return ProblemDetails on any errors (ADR-001)</step>
+    <step order="7">Test locally with curl or API client:
+      - GET /api/ai/visualization/related/{id}?countOnly=true returns metadata only
+      - GET /api/ai/visualization/related/{id} still returns full graph (regression)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read, Edit for C# file modifications</tool>
+    <tool>Bash for dotnet build and test</tool>
+    <tool>Grep to find endpoint handler</tool>
+  </tools>
+
+  <outputs>
+    <output>Modified visualization endpoint with countOnly parameter</output>
+    <output>countOnly=true returns metadata-only response</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>countOnly=true returns { nodes: [], edges: [], metadata: { totalResults: N } }</criterion>
+    <criterion>countOnly=false (or omitted) returns full graph data (no regression)</criterion>
+    <criterion>Response time for countOnly less than 200ms target</criterion>
+    <criterion>ProblemDetails returned on errors</criterion>
+    <criterion>Endpoint filter authorization applied to both paths</criterion>
+    <criterion>dotnet build succeeds without warnings</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

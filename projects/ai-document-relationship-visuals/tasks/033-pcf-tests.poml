@@ -1,0 +1,78 @@
+<task id="033" project="ai-document-relationship-visuals">
+  <metadata>
+    <title>Unit Tests for RelatedDocumentCount PCF</title>
+    <phase>4</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>testing, pcf</tags>
+    <dependencies>031</dependencies>
+    <blocks>034</blocks>
+    <status>not-started</status>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Write unit tests for the RelatedDocumentCount PCF component and useRelatedDocumentCount hook</goal>
+    <context>
+      <background>
+        Test the PCF component logic:
+        - useRelatedDocumentCount hook: API call, loading state, error handling
+        - RelatedDocumentCount.tsx: renders count card, opens dialog on click
+        - PCF lifecycle: updateView returns correct element
+      </background>
+      <relevant-files>
+        <file>src/client/pcf/RelatedDocumentCount/</file>
+      </relevant-files>
+    </context>
+    <constraints>
+      <constraint source="testing.md">80%+ coverage for PCF components</constraint>
+      <constraint source="testing.md">Mock API calls and @spaarke/auth</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-relationship-visuals/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern>testing/unit-test-structure.md</pattern>
+      <pattern>testing/mocking-patterns.md</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create test file for useRelatedDocumentCount hook</step>
+    <step order="2">Test: successful API call returns count</step>
+    <step order="3">Test: loading state while API call in progress</step>
+    <step order="4">Test: error state on API failure</step>
+    <step order="5">Test: re-fetches when documentId changes</step>
+    <step order="6">Create test file for RelatedDocumentCount component</step>
+    <step order="7">Test: renders RelationshipCountCard with correct props</step>
+    <step order="8">Test: opens FindSimilarDialog on card click</step>
+    <step order="9">Run npm test -- --coverage, verify 80%+ on PCF files</step>
+  </steps>
+
+  <tools>
+    <tool>Read, Write, Edit for test files</tool>
+    <tool>Bash for npm test</tool>
+  </tools>
+
+  <outputs>
+    <output>Unit tests for useRelatedDocumentCount hook</output>
+    <output>Unit tests for RelatedDocumentCount component</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>80%+ test coverage on PCF component files</criterion>
+    <criterion>API hook tests cover success, loading, error, and refresh</criterion>
+    <criterion>Component tests verify count card rendering and dialog opening</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

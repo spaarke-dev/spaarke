@@ -111,7 +111,8 @@ public static class VisualizationEndpoints
             IncludeKeywords = query.IncludeKeywords ?? true,
             DocumentTypes = query.DocumentTypes?.ToList(),
             IncludeParentEntity = query.IncludeParentEntity ?? true,
-            RelationshipTypeFilter = query.RelationshipTypes?.ToList()
+            RelationshipTypeFilter = query.RelationshipTypes?.ToList(),
+            CountOnly = query.CountOnly ?? false
         };
 
         try
@@ -274,4 +275,12 @@ public class VisualizationQueryParameters
     /// </summary>
     [FromQuery(Name = "relationshipTypes")]
     public string[]? RelationshipTypes { get; init; }
+
+    /// <summary>
+    /// When true, returns only metadata with totalResults count.
+    /// Skips graph node/edge computation for fast count queries.
+    /// Default: false
+    /// </summary>
+    [FromQuery(Name = "countOnly")]
+    public bool? CountOnly { get; init; }
 }

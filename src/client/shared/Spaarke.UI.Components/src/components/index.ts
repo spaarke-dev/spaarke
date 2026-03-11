@@ -45,3 +45,6 @@ export * from "./AiSummaryPopover";
 
 // FindSimilarDialog - Reusable iframe dialog for DocumentRelationshipViewer
 export * from "./FindSimilarDialog";
+
+// RelationshipCountCard - Document relationship count with drill-through
+export * from "./RelationshipCountCard";
