@@ -427,9 +427,14 @@ public sealed class CommunicationService
         }
 
         // Step 2: Resolve user email from claims (no ApprovedSenderValidator for user mode)
+        // Check multiple claim types: v2.0 tokens use preferred_username/email,
+        // v1.0 tokens use upn/unique_name, ClaimTypes.Email maps to xmlsoap email claim
         var userEmail = httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
             ?? httpContext.User.FindFirst("preferred_username")?.Value
-            ?? httpContext.User.FindFirst("email")?.Value;
+            ?? httpContext.User.FindFirst("email")?.Value
+            ?? httpContext.User.FindFirst("upn")?.Value
+            ?? httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.Upn)?.Value
+            ?? httpContext.User.FindFirst("unique_name")?.Value;
 
         if (string.IsNullOrWhiteSpace(userEmail))
         {
