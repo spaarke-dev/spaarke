@@ -145,6 +145,34 @@ public class VisualizationService : IVisualizationService
             // Step 5: Merge and deduplicate relationships (hardcoded takes priority)
             var allRelationships = MergeRelationships(hardcodedRelationships, semanticRelationships, documentId.ToString());
 
+            // Step 5.5: Count-only fast path — skip graph building and metadata enrichment
+            if (options.CountOnly)
+            {
+                stopwatch.Stop();
+
+                _logger.LogInformation(
+                    "Visualization count-only completed for document {DocumentId}: {TotalResults} related ({HardcodedCount} hardcoded, {SemanticCount} semantic) in {ElapsedMs}ms",
+                    documentId, allRelationships.Count, hardcodedRelationships.Count, semanticRelationships.Count, stopwatch.ElapsedMilliseconds);
+
+                return new DocumentGraphResponse
+                {
+                    Nodes = [],
+                    Edges = [],
+                    Metadata = new GraphMetadata
+                    {
+                        SourceDocumentId = documentId.ToString(),
+                        TenantId = options.TenantId,
+                        TotalResults = allRelationships.Count,
+                        Threshold = options.Threshold,
+                        Depth = options.Depth,
+                        MaxDepthReached = allRelationships.Count > 0 ? 1 : 0,
+                        NodesPerLevel = [],
+                        SearchLatencyMs = stopwatch.ElapsedMilliseconds,
+                        CacheHit = false
+                    }
+                };
+            }
+
             // Step 6: Get Dataverse metadata for URLs and parent entity info
             var documentMetadata = await GetDocumentMetadataAsync(
                 effectiveSourceDocument, allRelationships.Select(r => (r.Document, r.Score)).ToList(), cancellationToken);

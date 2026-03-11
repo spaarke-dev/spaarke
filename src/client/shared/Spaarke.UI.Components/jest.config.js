@@ -10,6 +10,7 @@ module.exports = {
     'src/services/CommandExecutor.ts',
     'src/hooks/useVirtualization.ts',
     'src/hooks/useKeyboardShortcuts.ts',
+    'src/hooks/useForceSimulation.ts',
     'src/utils/themeDetection.ts',
     'src/components/Toolbar/CommandToolbar.tsx',
     'src/components/DatasetGrid/GridView.tsx',
@@ -39,12 +40,21 @@ module.exports = {
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
     '^diff$': '<rootDir>/src/__mocks__/diff.js'
   },
+  transformIgnorePatterns: [
+    'node_modules/(?!(d3-force|d3-dispatch|d3-quadtree|d3-timer)/)'
+  ],
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {
       tsconfig: {
         jsx: 'react',
         esModuleInterop: true,
         allowSyntheticDefaultImports: true
+      }
+    }],
+    '^.+\\.jsx?$': ['ts-jest', {
+      tsconfig: {
+        allowJs: true,
+        esModuleInterop: true
       }
     }]
   }

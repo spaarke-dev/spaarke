@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Pcf.RelatedDocumentCount" constructor="RelatedDocumentCount" version="1.0.0"
+           display-name-key="Related Document Count"
+           description-key="PCF control displaying a count of semantically related documents with drill-through"
+           control-type="virtual">
+
+    <external-service-usage enabled="true">
+      <domain>spe-api-dev-67e2xz.azurewebsites.net</domain>
+      <domain>login.microsoftonline.com</domain>
+    </external-service-usage>
+
+    <!-- Bound: Document ID from the form record -->
+    <property name="documentId" display-name-key="Document ID" description-key="Bound document ID from the form record"
+              of-type="SingleLine.Text" usage="bound" required="true" />
+
+    <!-- Input: Tenant ID for authentication -->
+    <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD tenant ID"
+              of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- Input: API Base URL -->
+    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL"
+              of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- Input: Card title override -->
+    <property name="cardTitle" display-name-key="Card Title" description-key="Title displayed on the count card"
+              of-type="SingleLine.Text" usage="input" required="false" />
+
+    <resources>
+      <code path="index.ts" order="1"/>
+      <!-- Platform-provided libraries (not bundled) per ADR-022 -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+
+    <feature-usage>
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

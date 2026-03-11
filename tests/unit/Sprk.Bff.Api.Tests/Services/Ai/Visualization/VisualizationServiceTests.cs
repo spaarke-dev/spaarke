@@ -619,6 +619,177 @@ public class VisualizationServiceTests
 
     #endregion
 
+    #region CountOnly Tests
+
+    [Fact]
+    public void VisualizationOptions_CountOnly_DefaultsToFalse()
+    {
+        // Arrange & Act
+        var options = new VisualizationOptions { TenantId = "test" };
+
+        // Assert
+        options.CountOnly.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetRelatedDocumentsAsync_CountOnlyTrue_ReturnsEmptyNodesAndEdges()
+    {
+        // Arrange
+        var service = CreateService();
+        var options = new VisualizationOptions { TenantId = _tenantId, CountOnly = true };
+
+        SetupSearchClientWithRelatedDocuments(5, 0.8);
+        SetupDataverseMetadata();
+
+        // Act
+        var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
+
+        // Assert - CountOnly returns empty nodes/edges
+        result.Should().NotBeNull();
+        result.Nodes.Should().BeEmpty();
+        result.Edges.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetRelatedDocumentsAsync_CountOnlyTrue_ReturnsTotalResultsInMetadata()
+    {
+        // Arrange
+        var service = CreateService();
+        var options = new VisualizationOptions { TenantId = _tenantId, CountOnly = true, Threshold = 0.5f };
+
+        SetupSearchClientWithRelatedDocuments(5, 0.8);
+        SetupDataverseMetadata();
+
+        // Act
+        var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
+
+        // Assert - Metadata should contain accurate totalResults count
+        result.Metadata.Should().NotBeNull();
+        result.Metadata.TotalResults.Should().BeGreaterThan(0);
+        result.Metadata.SourceDocumentId.Should().Be(_sourceDocumentId.ToString());
+        result.Metadata.TenantId.Should().Be(_tenantId);
+    }
+
+    [Fact]
+    public async Task GetRelatedDocumentsAsync_CountOnlyTrue_PopulatesSearchLatency()
+    {
+        // Arrange
+        var service = CreateService();
+        var options = new VisualizationOptions { TenantId = _tenantId, CountOnly = true };
+
+        SetupSearchClientWithRelatedDocuments(3, 0.8);
+        SetupDataverseMetadata();
+
+        // Act
+        var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
+
+        // Assert - SearchLatencyMs should be populated even in count-only mode
+        result.Metadata.SearchLatencyMs.Should().BeGreaterOrEqualTo(0);
+        result.Metadata.Threshold.Should().Be(options.Threshold);
+        result.Metadata.Depth.Should().Be(options.Depth);
+    }
+
+    [Fact]
+    public async Task GetRelatedDocumentsAsync_CountOnlyTrue_SkipsDataverseMetadataEnrichment()
+    {
+        // Arrange
+        var service = CreateService();
+        var options = new VisualizationOptions { TenantId = _tenantId, CountOnly = true, Threshold = 0.5f };
+
+        SetupSearchClientWithRelatedDocuments(3, 0.8);
+        SetupDataverseMetadata();
+
+        // Act
+        var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
+
+        // Assert - Should NOT call GetDocumentAsync for related documents (only source)
+        // Source doc is always fetched (Step 1), but related doc metadata enrichment (Step 6) is skipped
+        _dataverseServiceMock.Verify(
+            x => x.GetDocumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once); // Only the source document call
+    }
+
+    [Fact]
+    public async Task GetRelatedDocumentsAsync_CountOnlyFalse_ReturnsFullGraphData()
+    {
+        // Arrange - Regression test: default behavior unchanged
+        var service = CreateService();
+        var options = new VisualizationOptions { TenantId = _tenantId, CountOnly = false, Threshold = 0.5f };
+
+        SetupSearchClientWithRelatedDocuments(3, 0.8);
+        SetupDataverseMetadata();
+
+        // Act
+        var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
+
+        // Assert - Full graph data should be returned
+        result.Nodes.Should().NotBeEmpty();
+        result.Nodes.Should().HaveCountGreaterOrEqualTo(1); // At least source node
+        result.Metadata.TotalResults.Should().BeGreaterOrEqualTo(0);
+    }
+
+    [Fact]
+    public async Task GetRelatedDocumentsAsync_CountOnlyTrue_SourceNotFound_ReturnsEmptyWithZeroCount()
+    {
+        // Arrange
+        var service = CreateService();
+        var options = new VisualizationOptions { TenantId = _tenantId, CountOnly = true };
+
+        // Setup Dataverse to return null for source document
+        _dataverseServiceMock
+            .Setup(x => x.GetDocumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DocumentEntity?)null);
+        SetupEmptySearchClient();
+
+        // Act
+        var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
+
+        // Assert - Source not found returns empty graph with zero totalResults
+        result.Should().NotBeNull();
+        result.Nodes.Should().BeEmpty();
+        result.Edges.Should().BeEmpty();
+        result.Metadata.TotalResults.Should().Be(0);
+        result.Metadata.SourceDocumentId.Should().Be(_sourceDocumentId.ToString());
+    }
+
+    [Fact]
+    public async Task GetRelatedDocumentsAsync_CountOnlyTrue_NoRelatedDocuments_ReturnsZeroCount()
+    {
+        // Arrange
+        var service = CreateService();
+        var options = new VisualizationOptions { TenantId = _tenantId, CountOnly = true };
+
+        SetupSearchClientWithSourceDocumentOnly();
+        SetupDataverseMetadata();
+
+        // Act
+        var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
+
+        // Assert
+        result.Nodes.Should().BeEmpty();
+        result.Edges.Should().BeEmpty();
+        result.Metadata.TotalResults.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetRelatedDocumentsAsync_CountOnlyTrue_ReturnsEmptyNodesPerLevel()
+    {
+        // Arrange
+        var service = CreateService();
+        var options = new VisualizationOptions { TenantId = _tenantId, CountOnly = true, Threshold = 0.5f };
+
+        SetupSearchClientWithRelatedDocuments(3, 0.8);
+        SetupDataverseMetadata();
+
+        // Act
+        var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
+
+        // Assert - NodesPerLevel should be empty since graph is not built
+        result.Metadata.NodesPerLevel.Should().BeEmpty();
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private void SetupEmptySearchClient()
