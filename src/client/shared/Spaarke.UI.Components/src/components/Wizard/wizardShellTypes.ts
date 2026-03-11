@@ -165,6 +165,12 @@ export interface IWizardShellHandle {
    * @param stepId - The unique identifier of the step to remove.
    */
   removeDynamicStep(stepId: string): void;
+  /**
+   * Request the shell to re-render, re-evaluating `canAdvance()` and other
+   * derived values. Use this when step content changes state that affects
+   * `canAdvance()` but doesn't otherwise trigger a shell re-render.
+   */
+  requestUpdate(): void;
   /** Read-only snapshot of the current shell state. */
   readonly state: IWizardShellState;
 }

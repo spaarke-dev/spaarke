@@ -766,8 +766,8 @@ interface IDynamicStepBuildOptions {
     bffTokenProvider: () => Promise<string>;
     /** Ref that tracks whether analysis has been created (for canAdvance). */
     analysisCreatedRef: React.MutableRefObject<boolean>;
-    /** Callback to force parent re-render when analysis is created (enables Next button). */
-    onAnalysisCreated: () => void;
+    /** Ref to WizardShell handle — used to call requestUpdate() after analysis creation. */
+    wizardShellRef: React.RefObject<IWizardShellHandle | null>;
 }
 
 function buildDynamicStepConfig(
@@ -801,7 +801,7 @@ function buildDynamicStepConfig(
                     containerId={options.containerId}
                     onAnalysisCreated={() => {
                         options.analysisCreatedRef.current = true;
-                        options.onAnalysisCreated();
+                        options.wizardShellRef.current?.requestUpdate();
                     }}
                 />
             ),
@@ -846,9 +846,8 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
     // Track previous selection to diff adds/removes for dynamic steps
     const prevSelectedRef = React.useRef<NextStepActionId[]>([]);
 
-    // Ref + force-update for analysis created state (enables Next button in WizardShell)
+    // Ref that tracks whether analysis has been created (for canAdvance)
     const analysisCreatedRef = React.useRef(false);
-    const [, forceUpdate] = React.useReducer((x: number) => x + 1, 0);
 
     const handleToggle = React.useCallback(
         (id: NextStepActionId) => {
@@ -904,7 +903,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
                         bffBaseUrl,
                         bffTokenProvider,
                         analysisCreatedRef,
-                        onAnalysisCreated: forceUpdate,
+                        wizardShellRef,
                     }),
                     DYNAMIC_CANONICAL_ORDER
                 );
