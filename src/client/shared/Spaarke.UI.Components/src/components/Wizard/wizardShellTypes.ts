@@ -218,6 +218,13 @@ export interface IWizardShellProps {
   /** Title displayed in the wizard's custom title bar. */
   title: string;
   /**
+   * When `true`, hides the wizard's custom title bar. Use this when the wizard
+   * is hosted inside a Dataverse dialog that already provides its own chrome
+   * (title bar + close button via `navigateTo` target: 2).
+   * Defaults to `false`.
+   */
+  hideTitle?: boolean;
+  /**
    * Accessible label for the dialog surface. Falls back to {@link title}
    * if not provided.
    */

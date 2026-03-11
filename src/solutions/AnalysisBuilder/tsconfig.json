@@ -18,9 +18,10 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@playbook/*": ["../LegalWorkspace/src/components/Playbook/*"]
+      "@spaarke/ui-components": ["../../client/shared/Spaarke.UI.Components/src/index.ts"],
+      "@spaarke/ui-components/*": ["../../client/shared/Spaarke.UI.Components/src/*"]
     }
   },
-  "include": ["src", "../LegalWorkspace/src/components/Playbook"],
+  "include": ["src", "../../client/shared/Spaarke.UI.Components/src"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

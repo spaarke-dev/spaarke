@@ -66,6 +66,10 @@ export interface ISummaryStepProps {
     uploadedDocumentMap: Map<string, UploadedDocumentInfo>;
     /** Whether all documents have completed profiling (exposed to parent for canAdvance). */
     onProcessingChange?: (isProcessing: boolean) => void;
+    /** When true, shows a simple file list preview (no AI profiling). Used for the Review step. */
+    reviewOnly?: boolean;
+    /** Display name of the parent entity (for review summary). */
+    parentEntityName?: string;
 }
 
 /** Metadata returned after upload, needed for AI analysis. */
@@ -489,7 +493,98 @@ export function SummaryStep({
     getToken,
     uploadedDocumentMap,
     onProcessingChange,
+    reviewOnly = false,
+    parentEntityName,
 }: ISummaryStepProps): JSX.Element {
+    const styles = useStyles();
+
+    if (reviewOnly) {
+        return (
+            <ReviewOnlyStep
+                files={files}
+                parentEntityName={parentEntityName}
+            />
+        );
+    }
+
+    return (
+        <ProfileStep
+            files={files}
+            apiBaseUrl={apiBaseUrl}
+            getToken={getToken}
+            uploadedDocumentMap={uploadedDocumentMap}
+            onProcessingChange={onProcessingChange}
+        />
+    );
+}
+
+// ---------------------------------------------------------------------------
+// ReviewOnlyStep — simple file list for the Review step
+// ---------------------------------------------------------------------------
+
+function ReviewOnlyStep({
+    files,
+    parentEntityName,
+}: {
+    files: IUploadedFile[];
+    parentEntityName?: string;
+}): JSX.Element {
+    const styles = useStyles();
+    const totalSize = files.reduce((sum, f) => sum + (f.sizeBytes ?? 0), 0);
+
+    const formatSize = (bytes: number): string => {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    };
+
+    return (
+        <div className={styles.root}>
+            <div className={styles.header}>
+                <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
+                    Review
+                </Text>
+                <Text size={200} className={styles.stepSubtitle}>
+                    {parentEntityName
+                        ? `${files.length} file${files.length !== 1 ? "s" : ""} will be uploaded to ${parentEntityName}.`
+                        : `${files.length} file${files.length !== 1 ? "s" : ""} ready for upload.`}
+                </Text>
+            </div>
+            <div className={styles.cardList}>
+                {files.map((file) => (
+                    <div key={file.id} className={styles.card}>
+                        <div className={styles.cardHeader}>
+                            <DocumentRegular className={styles.cardIcon} aria-hidden="true" />
+                            <Text size={300} weight="semibold" className={styles.cardFileName} title={file.name}>
+                                {file.name}
+                            </Text>
+                            <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                                {formatSize(file.sizeBytes ?? 0)}
+                            </Text>
+                        </div>
+                    </div>
+                ))}
+            </div>
+            {files.length > 1 && (
+                <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                    Total: {formatSize(totalSize)}
+                </Text>
+            )}
+        </div>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// ProfileStep — AI profiling with streaming (Processing step)
+// ---------------------------------------------------------------------------
+
+function ProfileStep({
+    files,
+    apiBaseUrl,
+    getToken,
+    uploadedDocumentMap,
+    onProcessingChange,
+}: Omit<ISummaryStepProps, "reviewOnly" | "parentEntityName">): JSX.Element {
     const styles = useStyles();
     const hasInitialized = useRef(false);
 

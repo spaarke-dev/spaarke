@@ -496,6 +496,7 @@ const ENTITY_CONFIGS: Record<string, EntityDocumentConfig> = {
         entityName: "sprk_project",
         lookupFieldName: "sprk_project",
         relationshipSchemaName: "sprk_Project_Document_1n",
+        navigationPropertyName: "sprk_Project",
         containerIdField: "sprk_containerid",
         displayNameField: "sprk_projectname",
         entitySetName: "sprk_projects",
@@ -504,6 +505,7 @@ const ENTITY_CONFIGS: Record<string, EntityDocumentConfig> = {
         entityName: "sprk_invoice",
         lookupFieldName: "sprk_invoice",
         relationshipSchemaName: "sprk_invoice_document",
+        navigationPropertyName: "sprk_Invoice",
         containerIdField: "sprk_containerid",
         displayNameField: "sprk_invoicenumber",
         entitySetName: "sprk_invoices",
@@ -532,7 +534,22 @@ const ENTITY_CONFIGS: Record<string, EntityDocumentConfig> = {
         displayNameField: "sprk_name",
         entitySetName: "sprk_communications",
     },
+    sprk_workassignment: {
+        entityName: "sprk_workassignment",
+        lookupFieldName: "sprk_workassignment",
+        relationshipSchemaName: "sprk_WorkAssignment_Document_1n",
+        navigationPropertyName: "sprk_WorkAssignment",
+        containerIdField: "sprk_containerid",
+        displayNameField: "sprk_name",
+        entitySetName: "sprk_workassignments",
+    },
 };
+
+/**
+ * Set of entity logical names that have upload configurations.
+ * Used by AssociateToStep to filter the dropdown to only supported entities.
+ */
+export const SUPPORTED_ENTITY_TYPES = new Set(Object.keys(ENTITY_CONFIGS));
 
 /**
  * Default entity config resolver.

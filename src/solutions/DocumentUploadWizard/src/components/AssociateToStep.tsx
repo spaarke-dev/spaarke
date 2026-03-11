@@ -56,6 +56,7 @@ import {
 } from "@fluentui/react-icons";
 
 import type { IResolvedParentContext } from "../types";
+import { SUPPORTED_ENTITY_TYPES } from "../services/uploadOrchestrator";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,6 +79,23 @@ interface IRecordTypeDef {
     logicalName: string;
     displayName: string;
 }
+
+/**
+ * Entity types excluded from the Associate To dropdown.
+ * These don't make sense as document upload targets.
+ */
+const EXCLUDED_ENTITY_TYPES = new Set([
+    "sprk_document",        // Cannot associate document to document
+    "sprk_billinganalysis", // Billing Analysis is not a valid upload target
+]);
+
+/**
+ * Hardcoded entity types to include if missing from sprk_recordtype_ref.
+ * These are added as fallback entries when the Dataverse data doesn't include them.
+ */
+const REQUIRED_ENTITY_TYPES: IRecordTypeDef[] = [
+    { id: "fallback-workassignment", logicalName: "sprk_workassignment", displayName: "Work Assignment" },
+];
 
 // ---------------------------------------------------------------------------
 // Xrm helpers (frame-walking pattern from DocumentEmailStep.tsx)
@@ -268,11 +286,28 @@ export const AssociateToStep: React.FC<IAssociateToStepProps> = ({
                 const result = await xrm.WebApi.retrieveMultipleRecords("sprk_recordtype_ref", query);
                 if (cancelled) return;
 
-                const defs: IRecordTypeDef[] = result.entities.map((e) => ({
-                    id: e["sprk_recordtype_refid"] as string,
-                    logicalName: e["sprk_recordlogicalname"] as string,
-                    displayName: e["sprk_recorddisplayname"] as string,
-                }));
+                let defs: IRecordTypeDef[] = result.entities
+                    .map((e) => ({
+                        id: e["sprk_recordtype_refid"] as string,
+                        logicalName: e["sprk_recordlogicalname"] as string,
+                        displayName: e["sprk_recorddisplayname"] as string,
+                    }))
+                    .filter((d) =>
+                        !EXCLUDED_ENTITY_TYPES.has(d.logicalName) &&
+                        SUPPORTED_ENTITY_TYPES.has(d.logicalName)
+                    );
+
+                // Add required entity types that may be missing from Dataverse data
+                const existingLogicalNames = new Set(defs.map((d) => d.logicalName));
+                for (const required of REQUIRED_ENTITY_TYPES) {
+                    if (!existingLogicalNames.has(required.logicalName)) {
+                        defs.push(required);
+                    }
+                }
+
+                // Re-sort by display name after adding fallbacks
+                defs.sort((a, b) => a.displayName.localeCompare(b.displayName));
+
                 setRecordTypes(defs);
                 if (defs.length > 0 && !selectedEntityType) {
                     setSelectedEntityType(defs[0].logicalName);

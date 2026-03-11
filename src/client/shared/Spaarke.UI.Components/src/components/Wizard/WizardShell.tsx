@@ -170,6 +170,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
       open,
       embedded = false,
       title,
+      hideTitle = false,
       ariaLabel,
       steps: stepConfigs,
       onClose,
@@ -354,25 +355,27 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
 
     const innerContent = (
       <>
-        {/* Custom title bar with close button */}
-        <div className={styles.titleBar}>
-          <Text
-            as="h1"
-            size={500}
-            weight="semibold"
-            className={styles.titleText}
-          >
-            {title}
-          </Text>
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={<Dismiss24Regular />}
-            className={styles.closeButton}
-            onClick={onClose}
-            aria-label="Close dialog"
-          />
-        </div>
+        {/* Custom title bar with close button (hidden when host provides its own chrome) */}
+        {!hideTitle && (
+          <div className={styles.titleBar}>
+            <Text
+              as="h1"
+              size={500}
+              weight="semibold"
+              className={styles.titleText}
+            >
+              {title}
+            </Text>
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<Dismiss24Regular />}
+              className={styles.closeButton}
+              onClick={onClose}
+              aria-label="Close dialog"
+            />
+          </div>
+        )}
 
         {/* Sidebar + content area */}
         <div className={styles.mainArea}>

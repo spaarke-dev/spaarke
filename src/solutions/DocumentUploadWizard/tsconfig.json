@@ -16,8 +16,8 @@
     "paths": {
       "@spaarke/auth": ["../../client/shared/Spaarke.Auth/dist"],
       "@spaarke/auth/*": ["../../client/shared/Spaarke.Auth/dist/*"],
-      "@spaarke/ui-components": ["../../client/shared/Spaarke.UI.Components/dist"],
-      "@spaarke/ui-components/*": ["../../client/shared/Spaarke.UI.Components/dist/*"]
+      "@spaarke/ui-components": ["../../client/shared/Spaarke.UI.Components/src"],
+      "@spaarke/ui-components/*": ["../../client/shared/Spaarke.UI.Components/src/*"]
     },
     "typeRoots": ["./node_modules/@types"]
   },

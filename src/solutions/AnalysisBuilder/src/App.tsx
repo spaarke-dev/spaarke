@@ -27,7 +27,7 @@ import {
   loadAllData,
   loadPlaybookScopes,
   createAndAssociate,
-} from "@playbook/index";
+} from "@spaarke/ui-components/components/Playbook";
 import type {
   IPlaybook,
   IAction,
@@ -37,7 +37,7 @@ import type {
   IPlaybookScopes,
   IAnalysisConfig,
   IPlaybookData,
-} from "@playbook/index";
+} from "@spaarke/ui-components/components/Playbook";
 
 // ---------------------------------------------------------------------------
 // Declare global Xrm for Dataverse WebAPI and navigation
@@ -90,6 +90,8 @@ interface IDocumentContext {
   containerId: string;
   fileId: string;
   apiBaseUrl: string;
+  /** When "dialog", opens workspace in new tab and shows close button instead of inline nav. */
+  mode: "standalone" | "dialog";
 }
 
 function parseUrlParams(): IDocumentContext {
@@ -104,7 +106,26 @@ function parseUrlParams(): IDocumentContext {
     containerId: effective.get("containerId") ?? "",
     fileId: effective.get("fileId") ?? "",
     apiBaseUrl: effective.get("apiBaseUrl") ?? "",
+    mode: effective.get("mode") === "dialog" ? "dialog" : "standalone",
   };
+}
+
+/**
+ * Resolve the Dataverse client URL for building entity form URLs.
+ * Walks parent/top frames to find Xrm.Utility.getGlobalContext().getClientUrl().
+ */
+function getClientUrl(): string | null {
+  const tryGetUrl = (xrmObj: any): string | null => {
+    try {
+      const url = xrmObj?.Utility?.getGlobalContext?.()?.getClientUrl?.();
+      if (url) return url;
+    } catch { /* */ }
+    return null;
+  };
+  try { if (typeof Xrm !== "undefined") { const u = tryGetUrl(Xrm); if (u) return u; } } catch { /* */ }
+  try { const u = tryGetUrl((window.parent as any)?.Xrm); if (u) return u; } catch { /* */ }
+  try { const u = tryGetUrl((window.top as any)?.Xrm); if (u) return u; } catch { /* */ }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +230,7 @@ const AppContent: React.FC = () => {
 
   // --- Execution state ---
   const [isExecuting, setIsExecuting] = React.useState(false);
+  const [successMessage, setSuccessMessage] = React.useState<string | null>(null);
 
   // --- Resolve Xrm.WebApi once ---
   const webApi = React.useMemo(() => resolveWebApi(), []);
@@ -302,17 +324,27 @@ const AppContent: React.FC = () => {
 
       const analysisId = await createAndAssociate(webApi, config);
 
-      // Navigate to Analysis Workspace form
-      const nav = resolveXrmNavigation();
-      if (nav) {
-        nav.navigateTo(
-          {
-            pageType: "entityrecord",
-            entityName: "sprk_analysis",
-            entityId: analysisId,
-          },
-          { target: 1 }
-        );
+      if (docContext.mode === "dialog") {
+        // Dialog mode: open workspace in new tab and show confirmation
+        const clientUrl = getClientUrl();
+        if (clientUrl) {
+          const url = `${clientUrl}/main.aspx?etn=sprk_analysis&id=${analysisId}&pagetype=entityrecord`;
+          window.open(url, "_blank", "noopener,noreferrer");
+        }
+        setSuccessMessage("Analysis created and opened in a new tab.");
+      } else {
+        // Standalone mode: navigate to Analysis Workspace form inline
+        const nav = resolveXrmNavigation();
+        if (nav) {
+          nav.navigateTo(
+            {
+              pageType: "entityrecord",
+              entityName: "sprk_analysis",
+              entityId: analysisId,
+            },
+            { target: 1 }
+          );
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create analysis");
@@ -331,7 +363,34 @@ const AppContent: React.FC = () => {
     }
   }, []);
 
+  // --- Close handler (dialog mode) ---
+  const handleClose = React.useCallback(() => {
+    try {
+      window.close();
+    } catch {
+      window.history.back();
+    }
+  }, []);
+
   // --- Render ---
+
+  if (successMessage) {
+    return (
+      <div className={styles.root}>
+        <div className={styles.header}>
+          <Text size={500} weight="semibold">New Analysis</Text>
+        </div>
+        <div className={styles.content}>
+          <MessageBar intent="success">
+            <MessageBarBody>{successMessage}</MessageBarBody>
+          </MessageBar>
+        </div>
+        <div className={styles.footer}>
+          <Button appearance="primary" onClick={handleClose}>Close</Button>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
