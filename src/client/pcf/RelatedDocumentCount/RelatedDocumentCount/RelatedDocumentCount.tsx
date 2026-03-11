@@ -13,6 +13,7 @@
 import * as React from "react";
 import { RelationshipCountCard } from "@spaarke/ui-components/dist/components/RelationshipCountCard";
 import { FindSimilarDialog } from "@spaarke/ui-components/dist/components/FindSimilarDialog";
+import { initializeAuth } from "./authInit";
 import { useRelatedDocumentCount } from "./hooks/useRelatedDocumentCount";
 import { IRelatedDocumentCountProps } from "./types";
 
@@ -73,12 +74,27 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
     documentId,
     tenantId,
     apiBaseUrl,
-    cardTitle = "RELATED DOCUMENTS",
     isDarkMode,
 }) => {
-    // Fetch related document count from BFF API
+    // Auth initialization state — must complete before API calls
+    const [isAuthReady, setIsAuthReady] = React.useState(false);
+    const [authError, setAuthError] = React.useState<string | null>(null);
+
+    React.useEffect(() => {
+        let cancelled = false;
+        const effectiveApiBaseUrl = apiBaseUrl || "https://spe-api-dev-67e2xz.azurewebsites.net";
+        initializeAuth(effectiveApiBaseUrl)
+            .then(() => { if (!cancelled) setIsAuthReady(true); })
+            .catch((err) => {
+                console.error("[RelatedDocumentCount] Auth init failed:", err);
+                if (!cancelled) setAuthError("Authentication failed. Please refresh.");
+            });
+        return () => { cancelled = true; };
+    }, [apiBaseUrl]);
+
+    // Fetch related document count from BFF API (only after auth is ready)
     const { count, isLoading, error, lastUpdated, refetch } = useRelatedDocumentCount(
-        documentId,
+        isAuthReady ? documentId : "",
         tenantId,
         apiBaseUrl
     );
@@ -104,12 +120,16 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
         setIsDialogOpen(false);
     }, []);
 
+    // Show loading while auth initializes, or auth error if it failed
+    const effectiveIsLoading = !isAuthReady && !authError ? true : isLoading;
+    const effectiveError = authError || error;
+
     return (
-        <div data-pcf-version="1.0.2">
+        <div data-pcf-version="1.0.3">
             <RelationshipCountCard
                 count={count}
-                isLoading={isLoading}
-                error={error}
+                isLoading={effectiveIsLoading}
+                error={effectiveError}
                 onOpen={handleOpen}
                 onRefresh={refetch}
                 lastUpdated={lastUpdated ?? undefined}

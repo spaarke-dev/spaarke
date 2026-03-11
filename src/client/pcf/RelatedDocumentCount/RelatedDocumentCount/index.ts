@@ -7,7 +7,6 @@ import {
     webDarkTheme,
 } from "@fluentui/react-components";
 import { resolveTheme, setupThemeListener } from "./services/ThemeService";
-import { initializeAuth } from "./authInit";
 import { RelatedDocumentCount as RelatedDocumentCountComponent } from "./RelatedDocumentCount";
 import { IRelatedDocumentCountProps } from "./types";
 
@@ -48,10 +47,6 @@ export class RelatedDocumentCount
 
         // Resolve initial theme from context
         this._theme = resolveTheme(context);
-
-        // Initialize @spaarke/auth for MSAL token management
-        const apiBaseUrl = context.parameters.apiBaseUrl?.raw || "https://spe-api-dev-67e2xz.azurewebsites.net";
-        void initializeAuth(apiBaseUrl);
 
         // Set up theme change listener for dynamic updates
         this._cleanupThemeListener = setupThemeListener((isDark) => {
