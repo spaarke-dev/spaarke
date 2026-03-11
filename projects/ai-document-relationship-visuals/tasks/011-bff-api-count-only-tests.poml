@@ -1,0 +1,76 @@
+<task id="011" project="ai-document-relationship-visuals">
+  <metadata>
+    <title>Unit Tests for countOnly API Parameter</title>
+    <phase>2</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>testing, bff-api</tags>
+    <dependencies>010</dependencies>
+    <blocks>012</blocks>
+    <status>not-started</status>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with explicit constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Write unit tests for the countOnly parameter added to the visualization endpoint</goal>
+    <context>
+      <background>
+        Task 010 added a countOnly parameter to the BFF API visualization endpoint.
+        This task adds unit tests to verify:
+        - countOnly=true returns metadata only (empty nodes/edges)
+        - countOnly=false returns full graph (regression)
+        - Error cases return ProblemDetails
+        - Authorization still enforced on countOnly path
+      </background>
+      <relevant-files>
+        <file>tests/unit/Sprk.Bff.Api.Tests/</file>
+        <file>src/server/api/Sprk.Bff.Api/</file>
+      </relevant-files>
+    </context>
+    <constraints>
+      <constraint source="testing.md">Follow existing test patterns in tests/unit/</constraint>
+      <constraint source="ADR-001">Verify ProblemDetails on error paths</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-relationship-visuals/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+    <patterns>
+      <pattern>testing/unit-test-structure.md</pattern>
+      <pattern>testing/integration-tests.md</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Find existing tests for the visualization endpoint</step>
+    <step order="2">Add test: countOnly=true returns empty nodes/edges with metadata.totalResults</step>
+    <step order="3">Add test: countOnly=false returns full graph data (regression)</step>
+    <step order="4">Add test: countOnly=true with invalid documentId returns ProblemDetails</step>
+    <step order="5">Run dotnet test and verify all pass</step>
+  </steps>
+
+  <tools>
+    <tool>Read, Write, Edit for test files</tool>
+    <tool>Bash for dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output>Unit tests for countOnly parameter</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Tests cover countOnly=true and countOnly=false paths</criterion>
+    <criterion>Tests verify ProblemDetails on errors</criterion>
+    <criterion>All tests pass with dotnet test</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

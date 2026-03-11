@@ -1,0 +1,88 @@
+<task id="021" project="ai-document-relationship-visuals">
+  <metadata>
+    <title>Add CSV Export Service and Export Button to Grid View</title>
+    <phase>3</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>frontend, fluent-ui, code-page</tags>
+    <dependencies>003</dependencies>
+    <blocks>024</blocks>
+    <status>not-started</status>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies .tsx files; new service implementation</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Create CsvExportService and add Export button to the Grid view toolbar in the Code Page</goal>
+    <context>
+      <background>
+        Users need to export document relationship data from the Grid view for compliance
+        reporting. The export must:
+        - Download CSV of visible (filtered) documents
+        - Include columns: Document Name, Type, Similarity %, Relationship Type, Parent Entity, Modified Date
+        - Use Blob + anchor download pattern (not window.open — avoids popup blocker)
+        - Include UTF-8 BOM for Excel compatibility
+        - Filename: related-documents-{sourceDocName}-{date}.csv
+      </background>
+      <relevant-files>
+        <file>src/client/code-pages/DocumentRelationshipViewer/src/App.tsx</file>
+        <file>src/client/code-pages/DocumentRelationshipViewer/src/components/RelationshipGrid.tsx</file>
+        <file>src/client/code-pages/DocumentRelationshipViewer/src/types/graph.ts</file>
+      </relevant-files>
+    </context>
+    <constraints>
+      <constraint source="ADR-021">Export button must use Fluent v9 ToolbarButton</constraint>
+      <constraint source="spec">Export respects active filters</constraint>
+      <constraint source="spec">Support 500+ rows without issues</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-relationship-visuals/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create src/client/code-pages/DocumentRelationshipViewer/src/services/CsvExportService.ts:
+      - exportToCsv(nodes, sourceDocumentName) function
+      - Map DocumentNode data to CSV rows
+      - Add UTF-8 BOM (\uFEFF) for Excel
+      - Create Blob with text/csv type
+      - Trigger download via anchor element click
+      - Filename: related-documents-{name}-{YYYY-MM-DD}.csv</step>
+    <step order="2">Modify RelationshipGrid.tsx to expose filtered rows via callback or ref</step>
+    <step order="3">Add Export button to App.tsx toolbar (visible in Grid view only):
+      - Use Fluent v9 ToolbarButton with ArrowDownload icon
+      - onClick calls CsvExportService with current filtered nodes</step>
+    <step order="4">Test with various data sizes (10, 100, 500 rows)</step>
+    <step order="5">Verify CSV opens correctly in Excel (UTF-8 characters, column alignment)</step>
+    <step order="6">npm run build</step>
+  </steps>
+
+  <tools>
+    <tool>Read, Write, Edit for file operations</tool>
+    <tool>Bash for npm build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/code-pages/DocumentRelationshipViewer/src/services/CsvExportService.ts</output>
+    <output>Modified App.tsx with Export button</output>
+    <output>Modified RelationshipGrid.tsx to expose filtered data</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Export button visible in Grid view toolbar only</criterion>
+    <criterion>CSV includes all 6 specified columns</criterion>
+    <criterion>CSV has UTF-8 BOM for Excel compatibility</criterion>
+    <criterion>Export respects active filters</criterion>
+    <criterion>Filename follows pattern: related-documents-{name}-{date}.csv</criterion>
+    <criterion>Works with 500+ rows</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

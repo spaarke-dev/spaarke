@@ -1,0 +1,116 @@
+<task id="030" project="ai-document-relationship-visuals">
+  <metadata>
+    <title>Scaffold RelatedDocumentCount PCF Control</title>
+    <phase>4</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>pcf, frontend, fluent-ui</tags>
+    <dependencies>003</dependencies>
+    <blocks>031</blocks>
+    <status>not-started</status>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include pcf; creates new .ts/.tsx files; ADR-006/021/022 compliance</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Create the RelatedDocumentCount PCF control project scaffold with ControlManifest, featureconfig.json, package.json, and entry point</goal>
+    <context>
+      <background>
+        This is a new PCF control for the Document Main Form. It displays a count of
+        semantically related documents using the RelationshipCountCard shared component.
+        Must follow React 16 patterns (ReactControl, ReactDOM.render), declare platform
+        libraries, and use deep imports from @spaarke/ui-components.
+      </background>
+      <relevant-files>
+        <file>src/client/pcf/SemanticSearchControl/</file>
+        <file>src/client/pcf/CLAUDE.md</file>
+        <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      </relevant-files>
+    </context>
+    <constraints>
+      <constraint source="ADR-022">React 16 APIs only (ReactControl pattern, ReactDOM.render)</constraint>
+      <constraint source="ADR-022">Declare platform-library in ControlManifest.Input.xml</constraint>
+      <constraint source="ADR-022">Create featureconfig.json for ReactDOM externalization</constraint>
+      <constraint source="ADR-006">PCF for field-bound form controls; place in src/client/pcf/</constraint>
+      <constraint source="ADR-021">Fluent UI v9; dark mode; WCAG 2.1 AA</constraint>
+      <constraint source="ADR-012">Deep import: @spaarke/ui-components/dist/components/RelationshipCountCard</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-relationship-visuals/spec.md</file>
+      <file>projects/ai-document-relationship-visuals/CLAUDE.md</file>
+      <file>.claude/adr/ADR-006.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern>pcf/control-initialization.md</pattern>
+      <pattern>pcf/theme-management.md</pattern>
+      <pattern>pcf/dialog-patterns.md</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SemanticSearchControl PCF as reference for ReactControl pattern with shared components</step>
+    <step order="2">Create directory: src/client/pcf/RelatedDocumentCount/RelatedDocumentCount/</step>
+    <step order="3">Create ControlManifest.Input.xml with:
+      - namespace: Spaarke.Pcf.RelatedDocumentCount
+      - Properties: documentId (bound, SingleLine.Text), tenantId (input), apiBaseUrl (input), cardTitle (input, default "RELATED DOCUMENTS")
+      - platform-library declarations for React 16 and Fluent v9</step>
+    <step order="4">Create featureconfig.json for ReactDOM externalization</step>
+    <step order="5">Create package.json with devDependencies for React 16 types</step>
+    <step order="6">Create tsconfig.json extending PCF base config</step>
+    <step order="7">Create index.ts implementing ReactControl with:
+      - init(): initialize @spaarke/auth
+      - updateView(): return React.createElement(FluentProvider, ..., RelatedDocumentCount)
+      - getOutputs(): return selectedDocumentId if needed
+      - destroy(): cleanup</step>
+    <step order="8">Create types/index.ts with IRelatedDocumentCountProps</step>
+    <step order="9">Add project to controls.pcfproj (or create .pcfproj)</step>
+    <step order="10">Run npm install and npm run build to verify scaffold</step>
+  </steps>
+
+  <tools>
+    <tool>Read, Write for file creation</tool>
+    <tool>Bash for npm install and build</tool>
+    <tool>Glob/Grep to find reference patterns</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/pcf/RelatedDocumentCount/ — complete PCF scaffold</output>
+    <output>ControlManifest.Input.xml with properties and platform-library</output>
+    <output>featureconfig.json for ReactDOM externalization</output>
+    <output>index.ts with ReactControl lifecycle</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PCF project scaffolded in src/client/pcf/RelatedDocumentCount/</criterion>
+    <criterion>ControlManifest has documentId bound property and platform-library declarations</criterion>
+    <criterion>featureconfig.json enables ReactDOM externalization</criterion>
+    <criterion>index.ts implements ReactControl with init/updateView/destroy</criterion>
+    <criterion>npm run build succeeds</criterion>
+    <criterion>Bundle size under 5MB</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="PCF Scaffold Builds">
+      <steps>
+        <step>Run npm install in PCF directory</step>
+        <step>Run npm run build</step>
+        <step>Verify output bundle exists and is under 5MB</step>
+      </steps>
+      <expected>Clean build with no errors</expected>
+    </test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

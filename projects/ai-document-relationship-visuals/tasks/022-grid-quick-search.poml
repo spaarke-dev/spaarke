@@ -1,0 +1,85 @@
+<task id="022" project="ai-document-relationship-visuals">
+  <metadata>
+    <title>Add Quick Search Filter to Grid View</title>
+    <phase>3</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>frontend, fluent-ui, code-page</tags>
+    <dependencies>003</dependencies>
+    <blocks>024</blocks>
+    <status>not-started</status>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies .tsx files; UI interaction change</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Add a quick search text input to the toolbar that filters Grid view rows by document name</goal>
+    <context>
+      <background>
+        Users with many related documents need to quickly find specific documents in the
+        Grid view. A search input in the toolbar filters rows client-side as the user types.
+        This also feeds into the Export feature — filtered rows are what gets exported.
+      </background>
+      <relevant-files>
+        <file>src/client/code-pages/DocumentRelationshipViewer/src/App.tsx</file>
+        <file>src/client/code-pages/DocumentRelationshipViewer/src/components/RelationshipGrid.tsx</file>
+      </relevant-files>
+    </context>
+    <constraints>
+      <constraint source="ADR-021">Use Fluent v9 SearchBox or Input with search icon</constraint>
+      <constraint source="spec">Filter as user types (debounce if needed for performance)</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-relationship-visuals/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add search state to App.tsx</step>
+    <step order="2">Add Fluent v9 SearchBox (or Input with Search icon) to toolbar</step>
+    <step order="3">Pass search filter string to RelationshipGrid as prop</step>
+    <step order="4">In RelationshipGrid, filter displayed rows by document name (case-insensitive contains)</step>
+    <step order="5">Ensure filtered rows are used for CSV export (task 021)</step>
+    <step order="6">Test with various search terms, verify instant filtering</step>
+    <step order="7">npm run build</step>
+  </steps>
+
+  <tools>
+    <tool>Read, Edit for file modifications</tool>
+    <tool>Bash for npm build</tool>
+  </tools>
+
+  <outputs>
+    <output>Modified App.tsx with search input</output>
+    <output>Modified RelationshipGrid.tsx with filtering logic</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Search input visible in toolbar</criterion>
+    <criterion>Grid rows filter as user types</criterion>
+    <criterion>Case-insensitive document name matching</criterion>
+    <criterion>Clearing search shows all rows</criterion>
+    <criterion>npm run build succeeds</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Search Filters Grid">
+      <steps>
+        <step>Open Grid view with multiple documents</step>
+        <step>Type partial document name in search</step>
+        <step>Verify only matching rows displayed</step>
+        <step>Clear search, verify all rows return</step>
+      </steps>
+      <expected>Grid filters in real-time as user types</expected>
+    </test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

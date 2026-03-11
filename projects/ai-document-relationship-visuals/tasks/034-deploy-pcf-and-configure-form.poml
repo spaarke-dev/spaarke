@@ -1,0 +1,77 @@
+<task id="034" project="ai-document-relationship-visuals">
+  <metadata>
+    <title>Deploy RelatedDocumentCount PCF and Configure Document Main Form</title>
+    <phase>4</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>deploy, pcf, dataverse</tags>
+    <dependencies>033</dependencies>
+    <blocks>040</blocks>
+    <status>not-started</status>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task; uses pcf-deploy and dataverse-deploy skills</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Build, deploy the RelatedDocumentCount PCF to Dataverse, and add it to the Document Main Form</goal>
+    <context>
+      <background>
+        Deploy the completed PCF control and configure the Document entity main form
+        to include it. The PCF should be placed in a section where users can see
+        the related document count when opening a Document record.
+      </background>
+      <relevant-files>
+        <file>src/client/pcf/RelatedDocumentCount/</file>
+        <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      </relevant-files>
+    </context>
+    <constraints>
+      <constraint source="pcf-deploy">Build, copy to solution, pack, import ZIP</constraint>
+      <constraint source="PCF-DEPLOYMENT-GUIDE">Update version in 4 locations before deploy</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-relationship-visuals/CLAUDE.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Bump PCF version in 4 locations per PCF-DEPLOYMENT-GUIDE</step>
+    <step order="2">Run pcf-deploy skill: build, copy, pack, import solution ZIP</step>
+    <step order="3">Configure Document Main Form:
+      - Add a section for the RelatedDocumentCount control
+      - Bind to sprk_documentid field (or appropriate document ID field)
+      - Set tenantId and apiBaseUrl input properties</step>
+    <step order="4">Publish form customizations</step>
+    <step order="5">Test: Open a Document record, verify count card appears and loads</step>
+    <step order="6">Test: Click count card, verify FindSimilarDialog opens with viewer</step>
+  </steps>
+
+  <tools>
+    <tool>Bash for pac cli commands</tool>
+    <tool>pcf-deploy skill</tool>
+    <tool>dataverse-deploy skill</tool>
+  </tools>
+
+  <outputs>
+    <output>Deployed RelatedDocumentCount PCF to Dataverse</output>
+    <output>Document Main Form configured with PCF control</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PCF deployed to Dataverse dev environment</criterion>
+    <criterion>Document Main Form shows RelatedDocumentCount control</criterion>
+    <criterion>Count card loads with document count on form open</criterion>
+    <criterion>Click card opens FindSimilarDialog with viewer</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
