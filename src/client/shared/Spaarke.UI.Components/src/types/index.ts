@@ -10,6 +10,7 @@ export * from "./WebApiLike";
 export * from "./FetchXmlTypes";
 export * from "./ConfigurationTypes";
 export * from "./LookupTypes";
+export * from "./MiniGraphTypes";
 export { PrivilegeService } from "../services/PrivilegeService";
 export { FieldSecurityService } from "../services/FieldSecurityService";
 export { ColumnRendererService } from "../services/ColumnRendererService";

@@ -71,15 +71,52 @@ Every deployment MUST increment the version in ALL 5 files:
 
 **If you forget #1 (ControlManifest.Input.xml), Dataverse silently keeps the old control.**
 
+### Shared Library Dependency (CRITICAL)
+
+**If the PCF imports from `@spaarke/ui-components/dist/...`, you MUST compile the shared library BEFORE the PCF build.** The PCF webpack bundles pre-compiled JS from the shared lib's `dist/` folder — NOT the `.tsx` source files. If `dist/` is stale, the PCF bundle will contain OLD code regardless of how many times you rebuild.
+
+**Step 0 — Compile shared lib `dist/`:**
+
+```bash
+cd src/client/shared/Spaarke.UI.Components
+
+# Full build (if it succeeds):
+npm run build
+
+# If full build fails due to pre-existing errors in unrelated files,
+# compile ONLY the changed files with relaxed checks:
+npx tsc \
+  --target ES2020 --module ESNext --jsx react \
+  --declaration --declarationMap --sourceMap \
+  --outDir ./dist --rootDir ./src \
+  --esModuleInterop --skipLibCheck \
+  --moduleResolution node --resolveJsonModule \
+  --isolatedModules --allowSyntheticDefaultImports \
+  --strict false \
+  src/components/YourChangedComponent/YourChangedComponent.tsx \
+  src/components/AnotherChanged/AnotherChanged.tsx
+```
+
+**Verify dist/ is fresh** (timestamps must be NEWER than source edits):
+```bash
+stat -c '%y' dist/components/YourChangedComponent/YourChangedComponent.js
+stat -c '%y' src/components/YourChangedComponent/YourChangedComponent.tsx
+```
+
+**If you skip this step, changes to shared components will NOT appear in the deployed PCF.**
+
 ### Other MUST/NEVER Rules
 
-- ✅ **MUST** rebuild fresh every deployment (`npm run build:prod`)
-- ✅ **MUST** copy ALL 3 files from `out/` to Solution: `bundle.js`, `ControlManifest.xml`, `styles.css`
+- ✅ **MUST** compile shared lib `dist/` before PCF build if shared components were modified
+- ✅ **MUST** rebuild fresh every deployment (`npm run build`)
+- ✅ **MUST** copy build output files from `out/` to Solution: `bundle.js`, `ControlManifest.xml`, and `styles.css` (if produced)
 - ✅ **MUST** use `pack.ps1` (not `Compress-Archive` — backslashes break import)
 - ✅ **MUST** use unmanaged solution (ADR-022)
 - ✅ **MUST** use publisher `Spaarke` with prefix `sprk_`
+- ❌ **NEVER** use `npm run build:prod` — pcf-scripts does not have a separate production build script; use `npm run build`
 - ❌ **NEVER** use `pac pcf push` — creates temp solutions, rebuilds in dev mode
 - ❌ **NEVER** reuse old solution ZIPs
+- ❌ **NEVER** skip shared lib compilation when shared components were modified — stale `dist/` causes silent failures
 
 ---
 
@@ -116,15 +153,19 @@ All paths relative to the repository root. **Claude Code MUST use these exact pa
 
 Before building, update the version in all 5 files. The build propagates the version from `ControlManifest.Input.xml` into the build output.
 
+### Step 1.5: Compile Shared Library (if modified)
+
+If ANY files in `src/client/shared/Spaarke.UI.Components/src/` were modified, compile `dist/` BEFORE the PCF build. See "Shared Library Dependency" section above for commands.
+
 ### Step 2: Build Fresh
 
 ```bash
-cd src/client/pcf/{ControlName}/control
-rm -rf ../out/ ../bin/
-npm run build:prod
+cd src/client/pcf/{ControlName}
+rm -rf out/ bin/
+npm run build
 
-# Verify size (~200-500KB, NOT 8MB)
-ls -la ../out/controls/control/bundle.js
+# Verify size (~200-500KB field-based, 1-5MB custom page)
+ls -la out/controls/{ControlName}/bundle.js
 ```
 
 ### Step 3: Copy Build Output to Solution
@@ -281,9 +322,11 @@ When the user wants to deploy manually for fastest iteration:
 | `Root component missing for custom control` | Empty `<RootComponents />` in solution.xml | Add `<RootComponent type="66" schemaName="..." behavior="0" />` |
 | `component sprk_xyz.js of type 61 is not declared` | Web resource in customizations.xml but not in RootComponents, or GUID mismatch | **Remove all web resources from PCF solution.** PCF = PCF only. |
 | `unexpected error` (no details) | Wrong customizations.xml format OR missing [Content_Types].xml entries | Check: 1) `<Name>` child elements (not attributes), 2) `.js`/`.css` in [Content_Types].xml |
-| Bundle is 8MB | Dev build | Use `npm run build:prod`, add platform libraries |
+| Bundle is 8MB | Missing platform libraries | Ensure `<platform-library>` entries in manifest, verify `featureconfig.json` has `"pcfReactPlatformLibraries": "on"` |
 | Version didn't update in browser | ControlManifest.Input.xml version not incremented | Update #1 location FIRST, rebuild, redeploy |
 | PCF shows old behavior after import | Dataverse control cache | `pac solution delete --solution-name X` then reimport |
+| Shared component changes not appearing | Stale `dist/` in shared lib — `tsc` build failed, webpack bundled old compiled JS | **Compile shared lib `dist/` first** (see Step 1.5). Verify `dist/` timestamps are newer than source edits. |
+| Multiple rebuilds with no visible change | Same as above — shared lib `dist/` not recompiled | Check `stat -c '%y'` on dist vs src files. If dist is older, shared lib was never recompiled. |
 
 ---
 

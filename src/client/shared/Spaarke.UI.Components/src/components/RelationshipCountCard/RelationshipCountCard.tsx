@@ -21,7 +21,7 @@ import {
     mergeClasses,
 } from "@fluentui/react-components";
 import {
-    ArrowRight16Regular,
+    Open16Regular,
     ArrowSync20Regular,
     Warning20Regular,
 } from "@fluentui/react-icons";
@@ -45,6 +45,8 @@ export interface IRelationshipCountCardProps {
     onRefresh?: () => void;
     /** Timestamp of the last relationship analysis. */
     lastUpdated?: Date;
+    /** Optional graph preview element rendered above the count when count > 0. */
+    graphPreview?: React.ReactElement | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -64,7 +66,34 @@ const useStyles = makeStyles({
         display: "flex",
         alignItems: "center",
         justifyContent: "flex-end",
+        gap: tokens.spacingHorizontalXS,
     },
+    /** When graph preview is present: count left, graph right */
+    graphRow: {
+        display: "flex",
+        alignItems: "stretch",
+        gap: "0px",
+        borderRadius: tokens.borderRadiusMedium,
+        overflow: "hidden",
+    },
+    countColumn: {
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        minWidth: "56px",
+        padding: tokens.spacingVerticalS + " " + tokens.spacingHorizontalM,
+    },
+    graphPreviewContainer: {
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        flexGrow: 1,
+        minHeight: "120px",
+        overflow: "hidden",
+    },
+    /** Fallback body when no graph preview */
     body: {
         display: "flex",
         alignItems: "center",
@@ -81,6 +110,10 @@ const useStyles = makeStyles({
         fontWeight: tokens.fontWeightBold,
         lineHeight: tokens.lineHeightHero800,
         color: tokens.colorNeutralForeground1,
+    },
+    countLabel: {
+        fontSize: tokens.fontSizeBase200,
+        color: tokens.colorNeutralForeground3,
     },
     zeroCount: {
         color: tokens.colorNeutralForeground3,
@@ -107,7 +140,7 @@ const useStyles = makeStyles({
     footer: {
         display: "flex",
         alignItems: "center",
-        justifyContent: "space-between",
+        justifyContent: "flex-end",
     },
     lastUpdated: {
         color: tokens.colorNeutralForeground3,
@@ -141,27 +174,40 @@ export const RelationshipCountCard: React.FC<IRelationshipCountCardProps> = ({
     onOpen,
     onRefresh,
     lastUpdated,
+    graphPreview,
 }) => {
     const styles = useStyles();
 
-    // Refresh button (shared across states)
-    const refreshButton = onRefresh ? (
+    // Action buttons row (top-right: refresh + open)
+    const isZero = count === 0;
+    const actionRow = (
         <div className={styles.topRow}>
-            <Button
-                appearance="subtle"
-                icon={<ArrowSync20Regular />}
-                size="small"
-                onClick={onRefresh}
-                title="Refresh"
-            />
+            {onRefresh && (
+                <Button
+                    appearance="subtle"
+                    icon={<ArrowSync20Regular />}
+                    size="small"
+                    onClick={onRefresh}
+                    title="Refresh"
+                />
+            )}
+            {!isZero && !isLoading && !error && (
+                <Button
+                    appearance="subtle"
+                    icon={<Open16Regular />}
+                    size="small"
+                    onClick={onOpen}
+                    title="Open full viewer"
+                />
+            )}
         </div>
-    ) : null;
+    );
 
     // ── Loading state ────────────────────────────────────────────────────
     if (isLoading) {
         return (
             <Card className={styles.card}>
-                {refreshButton}
+                {actionRow}
                 <div className={styles.spinnerContainer}>
                     <Spinner size="small" label="Loading..." />
                 </div>
@@ -173,7 +219,7 @@ export const RelationshipCountCard: React.FC<IRelationshipCountCardProps> = ({
     if (error) {
         return (
             <Card className={styles.card}>
-                {refreshButton}
+                {actionRow}
                 <div className={styles.errorContainer}>
                     <Warning20Regular className={styles.errorIcon} />
                     <Text size={200}>{error}</Text>
@@ -183,48 +229,51 @@ export const RelationshipCountCard: React.FC<IRelationshipCountCardProps> = ({
     }
 
     // ── Normal / Zero-count state ────────────────────────────────────────
-    const isZero = count === 0;
+    const hasGraph = !isZero && graphPreview;
 
     return (
         <Card className={styles.card}>
-            {refreshButton}
-            <div className={styles.body}>
-                <div className={styles.countContainer}>
-                    <Text
-                        className={mergeClasses(
-                            styles.count,
-                            isZero && styles.zeroCount
-                        )}
-                    >
-                        {count}
-                    </Text>
-                    {isZero && (
-                        <Text size={200} className={styles.zeroLabel}>
-                            No related documents found
-                        </Text>
-                    )}
-                    {!isZero && (
-                        <Badge
-                            appearance="filled"
-                            color="brand"
-                            size="small"
-                        >
-                            found
-                        </Badge>
-                    )}
+            {actionRow}
+            {hasGraph ? (
+                /* Graph layout: count left | graph right */
+                <div className={styles.graphRow}>
+                    <div className={styles.countColumn}>
+                        <Text className={styles.count}>{count > 99 ? "99+" : count}</Text>
+                        <Text className={styles.countLabel}>Similar</Text>
+                    </div>
+                    <div className={styles.graphPreviewContainer}>
+                        {graphPreview}
+                    </div>
                 </div>
-                {!isZero && (
-                    <Button
-                        appearance="subtle"
-                        icon={<ArrowRight16Regular />}
-                        iconPosition="after"
-                        size="small"
-                        onClick={onOpen}
-                    >
-                        View
-                    </Button>
-                )}
-            </div>
+            ) : (
+                /* No-graph layout: count + badge inline */
+                <div className={styles.body}>
+                    <div className={styles.countContainer}>
+                        <Text
+                            className={mergeClasses(
+                                styles.count,
+                                isZero && styles.zeroCount
+                            )}
+                        >
+                            {count}
+                        </Text>
+                        {isZero && (
+                            <Text size={200} className={styles.zeroLabel}>
+                                No related documents found
+                            </Text>
+                        )}
+                        {!isZero && (
+                            <Badge
+                                appearance="filled"
+                                color="brand"
+                                size="small"
+                            >
+                                found
+                            </Badge>
+                        )}
+                    </div>
+                </div>
+            )}
             {lastUpdated && (
                 <div className={styles.footer}>
                     <Text className={styles.lastUpdated} size={100}>

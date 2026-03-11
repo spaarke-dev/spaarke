@@ -143,6 +143,38 @@ cd src/client/pcf/{ControlName}
 # Custom Page:  ControlManifest.Input.xml           -> output at out/controls/
 ```
 
+### Step 1.5: Compile Shared Library (if modified) — CRITICAL
+
+**If the PCF imports from `@spaarke/ui-components/dist/...` AND you modified any files in `src/client/shared/Spaarke.UI.Components/src/`, you MUST compile the shared lib `dist/` BEFORE the PCF build.**
+
+The PCF webpack bundles pre-compiled JS from `dist/` — NOT the `.tsx` source files. If `dist/` is stale, the PCF bundle will silently contain OLD code no matter how many times you rebuild the PCF.
+
+```bash
+cd src/client/shared/Spaarke.UI.Components
+
+# Option A: Full build (preferred, if it succeeds)
+npm run build
+
+# Option B: If full build fails due to pre-existing errors in unrelated files,
+# compile ONLY the changed files:
+npx tsc \
+  --target ES2020 --module ESNext --jsx react \
+  --declaration --declarationMap --sourceMap \
+  --outDir ./dist --rootDir ./src \
+  --esModuleInterop --skipLibCheck \
+  --moduleResolution node --resolveJsonModule \
+  --isolatedModules --allowSyntheticDefaultImports \
+  --strict false \
+  src/components/YourChanged/YourChanged.tsx \
+  src/types/YourTypes.ts
+```
+
+**Verify dist/ is fresh** — timestamps MUST be newer than source edits:
+```bash
+stat -c '%y' dist/components/YourChanged/YourChanged.js   # Must be newer
+stat -c '%y' src/components/YourChanged/YourChanged.tsx    # Than this
+```
+
 ### Step 2: Build Fresh
 
 ```bash
@@ -616,6 +648,8 @@ And enable in featureconfig.json:
 | `Source File does not exist` | Missing file in Controls folder | Copy ALL files from build output |
 | Version didn't update | Stale bundle copied | Rebuild fresh, copy fresh files |
 | Old features still showing | Browser cache | Hard refresh `Ctrl+Shift+R` |
+| Shared component changes not appearing | Stale `dist/` in shared lib — `tsc` build failed, webpack bundled old compiled JS | **Compile shared lib `dist/` first** (see Step 1.5). Verify `dist/` timestamps are newer than source edits with `stat -c '%y'`. |
+| Multiple rebuilds with no visible change | Same as above — shared lib `dist/` never recompiled | The PCF webpack resolves `@spaarke/ui-components/dist/...` to pre-compiled JS. If `dist/` is stale, ALL rebuilds bundle old code. |
 | pack.ps1 parsing error | Non-ASCII characters in script | Remove em dashes, smart quotes; use only ASCII |
 
 ### Orphaned Controls

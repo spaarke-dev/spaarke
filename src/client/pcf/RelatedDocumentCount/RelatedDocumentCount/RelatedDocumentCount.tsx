@@ -13,8 +13,10 @@
 import * as React from "react";
 import { RelationshipCountCard } from "@spaarke/ui-components/dist/components/RelationshipCountCard";
 import { FindSimilarDialog } from "@spaarke/ui-components/dist/components/FindSimilarDialog";
+import { MiniGraph } from "@spaarke/ui-components/dist/components/MiniGraph";
 import { initializeAuth } from "./authInit";
 import { useRelatedDocumentCount } from "./hooks/useRelatedDocumentCount";
+import { useRelatedDocumentGraphData } from "./hooks/useRelatedDocumentGraphData";
 import { IRelatedDocumentCountProps } from "./types";
 
 /**
@@ -99,6 +101,14 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
         apiBaseUrl
     );
 
+    // Phase 2: Fetch full graph data for mini preview (only after count loaded and > 0)
+    const { nodes: graphNodes, edges: graphEdges } = useRelatedDocumentGraphData(
+        documentId,
+        tenantId,
+        apiBaseUrl,
+        isAuthReady && !isLoading && count > 0
+    );
+
     // Dialog open/close state
     const [isDialogOpen, setIsDialogOpen] = React.useState(false);
 
@@ -124,8 +134,19 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
     const effectiveIsLoading = !isAuthReady && !authError ? true : isLoading;
     const effectiveError = authError || error;
 
+    // Build mini graph preview element (renders when graph data arrives)
+    const graphPreview = graphNodes.length > 0
+        ? React.createElement(MiniGraph, {
+              nodes: graphNodes,
+              edges: graphEdges,
+              width: 260,
+              height: 140,
+              onClick: handleOpen,
+          })
+        : null;
+
     return (
-        <div data-pcf-version="1.0.4">
+        <div data-pcf-version="1.0.15">
             <RelationshipCountCard
                 count={count}
                 isLoading={effectiveIsLoading}
@@ -133,6 +154,7 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
                 onOpen={handleOpen}
                 onRefresh={refetch}
                 lastUpdated={lastUpdated ?? undefined}
+                graphPreview={graphPreview}
             />
             <FindSimilarDialog
                 open={isDialogOpen}
