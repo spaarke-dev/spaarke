@@ -68,8 +68,9 @@ export class RelatedDocumentCount
         this._context = context;
         this._theme = resolveTheme(context);
 
-        // Read properties from manifest
-        const documentId = context.parameters.documentId?.raw ?? "";
+        // Read document ID from form context (not from bound field - field may not exist on entity)
+        const pageContext = (context as unknown as { page?: { entityId?: string } }).page;
+        const documentId = pageContext?.entityId ?? "";
         const tenantId = context.parameters.tenantId?.raw ?? undefined;
         const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? undefined;
         const cardTitle = context.parameters.cardTitle?.raw ?? undefined;

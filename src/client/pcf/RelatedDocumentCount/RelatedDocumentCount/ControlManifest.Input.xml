@@ -10,9 +10,9 @@
       <domain>login.microsoftonline.com</domain>
     </external-service-usage>
 
-    <!-- Bound: Document ID from the form record -->
-    <property name="documentId" display-name-key="Document ID" description-key="Bound document ID from the form record"
-              of-type="SingleLine.Text" usage="bound" required="true" />
+    <!-- Bound: placeholder field (PCF requires a bound property; actual document ID read from context.page.entityId) -->
+    <property name="documentId" display-name-key="Document ID" description-key="Placeholder bound field - document ID is read from form context at runtime"
+              of-type="SingleLine.Text" usage="bound" required="false" />
 
     <!-- Input: Tenant ID for authentication -->
     <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD tenant ID"
