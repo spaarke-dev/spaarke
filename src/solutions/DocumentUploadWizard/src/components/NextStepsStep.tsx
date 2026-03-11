@@ -764,6 +764,10 @@ interface IDynamicStepBuildOptions {
     uploadedDocumentMap?: Map<string, UploadedDocumentInfo>;
     bffBaseUrl: string;
     bffTokenProvider: () => Promise<string>;
+    /** Ref that tracks whether analysis has been created (for canAdvance). */
+    analysisCreatedRef: React.MutableRefObject<boolean>;
+    /** Callback to force parent re-render when analysis is created (enables Next button). */
+    onAnalysisCreated: () => void;
 }
 
 function buildDynamicStepConfig(
@@ -786,17 +790,19 @@ function buildDynamicStepConfig(
     }
 
     if (actionId === "work-on-analysis") {
-        const analysisCreatedRef = { current: false };
         return {
             id: stepId,
             label: stepLabel,
-            canAdvance: () => analysisCreatedRef.current,
+            canAdvance: () => options.analysisCreatedRef.current,
             isSkippable: true,
             renderContent: () => (
                 <WorkOnAnalysisStepContent
                     successfulFiles={options.successfulFiles ?? []}
                     containerId={options.containerId}
-                    onAnalysisCreated={() => { analysisCreatedRef.current = true; }}
+                    onAnalysisCreated={() => {
+                        options.analysisCreatedRef.current = true;
+                        options.onAnalysisCreated();
+                    }}
                 />
             ),
         };
@@ -839,6 +845,10 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
 
     // Track previous selection to diff adds/removes for dynamic steps
     const prevSelectedRef = React.useRef<NextStepActionId[]>([]);
+
+    // Ref + force-update for analysis created state (enables Next button in WizardShell)
+    const analysisCreatedRef = React.useRef(false);
+    const [, forceUpdate] = React.useReducer((x: number) => x + 1, 0);
 
     const handleToggle = React.useCallback(
         (id: NextStepActionId) => {
@@ -893,6 +903,8 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
                         uploadedDocumentMap,
                         bffBaseUrl,
                         bffTokenProvider,
+                        analysisCreatedRef,
+                        onAnalysisCreated: forceUpdate,
                     }),
                     DYNAMIC_CANONICAL_ORDER
                 );
