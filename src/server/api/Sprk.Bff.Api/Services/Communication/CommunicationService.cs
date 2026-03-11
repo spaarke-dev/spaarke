@@ -729,11 +729,10 @@ public sealed class CommunicationService
             ["sprk_correlationid"] = correlationId
         };
 
-        // Set sprk_sentby to user's Azure AD object ID (if available)
-        if (!string.IsNullOrWhiteSpace(userObjectId))
-        {
-            communication["sprk_sentby"] = userObjectId;
-        }
+        // Note: sprk_sentby is a lookup field (EntityReference), not a string.
+        // Setting the user's Azure AD object ID as a string would cause a Dataverse validation error.
+        // TODO: Resolve systemuser ID from Azure AD oid to set sprk_sentby as EntityReference.
+        // For now, store the sender identity in sprk_from (string field) which is already set above.
 
         // Only set CC/BCC if provided
         if (request.Cc is { Length: > 0 })

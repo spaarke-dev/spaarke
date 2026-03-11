@@ -334,7 +334,7 @@ public sealed class GraphSubscriptionManager : BackgroundService
         {
             ["sprk_subscriptionid"] = subscriptionId,
             ["sprk_subscriptionexpiry"] = expiry.UtcDateTime,
-            ["sprk_subscriptionstatus"] = new OptionSetValue(100000000) // Active
+            ["sprk_subscriptionstatus"] = new OptionSetValue(100000) // Active
         };
 
         await _dataverseService.UpdateAsync("sprk_communicationaccount", accountId, fields, ct);
