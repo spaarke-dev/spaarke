@@ -20,6 +20,20 @@ param dataverseUrl = 'https://REPLACE_ORG.crm.dynamics.com'
 param containerTypeId = ''
 
 // ============================================================================
+// COMMUNICATION (Email Processing - REQUIRED for email features)
+// ============================================================================
+
+// SPE container/drive ID for email archival (from SPE provisioning)
+param communicationArchiveContainerId = ''
+
+// Default mailbox for sending/receiving email (shared mailbox with Graph access)
+// Example: 'mailbox-central@contoso.com'
+param communicationDefaultMailbox = 'REPLACE_MAILBOX_EMAIL'
+
+// Display name for the default mailbox (shown in From field)
+param communicationDefaultDisplayName = 'REPLACE_MAILBOX_DISPLAY_NAME'
+
+// ============================================================================
 // DEPLOYMENT OPTIONS (Can customize based on customer needs)
 // ============================================================================
 

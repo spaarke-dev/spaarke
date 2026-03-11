@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication;
 
 namespace Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -27,7 +29,13 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 public class IncomingCommunicationJobHandler : IJobHandler
 {
     private readonly IncomingCommunicationProcessor _processor;
+    private readonly IGraphClientFactory _graphClientFactory;
     private readonly ILogger<IncomingCommunicationJobHandler> _logger;
+
+    // Matches a GUID pattern (user object ID from Graph resource path)
+    private static readonly Regex GuidPattern = new(
+        @"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+        RegexOptions.Compiled);
 
     /// <summary>
     /// Job type constant - must match JobTypeIncomingCommunication in CommunicationEndpoints.
@@ -36,9 +44,11 @@ public class IncomingCommunicationJobHandler : IJobHandler
 
     public IncomingCommunicationJobHandler(
         IncomingCommunicationProcessor processor,
+        IGraphClientFactory graphClientFactory,
         ILogger<IncomingCommunicationJobHandler> logger)
     {
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
+        _graphClientFactory = graphClientFactory ?? throw new ArgumentNullException(nameof(graphClientFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -69,7 +79,7 @@ public class IncomingCommunicationJobHandler : IJobHandler
             }
 
             var messageId = payload.MessageId;
-            var mailboxEmail = ExtractMailboxFromResource(payload.Resource);
+            var mailboxIdentifier = ExtractMailboxFromResource(payload.Resource);
 
             if (string.IsNullOrEmpty(messageId))
             {
@@ -82,7 +92,7 @@ public class IncomingCommunicationJobHandler : IJobHandler
                     job.Attempt, stopwatch.Elapsed);
             }
 
-            if (string.IsNullOrEmpty(mailboxEmail))
+            if (string.IsNullOrEmpty(mailboxIdentifier))
             {
                 _logger.LogError(
                     "Could not extract mailbox email from Resource '{Resource}' in job {JobId}",
@@ -91,6 +101,18 @@ public class IncomingCommunicationJobHandler : IJobHandler
                     job.JobId, JobType,
                     $"Could not extract mailbox email from Resource: {payload.Resource}",
                     job.Attempt, stopwatch.Elapsed);
+            }
+
+            // Graph webhook resource paths may contain a user object ID (GUID) instead of
+            // an email address. When detected, resolve to the actual email via Graph API.
+            var mailboxEmail = mailboxIdentifier;
+            if (GuidPattern.IsMatch(mailboxIdentifier))
+            {
+                _logger.LogDebug(
+                    "Mailbox identifier is a GUID ({Identifier}), resolving to email address",
+                    mailboxIdentifier);
+
+                mailboxEmail = await ResolveUserGuidToEmailAsync(mailboxIdentifier, ct);
             }
 
             _logger.LogInformation(
@@ -153,6 +175,48 @@ public class IncomingCommunicationJobHandler : IJobHandler
         return nextSlash > emailStart
             ? resource[emailStart..nextSlash]
             : resource[emailStart..]; // email is the last segment (unlikely but safe)
+    }
+
+    /// <summary>
+    /// Resolves a Graph user object ID (GUID) to an email address via Graph API.
+    /// Graph webhook resource paths use the user's object ID, not their email.
+    /// This method calls Graph to get the user's mail or userPrincipalName.
+    /// </summary>
+    private async Task<string> ResolveUserGuidToEmailAsync(
+        string userObjectId, CancellationToken ct)
+    {
+        try
+        {
+            var graphClient = _graphClientFactory.ForApp();
+            var user = await graphClient.Users[userObjectId]
+                .GetAsync(config =>
+                {
+                    config.QueryParameters.Select = new[] { "mail", "userPrincipalName" };
+                }, ct);
+
+            // Prefer mail (the actual mailbox address), fall back to UPN
+            var email = user?.Mail ?? user?.UserPrincipalName;
+            if (!string.IsNullOrEmpty(email))
+            {
+                _logger.LogInformation(
+                    "Resolved user GUID {UserObjectId} to email {Email} via Graph API",
+                    userObjectId, email);
+                return email;
+            }
+
+            _logger.LogWarning(
+                "Graph user {UserObjectId} has no mail or UPN; using GUID as identifier",
+                userObjectId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to resolve user GUID {UserObjectId} via Graph API; using GUID as identifier",
+                userObjectId);
+        }
+
+        return userObjectId;
     }
 
     private IncomingCommunicationPayload? ParsePayload(JsonDocument? payload)

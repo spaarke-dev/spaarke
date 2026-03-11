@@ -12,7 +12,17 @@
       "Grep(**)",
       "Skill(*)",
       "Task(*)",
-      "Bash"
+      "Bash",
+      "Bash(az rest --method get --url 'https://spaarkedev1.crm.dynamics.com/api/data/v9.2/EntityDefinitions\\(LogicalName='\"''\"'sprk_communication'\"''\"'\\)/Attributes?$select=LogicalName,AttributeType&$filter=startswith\\(LogicalName,'\"''\"'sprk_'\"''\"'\\)' --resource \"https://spaarkedev1.crm.dynamics.com\" -o json)",
+      "Bash(az servicebus queue list --namespace-name spe-servicebus-dev-67e2xz -g spe-infrastructure-westus2 --query \"[].name\" -o tsv)",
+      "Bash(az keyvault secret show --vault-name spaarke-spekvcert --name ServiceBus-ConnectionString --query \"value\" -o tsv)",
+      "Bash(az servicebus queue list --namespace-name spaarke-servicebus-dev -g spe-infrastructure-westus2 --query \"[].name\" -o tsv)",
+      "Bash(az resource list -g spe-infrastructure-westus2 --resource-type Microsoft.ServiceBus/namespaces --query \"[].name\" -o tsv)",
+      "Bash(az resource list -g spe-infrastructure-westus2 --query \"[?type==''Microsoft.ServiceBus/namespaces''].name\" -o tsv)",
+      "Bash(az resource list --query \"[?type==''Microsoft.ServiceBus/namespaces''].{name:name,group:resourceGroup}\" -o table)",
+      "Bash(az servicebus queue list --namespace-name spaarke-servicebus-dev -g SharePointEmbedded --query \"[].name\" -o tsv)",
+      "Bash(az monitor app-insights component list --resource-group spe-infrastructure-westus2 --query \"[].name\" -o tsv)",
+      "Bash(az monitor app-insights component show --resource-group spe-infrastructure-westus2 --query \"[].name\" -o tsv)"
     ]
   }
 }

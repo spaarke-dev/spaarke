@@ -1,8 +1,10 @@
+using Microsoft.Extensions.Options;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication.Models;
 
@@ -34,7 +36,7 @@ public sealed class GraphSubscriptionManager : BackgroundService
         CommunicationAccountService accountService,
         IGraphClientFactory graphClientFactory,
         IDataverseService dataverseService,
-        IConfiguration configuration,
+        IOptions<CommunicationOptions> communicationOptions,
         ILogger<GraphSubscriptionManager> logger)
     {
         _accountService = accountService ?? throw new ArgumentNullException(nameof(accountService));
@@ -42,10 +44,9 @@ public sealed class GraphSubscriptionManager : BackgroundService
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        _notificationUrl = configuration["Communication:WebhookNotificationUrl"]
-            ?? throw new InvalidOperationException("Communication:WebhookNotificationUrl not configured");
-        _clientState = configuration["Communication:WebhookClientState"]
-            ?? throw new InvalidOperationException("Communication:WebhookClientState not configured");
+        var options = communicationOptions?.Value ?? throw new ArgumentNullException(nameof(communicationOptions));
+        _notificationUrl = options.WebhookNotificationUrl;
+        _clientState = options.WebhookClientState;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -325,16 +326,16 @@ public sealed class GraphSubscriptionManager : BackgroundService
 
     /// <summary>
     /// Updates the sprk_communicationaccount record in Dataverse with subscription info.
-    /// Uses sprk_subscriptionid and sprk_subscriptionexpiry fields.
+    /// Uses sprk_graphsubscriptionid and sprk_graphsubscriptionexpiry fields.
     /// </summary>
     private async Task UpdateAccountSubscriptionAsync(
         Guid accountId, string subscriptionId, DateTimeOffset expiry, CancellationToken ct)
     {
         var fields = new Dictionary<string, object>
         {
-            ["sprk_subscriptionid"] = subscriptionId,
-            ["sprk_subscriptionexpiry"] = expiry.UtcDateTime,
-            ["sprk_subscriptionstatus"] = new OptionSetValue(100000) // Active
+            ["sprk_graphsubscriptionid"] = subscriptionId,
+            ["sprk_graphsubscriptionexpiry"] = expiry.UtcDateTime,
+            ["sprk_graphsubscriptionstatus"] = new OptionSetValue(100000000) // Active
         };
 
         await _dataverseService.UpdateAsync("sprk_communicationaccount", accountId, fields, ct);

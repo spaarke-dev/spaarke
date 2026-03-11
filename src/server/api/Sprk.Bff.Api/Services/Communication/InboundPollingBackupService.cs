@@ -227,10 +227,10 @@ public sealed class InboundPollingBackupService : BackgroundService
                 MaxAttempts = 3
             };
 
-            await _jobSubmissionService.SubmitJobAsync(job, ct);
+            await _jobSubmissionService.SubmitCommunicationJobAsync(job, ct);
 
             _logger.LogInformation(
-                "Enqueued IncomingCommunicationJob from polling | MessageId={MessageId}, " +
+                "Enqueued IncomingCommunicationJob to communication queue from polling | MessageId={MessageId}, " +
                 "Subject='{Subject}', Account={AccountId} ({Email}), " +
                 "correlation {CorrelationId}",
                 messageId, message.Subject, account.Id, account.EmailAddress, correlationIdForJob);

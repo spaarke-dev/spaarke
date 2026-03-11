@@ -14,6 +14,7 @@ public class JobSubmissionService
     private readonly ServiceBusClient _serviceBusClient;
     private readonly ILogger<JobSubmissionService> _logger;
     private readonly string _queueName;
+    private readonly string _communicationQueueName;
 
     public JobSubmissionService(
         IOptions<ServiceBusOptions> serviceBusOptions,
@@ -25,8 +26,11 @@ public class JobSubmissionService
 
         var options = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
         _queueName = options.QueueName;
+        _communicationQueueName = options.CommunicationQueueName;
 
-        _logger.LogInformation("Job submission configured with Service Bus (Queue: {Queue})", _queueName);
+        _logger.LogInformation(
+            "Job submission configured with Service Bus (Queue: {Queue}, CommunicationQueue: {CommQueue})",
+            _queueName, _communicationQueueName);
     }
 
     /// <summary>
@@ -48,14 +52,31 @@ public class JobSubmissionService
             throw new ArgumentException("Job.JobType cannot be null or empty", nameof(job));
         }
 
-        await SubmitToServiceBusAsync(job, ct);
+        await SubmitToQueueAsync(job, _queueName, ct);
     }
 
-    private async Task SubmitToServiceBusAsync(JobContract job, CancellationToken ct)
+    /// <summary>
+    /// Submits a communication job to the dedicated communication queue.
+    /// Isolates email processing from the shared job queue to prevent cross-domain failures.
+    /// </summary>
+    public async Task SubmitCommunicationJobAsync(JobContract job, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+
+        if (job.JobId == Guid.Empty)
+            throw new ArgumentException("Job.JobId cannot be empty", nameof(job));
+
+        if (string.IsNullOrWhiteSpace(job.JobType))
+            throw new ArgumentException("Job.JobType cannot be null or empty", nameof(job));
+
+        await SubmitToQueueAsync(job, _communicationQueueName, ct);
+    }
+
+    private async Task SubmitToQueueAsync(JobContract job, string queueName, CancellationToken ct)
     {
         try
         {
-            var sender = _serviceBusClient!.CreateSender(_queueName);
+            var sender = _serviceBusClient!.CreateSender(queueName);
 
             // Serialize job to JSON
             var messageBody = JsonSerializer.Serialize(job, new JsonSerializerOptions
@@ -82,13 +103,13 @@ public class JobSubmissionService
 
             _logger.LogInformation(
                 "Job {JobId} ({JobType}) submitted to Service Bus queue {QueueName} with idempotency key {IdempotencyKey}",
-                job.JobId, job.JobType, _queueName, job.IdempotencyKey);
+                job.JobId, job.JobType, queueName, job.IdempotencyKey);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
                 "Failed to submit job {JobId} ({JobType}) to Service Bus queue {QueueName}",
-                job.JobId, job.JobType, _queueName);
+                job.JobId, job.JobType, queueName);
             throw;
         }
     }

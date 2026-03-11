@@ -25,6 +25,14 @@ public class ServiceBusOptions
     public string QueueName { get; set; } = string.Empty;
 
     /// <summary>
+    /// Dedicated Service Bus queue for communication/email jobs.
+    /// Isolates email processing from the shared job queue to prevent
+    /// cross-domain failures (e.g., a broken finance handler blocking email processing).
+    /// Default: "sdap-communication"
+    /// </summary>
+    public string CommunicationQueueName { get; set; } = "sdap-communication";
+
+    /// <summary>
     /// Maximum number of concurrent message processing calls.
     /// Range: 1-100
     /// Recommended: 5 for staging, 10+ for production
