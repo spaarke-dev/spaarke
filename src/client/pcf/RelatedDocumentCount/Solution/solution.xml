@@ -85,7 +85,7 @@
       </Addresses>
     </Publisher>
     <RootComponents>
-      <RootComponent type="66" schemaName="sprk_Spaarke.Pcf.RelatedDocumentCount" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Pcf.RelatedDocumentCount.RelatedDocumentCount" behavior="0" />
     </RootComponents>
     <MissingDependencies />
   </SolutionManifest>

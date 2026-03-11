@@ -13,8 +13,8 @@
   <optionsets />
   <CustomControls>
     <CustomControl>
-      <Name>sprk_Spaarke.Pcf.RelatedDocumentCount</Name>
-      <FileName>/Controls/sprk_Spaarke.Pcf.RelatedDocumentCount/ControlManifest.xml</FileName>
+      <Name>sprk_Spaarke.Pcf.RelatedDocumentCount.RelatedDocumentCount</Name>
+      <FileName>/Controls/sprk_Spaarke.Pcf.RelatedDocumentCount.RelatedDocumentCount/ControlManifest.xml</FileName>
     </CustomControl>
   </CustomControls>
   <EntityDataProviders />

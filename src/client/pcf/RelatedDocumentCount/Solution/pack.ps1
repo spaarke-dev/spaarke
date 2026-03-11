@@ -33,10 +33,10 @@ try {
     }
 
     # Add control files (bundle.js, ControlManifest.xml, styles.css)
-    $controlsDir = Join-Path $PSScriptRoot 'Controls\sprk_Spaarke.Pcf.RelatedDocumentCount'
+    $controlsDir = Join-Path $PSScriptRoot 'Controls\sprk_Spaarke.Pcf.RelatedDocumentCount.RelatedDocumentCount'
     if (Test-Path $controlsDir) {
         Get-ChildItem -Path $controlsDir -File | ForEach-Object {
-            $entryName = 'Controls/sprk_Spaarke.Pcf.RelatedDocumentCount/' + $_.Name
+            $entryName = 'Controls/sprk_Spaarke.Pcf.RelatedDocumentCount.RelatedDocumentCount/' + $_.Name
             Write-Host "  Adding: $entryName"
             [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
                 $zip, $_.FullName, $entryName, [System.IO.Compression.CompressionLevel]::Optimal
