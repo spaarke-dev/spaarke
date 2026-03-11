@@ -21,8 +21,8 @@ import {
     mergeClasses,
 } from "@fluentui/react-components";
 import {
-    DocumentSearch20Regular,
     ArrowRight16Regular,
+    ArrowSync20Regular,
     Warning20Regular,
 } from "@fluentui/react-icons";
 
@@ -31,7 +31,7 @@ import {
 // ---------------------------------------------------------------------------
 
 export interface IRelationshipCountCardProps {
-    /** Card title. Defaults to "RELATED DOCUMENTS". */
+    /** Card title — no longer displayed but kept for API compatibility. */
     title?: string;
     /** Number of semantically related documents. */
     count: number;
@@ -41,6 +41,8 @@ export interface IRelationshipCountCardProps {
     error?: string | null;
     /** Called when the user clicks to open/drill-through to related documents. */
     onOpen: () => void;
+    /** Called when the user clicks the refresh button. */
+    onRefresh?: () => void;
     /** Timestamp of the last relationship analysis. */
     lastUpdated?: Date;
 }
@@ -58,19 +60,10 @@ const useStyles = makeStyles({
         minWidth: "200px",
         cursor: "default",
     },
-    header: {
+    topRow: {
         display: "flex",
         alignItems: "center",
-        gap: tokens.spacingHorizontalS,
-    },
-    headerIcon: {
-        color: tokens.colorBrandForeground1,
-    },
-    title: {
-        fontWeight: tokens.fontWeightSemibold,
-        color: tokens.colorNeutralForeground2,
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
+        justifyContent: "flex-end",
     },
     body: {
         display: "flex",
@@ -90,6 +83,9 @@ const useStyles = makeStyles({
         color: tokens.colorNeutralForeground1,
     },
     zeroCount: {
+        color: tokens.colorNeutralForeground3,
+    },
+    zeroLabel: {
         color: tokens.colorNeutralForeground3,
     },
     spinnerContainer: {
@@ -139,25 +135,33 @@ function formatLastUpdated(date: Date): string {
 // ---------------------------------------------------------------------------
 
 export const RelationshipCountCard: React.FC<IRelationshipCountCardProps> = ({
-    title = "RELATED DOCUMENTS",
     count,
     isLoading = false,
     error,
     onOpen,
+    onRefresh,
     lastUpdated,
 }) => {
     const styles = useStyles();
+
+    // Refresh button (shared across states)
+    const refreshButton = onRefresh ? (
+        <div className={styles.topRow}>
+            <Button
+                appearance="subtle"
+                icon={<ArrowSync20Regular />}
+                size="small"
+                onClick={onRefresh}
+                title="Refresh"
+            />
+        </div>
+    ) : null;
 
     // ── Loading state ────────────────────────────────────────────────────
     if (isLoading) {
         return (
             <Card className={styles.card}>
-                <div className={styles.header}>
-                    <DocumentSearch20Regular className={styles.headerIcon} />
-                    <Text className={styles.title} size={200}>
-                        {title}
-                    </Text>
-                </div>
+                {refreshButton}
                 <div className={styles.spinnerContainer}>
                     <Spinner size="small" label="Loading..." />
                 </div>
@@ -169,12 +173,7 @@ export const RelationshipCountCard: React.FC<IRelationshipCountCardProps> = ({
     if (error) {
         return (
             <Card className={styles.card}>
-                <div className={styles.header}>
-                    <DocumentSearch20Regular className={styles.headerIcon} />
-                    <Text className={styles.title} size={200}>
-                        {title}
-                    </Text>
-                </div>
+                {refreshButton}
                 <div className={styles.errorContainer}>
                     <Warning20Regular className={styles.errorIcon} />
                     <Text size={200}>{error}</Text>
@@ -188,12 +187,7 @@ export const RelationshipCountCard: React.FC<IRelationshipCountCardProps> = ({
 
     return (
         <Card className={styles.card}>
-            <div className={styles.header}>
-                <DocumentSearch20Regular className={styles.headerIcon} />
-                <Text className={styles.title} size={200}>
-                    {title}
-                </Text>
-            </div>
+            {refreshButton}
             <div className={styles.body}>
                 <div className={styles.countContainer}>
                     <Text
@@ -204,6 +198,11 @@ export const RelationshipCountCard: React.FC<IRelationshipCountCardProps> = ({
                     >
                         {count}
                     </Text>
+                    {isZero && (
+                        <Text size={200} className={styles.zeroLabel}>
+                            No related documents found
+                        </Text>
+                    )}
                     {!isZero && (
                         <Badge
                             appearance="filled"
@@ -226,11 +225,6 @@ export const RelationshipCountCard: React.FC<IRelationshipCountCardProps> = ({
                     </Button>
                 )}
             </div>
-            {isZero && (
-                <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-                    No related documents found
-                </Text>
-            )}
             {lastUpdated && (
                 <div className={styles.footer}>
                     <Text className={styles.lastUpdated} size={100}>

@@ -77,7 +77,7 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
     isDarkMode,
 }) => {
     // Fetch related document count from BFF API
-    const { count, isLoading, error, lastUpdated } = useRelatedDocumentCount(
+    const { count, isLoading, error, lastUpdated, refetch } = useRelatedDocumentCount(
         documentId,
         tenantId,
         apiBaseUrl
@@ -105,13 +105,13 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
     }, []);
 
     return (
-        <div data-pcf-version="1.0.1">
+        <div data-pcf-version="1.0.2">
             <RelationshipCountCard
-                title={cardTitle}
                 count={count}
                 isLoading={isLoading}
                 error={error}
                 onOpen={handleOpen}
+                onRefresh={refetch}
                 lastUpdated={lastUpdated ?? undefined}
             />
             <FindSimilarDialog
