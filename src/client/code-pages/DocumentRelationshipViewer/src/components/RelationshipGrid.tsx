@@ -35,6 +35,7 @@ import {
     Code20Regular,
     FolderZip20Regular,
     DocumentQuestionMark20Regular,
+    Eye20Regular,
 } from "@fluentui/react-icons";
 import type { DocumentNode, DocumentNodeData } from "../types/graph";
 
@@ -65,6 +66,9 @@ const useStyles = makeStyles({
     },
     grid: {
         width: "100%",
+        "& th, & td": {
+            paddingRight: "10px",
+        },
     },
     emptyState: {
         display: "flex",
@@ -90,9 +94,6 @@ const useStyles = makeStyles({
         textOverflow: "ellipsis",
         whiteSpace: "nowrap",
     },
-    sourceBadge: {
-        flexShrink: 0,
-    },
     similarityHigh: { color: tokens.colorStatusSuccessForeground1, fontWeight: tokens.fontWeightSemibold },
     similarityMed: { color: tokens.colorBrandForeground1, fontWeight: tokens.fontWeightSemibold },
     similarityLow: { color: tokens.colorStatusWarningForeground1 },
@@ -107,6 +108,12 @@ const useStyles = makeStyles({
         ":hover": {
             backgroundColor: tokens.colorNeutralBackground1Hover,
         },
+    },
+    previewIcon: {
+        color: tokens.colorNeutralForeground3,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
     },
 });
 
@@ -183,9 +190,6 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes, searc
                     <div className={styles.nameCell}>
                         <span className={styles.nameIcon}>{getFileIcon(row.data.fileType ?? "file")}</span>
                         <Text className={styles.nameText} title={row.data.name}>{row.data.name}</Text>
-                        {row.data.isSource && (
-                            <Badge className={styles.sourceBadge} appearance="filled" color="brand" size="small">Source</Badge>
-                        )}
                     </div>
                 </TableCellLayout>
             ),
@@ -256,15 +260,25 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes, searc
                 </TableCellLayout>
             ),
         }),
+        createTableColumn<GridRow>({
+            columnId: "preview",
+            renderHeaderCell: () => "Preview",
+            renderCell: () => (
+                <TableCellLayout>
+                    <span className={styles.previewIcon}><Eye20Regular /></span>
+                </TableCellLayout>
+            ),
+        }),
     ], [styles, handleRowClickInternal]);
 
     const columnSizingOptions: TableColumnSizingOptions = useMemo(() => ({
-        name:         { defaultWidth: 400, minWidth: 200, idealWidth: 400 },
+        name:         { defaultWidth: 700, minWidth: 300, idealWidth: 700 },
         relationship: { defaultWidth: 160, minWidth: 100, idealWidth: 160 },
         similarity:   { defaultWidth: 100, minWidth: 80,  idealWidth: 100 },
         type:         { defaultWidth: 100, minWidth: 80,  idealWidth: 100 },
         parent:       { defaultWidth: 180, minWidth: 100, idealWidth: 180 },
         modified:     { defaultWidth: 130, minWidth: 100, idealWidth: 130 },
+        preview:      { defaultWidth: 70,  minWidth: 60,  idealWidth: 70 },
     }), []);
 
     if (rows.length === 0) {

@@ -16,7 +16,7 @@
  *   - Node action bar: open record, view file, expand
  */
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
     makeStyles,
     tokens,
@@ -35,12 +35,12 @@ import {
 } from "@fluentui/react-components";
 import type { SearchBoxChangeEvent, InputOnChangeData } from "@fluentui/react-components";
 import {
-    NetworkCheck20Regular,
-    Grid20Regular,
     Filter20Regular,
     FilterDismiss20Regular,
     ArrowDownload20Regular,
     ArrowSync20Regular,
+    Search20Regular,
+    Dismiss20Regular,
 } from "@fluentui/react-icons";
 import { DocumentGraph } from "./components/DocumentGraph";
 import { RelationshipGrid, type GridRow } from "./components/RelationshipGrid";
@@ -52,9 +52,29 @@ import { ControlPanel, DEFAULT_FILTER_SETTINGS, DOCUMENT_TYPES, type FilterSetti
 import { useVisualizationApi, formatVisualizationError } from "./hooks/useVisualizationApi";
 import { initializeAuth, getToken } from "./services/authInit";
 import { exportToCsv } from "./services/CsvExportService";
-import { createFilePreviewServices } from "./services/FilePreviewServiceAdapter";
-import { FilePreviewDialog } from "../../../shared/Spaarke.UI.Components/dist/components/FilePreview";
+import { authenticatedFetch } from "./services/authInit";
+import { FilePreviewDialog } from "./components/FilePreviewDialog";
 import type { DocumentNode } from "./types/graph";
+
+/** Inline SVG icon: table/grid view (matches Fluent 20px icon style) */
+const TableViewIcon: React.FC = () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M3 4.5C3 3.67 3.67 3 4.5 3h11c.83 0 1.5.67 1.5 1.5v11c0 .83-.67 1.5-1.5 1.5h-11C3.67 17 3 16.33 3 15.5v-11zM4.5 4a.5.5 0 00-.5.5V7h12V4.5a.5.5 0 00-.5-.5h-11zM16 8H4v3h12V8zm0 4H4v3.5a.5.5 0 00.5.5h11a.5.5 0 00.5-.5V12z" fill="currentColor"/>
+        <path d="M8 8v7M12 8v7" stroke="currentColor" strokeWidth="1"/>
+    </svg>
+);
+
+/** Inline SVG icon: graph/network view (matches Fluent 20px icon style) */
+const GraphViewIcon: React.FC = () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="10" cy="5" r="2.5" stroke="currentColor" strokeWidth="1.2"/>
+        <circle cx="5" cy="14" r="2.5" stroke="currentColor" strokeWidth="1.2"/>
+        <circle cx="15" cy="14" r="2.5" stroke="currentColor" strokeWidth="1.2"/>
+        <line x1="10" y1="7.5" x2="6.5" y2="11.5" stroke="currentColor" strokeWidth="1.2"/>
+        <line x1="10" y1="7.5" x2="13.5" y2="11.5" stroke="currentColor" strokeWidth="1.2"/>
+        <line x1="7.5" y1="14" x2="12.5" y2="14" stroke="currentColor" strokeWidth="1.2"/>
+    </svg>
+);
 
 const DEFAULT_API_BASE_URL = "https://spe-api-dev-67e2xz.azurewebsites.net";
 
@@ -73,15 +93,17 @@ const useStyles = makeStyles({
         height: "100vh",
         backgroundColor: tokens.colorNeutralBackground1,
         overflow: "hidden",
+        padding: "10px",
+        boxSizing: "border-box",
     },
     toolbar: {
         display: "flex",
         alignItems: "center",
-        height: "37px",
+        height: "47px",
         padding: `0 ${tokens.spacingHorizontalM}`,
         borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
         backgroundColor: tokens.colorNeutralBackground2,
-        gap: tokens.spacingHorizontalS,
+        gap: tokens.spacingHorizontalM,
         flexShrink: 0,
     },
     main: {
@@ -132,7 +154,7 @@ const useStyles = makeStyles({
     },
     viewToggle: {
         display: "flex",
-        gap: tokens.spacingHorizontalXXS,
+        gap: tokens.spacingHorizontalS,
     },
     viewButton: {
         minWidth: "auto",
@@ -141,21 +163,16 @@ const useStyles = makeStyles({
         backgroundColor: tokens.colorBrandBackground2,
         color: tokens.colorBrandForeground1,
     },
-    searchBox: {
-        minWidth: "200px",
-        maxWidth: "300px",
-    },
     toolbarSpacer: {
         flex: 1,
     },
-    gridToolbar: {
+    searchContainer: {
+        position: "relative",
         display: "flex",
         alignItems: "center",
-        gap: tokens.spacingHorizontalS,
-        padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-        backgroundColor: tokens.colorNeutralBackground1,
-        flexShrink: 0,
+    },
+    searchBox: {
+        width: "400px",
     },
 });
 
@@ -178,6 +195,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
     const [filters, setFilters] = useState<FilterSettings>(DEFAULT_FILTER_SETTINGS);
     const [selectedNode, setSelectedNode] = useState<DocumentNode | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
+    const [isSearchExpanded, setIsSearchExpanded] = useState(false);
     const filteredRowsRef = useRef<GridRow[]>([]);
 
     // File preview dialog state
@@ -185,9 +203,6 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
     const [previewDocumentName, setPreviewDocumentName] = useState<string>("");
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
     const [previewInWorkspace, setPreviewInWorkspace] = useState(false);
-
-    // FilePreviewDialog services adapter (memoized)
-    const filePreviewServices = useMemo(() => createFilePreviewServices(apiBaseUrl), [apiBaseUrl]);
 
     // Auth initialization — uses @spaarke/auth (multi-tenant, no hardcoded values)
     useEffect(() => {
@@ -253,6 +268,93 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
         setPreviewDocumentId(null);
     }, []);
 
+    // FilePreviewDialog callbacks (PCF-style interface)
+    const fetchPreviewUrl = useCallback(async (): Promise<string | null> => {
+        if (!previewDocumentId) return null;
+        try {
+            const res = await authenticatedFetch(`${apiBaseUrl}/api/documents/${previewDocumentId}/preview-url`);
+            if (!res.ok) return null;
+            const data = await res.json();
+            return data.previewUrl ?? data.url ?? null;
+        } catch {
+            console.error("[FilePreview] Failed to get preview URL:", previewDocumentId);
+            return null;
+        }
+    }, [previewDocumentId, apiBaseUrl]);
+
+    const handleOpenFile = useCallback((mode: "desktop" | "web") => {
+        if (!previewDocumentId) return;
+        void (async () => {
+            try {
+                const res = await authenticatedFetch(`${apiBaseUrl}/api/documents/${encodeURIComponent(previewDocumentId)}/open-links`);
+                if (!res.ok) return;
+                const links = await res.json();
+                // Desktop protocol available (Word, Excel, PowerPoint) — open in native app
+                if (links.desktopUrl) {
+                    window.open(links.desktopUrl, "_self");
+                    return;
+                }
+                // No desktop protocol — download via BFF /content endpoint and let OS open
+                // (e.g. Adobe Acrobat for PDFs). SPE webUrl requires SharePoint permissions
+                // users may not have, so we stream through the BFF.
+                try {
+                    const contentUrl = `${apiBaseUrl}/api/documents/${encodeURIComponent(previewDocumentId)}/content`;
+                    const response = await authenticatedFetch(contentUrl);
+                    if (response.ok) {
+                        const blob = await response.blob();
+                        const objectUrl = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = objectUrl;
+                        a.download = links.fileName ?? previewDocumentName ?? "document";
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(objectUrl);
+                        return;
+                    }
+                } catch (err) {
+                    console.error("[FilePreview] Download failed, falling back:", err);
+                }
+                // Final fallback to webUrl
+                if (links.webUrl) {
+                    window.open(links.webUrl, "_blank", "noopener,noreferrer");
+                }
+            } catch {
+                console.error("[FilePreview] Failed to get open links:", previewDocumentId);
+            }
+        })();
+    }, [previewDocumentId, previewDocumentName, apiBaseUrl]);
+
+    const handleOpenRecord = useCallback(() => {
+        if (!previewDocumentId) return;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const xrm = (window as any).Xrm;
+        if (xrm?.Navigation?.openForm) {
+            xrm.Navigation.openForm({ entityName: "sprk_document", entityId: previewDocumentId });
+        } else {
+            const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
+            window.open(`${clientUrl}/main.aspx?etn=sprk_document&id=${previewDocumentId}&pagetype=entityrecord`, "_blank");
+        }
+    }, [previewDocumentId]);
+
+    const handleEmailDocument = useCallback(() => {
+        // Email not yet implemented in viewer context — stub
+        console.log("[FilePreview] Email not implemented for viewer context");
+    }, []);
+
+    const handleCopyLink = useCallback(() => {
+        if (!previewDocumentId) return;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const xrm = (window as any).Xrm;
+        const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
+        const url = `${clientUrl}/main.aspx?etn=sprk_document&id=${previewDocumentId}&pagetype=entityrecord`;
+        void navigator.clipboard.writeText(url);
+    }, [previewDocumentId]);
+
+    const handleToggleWorkspace = useCallback(() => {
+        setPreviewInWorkspace((prev) => !prev);
+    }, []);
+
     const handleFilterChange = useCallback((newFilters: FilterSettings) => {
         setFilters(newFilters);
         setSelectedNode(null);
@@ -301,25 +403,80 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
         );
     }
 
+    // Filter graph nodes by search query (case-insensitive name match)
+    const filteredGraphNodes = React.useMemo(() => {
+        if (!searchQuery || searchQuery.trim() === "") return nodes;
+        const query = searchQuery.toLowerCase();
+        return nodes.filter((n) => n.data.isSource || n.data.name.toLowerCase().includes(query));
+    }, [nodes, searchQuery]);
+
+    // Filter edges to only include those between visible nodes
+    const filteredGraphEdges = React.useMemo(() => {
+        if (!searchQuery || searchQuery.trim() === "") return edges;
+        const visibleIds = new Set(filteredGraphNodes.map((n) => n.id));
+        return edges.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target));
+    }, [edges, filteredGraphNodes, searchQuery]);
+
     const relatedCount = nodes.filter((n) => !n.data.isSource).length;
     const edgeCount = edges.length;
 
     return (
         <div className={styles.root}>
-            {/* Toolbar: [Refresh] | ——spacer—— [Grid] [Graph] [Network] [Timeline] [Settings] */}
+            {/* Toolbar: [Refresh] [Search] [Export] | ——spacer—— [Grid] [Graph] [Settings] */}
             <div className={styles.toolbar}>
-                {/* Left: Refresh */}
-                <Tooltip content="Refresh data" relationship="label">
+                {/* Left: Refresh + Search + Export */}
+                <Tooltip content="Refresh the page" relationship="label">
                     <Button
                         appearance="subtle"
                         size="small"
                         icon={<ArrowSync20Regular />}
                         onClick={refetch}
-                        aria-label="Refresh"
-                    >
-                        Refresh
-                    </Button>
+                        aria-label="Refresh the page"
+                    />
                 </Tooltip>
+                <div className={styles.searchContainer}>
+                    {isSearchExpanded ? (
+                        <>
+                            <SearchBox
+                                className={styles.searchBox}
+                                placeholder="Search documents..."
+                                size="small"
+                                value={searchQuery}
+                                onChange={handleSearchChange}
+                                aria-label="Filter the list of documents"
+                                autoFocus
+                            />
+                            <Button
+                                appearance="subtle"
+                                size="small"
+                                icon={<Dismiss20Regular />}
+                                onClick={() => { setIsSearchExpanded(false); setSearchQuery(""); }}
+                                aria-label="Close search"
+                            />
+                        </>
+                    ) : (
+                        <Tooltip content="Filter the list of documents" relationship="label">
+                            <Button
+                                appearance="subtle"
+                                size="small"
+                                icon={<Search20Regular />}
+                                onClick={() => setIsSearchExpanded(true)}
+                                aria-label="Filter the list of documents"
+                            />
+                        </Tooltip>
+                    )}
+                </div>
+                {viewMode === "grid" && (
+                    <Tooltip content="Export the list of documents" relationship="label">
+                        <Button
+                            appearance="subtle"
+                            size="small"
+                            icon={<ArrowDownload20Regular />}
+                            onClick={handleExport}
+                            aria-label="Export the list of documents"
+                        />
+                    </Tooltip>
+                )}
                 <ToolbarDivider />
 
                 {/* Spacer */}
@@ -327,31 +484,27 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
 
                 {/* Right: View toggles + Settings */}
                 <div className={styles.viewToggle}>
-                    <Tooltip content="Grid view" relationship="label">
+                    <Tooltip content="View documents in grid" relationship="label">
                         <Button
                             className={`${styles.viewButton} ${viewMode === "grid" ? styles.activeViewButton : ""}`}
                             appearance={viewMode === "grid" ? "primary" : "subtle"}
                             size="small"
-                            icon={<Grid20Regular />}
+                            icon={<TableViewIcon />}
                             onClick={() => setViewMode("grid")}
-                            aria-label="Grid view"
+                            aria-label="View documents in grid"
                             aria-pressed={viewMode === "grid"}
-                        >
-                            Grid
-                        </Button>
+                        />
                     </Tooltip>
-                    <Tooltip content="Graph view" relationship="label">
+                    <Tooltip content="View documents in node graph visual" relationship="label">
                         <Button
                             className={`${styles.viewButton} ${viewMode === "graph" ? styles.activeViewButton : ""}`}
                             appearance={viewMode === "graph" ? "primary" : "subtle"}
                             size="small"
-                            icon={<NetworkCheck20Regular />}
+                            icon={<GraphViewIcon />}
                             onClick={() => setViewMode("graph")}
-                            aria-label="Graph view"
+                            aria-label="View documents in node graph visual"
                             aria-pressed={viewMode === "graph"}
-                        >
-                            Graph
-                        </Button>
+                        />
                     </Tooltip>
                 </div>
                 <Tooltip content={showFilterPanel ? "Hide settings" : "Show settings"} relationship="label">
@@ -365,31 +518,6 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
                     />
                 </Tooltip>
             </div>
-
-            {/* Grid-specific inline toolbar (search + export) */}
-            {viewMode === "grid" && (
-                <div className={styles.gridToolbar}>
-                    <SearchBox
-                        className={styles.searchBox}
-                        placeholder="Search documents..."
-                        size="small"
-                        value={searchQuery}
-                        onChange={handleSearchChange}
-                        aria-label="Search documents by name"
-                    />
-                    <Tooltip content="Export filtered rows to CSV" relationship="label">
-                        <Button
-                            appearance="subtle"
-                            size="small"
-                            icon={<ArrowDownload20Regular />}
-                            onClick={handleExport}
-                            aria-label="Export to CSV"
-                        >
-                            Export
-                        </Button>
-                    </Tooltip>
-                </div>
-            )}
 
             {/* Auth or API error */}
             {(authError ?? (error && !isLoading)) && (
@@ -417,8 +545,8 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
                         </div>
                     ) : viewMode === "graph" ? (
                         <DocumentGraph
-                            nodes={nodes}
-                            edges={edges}
+                            nodes={filteredGraphNodes}
+                            edges={filteredGraphEdges}
                             isDarkMode={isDarkMode}
                             onNodeSelect={handleNodeSelect}
                             showMinimap
@@ -468,11 +596,14 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
                 <FilePreviewDialog
                     open={isPreviewOpen}
                     documentName={previewDocumentName}
-                    documentId={previewDocumentId}
-                    isInWorkspace={previewInWorkspace}
-                    services={filePreviewServices}
                     onClose={handlePreviewClose}
-                    onWorkspaceFlagChanged={(newFlag: boolean) => setPreviewInWorkspace(newFlag)}
+                    fetchPreviewUrl={fetchPreviewUrl}
+                    onOpenFile={handleOpenFile}
+                    onOpenRecord={handleOpenRecord}
+                    onEmailDocument={handleEmailDocument}
+                    onCopyLink={handleCopyLink}
+                    onToggleWorkspace={handleToggleWorkspace}
+                    isInWorkspace={previewInWorkspace}
                 />
             )}
         </div>

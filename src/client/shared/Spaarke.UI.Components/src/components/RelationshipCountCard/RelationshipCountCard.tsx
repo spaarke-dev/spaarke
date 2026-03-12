@@ -17,7 +17,6 @@ import {
     Text,
     Spinner,
     Button,
-    Badge,
     mergeClasses,
 } from "@fluentui/react-components";
 import {
@@ -265,13 +264,7 @@ export const RelationshipCountCard: React.FC<IRelationshipCountCardProps> = ({
                             </Text>
                         )}
                         {!isZero && (
-                            <Badge
-                                appearance="filled"
-                                color="brand"
-                                size="small"
-                            >
-                                found
-                            </Badge>
+                            <Text className={styles.countLabel}>Similar</Text>
                         )}
                     </div>
                 </div>

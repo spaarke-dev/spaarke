@@ -13,6 +13,11 @@ module.exports = {
   resolve: {
     extensions: ['.ts', '.tsx', '.js', '.jsx'],
     alias: {
+      // Deduplicate shared dependencies — shared libs have their own node_modules
+      // copies which causes hooks, context, and portal issues across boundaries
+      'react': path.resolve(__dirname, 'node_modules/react'),
+      'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
+      '@fluentui/react-components': path.resolve(__dirname, 'node_modules/@fluentui/react-components'),
       '@spaarke/auth': path.resolve(__dirname, '../../shared/Spaarke.Auth/dist'),
       '@spaarke/ui-components': path.resolve(__dirname, '../../shared/Spaarke.UI.Components/dist'),
     },

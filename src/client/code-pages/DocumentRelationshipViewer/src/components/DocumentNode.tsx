@@ -9,14 +9,13 @@ import React from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import {
     makeStyles, tokens, Card, CardHeader, Badge, Caption1,
-    Body1Strong, mergeClasses, Link, Tooltip,
+    Body1Strong, mergeClasses,
 } from "@fluentui/react-components";
 import {
     Document20Regular, DocumentPdf20Regular, Image20Regular, DocumentText20Regular,
     Folder20Regular, Table20Regular, SlideText20Regular, Mail20Regular, Code20Regular,
     FolderZip20Regular, Video20Regular, DocumentQuestionMark20Regular,
     Briefcase24Regular, Building24Regular, Receipt24Regular, MailInbox24Regular,
-    Eye16Regular,
 } from "@fluentui/react-icons";
 import type { DocumentNode as TDocumentNode, DocumentNodeData } from "../types/graph";
 import { isParentHubNode, type NodeType } from "../types/api";
@@ -73,20 +72,24 @@ const useStyles = makeStyles({
     sourceCard: {
         backgroundColor: tokens.colorBrandBackground,
         border: `2px solid ${tokens.colorBrandStroke1}`,
+        boxShadow: "none",
         "& *": { color: tokens.colorNeutralForegroundOnBrand },
     },
     relatedCard: {
         backgroundColor: tokens.colorNeutralBackground1,
         border: `1px solid ${tokens.colorNeutralStroke1}`,
+        boxShadow: "none",
     },
     orphanCard: {
         backgroundColor: tokens.colorNeutralBackground2,
         border: `2px dashed ${tokens.colorNeutralStroke2}`,
+        boxShadow: "none",
         opacity: 0.9,
     },
     parentHubCard: {
         backgroundColor: tokens.colorPaletteGreenBackground2,
         border: `2px solid ${tokens.colorPaletteGreenBorder2}`,
+        boxShadow: "none",
         minWidth: "120px",
         maxWidth: "150px",
     },
@@ -143,13 +146,6 @@ const useStyles = makeStyles({
     },
     sourceFooter: { borderTop: `1px solid ${tokens.colorBrandStroke2}` },
     orphanBadge: { fontSize: tokens.fontSizeBase100 },
-    openLink: {
-        display: "flex", alignItems: "center", gap: tokens.spacingHorizontalXXS,
-        fontSize: tokens.fontSizeBase100, textDecoration: "none",
-        color: tokens.colorBrandForegroundLink, cursor: "pointer", marginLeft: "auto",
-        "&:hover": { textDecoration: "underline" },
-    },
-    sourceOpenLink: { color: tokens.colorNeutralForegroundOnBrand, opacity: 0.9 },
     footerRow: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalXS, width: "100%" },
     infoIcon: {
         display: "flex", alignItems: "center", justifyContent: "center",
@@ -212,13 +208,7 @@ export const DocumentNode: React.FC<NodeProps<TDocumentNode>> = ({ data, selecte
     const compactMode = data.compactMode ?? false;
     const nodeType = data.nodeType ?? (isSource ? "source" : isOrphanFile ? "orphan" : "related");
     const isParentHub = isParentHubNode(nodeType);
-    const recordUrl = data.recordUrl;
     const tooltipContent = buildTooltipContent(data, styles);
-
-    const handleOpenRecord = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (recordUrl) window.open(recordUrl, "_blank", "noopener,noreferrer");
-    };
 
     if (compactMode) {
         return (
@@ -271,7 +261,6 @@ export const DocumentNode: React.FC<NodeProps<TDocumentNode>> = ({ data, selecte
                             {data.relationshipTypes && data.relationshipTypes.length > 0 ? (
                                 data.relationshipTypes.slice(0, 2).map(renderRelationshipIndicator)
                             ) : isOrphanFile ? <Badge className={styles.orphanBadge} appearance="outline" color="warning" size="small">File only</Badge> : <span />}
-                            <Link className={styles.openLink} onClick={(e) => e.stopPropagation()} title="Preview document"><Eye16Regular /></Link>
                         </div>
                     </div>
                 )}
@@ -279,7 +268,6 @@ export const DocumentNode: React.FC<NodeProps<TDocumentNode>> = ({ data, selecte
                     <div className={mergeClasses(styles.footer, styles.sourceFooter)}>
                         <div className={styles.footerRow}>
                             <Badge appearance="filled" color="brand" size="small">Source</Badge>
-                            <Link className={mergeClasses(styles.openLink, styles.sourceOpenLink)} onClick={(e) => e.stopPropagation()} title="Preview document"><Eye16Regular /></Link>
                         </div>
                     </div>
                 )}
