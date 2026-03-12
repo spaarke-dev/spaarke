@@ -1,6 +1,6 @@
 # Communication Account Administration Guide - Release 2
 
-> **Last Updated**: March 9, 2026
+> **Last Updated**: March 12, 2026
 > **Purpose**: Complete administrative guide for managing the Email Communication Service R2 in Dataverse — covering communication account management, send modes, inbound monitoring, document archival, verification, and troubleshooting.
 > **Applies To**: Dev environment (`spaarkedev1.crm.dynamics.com`, `spe-api-dev-67e2xz.azurewebsites.net`)
 > **Release**: R2 (replaces email activities, Server-Side Sync retirement)
@@ -323,20 +323,22 @@ Check the **My Communications** view (activity-based) or create a custom view to
 
 When incoming email arrives, the BFF API automatically attempts to link it to relevant Dataverse entities (matters, contacts, accounts, etc.) using a priority cascade:
 
-### Resolution Cascade (Priority Order)
+### Resolution Cascade (3-Level Priority)
 
-1. **Thread Match** — If In-Reply-To header references an existing `sprk_graphmessageid`, link to that communication's associated entity
-2. **Sender Match** — If email is from a contact/account already in Dataverse, auto-link to that entity
-3. **Subject Pattern** — If subject contains a known matter ID or pattern, auto-link
-4. **Mailbox Context** — If the account has default associations (rare), use those
+1. **Thread Match** — If `In-Reply-To` header references an existing `sprk_internetmessageid` (or fallback `sprk_graphmessageid`), copy the parent record's associations
+2. **Sender Match** — Query `contact` by sender email; query `account` by sender domain (skips common providers like gmail.com, outlook.com)
+3. **Subject Pattern** — Regex match against subject line for matter reference numbers (e.g., `MAT-123`, `Matter #123`, `SPRK-456`, `[MATTER:789]`)
+
+**No default-matter fallback**: Shared mailboxes are not matter-specific. Unassociated emails remain with `sprk_associationstatus = Pending Review` for manual triage.
 
 ### What Gets Linked
 
 The system populates association fields on the incoming `sprk_communication` record:
-- `sprk_regardingobjectid` — Primary associated entity (matter, contact, account, etc.)
-- `sprk_contactid` — If sender is a known contact
-- `sprk_accountid` — If sender is from a known account
-- Additional association fields as configured
+- `sprk_regarding{entity}` — Entity-specific lookup fields (8 supported entity types)
+- `sprk_regardingrecordname` — Denormalized display name of primary association
+- `sprk_regardingrecordid` — Denormalized GUID of primary association
+- `sprk_regardingrecordurl` — Denormalized URL for primary association
+- `sprk_associationstatus` — Resolved (100000000) or Pending Review (100000001)
 
 ### Limitations & Scope
 
@@ -482,13 +484,26 @@ Replace `{account-id}` with the `sprk_communicationaccountid` GUID.
 
 The `GraphSubscriptionManager` background service automatically handles the complete lifecycle:
 
-1. **On BFF Startup**: Queries all receive-enabled accounts and creates subscriptions for those without one
-2. **Every 30 Minutes**: Checks subscription status and:
-   - Creates new subscriptions for accounts without one
-   - Renews subscriptions when expiry < 24 hours away
-   - Recreates subscriptions that failed or expired
+1. **On BFF Startup**: Waits 10 seconds for dependencies to warm up, then runs the first cycle
+2. **Every 30 Minutes**: Runs two phases:
+   - **Phase 1 — Orphan Cleanup**: Lists ALL Graph subscriptions, identifies any whose `NotificationUrl` matches the configured webhook URL but are NOT tracked in any Dataverse account record, and deletes them. This prevents duplicate webhook notifications from accumulated orphan subscriptions.
+   - **Phase 2 — Per-Account Lifecycle**: For each receive-enabled account:
+     - Creates new subscriptions for accounts without one
+     - Renews subscriptions when expiry < 24 hours away
+     - Recreates subscriptions that failed or expired (404 on renewal → delete + recreate)
 3. **On Notification**: When an email arrives, Graph sends a change notification to `POST /api/communications/incoming-webhook`
 4. **Processing**: The webhook enqueues the message for processing (< 3 seconds response time required)
+
+### Diagnostic Endpoint
+
+To check the current state of Graph subscriptions, use the diagnostic endpoint:
+
+```bash
+curl "https://spe-api-dev-67e2xz.azurewebsites.net/api/diagnostics/graph-subscriptions" \
+  -H "Authorization: Bearer {token}"
+```
+
+This lists all active Graph subscriptions including their `NotificationUrl`, `Resource`, and `ExpirationDateTime`. Use this to verify orphan cleanup is working correctly — you should see exactly one subscription per receive-enabled account.
 
 ### Subscription Lifetime
 
@@ -717,6 +732,18 @@ The **Communication Account** form includes the following sections:
 | Mailbox does not exist in Azure AD | Verify mailbox exists: `Get-Mailbox -Identity "address@domain.com"` |
 | App registration missing permissions | Check `Mail.Send` (Application) and `Mail.Read` (Application) in Azure AD |
 
+### Duplicate Emails Being Processed
+
+**Symptom**: The same incoming email creates multiple `sprk_communication` records.
+
+**Possible Causes and Fixes**:
+
+| Cause | Fix |
+|-------|-----|
+| Orphan Graph subscriptions | Check diagnostic endpoint — should see exactly 1 subscription per account. If more, orphan cleanup will handle it on next 30-min cycle. Force by restarting the BFF API. |
+| Service Bus deduplication window expired | Default dedup window is set on the queue. Messages received outside the window are treated as new. |
+| Multiple BFF instances racing | The dedup key `msg:{messageId}:{changeType}` + Service Bus `MessageId` should prevent this. Check if IdempotencyKey is being set correctly. |
+
 ### Backup Polling Not Running
 
 **Symptom**: Incoming emails not being processed even when webhook subscription is down.
@@ -725,9 +752,22 @@ The **Communication Account** form includes the following sections:
 
 | Cause | Fix |
 |-------|-----|
-| `InboundPollingBackupService` not started | Check BFF API health via `/healthz`; review startup logs |
+| `InboundPollingBackupService` not started | Check BFF API health via `/healthz`; review startup logs for "InboundPollingBackupService starting" |
+| Startup failure killed the service | Check logs for errors within first 15 seconds of startup. The service has startup resilience (try-catch) but check for persistent errors. |
 | Account not receive-enabled | Set `sprk_receiveenabled` to Yes |
 | Redis cache stale | Clear Redis cache; service will re-query on next cycle |
+
+### BackgroundService Not Running (Silent Death)
+
+**Symptom**: Subscriptions not being renewed, polling not running, send counts not resetting — but `/healthz` returns healthy.
+
+**Possible Causes and Fixes**:
+
+| Cause | Fix |
+|-------|-----|
+| Unhandled exception in `ExecuteAsync` | .NET 8 default `BackgroundServiceExceptionBehavior.StopHost` stops the host on unhandled exceptions. All communication services now wrap initial execution in try-catch, but check for exceptions in startup logs. |
+| Dependency not available at startup | Services have startup delays (10s for GraphSubscriptionManager, 15s for InboundPollingBackupService) to allow dependencies to initialize. If Dataverse or Graph is slow, the first cycle may fail but the service will retry on next tick. |
+| App Service recycled | Check App Service logs for recycling events. Services auto-restart with the host. |
 
 ### OBO Token Errors (Individual User Send)
 

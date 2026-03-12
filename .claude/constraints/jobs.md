@@ -2,7 +2,7 @@
 
 > **Domain**: Async Processing, Background Workers
 > **Source ADRs**: ADR-004, ADR-017
-> **Last Updated**: 2025-12-18
+> **Last Updated**: 2026-03-12
 
 ---
 
@@ -23,6 +23,8 @@ Load when:
 - ✅ **MUST** use Job Contract schema for all async work
 - ✅ **MUST** implement handlers as idempotent (safe under at-least-once)
 - ✅ **MUST** use deterministic IdempotencyKey patterns
+- ✅ **MUST** set Service Bus `MessageId` = `IdempotencyKey` for cross-instance deduplication
+- ✅ **MUST** SHA-256 hash IdempotencyKey values exceeding 128 characters (Service Bus MessageId limit)
 - ✅ **MUST** propagate CorrelationId from original request
 - ✅ **MUST** emit JobOutcome events (Completed, Failed, Poisoned)
 
@@ -123,7 +125,21 @@ public class AnalysisJobHandler : IJobHandler<AnalysisJob>
 |----------|-------------|
 | Document indexing | `doc-{docId}-v{rowVersion}` |
 | AI analysis | `analysis-{docId}-{analysisType}` |
-| Email processing | `email-{messageId}` |
+| Email processing | `Communication:{messageId}:Process` |
+
+### Service Bus Deduplication
+
+Service Bus provides cross-instance duplicate detection when `MessageId` is set. The BFF sets `MessageId = IdempotencyKey` on every enqueued message.
+
+**SHA-256 hashing rule**: Service Bus limits `MessageId` to 128 characters. If the IdempotencyKey exceeds this, hash it:
+
+```csharp
+var messageId = idempotencyKey.Length > 128
+    ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(idempotencyKey)))
+    : idempotencyKey;
+```
+
+This ensures deterministic deduplication even for long keys (e.g., email message IDs with long domains).
 
 ---
 
