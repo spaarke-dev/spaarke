@@ -1665,6 +1665,72 @@ app.MapGet("/debug/job-handlers", (IServiceProvider sp, ILogger<Program> logger)
     }
 }).AllowAnonymous();
 
+// DEBUG: Diagnose communication BackgroundService resolution and manually trigger subscription management
+app.MapGet("/debug/communication-services", async (IServiceProvider sp, ILogger<Program> logger) =>
+{
+    var results = new Dictionary<string, string>();
+
+    // Check if key services resolve
+    try
+    {
+        var accountService = sp.GetRequiredService<Sprk.Bff.Api.Services.Communication.CommunicationAccountService>();
+        results["CommunicationAccountService"] = "OK";
+
+        // Try to query receive-enabled accounts (the first thing GraphSubscriptionManager does)
+        try
+        {
+            var accounts = await accountService.QueryReceiveEnabledAccountsAsync();
+            results["ReceiveEnabledAccounts"] = $"{accounts.Length} found";
+            foreach (var account in accounts)
+            {
+                results[$"Account:{account.EmailAddress}"] =
+                    $"SubId={account.SubscriptionId ?? "none"}, Expiry={account.SubscriptionExpiry}, AutoCreate={account.AutoCreateRecords}";
+            }
+        }
+        catch (Exception ex)
+        {
+            results["ReceiveEnabledAccounts"] = $"QUERY FAILED: {ex.Message}";
+        }
+    }
+    catch (Exception ex)
+    {
+        results["CommunicationAccountService"] = $"FAILED: {ex.Message}";
+    }
+
+    // List Graph subscriptions
+    try
+    {
+        var graphFactory = sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>();
+        var graphClient = graphFactory.ForApp();
+        var subs = await graphClient.Subscriptions.GetAsync();
+        results["ActiveGraphSubscriptions"] = $"{subs?.Value?.Count ?? 0}";
+        if (subs?.Value != null)
+        {
+            foreach (var sub in subs.Value)
+            {
+                results[$"Subscription:{sub.Id}"] =
+                    $"Resource={sub.Resource}, Expires={sub.ExpirationDateTime}, ChangeType={sub.ChangeType}, NotificationUrl={sub.NotificationUrl}";
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        results["ActiveGraphSubscriptions"] = $"FAILED: {ex.Message}";
+    }
+
+    // Check hosted services
+    var hostedServices = sp.GetServices<Microsoft.Extensions.Hosting.IHostedService>().ToList();
+    results["TotalHostedServices"] = hostedServices.Count.ToString();
+    var commServices = hostedServices.Where(s =>
+        s.GetType().Namespace?.Contains("Communication") == true).ToList();
+    foreach (var svc in commServices)
+    {
+        results[$"HostedService:{svc.GetType().Name}"] = "Running";
+    }
+
+    return Results.Ok(results);
+}).AllowAnonymous();
+
 // ---- Endpoint Groups ----
 
 // User identity and capabilities endpoints

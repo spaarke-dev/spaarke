@@ -61,11 +61,27 @@ public sealed class InboundPollingBackupService : BackgroundService
             "InboundPollingBackupService starting with {Interval} minute interval",
             _pollingInterval.TotalMinutes);
 
+        // Brief delay to let dependencies warm up during app startup
+        await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
+
         // Use PeriodicTimer for efficient periodic execution (ADR-001 pattern)
         using var timer = new PeriodicTimer(_pollingInterval);
 
         // Execute immediately on startup, then on interval
-        await PollAllAccountsAsync(stoppingToken);
+        // Wrapped in try-catch so a startup failure doesn't kill the service
+        try
+        {
+            await PollAllAccountsAsync(stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Initial inbound polling cycle failed, will retry on next interval");
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
