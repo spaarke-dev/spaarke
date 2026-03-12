@@ -228,10 +228,16 @@ export interface IActivityFeedProps {
   onRefetchReady?: (refetch: () => void) => void;
   /** When true, renders filter pills as text-only (no icons or count badges). Default false. */
   textOnlyFilter?: boolean;
-  /** When true, renders feed items in a 4×2 card grid instead of a vertical list. */
+  /** When true, renders feed items in a 3×2 card grid instead of a vertical list. */
   gridLayout?: boolean;
+  /** When true, hides the overflow menu on each card (grid mode). */
+  hideOverflowMenu?: boolean;
   /** Called when the "open all" icon on the filter bar is clicked. */
   onOpenAll?: () => void;
+  /** Called when the user clicks "Refresh" in the filter bar. */
+  onRefresh?: () => void;
+  /** Called when the user clicks "+ Create" in the filter bar. */
+  onCreateNew?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +253,10 @@ export const ActivityFeed: React.FC<IActivityFeedProps> = ({
   onRefetchReady,
   textOnlyFilter = false,
   gridLayout = false,
+  hideOverflowMenu = false,
   onOpenAll,
+  onRefresh,
+  onCreateNew,
 }) => {
   const styles = useStyles();
 
@@ -376,6 +385,8 @@ export const ActivityFeed: React.FC<IActivityFeedProps> = ({
         onFilterChange={handleFilterChange}
         textOnly={textOnlyFilter}
         onOpenAll={onOpenAll}
+        onRefresh={onRefresh ?? refetch}
+        onCreateNew={onCreateNew}
       />
 
       {/* Feed content area */}
@@ -432,6 +443,7 @@ export const ActivityFeed: React.FC<IActivityFeedProps> = ({
             onTeams={handleTeams}
             onEdit={handleEdit}
             gridLayout={gridLayout}
+            hideOverflowMenu={hideOverflowMenu}
           />
         )}
       </div>

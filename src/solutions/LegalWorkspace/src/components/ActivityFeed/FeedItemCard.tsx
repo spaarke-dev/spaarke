@@ -424,6 +424,8 @@ export interface IFeedItemCardProps {
   onTeams?: (eventId: string) => void;
   /** Called when the user clicks the Edit action. */
   onEdit?: (eventId: string) => void;
+  /** When true, hides the overflow menu (⋮) button. Used in grid mode. */
+  hideOverflowMenu?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -431,7 +433,7 @@ export interface IFeedItemCardProps {
 // ---------------------------------------------------------------------------
 
 export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
-  ({ event, onAISummary, onEmail, onTeams, onEdit }) => {
+  ({ event, onAISummary, onEmail, onTeams, onEdit, hideOverflowMenu }) => {
     const styles = useStyles();
 
     // Flag state from shared context (optimistic updates)
@@ -676,47 +678,49 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
               </div>
             </Tooltip>
 
-            {/* Overflow menu (⋮) */}
-            <Menu>
-              <MenuTrigger disableButtonEnhancement>
-                <Tooltip content="More actions" relationship="label">
-                  <Button
-                    appearance="subtle"
-                    size="medium"
-                    icon={<MoreVerticalRegular aria-hidden="true" />}
-                    aria-label="More actions"
-                  />
-                </Tooltip>
-              </MenuTrigger>
-              <MenuPopover>
-                <MenuList>
-                  <MenuItem
-                    icon={<MailRegular />}
-                    onClick={handleEmail}
-                  >
-                    Email
-                  </MenuItem>
-                  <MenuItem
-                    icon={<ChatRegular />}
-                    onClick={handleTeams}
-                  >
-                    Teams Chat
-                  </MenuItem>
-                  <MenuItem
-                    icon={<EditRegular />}
-                    onClick={handleEdit}
-                  >
-                    Edit
-                  </MenuItem>
-                  <MenuItem
-                    icon={<SparkleRegular />}
-                    onClick={handleAISummary}
-                  >
-                    AI Summary
-                  </MenuItem>
-                </MenuList>
-              </MenuPopover>
-            </Menu>
+            {/* Overflow menu (⋮) — hidden in grid mode */}
+            {!hideOverflowMenu && (
+              <Menu>
+                <MenuTrigger disableButtonEnhancement>
+                  <Tooltip content="More actions" relationship="label">
+                    <Button
+                      appearance="subtle"
+                      size="medium"
+                      icon={<MoreVerticalRegular aria-hidden="true" />}
+                      aria-label="More actions"
+                    />
+                  </Tooltip>
+                </MenuTrigger>
+                <MenuPopover>
+                  <MenuList>
+                    <MenuItem
+                      icon={<MailRegular />}
+                      onClick={handleEmail}
+                    >
+                      Email
+                    </MenuItem>
+                    <MenuItem
+                      icon={<ChatRegular />}
+                      onClick={handleTeams}
+                    >
+                      Teams Chat
+                    </MenuItem>
+                    <MenuItem
+                      icon={<EditRegular />}
+                      onClick={handleEdit}
+                    >
+                      Edit
+                    </MenuItem>
+                    <MenuItem
+                      icon={<SparkleRegular />}
+                      onClick={handleAISummary}
+                    >
+                      AI Summary
+                    </MenuItem>
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
+            )}
           </div>
         </div>
       </div>

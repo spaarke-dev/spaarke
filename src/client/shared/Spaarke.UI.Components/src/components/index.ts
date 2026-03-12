@@ -48,3 +48,12 @@ export * from "./FindSimilarDialog";
 
 // Playbook - Shared playbook card grid, scope configuration, and analysis services
 export * from "./Playbook";
+
+// Wizard - Multi-step dialog shell and infrastructure
+export * from "./Wizard";
+
+// FileUpload - Generic drag-and-drop file upload components
+export * from "./FileUpload";
+
+// CreateRecordWizard - Reusable multi-step record creation wizard
+export * from "./CreateRecordWizard";

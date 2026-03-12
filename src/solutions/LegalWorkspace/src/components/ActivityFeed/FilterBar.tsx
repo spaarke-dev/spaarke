@@ -33,6 +33,8 @@ import {
   ReceiptRegular,
   CheckboxCheckedRegular,
   OpenRegular,
+  ArrowClockwiseRegular,
+  AddRegular,
 } from "@fluentui/react-icons";
 import { EventFilterCategory } from "../../types/enums";
 import { CategoryCounts } from "../../hooks/useActivityFeedFilters";
@@ -141,6 +143,23 @@ const useStyles = makeStyles({
   countBadge: {
     flexShrink: 0,
   },
+  toolbarDivider: {
+    width: "1px",
+    height: "20px",
+    backgroundColor: tokens.colorNeutralStroke2,
+    marginLeft: tokens.spacingHorizontalXS,
+    marginRight: tokens.spacingHorizontalXS,
+    flexShrink: 0,
+  },
+  spacer: {
+    flex: "1 1 0",
+  },
+  rightGroup: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: "15px",
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -158,6 +177,10 @@ export interface IFilterBarProps {
   textOnly?: boolean;
   /** Called when the "open all" icon is clicked (far right of filter bar). */
   onOpenAll?: () => void;
+  /** Called when the refresh button is clicked. */
+  onRefresh?: () => void;
+  /** Called when the "+ Create" button is clicked. */
+  onCreateNew?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +193,8 @@ export const FilterBar: React.FC<IFilterBarProps> = ({
   onFilterChange,
   textOnly = false,
   onOpenAll,
+  onRefresh,
+  onCreateNew,
 }) => {
   const styles = useStyles();
 
@@ -179,6 +204,19 @@ export const FilterBar: React.FC<IFilterBarProps> = ({
       role="toolbar"
       aria-label="Filter updates by category"
     >
+      {/* Left group: Refresh + divider + filter pills */}
+      {onRefresh && (
+        <>
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<ArrowClockwiseRegular />}
+            onClick={onRefresh}
+            aria-label="Refresh updates"
+          />
+          <span className={styles.toolbarDivider} aria-hidden="true" />
+        </>
+      )}
       {FILTER_PILLS.map((pill) => {
         const count = categoryCounts[pill.key];
         const isActive = activeFilter === pill.key;
@@ -212,16 +250,31 @@ export const FilterBar: React.FC<IFilterBarProps> = ({
           </ToggleButton>
         );
       })}
-      {onOpenAll && (
-        <Button
-          appearance="subtle"
-          size="small"
-          icon={<OpenRegular />}
-          onClick={onOpenAll}
-          aria-label="Open all updates"
-          style={{ marginLeft: "auto", flexShrink: 0 }}
-        />
-      )}
+
+      {/* Spacer pushes right group to the end */}
+      <div className={styles.spacer} />
+
+      {/* Right group: Create + Open */}
+      <div className={styles.rightGroup}>
+        {onCreateNew && (
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<AddRegular />}
+            onClick={onCreateNew}
+            aria-label="Create new event"
+          />
+        )}
+        {onOpenAll && (
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<OpenRegular />}
+            onClick={onOpenAll}
+            aria-label="Open all updates"
+          />
+        )}
+      </div>
     </div>
   );
 };
