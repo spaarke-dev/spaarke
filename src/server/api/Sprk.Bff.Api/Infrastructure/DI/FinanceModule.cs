@@ -145,7 +145,10 @@ public static class FinanceModule
         // FinancialCalculationToolHandler - calculates and updates matter/project financial totals
         // Operations: "recalculate" (from all invoices) or "increment" (add single invoice)
         // Uses optimistic concurrency with row version checks and exponential backoff retry
-        services.AddScoped<IAiToolHandler, FinancialCalculationToolHandler>();
+        // Dual registration: concrete type needed by InvoiceExtractionJobHandler (direct injection),
+        // interface forwarding needed by playbook tool discovery (GetServices<IAiToolHandler>).
+        services.AddScoped<FinancialCalculationToolHandler>();
+        services.AddScoped<IAiToolHandler>(sp => sp.GetRequiredService<FinancialCalculationToolHandler>());
 
         // DataverseUpdateToolHandler - generic entity record update from playbook context
         // Allows playbooks to update arbitrary entity fields without custom handlers

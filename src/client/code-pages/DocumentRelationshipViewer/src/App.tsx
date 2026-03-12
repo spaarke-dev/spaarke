@@ -16,7 +16,7 @@
  *   - Node action bar: open record, view file, expand
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
     makeStyles,
     tokens,
@@ -31,19 +31,23 @@ import {
     ToolbarDivider,
     Badge,
     Tooltip,
+    SearchBox,
 } from "@fluentui/react-components";
+import type { SearchBoxChangeEvent, InputOnChangeData } from "@fluentui/react-components";
 import {
     NetworkCheck20Regular,
     Grid20Regular,
     Filter20Regular,
     FilterDismiss20Regular,
+    ArrowDownload20Regular,
 } from "@fluentui/react-icons";
 import { DocumentGraph } from "./components/DocumentGraph";
-import { RelationshipGrid } from "./components/RelationshipGrid";
+import { RelationshipGrid, type GridRow } from "./components/RelationshipGrid";
 import { ControlPanel, DEFAULT_FILTER_SETTINGS, DOCUMENT_TYPES, type FilterSettings } from "./components/ControlPanel";
 import { NodeActionBar } from "./components/NodeActionBar";
 import { useVisualizationApi, formatVisualizationError } from "./hooks/useVisualizationApi";
 import { initializeAuth, getToken } from "./services/authInit";
+import { exportToCsv } from "./services/CsvExportService";
 import type { DocumentNode } from "./types/graph";
 
 const DEFAULT_API_BASE_URL = "https://spe-api-dev-67e2xz.azurewebsites.net";
@@ -129,6 +133,10 @@ const useStyles = makeStyles({
         backgroundColor: tokens.colorBrandBackground2,
         color: tokens.colorBrandForeground1,
     },
+    searchBox: {
+        minWidth: "200px",
+        maxWidth: "300px",
+    },
 });
 
 export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
@@ -149,6 +157,8 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
     const [showFilterPanel, setShowFilterPanel] = useState(false);
     const [filters, setFilters] = useState<FilterSettings>(DEFAULT_FILTER_SETTINGS);
     const [selectedNode, setSelectedNode] = useState<DocumentNode | null>(null);
+    const [searchQuery, setSearchQuery] = useState("");
+    const filteredRowsRef = useRef<GridRow[]>([]);
 
     // Auth initialization — uses @spaarke/auth (multi-tenant, no hardcoded values)
     useEffect(() => {
@@ -205,6 +215,20 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
         setFilters(newFilters);
         setSelectedNode(null);
     }, []);
+
+    const handleSearchChange = useCallback((_ev: SearchBoxChangeEvent, data: InputOnChangeData) => {
+        setSearchQuery(data.value);
+    }, []);
+
+    const handleFilteredRowsChange = useCallback((rows: GridRow[]) => {
+        filteredRowsRef.current = rows;
+    }, []);
+
+    const handleExport = useCallback(() => {
+        const sourceNode = nodes.find((n) => n.data.isSource);
+        const sourceName = sourceNode?.data.name ?? "document";
+        exportToCsv(filteredRowsRef.current, sourceName);
+    }, [nodes]);
 
     // Use theme from URL param (passed by PCF control) instead of system preference
     const isDarkMode = isDark;
@@ -282,6 +306,28 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
                             aria-pressed={showFilterPanel}
                         />
                     </Tooltip>
+                    {viewMode === "grid" && (
+                        <>
+                            <ToolbarDivider />
+                            <SearchBox
+                                className={styles.searchBox}
+                                placeholder="Search documents..."
+                                size="small"
+                                value={searchQuery}
+                                onChange={handleSearchChange}
+                                aria-label="Search documents by name"
+                            />
+                            <Tooltip content="Export filtered rows to CSV" relationship="label">
+                                <ToolbarButton
+                                    icon={<ArrowDownload20Regular />}
+                                    onClick={handleExport}
+                                    aria-label="Export to CSV"
+                                >
+                                    Export
+                                </ToolbarButton>
+                            </Tooltip>
+                        </>
+                    )}
                 </Toolbar>
             </div>
 
@@ -326,7 +372,12 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
                             )}
                         </>
                     ) : (
-                        <RelationshipGrid nodes={nodes} isDarkMode={isDarkMode} />
+                        <RelationshipGrid
+                            nodes={nodes}
+                            isDarkMode={isDarkMode}
+                            searchQuery={searchQuery}
+                            onFilteredRowsChange={handleFilteredRowsChange}
+                        />
                     )}
                 </div>
             </div>

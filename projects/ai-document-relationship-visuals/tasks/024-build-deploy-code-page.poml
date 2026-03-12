@@ -1,0 +1,73 @@
+<task id="024" project="ai-document-relationship-visuals">
+  <metadata>
+    <title>Build and Deploy Enhanced Code Page</title>
+    <phase>3</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>deploy, code-page</tags>
+    <dependencies>020, 021, 022</dependencies>
+    <blocks>040</blocks>
+    <status>not-started</status>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task; uses code-page-deploy skill</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Build and deploy the enhanced DocumentRelationshipViewer Code Page to Dataverse</goal>
+    <context>
+      <background>
+        After tasks 020-022, the Code Page has:
+        - useForceSimulation migration (no more layout spinner)
+        - CSV export button in Grid view
+        - Quick search filter
+
+        Deploy using the code-page-deploy skill (two-step: webpack + inline HTML).
+      </background>
+      <relevant-files>
+        <file>src/client/code-pages/DocumentRelationshipViewer/</file>
+      </relevant-files>
+    </context>
+    <constraints>
+      <constraint source="code-page-deploy">Must use two-step build: webpack then inline HTML</constraint>
+      <constraint source="code-page-deploy">Deploy the inlined HTML as web resource, not separate JS</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-relationship-visuals/CLAUDE.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run npm run build in Code Page directory</step>
+    <step order="2">Run code-page-deploy skill to build inlined HTML and deploy</step>
+    <step order="3">Verify deployment: open DocumentRelationshipViewer from Dataverse</step>
+    <step order="4">Regression test: Graph view, Grid view, filters, dark mode</step>
+    <step order="5">Test new features: instant graph (no spinner), CSV export, quick search</step>
+  </steps>
+
+  <tools>
+    <tool>Bash for build commands</tool>
+    <tool>code-page-deploy skill</tool>
+  </tools>
+
+  <outputs>
+    <output>Deployed Code Page web resource</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Code Page builds without errors</criterion>
+    <criterion>Web resource deployed to Dataverse</criterion>
+    <criterion>Graph renders without layout spinner</criterion>
+    <criterion>CSV export works in deployed version</criterion>
+    <criterion>Quick search works in deployed version</criterion>
+    <criterion>All existing features still work</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

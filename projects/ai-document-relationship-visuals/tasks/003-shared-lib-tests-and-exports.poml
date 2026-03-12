@@ -1,0 +1,81 @@
+<task id="003" project="ai-document-relationship-visuals">
+  <metadata>
+    <title>Verify Shared Library Build, Exports, and Test Coverage</title>
+    <phase>1</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>testing, shared-component, build</tags>
+    <dependencies>001, 002</dependencies>
+    <blocks>020, 031</blocks>
+    <status>not-started</status>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing and build verification task; has explicit constraints but no new code implementation</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Verify that RelationshipCountCard and useForceSimulation build cleanly, exports resolve correctly (barrel + deep imports), and test coverage meets 90%+ threshold</goal>
+    <context>
+      <background>
+        After tasks 001 and 002, the shared library has two new exports. This task verifies:
+        1. npm run build succeeds without errors
+        2. Barrel import works: import { RelationshipCountCard, useForceSimulation } from "@spaarke/ui-components"
+        3. Deep import works: import { RelationshipCountCard } from "@spaarke/ui-components/dist/components/RelationshipCountCard"
+        4. Test coverage meets 90%+ for both new components
+        5. No regressions in existing shared library components
+      </background>
+      <relevant-files>
+        <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+        <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+        <file>src/client/shared/Spaarke.UI.Components/tsconfig.json</file>
+      </relevant-files>
+    </context>
+    <constraints>
+      <constraint source="ADR-012">Barrel AND deep import paths must resolve</constraint>
+      <constraint source="ADR-012">90%+ test coverage on new shared components</constraint>
+      <constraint source="spec">No regressions in existing FindSimilarDialog or other components</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-relationship-visuals/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run npm run build in shared library — verify clean build</step>
+    <step order="2">Verify barrel exports in dist/index.js include RelationshipCountCard and useForceSimulation</step>
+    <step order="3">Verify deep import paths exist in dist/components/RelationshipCountCard/ and dist/hooks/</step>
+    <step order="4">Run npm test -- --coverage — verify 90%+ on new components</step>
+    <step order="5">Verify existing tests still pass (no regressions)</step>
+    <step order="6">Fix any build or test issues discovered</step>
+  </steps>
+
+  <tools>
+    <tool>Bash for npm build and test commands</tool>
+    <tool>Read/Grep to verify dist output</tool>
+  </tools>
+
+  <outputs>
+    <output>Clean shared library build</output>
+    <output>Verified barrel and deep import paths</output>
+    <output>Test coverage report showing 90%+ on new components</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>npm run build completes without errors</criterion>
+    <criterion>Barrel import resolves RelationshipCountCard and useForceSimulation</criterion>
+    <criterion>Deep import path @spaarke/ui-components/dist/components/RelationshipCountCard resolves</criterion>
+    <criterion>Test coverage >= 90% on RelationshipCountCard and useForceSimulation</criterion>
+    <criterion>All existing tests still pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

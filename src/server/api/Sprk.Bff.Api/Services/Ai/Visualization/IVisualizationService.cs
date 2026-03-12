@@ -90,6 +90,14 @@ public record VisualizationOptions
     /// Example: ["same_email", "semantic"] to show only email siblings and content-similar documents.
     /// </summary>
     public IList<string>? RelationshipTypeFilter { get; init; }
+
+    /// <summary>
+    /// When true, returns only metadata with totalResults count.
+    /// Skips graph node/edge computation (Dataverse metadata enrichment and hub topology building)
+    /// for fast count queries. Returns empty Nodes and Edges arrays.
+    /// Default: false
+    /// </summary>
+    public bool CountOnly { get; init; }
 }
 
 /// <summary>

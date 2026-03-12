@@ -1,0 +1,127 @@
+<task id="031" project="ai-document-relationship-visuals">
+  <metadata>
+    <title>Implement RelatedDocumentCount PCF Component Logic</title>
+    <phase>4</phase>
+    <estimate>3-4 hours</estimate>
+    <tags>pcf, frontend, fluent-ui</tags>
+    <dependencies>030, 003, 010</dependencies>
+    <blocks>033, 040</blocks>
+    <status>not-started</status>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF implementation; modifies .tsx files; multiple ADR constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Implement the RelatedDocumentCount PCF component: API hook, count card rendering, and FindSimilarDialog integration</goal>
+    <context>
+      <background>
+        With the PCF scaffold (task 030), shared library (tasks 001-003), and API enhancement
+        (task 010) in place, implement the full PCF component:
+        1. useRelatedDocumentCount hook — calls BFF API with countOnly=true
+        2. RelatedDocumentCount.tsx — wires RelationshipCountCard + FindSimilarDialog
+        3. Handle loading, error, and refresh states
+
+        The PCF uses deep imports from @spaarke/ui-components for React 16 compatibility.
+      </background>
+      <relevant-files>
+        <file>src/client/pcf/RelatedDocumentCount/RelatedDocumentCount/index.ts</file>
+        <file>src/client/shared/Spaarke.UI.Components/src/components/RelationshipCountCard/</file>
+        <file>src/client/shared/Spaarke.UI.Components/src/components/FindSimilarDialog/</file>
+      </relevant-files>
+    </context>
+    <constraints>
+      <constraint source="ADR-022">React 16 APIs only — no createRoot, useTransition, etc.</constraint>
+      <constraint source="ADR-012">Deep imports: @spaarke/ui-components/dist/components/{Name}</constraint>
+      <constraint source="ADR-021">Dark mode support via FluentProvider theme</constraint>
+      <constraint source="spec">Count fetches on form load with countOnly=true</constraint>
+      <constraint source="spec">Click opens FindSimilarDialog with full viewer URL</constraint>
+      <constraint source="spec">Auto-refresh on form context change (record navigation)</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-relationship-visuals/spec.md</file>
+      <file>projects/ai-document-relationship-visuals/CLAUDE.md</file>
+      <file>.claude/adr/ADR-006.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern>pcf/control-initialization.md</pattern>
+      <pattern>pcf/theme-management.md</pattern>
+      <pattern>pcf/dialog-patterns.md</pattern>
+      <pattern>pcf/dataverse-queries.md</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create hooks/useRelatedDocumentCount.ts:
+      - Accept documentId, tenantId, apiBaseUrl
+      - Call GET /api/ai/visualization/related/{documentId}?countOnly=true&amp;tenantId=...
+      - Use @spaarke/auth for token acquisition
+      - Return { count, isLoading, error, lastUpdated }
+      - Support re-fetch when documentId changes</step>
+    <step order="2">Create RelatedDocumentCount.tsx:
+      - Import RelationshipCountCard via deep import
+      - Import FindSimilarDialog via deep import
+      - Wire useRelatedDocumentCount hook
+      - Build viewer URL for FindSimilarDialog
+      - Handle dialog open/close state</step>
+    <step order="3">Update index.ts updateView() to pass PCF context properties to component</step>
+    <step order="4">Handle theme detection from PCF context for dark mode</step>
+    <step order="5">Handle form context changes (documentId changes when user navigates records)</step>
+    <step order="6">Test locally with npm run build</step>
+    <step order="7">Verify bundle size under 5MB</step>
+  </steps>
+
+  <tools>
+    <tool>Read, Write, Edit for file operations</tool>
+    <tool>Bash for npm build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/pcf/RelatedDocumentCount/RelatedDocumentCount/RelatedDocumentCount.tsx</output>
+    <output>src/client/pcf/RelatedDocumentCount/RelatedDocumentCount/hooks/useRelatedDocumentCount.ts</output>
+    <output>Updated index.ts with component wiring</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>useRelatedDocumentCount calls BFF API with countOnly=true</criterion>
+    <criterion>RelationshipCountCard renders with count from API</criterion>
+    <criterion>Loading spinner shows during API call</criterion>
+    <criterion>Error state displays on API failure</criterion>
+    <criterion>Click opens FindSimilarDialog with correct viewer URL</criterion>
+    <criterion>Count refreshes when documentId changes (record navigation)</criterion>
+    <criterion>Dark mode works via FluentProvider theme</criterion>
+    <criterion>npm run build succeeds; bundle under 5MB</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Count Card Integration">
+      <steps>
+        <step>Place PCF on test form with documentId field</step>
+        <step>Load form with a document that has related documents</step>
+        <step>Verify count card shows numeric count</step>
+        <step>Click card, verify FindSimilarDialog opens</step>
+      </steps>
+      <expected>Count displays within 200ms; dialog opens with viewer</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps>
+        <step>Toggle Dataverse dark mode</step>
+        <step>Verify count card adapts colors</step>
+      </steps>
+      <expected>All colors use semantic tokens per ADR-021</expected>
+    </test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,11 +1,9 @@
 /**
- * DocumentGraph — @xyflow/react v12 canvas with d3-force layout
+ * DocumentGraph — @xyflow/react v12 canvas with synchronous d3-force layout
  *
  * Migrated from react-flow-renderer v10 PCF to @xyflow/react v12 Code Page.
- * Key changes:
- * - ReactFlow is now a named export (not default)
- * - CSS import path updated
- * - NodeTypes/EdgeTypes type parameters updated for v12
+ * Uses shared `useForceSimulation` hook for synchronous layout computation —
+ * positions are fully resolved before first render (no spinner).
  */
 
 import React, { useMemo, useEffect, useCallback } from "react";
@@ -22,8 +20,8 @@ import {
     type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { makeStyles, tokens, Spinner, Text } from "@fluentui/react-components";
-import { useForceLayout } from "../hooks/useForceLayout";
+import { makeStyles, tokens, Text } from "@fluentui/react-components";
+import { useForceSimulation, type ForceNode, type ForceEdge } from "@spaarke/ui-components";
 import { DocumentNode as DocumentNodeComponent } from "./DocumentNode";
 import { DocumentEdge as DocumentEdgeComponent } from "./DocumentEdge";
 import type { DocumentNode, DocumentEdge, DocumentNodeData, ForceLayoutOptions } from "../types/graph";
@@ -40,11 +38,6 @@ export interface DocumentGraphProps {
 
 const useStyles = makeStyles({
     container: { width: "100%", height: "100%", minHeight: "300px", position: "relative" },
-    loadingOverlay: {
-        position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        backgroundColor: tokens.colorNeutralBackground1, opacity: 0.9, zIndex: 10,
-    },
     emptyState: {
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
         height: "100%", color: tokens.colorNeutralForeground3, gap: tokens.spacingVerticalM,
@@ -70,21 +63,53 @@ export const DocumentGraph: React.FC<DocumentGraphProps> = ({
 }) => {
     const styles = useStyles();
 
-    const { layoutNodes, layoutEdges, isSimulating } = useForceLayout(
-        inputNodes, inputEdges,
-        { ...layoutOptions, centerX: 0, centerY: 0 }
+    // Convert @xyflow/react nodes to ForceNode inputs
+    const forceNodes = useMemo<ForceNode[]>(
+        () => inputNodes.map((n) => ({
+            id: n.id,
+            label: n.data.name,
+            isSource: n.data.isSource,
+        })),
+        [inputNodes]
     );
 
-    const nodesWithCompactMode = useMemo(
-        () => layoutNodes.map((node) => ({ ...node, data: { ...node.data, compactMode } })),
-        [layoutNodes, compactMode]
+    // Convert @xyflow/react edges to ForceEdge inputs (similarity → weight)
+    const forceEdges = useMemo<ForceEdge[]>(
+        () => inputEdges.map((e) => ({
+            source: e.source,
+            target: e.target,
+            weight: e.data?.similarity ?? 0.5,
+        })),
+        [inputEdges]
     );
 
-    const [nodes, setNodes, onNodesChange] = useNodesState(nodesWithCompactMode);
-    const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
+    // Run synchronous force simulation — positions resolved before first render
+    const layoutResult = useForceSimulation(forceNodes, forceEdges, {
+        mode: "hub-spoke",
+        chargeStrength: layoutOptions?.chargeStrength ?? -1000,
+        linkDistanceMultiplier: layoutOptions?.distanceMultiplier ?? 400,
+        collisionRadius: layoutOptions?.collisionRadius ?? 100,
+        center: { x: layoutOptions?.centerX ?? 0, y: layoutOptions?.centerY ?? 0 },
+    });
 
-    useEffect(() => { setNodes(nodesWithCompactMode); }, [nodesWithCompactMode, setNodes]);
-    useEffect(() => { setEdges(layoutEdges); }, [layoutEdges, setEdges]);
+    // Map positioned output back to @xyflow/react Node format
+    const layoutNodes = useMemo<DocumentNode[]>(() => {
+        const posMap = new Map(layoutResult.nodes.map((pn) => [pn.id, pn]));
+        return inputNodes.map((node) => {
+            const pos = posMap.get(node.id);
+            return {
+                ...node,
+                position: { x: pos?.x ?? 0, y: pos?.y ?? 0 },
+                data: { ...node.data, compactMode },
+            };
+        });
+    }, [inputNodes, layoutResult.nodes, compactMode]);
+
+    const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
+    const [edges, setEdges, onEdgesChange] = useEdgesState(inputEdges);
+
+    useEffect(() => { setNodes(layoutNodes); }, [layoutNodes, setNodes]);
+    useEffect(() => { setEdges(inputEdges); }, [inputEdges, setEdges]);
 
     const handleNodeClick = useCallback(
         (_event: React.MouseEvent, node: Node) => {
@@ -108,11 +133,6 @@ export const DocumentGraph: React.FC<DocumentGraphProps> = ({
 
     return (
         <div className={styles.container}>
-            {isSimulating && (
-                <div className={styles.loadingOverlay}>
-                    <Spinner size="medium" label="Calculating layout..." />
-                </div>
-            )}
             <ReactFlow
                 nodes={nodes}
                 edges={typedEdges}

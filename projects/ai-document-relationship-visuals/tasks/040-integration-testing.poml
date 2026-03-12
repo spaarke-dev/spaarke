@@ -1,0 +1,88 @@
+<task id="040" project="ai-document-relationship-visuals">
+  <metadata>
+    <title>End-to-End Integration Testing and Performance Validation</title>
+    <phase>5</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>testing, e2e-test, pcf, code-page</tags>
+    <dependencies>024, 034</dependencies>
+    <blocks>090</blocks>
+    <status>not-started</status>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Integration testing across all surfaces; performance validation; quality gate</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Perform end-to-end integration testing of the full Document form → count card → dialog → graph flow, dark mode verification, and performance validation</goal>
+    <context>
+      <background>
+        All components are deployed. This task validates the complete user flow:
+        1. Open Document record → count card shows count within 200ms
+        2. Click card → FindSimilarDialog opens with graph
+        3. Graph renders instantly (no spinner)
+        4. Switch to Grid view → search and export work
+        5. Dark mode works on all surfaces
+        6. Performance meets targets
+      </background>
+      <relevant-files>
+        <file>projects/ai-document-relationship-visuals/spec.md</file>
+      </relevant-files>
+    </context>
+    <constraints>
+      <constraint source="spec">Count card: less than 200ms API response</constraint>
+      <constraint source="spec">Graph layout: less than 50ms for 25 nodes</constraint>
+      <constraint source="spec">Graph first paint: less than 100ms after data fetch</constraint>
+      <constraint source="spec">CSV export: less than 2000ms for 500 docs</constraint>
+      <constraint source="spec">Grid render: less than 1000ms for 100 docs</constraint>
+      <constraint source="ADR-021">Dark mode on all surfaces</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-relationship-visuals/spec.md</file>
+      <file>projects/ai-document-relationship-visuals/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Test full flow: Open Document record → verify count card loads with count</step>
+    <step order="2">Test: Click count card → FindSimilarDialog opens → graph renders instantly</step>
+    <step order="3">Test: Switch to Grid view → verify data matches graph</step>
+    <step order="4">Test: Quick search in Grid → verify filtering</step>
+    <step order="5">Test: Export CSV → verify file downloads with correct columns</step>
+    <step order="6">Test: Apply filters → export → verify export respects filters</step>
+    <step order="7">Performance: Measure count API response time (target less than 200ms)</step>
+    <step order="8">Performance: Measure graph layout computation time (target less than 50ms for 25 nodes)</step>
+    <step order="9">Dark mode: Toggle dark mode, verify all surfaces (count card, graph, grid, dialog)</step>
+    <step order="10">Test edge cases: Document with 0 related docs, document with 100+ related docs</step>
+    <step order="11">Document any issues found and create follow-up tasks if needed</step>
+  </steps>
+
+  <tools>
+    <tool>Browser DevTools for performance measurement</tool>
+    <tool>Manual testing in Dataverse environment</tool>
+  </tools>
+
+  <outputs>
+    <output>Integration test results documented</output>
+    <output>Performance measurements documented</output>
+    <output>Any issues logged as follow-up tasks</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Full flow works: form → count → dialog → graph</criterion>
+    <criterion>Count API response less than 200ms</criterion>
+    <criterion>Graph renders without spinner</criterion>
+    <criterion>CSV export works with correct data</criterion>
+    <criterion>Quick search filters correctly</criterion>
+    <criterion>Dark mode works on all surfaces</criterion>
+    <criterion>Zero-state (0 related docs) handled gracefully</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,8 +1,10 @@
+using Microsoft.Extensions.Options;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication.Models;
 
@@ -34,7 +36,7 @@ public sealed class GraphSubscriptionManager : BackgroundService
         CommunicationAccountService accountService,
         IGraphClientFactory graphClientFactory,
         IDataverseService dataverseService,
-        IConfiguration configuration,
+        IOptions<CommunicationOptions> communicationOptions,
         ILogger<GraphSubscriptionManager> logger)
     {
         _accountService = accountService ?? throw new ArgumentNullException(nameof(accountService));
@@ -42,10 +44,9 @@ public sealed class GraphSubscriptionManager : BackgroundService
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        _notificationUrl = configuration["Communication:WebhookNotificationUrl"]
-            ?? throw new InvalidOperationException("Communication:WebhookNotificationUrl not configured");
-        _clientState = configuration["Communication:WebhookClientState"]
-            ?? throw new InvalidOperationException("Communication:WebhookClientState not configured");
+        var options = communicationOptions?.Value ?? throw new ArgumentNullException(nameof(communicationOptions));
+        _notificationUrl = options.WebhookNotificationUrl;
+        _clientState = options.WebhookClientState;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -55,11 +56,27 @@ public sealed class GraphSubscriptionManager : BackgroundService
             "renewal threshold {Threshold} hours, subscription lifetime {Lifetime} days",
             TickInterval.TotalMinutes, RenewalThreshold.TotalHours, SubscriptionLifetime.TotalDays);
 
+        // Brief delay to let Dataverse/Graph dependencies warm up during app startup
+        await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+
         // Use PeriodicTimer for efficient periodic execution (ADR-001 pattern)
         using var timer = new PeriodicTimer(TickInterval);
 
         // Execute immediately on startup, then on interval
-        await ManageSubscriptionsAsync(stoppingToken);
+        // Wrapped in try-catch so a startup failure doesn't kill the service
+        try
+        {
+            await ManageSubscriptionsAsync(stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Initial subscription management cycle failed, will retry on next interval");
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -119,6 +136,9 @@ public sealed class GraphSubscriptionManager : BackgroundService
         _logger.LogInformation(
             "Managing subscriptions for {Count} receive-enabled accounts, correlation {CorrelationId}",
             accounts.Length, correlationId);
+
+        // Clean up orphaned subscriptions that are not tracked by any Dataverse account
+        await CleanupOrphanedSubscriptionsAsync(accounts, correlationId, ct);
 
         var created = 0;
         var renewed = 0;
@@ -324,17 +344,96 @@ public sealed class GraphSubscriptionManager : BackgroundService
     }
 
     /// <summary>
+    /// Deletes Graph subscriptions that are not tracked by any Dataverse communication account.
+    /// Only deletes subscriptions whose notificationUrl matches our configured webhook URL,
+    /// to avoid touching subscriptions managed by other applications.
+    /// </summary>
+    private async Task CleanupOrphanedSubscriptionsAsync(
+        CommunicationAccount[] accounts, string correlationId, CancellationToken ct)
+    {
+        try
+        {
+            var graphClient = _graphClientFactory.ForApp();
+            var allSubs = await graphClient.Subscriptions.GetAsync(cancellationToken: ct);
+
+            if (allSubs?.Value == null || allSubs.Value.Count == 0)
+                return;
+
+            // Build set of subscription IDs that Dataverse knows about
+            var managedSubIds = new HashSet<string>(
+                accounts
+                    .Where(a => !string.IsNullOrEmpty(a.SubscriptionId))
+                    .Select(a => a.SubscriptionId!),
+                StringComparer.OrdinalIgnoreCase);
+
+            var orphans = allSubs.Value
+                .Where(s => !string.IsNullOrEmpty(s.Id)
+                    && !managedSubIds.Contains(s.Id)
+                    && string.Equals(s.NotificationUrl, _notificationUrl, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (orphans.Count == 0)
+            {
+                _logger.LogDebug(
+                    "No orphaned subscriptions found ({Total} total, {Managed} managed), correlation {CorrelationId}",
+                    allSubs.Value.Count, managedSubIds.Count, correlationId);
+                return;
+            }
+
+            _logger.LogWarning(
+                "Found {OrphanCount} orphaned subscriptions (out of {Total} total), " +
+                "deleting to prevent duplicate notifications, correlation {CorrelationId}",
+                orphans.Count, allSubs.Value.Count, correlationId);
+
+            var deleted = 0;
+            foreach (var orphan in orphans)
+            {
+                try
+                {
+                    await graphClient.Subscriptions[orphan.Id].DeleteAsync(cancellationToken: ct);
+                    deleted++;
+                    _logger.LogInformation(
+                        "Deleted orphaned subscription {SubscriptionId} (resource: {Resource}), " +
+                        "correlation {CorrelationId}",
+                        orphan.Id, orphan.Resource, correlationId);
+                }
+                catch (ODataError odataEx) when (odataEx.ResponseStatusCode == 404)
+                {
+                    _logger.LogDebug("Orphan subscription {SubscriptionId} already gone (404)", orphan.Id);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Failed to delete orphan subscription {SubscriptionId}, correlation {CorrelationId}",
+                        orphan.Id, correlationId);
+                }
+            }
+
+            _logger.LogInformation(
+                "Orphan cleanup complete: {Deleted}/{Total} deleted, correlation {CorrelationId}",
+                deleted, orphans.Count, correlationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to run orphan subscription cleanup, correlation {CorrelationId}. " +
+                "This is non-fatal; orphans will be cleaned up on the next cycle.",
+                correlationId);
+        }
+    }
+
+    /// <summary>
     /// Updates the sprk_communicationaccount record in Dataverse with subscription info.
-    /// Uses sprk_subscriptionid and sprk_subscriptionexpiry fields.
+    /// Uses sprk_graphsubscriptionid and sprk_graphsubscriptionexpiry fields.
     /// </summary>
     private async Task UpdateAccountSubscriptionAsync(
         Guid accountId, string subscriptionId, DateTimeOffset expiry, CancellationToken ct)
     {
         var fields = new Dictionary<string, object>
         {
-            ["sprk_subscriptionid"] = subscriptionId,
-            ["sprk_subscriptionexpiry"] = expiry.UtcDateTime,
-            ["sprk_subscriptionstatus"] = new OptionSetValue(100000000) // Active
+            ["sprk_graphsubscriptionid"] = subscriptionId,
+            ["sprk_graphsubscriptionexpiry"] = expiry.UtcDateTime,
+            ["sprk_graphsubscriptionstatus"] = new OptionSetValue(100000000) // Active
         };
 
         await _dataverseService.UpdateAsync("sprk_communicationaccount", accountId, fields, ct);

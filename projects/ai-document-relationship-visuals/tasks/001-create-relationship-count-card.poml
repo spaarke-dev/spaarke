@@ -1,0 +1,125 @@
+<task id="001" project="ai-document-relationship-visuals">
+  <metadata>
+    <title>Create RelationshipCountCard Shared Component</title>
+    <phase>1</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>frontend, fluent-ui, shared-component</tags>
+    <dependencies></dependencies>
+    <blocks>003, 004, 031</blocks>
+    <status>not-started</status>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new shared component (.tsx files); ADR-012 compliance required</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Create the RelationshipCountCard shared component in @spaarke/ui-components</goal>
+    <context>
+      <background>
+        This is a new shared component that displays a count of semantically related documents
+        with a drill-through callback. It will be hosted by the RelatedDocumentCount PCF control
+        on the Document Main Form. It must follow the callback-based prop pattern used by
+        FindSimilarDialog — zero service dependencies, context-agnostic.
+      </background>
+      <relevant-files>
+        <file>src/client/shared/Spaarke.UI.Components/src/components/FindSimilarDialog/FindSimilarDialog.tsx</file>
+        <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+        <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+        <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      </relevant-files>
+    </context>
+    <constraints>
+      <constraint source="ADR-012">Callback-based props only — zero service dependencies</constraint>
+      <constraint source="ADR-012">Must export via barrel (index.ts) AND support deep imports</constraint>
+      <constraint source="ADR-021">Fluent UI v9 exclusively — makeStyles, tokens, no custom CSS</constraint>
+      <constraint source="ADR-021">Dark mode required — use design tokens for all colors</constraint>
+      <constraint source="ADR-022">Must be React 16 compatible (consumed by PCF via deep import)</constraint>
+      <constraint source="ADR-012">90%+ test coverage required</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-relationship-visuals/spec.md</file>
+      <file>projects/ai-document-relationship-visuals/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern>pcf/theme-management.md</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read FindSimilarDialog component as reference pattern for callback-based shared component</step>
+    <step order="2">Create RelationshipCountCard directory: src/client/shared/Spaarke.UI.Components/src/components/RelationshipCountCard/</step>
+    <step order="3">Implement RelationshipCountCard.tsx with IRelationshipCountCardProps interface:
+      - title (optional, default "RELATED DOCUMENTS")
+      - count (number)
+      - isLoading (optional boolean)
+      - error (optional string | null)
+      - onOpen callback
+      - lastUpdated (optional Date)
+      States: loading spinner, count display, error message, zero count
+      Use Fluent v9: Card, Text, Spinner, Button, Badge, makeStyles, tokens</step>
+    <step order="4">Create index.ts barrel export for the component</step>
+    <step order="5">Add export to main src/index.ts barrel</step>
+    <step order="6">Verify deep import path works: @spaarke/ui-components/dist/components/RelationshipCountCard</step>
+    <step order="7">Create RelationshipCountCard.test.tsx with tests for all states (loading, count, error, zero, dark mode, click handler) — target 90%+ coverage</step>
+    <step order="8">Run npm run build in shared library to verify clean build</step>
+    <step order="9">Run npm test to verify all tests pass with coverage threshold</step>
+  </steps>
+
+  <tools>
+    <tool>Read, Write, Edit for file operations</tool>
+    <tool>Bash for npm build and test commands</tool>
+    <tool>Grep/Glob for finding patterns in existing components</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/shared/Spaarke.UI.Components/src/components/RelationshipCountCard/RelationshipCountCard.tsx</output>
+    <output>src/client/shared/Spaarke.UI.Components/src/components/RelationshipCountCard/RelationshipCountCard.test.tsx</output>
+    <output>src/client/shared/Spaarke.UI.Components/src/components/RelationshipCountCard/index.ts</output>
+    <output>Updated src/index.ts barrel export</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>RelationshipCountCard renders count with title and open button</criterion>
+    <criterion>Loading state shows Fluent Spinner</criterion>
+    <criterion>Error state shows error message</criterion>
+    <criterion>Zero state shows "0" and card remains clickable</criterion>
+    <criterion>onOpen callback fires on card click</criterion>
+    <criterion>Dark mode renders correctly (uses design tokens only)</criterion>
+    <criterion>90%+ test coverage on component</criterion>
+    <criterion>Builds cleanly in shared library (npm run build)</criterion>
+    <criterion>Deep import path resolves correctly</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Component Renders All States">
+      <steps>
+        <step>Import RelationshipCountCard in test harness</step>
+        <step>Render with count=10, verify "10" displayed</step>
+        <step>Render with isLoading=true, verify spinner</step>
+        <step>Render with error="API failed", verify error text</step>
+        <step>Render with count=0, verify "0" and card clickable</step>
+      </steps>
+      <expected>All states render without errors</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps>
+        <step>Wrap in FluentProvider with webDarkTheme</step>
+        <step>Verify all colors use semantic tokens</step>
+      </steps>
+      <expected>Colors adapt to dark theme per ADR-021</expected>
+    </test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

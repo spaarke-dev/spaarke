@@ -118,6 +118,7 @@ module serviceBus '../modules/service-bus.bicep' = {
       'document-indexing'
       'ai-indexing'
       'customer-onboarding'
+      'sdap-communication'
     ]
     tags: tags
   }

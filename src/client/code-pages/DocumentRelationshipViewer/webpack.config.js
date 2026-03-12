@@ -14,6 +14,7 @@ module.exports = {
     extensions: ['.ts', '.tsx', '.js', '.jsx'],
     alias: {
       '@spaarke/auth': path.resolve(__dirname, '../../shared/Spaarke.Auth/dist'),
+      '@spaarke/ui-components': path.resolve(__dirname, '../../shared/Spaarke.UI.Components/dist'),
     },
   },
   module: {

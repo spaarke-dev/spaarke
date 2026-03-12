@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Sprk.Bff.Api.Services.Communication.Models;
 
 /// <summary>
@@ -5,6 +7,7 @@ namespace Sprk.Bff.Api.Services.Communication.Models;
 /// SharedMailbox uses app-only auth (GraphClientFactory.ForApp()).
 /// User uses delegated auth via OBO (GraphClientFactory.ForUserAsync()).
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum SendMode
 {
     SharedMailbox = 0,

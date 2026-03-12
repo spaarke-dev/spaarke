@@ -126,19 +126,9 @@ public sealed class IncomingAssociationResolver
             return;
         }
 
-        // ── Priority 4: Mailbox context (default regarding matter) ──────────────
-        if (account?.DefaultRegardingMatterId is { } defaultMatterId && defaultMatterId != Guid.Empty)
-        {
-            fields["sprk_regardingmatter"] = new EntityReference("sprk_matter", defaultMatterId);
-
-            _logger.LogInformation(
-                "Association resolved via mailbox context for communication {CommunicationId} | DefaultMatter: {MatterId}",
-                communicationId, defaultMatterId);
-            await ApplyAssociationAsync(communicationId, fields, AssociationStatusResolved, ct);
-            return;
-        }
-
         // ── No match: flag as Pending Review ────────────────────────────────────
+        // Unassociated emails remain unassociated and surface for manual review.
+        // No default-matter fallback — shared mailboxes are not matter-specific.
         _logger.LogInformation(
             "No association found for communication {CommunicationId}. Setting status to Pending Review.",
             communicationId);
@@ -172,12 +162,11 @@ public sealed class IncomingAssociationResolver
                 "Found In-Reply-To header: {InReplyTo} for message {GraphMessageId}",
                 inReplyTo, graphMessageId);
 
-            // Look up parent communication by the In-Reply-To message ID
-            // The In-Reply-To header contains an internet message ID (e.g., <ABC@contoso.com>),
-            // but sprk_graphmessageid stores the Graph message ID. We need to search
-            // by sprk_internetmessageid if available, or fall back.
-            // For simplicity, try matching against sprk_graphmessageid first.
-            var parentComm = await _dataverseService.GetCommunicationByGraphMessageIdAsync(inReplyTo, ct);
+            // Look up parent communication by the In-Reply-To internet message ID.
+            // In-Reply-To contains an RFC 2822 internet message ID (e.g., <ABC@contoso.com>).
+            // Search sprk_internetmessageid first (exact match), fall back to sprk_graphmessageid.
+            var parentComm = await _dataverseService.GetCommunicationByInternetMessageIdAsync(inReplyTo, ct)
+                             ?? await _dataverseService.GetCommunicationByGraphMessageIdAsync(inReplyTo, ct);
             if (parentComm is null)
             {
                 _logger.LogDebug("No parent communication found for In-Reply-To: {InReplyTo}", inReplyTo);

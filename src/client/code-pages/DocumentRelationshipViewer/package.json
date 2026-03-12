@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@spaarke/auth": "file:../../shared/Spaarke.Auth",
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
     "@azure/msal-browser": "^3.30.0",
     "@fluentui/react-components": "^9.54.0",
     "@fluentui/react-icons": "^2.0.0",

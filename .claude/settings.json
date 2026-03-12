@@ -13,7 +13,8 @@
       "Skill(*)",
       "Task(*)",
       "Bash",
-      "Read(//c/code_files/spaarke-wt-sdap-file-upload-document-r2/**)"
+      "Read(//c/code_files/spaarke-wt-sdap-file-upload-document-r2/**)",
+      "Bash(npm ls d3-force)"
     ]
   }
 }

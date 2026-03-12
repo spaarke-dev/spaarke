@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
@@ -7,6 +8,9 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
+using System.Text.Json;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
 namespace Sprk.Bff.Api.Services.Communication;
@@ -26,10 +30,20 @@ public sealed class IncomingCommunicationProcessor
     private readonly CommunicationAccountService _accountService;
     private readonly IncomingAssociationResolver _associationResolver;
     private readonly IEmailAttachmentProcessor _attachmentProcessor;
-    private readonly EmlGenerationService _emlGenerationService;
+    private readonly GraphMessageToEmlConverter _emlConverter;
     private readonly SpeFileStore _speFileStore;
+    private readonly JobSubmissionService _jobSubmissionService;
     private readonly CommunicationOptions _options;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<IncomingCommunicationProcessor> _logger;
+
+    /// <summary>
+    /// Matches a GUID pattern — Graph webhook resource paths use user object IDs (GUIDs)
+    /// instead of email addresses, e.g. "users/e2e9000e-ce35-4f33-b0de-9c203fd5087a/messages/..."
+    /// </summary>
+    private static readonly Regex GuidPattern = new(
+        @"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+        RegexOptions.Compiled);
 
     public IncomingCommunicationProcessor(
         IGraphClientFactory graphClientFactory,
@@ -37,9 +51,11 @@ public sealed class IncomingCommunicationProcessor
         CommunicationAccountService accountService,
         IncomingAssociationResolver associationResolver,
         IEmailAttachmentProcessor attachmentProcessor,
-        EmlGenerationService emlGenerationService,
+        GraphMessageToEmlConverter emlConverter,
         SpeFileStore speFileStore,
+        JobSubmissionService jobSubmissionService,
         IOptions<CommunicationOptions> options,
+        IConfiguration configuration,
         ILogger<IncomingCommunicationProcessor> logger)
     {
         _graphClientFactory = graphClientFactory;
@@ -47,9 +63,11 @@ public sealed class IncomingCommunicationProcessor
         _accountService = accountService;
         _associationResolver = associationResolver;
         _attachmentProcessor = attachmentProcessor;
-        _emlGenerationService = emlGenerationService;
+        _emlConverter = emlConverter;
         _speFileStore = speFileStore;
+        _jobSubmissionService = jobSubmissionService;
         _options = options.Value;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -57,14 +75,15 @@ public sealed class IncomingCommunicationProcessor
     /// Processes an incoming email: fetches from Graph, creates Dataverse record,
     /// handles attachments, and archives .eml.
     /// </summary>
-    /// <param name="mailboxEmail">The shared mailbox email that received the message.</param>
+    /// <param name="mailboxEmail">The shared mailbox email or Azure AD GUID that received the message.</param>
     /// <param name="graphMessageId">The Graph message ID to fetch.</param>
+    /// <param name="subscriptionId">Graph subscription ID from the notification (used to resolve the correct account).</param>
     /// <param name="ct">Cancellation token.</param>
-    public async Task ProcessAsync(string mailboxEmail, string graphMessageId, CancellationToken ct)
+    public async Task ProcessAsync(string mailboxEmail, string graphMessageId, string? subscriptionId = null, CancellationToken ct = default)
     {
         _logger.LogInformation(
-            "Processing incoming communication | Mailbox: {Mailbox}, GraphMessageId: {GraphMessageId}",
-            mailboxEmail, graphMessageId);
+            "Processing incoming communication | Mailbox: {Mailbox}, GraphMessageId: {GraphMessageId}, SubscriptionId: {SubscriptionId}",
+            mailboxEmail, graphMessageId, subscriptionId);
 
         // ── Step 1: Deduplication check ──────────────────────────────────────────
         // Query sprk_communication where sprk_graphmessageid == graphMessageId.
@@ -72,14 +91,86 @@ public sealed class IncomingCommunicationProcessor
         if (await ExistsByGraphMessageIdAsync(graphMessageId, ct))
         {
             _logger.LogInformation(
-                "Duplicate detected: sprk_communication already exists for GraphMessageId {GraphMessageId}. Skipping.",
+                "Duplicate detected for GraphMessageId {GraphMessageId}. Skipping.",
                 graphMessageId);
             return;
         }
 
         // ── Step 2: Get account details ──────────────────────────────────────────
         // Check if the receiving mailbox has sprk_autocreaterecords enabled.
+        // Graph webhook resource paths contain user object IDs (GUIDs) instead of
+        // email addresses. When a GUID is detected, look up the account directly
+        // from the receive-enabled accounts list (shared mailboxes can't be resolved
+        // via Graph Users API).
         var account = await GetReceiveAccountAsync(mailboxEmail, ct);
+
+        if (account is null && GuidPattern.IsMatch(mailboxEmail))
+        {
+            _logger.LogInformation(
+                "Mailbox identifier is a GUID ({Identifier}), resolving to email address",
+                mailboxEmail);
+
+            // Graph webhook notifications use Azure AD object IDs (GUIDs) instead of email addresses.
+            // Strategy: 1) query Graph subscription to extract email from resource path,
+            //           2) match by stored subscription ID, 3) single-account fallback.
+            var allAccounts = await _accountService.QueryReceiveEnabledAccountsAsync(ct);
+
+            // Primary: query the Graph subscription object to get the original resource path
+            // which contains the email address (e.g., "users/mailbox@domain.com/mailFolders/Inbox/messages")
+            if (account is null && !string.IsNullOrEmpty(subscriptionId))
+            {
+                try
+                {
+                    var graphClient = _graphClientFactory.ForApp();
+                    var sub = await graphClient.Subscriptions[subscriptionId].GetAsync(cancellationToken: ct);
+                    var resourceEmail = ExtractMailboxFromResource(sub?.Resource);
+
+                    if (!string.IsNullOrEmpty(resourceEmail))
+                    {
+                        mailboxEmail = resourceEmail;
+                        account = allAccounts.FirstOrDefault(a =>
+                            string.Equals(a.EmailAddress, resourceEmail, StringComparison.OrdinalIgnoreCase));
+
+                        _logger.LogInformation(
+                            "Resolved GUID via Graph subscription {SubscriptionId} → email {Email}, account matched: {Matched}",
+                            subscriptionId, resourceEmail, account is not null);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to query Graph subscription {SubscriptionId} for GUID resolution",
+                        subscriptionId);
+                }
+            }
+
+            // Fallback: match by stored subscription ID on Dataverse accounts
+            if (account is null && !string.IsNullOrEmpty(subscriptionId))
+            {
+                account = allAccounts.FirstOrDefault(a =>
+                    string.Equals(a.SubscriptionId, subscriptionId, StringComparison.OrdinalIgnoreCase));
+            }
+
+            // Final fallback: single-account if only one exists
+            account ??= allAccounts.Length == 1 ? allAccounts[0] : null;
+
+            if (account is not null)
+            {
+                mailboxEmail = account.EmailAddress;
+                _logger.LogInformation(
+                    "Resolved GUID to account {Email} (from {Count} receive-enabled accounts)",
+                    account.EmailAddress, allAccounts.Length);
+            }
+            else if (GuidPattern.IsMatch(mailboxEmail))
+            {
+                _logger.LogWarning(
+                    "Could not resolve GUID {MailboxGuid} to any account or email. " +
+                    "SubscriptionId: {SubscriptionId}, Accounts: {Count}.",
+                    mailboxEmail, subscriptionId, allAccounts.Length);
+            }
+        }
+
         if (account is null)
         {
             _logger.LogWarning(
@@ -101,7 +192,7 @@ public sealed class IncomingCommunicationProcessor
                 {
                     config.QueryParameters.Select = new[]
                     {
-                        "id", "from", "toRecipients", "ccRecipients",
+                        "id", "internetMessageId", "from", "toRecipients", "ccRecipients",
                         "subject", "body", "uniqueBody",
                         "receivedDateTime", "hasAttachments"
                     };
@@ -157,8 +248,11 @@ public sealed class IncomingCommunicationProcessor
                 communicationId, graphMessageId);
         }
 
-        // ── Step 5: Process attachments (if account has sprk_autocreaterecords) ──
-        if (account?.AutoCreateRecords == true && message.HasAttachments == true
+        // ── Step 5: Process attachments ──────────────────────────────────────────
+        // Process attachments when: account has AutoCreateRecords enabled, OR account
+        // could not be resolved (default to processing rather than silently dropping).
+        var shouldProcessAttachments = account is null || account.AutoCreateRecords;
+        if (shouldProcessAttachments && message.HasAttachments == true
             && message.Attachments is { Count: > 0 })
         {
             try
@@ -320,8 +414,9 @@ public sealed class IncomingCommunicationProcessor
             ["sprk_subject"] = message.Subject ?? "(No Subject)",
             ["sprk_body"] = bodyContent,
             ["sprk_graphmessageid"] = graphMessageId,
+            ["sprk_internetmessageid"] = message.InternetMessageId,
             ["sprk_sentat"] = message.ReceivedDateTime?.UtcDateTime ?? DateTime.UtcNow,
-            ["sprk_receivedat"] = message.ReceivedDateTime?.UtcDateTime ?? DateTime.UtcNow,
+            ["sprk_receiveddate"] = message.ReceivedDateTime?.UtcDateTime ?? DateTime.UtcNow,
 
             // Note: Regarding fields (sprk_regardingmatter, sprk_regardingorganization,
             // sprk_regardingperson) are set in step 4.5 by IncomingAssociationResolver.
@@ -406,6 +501,34 @@ public sealed class IncomingCommunicationProcessor
                 using var stream = new MemoryStream(attachment.ContentBytes!);
                 var fileHandle = await _speFileStore.UploadSmallAsync(driveId, spePath, stream, ct);
 
+                // Create sprk_document record for the attachment (mirrors outbound pattern)
+                Guid? attachmentDocumentId = null;
+                if (fileHandle?.Id is not null)
+                {
+                    var attachmentDoc = new DataverseEntity("sprk_document")
+                    {
+                        ["sprk_documentname"] = TruncateTo(fileName, 200),
+                        ["sprk_filename"] = fileName, // AI analyzer reads this for file type detection
+                        ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
+                        ["sprk_sourcetype"] = new OptionSetValue(659490004), // Email Attachment
+                        ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+                        ["sprk_graphitemid"] = fileHandle.Id,
+                        ["sprk_graphdriveid"] = driveId,
+                    };
+
+                    attachmentDocumentId = await _dataverseService.CreateAsync(attachmentDoc, ct);
+
+                    _logger.LogInformation(
+                        "Created sprk_document for inbound attachment | DocumentId: {DocumentId}, FileName: {FileName}, CommunicationId: {CommunicationId}",
+                        attachmentDocumentId, fileName, communicationId);
+
+                    // Enqueue AI analysis for the attachment (best-effort)
+                    await EnqueueDocumentAnalysisAsync(attachmentDocumentId.Value, communicationId, ct);
+
+                    // Enqueue RAG indexing for semantic search (best-effort)
+                    await EnqueueRagIndexingAsync(driveId, fileHandle.Id, attachmentDocumentId.Value, fileName, communicationId, ct);
+                }
+
                 // Create sprk_communicationattachment record
                 var attachmentRecord = new DataverseEntity("sprk_communicationattachment")
                 {
@@ -417,8 +540,14 @@ public sealed class IncomingCommunicationProcessor
                 // Link to SPE if upload succeeded
                 if (fileHandle?.Id is not null)
                 {
-                    attachmentRecord["sprk_speitemid"] = fileHandle.Id;
-                    attachmentRecord["sprk_spedriveid"] = driveId;
+                    attachmentRecord["sprk_graphitemid"] = fileHandle.Id;
+                    attachmentRecord["sprk_graphdriveid"] = driveId;
+                }
+
+                // Link to document record if created
+                if (attachmentDocumentId.HasValue)
+                {
+                    attachmentRecord["sprk_document"] = new EntityReference("sprk_document", attachmentDocumentId.Value);
                 }
 
                 await _dataverseService.CreateAsync(attachmentRecord, ct);
@@ -460,36 +589,9 @@ public sealed class IncomingCommunicationProcessor
             return;
         }
 
-        // Build a synthetic SendCommunicationRequest and Response for EmlGenerationService
-        // (reusing existing EML generation infrastructure)
-        var syntheticRequest = new SendCommunicationRequest
-        {
-            To = message.ToRecipients?
-                .Where(r => r.EmailAddress?.Address is not null)
-                .Select(r => r.EmailAddress!.Address!)
-                .ToArray() ?? new[] { mailboxEmail },
-            Cc = message.CcRecipients?
-                .Where(r => r.EmailAddress?.Address is not null)
-                .Select(r => r.EmailAddress!.Address!)
-                .ToArray(),
-            Subject = message.Subject ?? "(No Subject)",
-            Body = message.Body?.Content ?? string.Empty,
-            BodyFormat = message.Body?.ContentType == BodyType.Html
-                ? BodyFormat.HTML
-                : BodyFormat.PlainText,
-        };
-
-        var syntheticResponse = new SendCommunicationResponse
-        {
-            CommunicationId = communicationId,
-            GraphMessageId = message.Id ?? communicationId.ToString("N"),
-            Status = CommunicationStatus.Delivered,
-            SentAt = message.ReceivedDateTime ?? DateTimeOffset.UtcNow,
-            From = message.From?.EmailAddress?.Address ?? "unknown",
-            CorrelationId = communicationId.ToString("N")
-        };
-
-        var emlResult = _emlGenerationService.GenerateEml(syntheticRequest, syntheticResponse);
+        // Use GraphMessageToEmlConverter for proper RFC 2822 .eml with preserved headers
+        // (InternetMessageId, In-Reply-To, References) and inline attachments
+        var emlResult = _emlConverter.ConvertToEml(message);
 
         var spePath = $"/communications/{communicationId:N}/{emlResult.FileName}";
         using var emlStream = new MemoryStream(emlResult.Content);
@@ -500,15 +602,32 @@ public sealed class IncomingCommunicationProcessor
             communicationId, spePath);
 
         // Create sprk_document record linking to the archived file
+        var senderEmail = message.From?.EmailAddress?.Address;
+        var recipientEmails = message.ToRecipients?
+            .Where(r => r.EmailAddress?.Address is not null)
+            .Select(r => r.EmailAddress!.Address!)
+            .ToArray();
+
         var document = new DataverseEntity("sprk_document")
         {
-            ["sprk_name"] = $"Archived: {TruncateTo(message.Subject ?? "(No Subject)", 180)}",
-            ["sprk_documenttype"] = new OptionSetValue(100000002), // Communication
-            ["sprk_sourcetype"] = new OptionSetValue(100000001), // CommunicationArchive
+            ["sprk_documentname"] = $"Archived: {TruncateTo(message.Subject ?? "(No Subject)", 180)}",
+            ["sprk_filename"] = emlResult.FileName, // e.g., "email-2026-03-12.eml" — AI analyzer reads this for file type
+            ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
+            ["sprk_sourcetype"] = new OptionSetValue(659490003), // Email Archive
             ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
-            ["sprk_speitemid"] = fileHandle?.Id,
-            ["sprk_spedriveid"] = driveId,
+            ["sprk_graphitemid"] = fileHandle?.Id,
+            ["sprk_graphdriveid"] = driveId,
+            ["sprk_isemailarchive"] = true,
+            ["sprk_emailsubject"] = message.Subject ?? "(No Subject)",
+            ["sprk_emaildirection"] = new OptionSetValue(100000000), // Received
         };
+
+        if (!string.IsNullOrEmpty(senderEmail))
+            document["sprk_emailfrom"] = senderEmail;
+        if (recipientEmails is { Length: > 0 })
+            document["sprk_emailto"] = string.Join("; ", recipientEmails);
+        if (message.ReceivedDateTime.HasValue)
+            document["sprk_emaildate"] = message.ReceivedDateTime.Value.DateTime;
 
         var documentId = await _dataverseService.CreateAsync(document, ct);
 
@@ -516,6 +635,15 @@ public sealed class IncomingCommunicationProcessor
             "Created sprk_document record for archived .eml | DocumentId: {DocumentId}, " +
             "CommunicationId: {CommunicationId}",
             documentId, communicationId);
+
+        // Enqueue AI analysis for the archived .eml (best-effort)
+        await EnqueueDocumentAnalysisAsync(documentId, communicationId, ct);
+
+        // Enqueue RAG indexing for semantic search (best-effort)
+        if (fileHandle?.Id is not null)
+        {
+            await EnqueueRagIndexingAsync(driveId, fileHandle.Id, documentId, emlResult.FileName, communicationId, ct);
+        }
     }
 
     /// <summary>
@@ -533,6 +661,122 @@ public sealed class IncomingCommunicationProcessor
         _logger.LogDebug(
             "Marked message as read | Mailbox: {Mailbox}, GraphMessageId: {GraphMessageId}",
             mailboxEmail, graphMessageId);
+    }
+
+    /// <summary>
+    /// Enqueues an AppOnlyDocumentAnalysis job for a document record (best-effort).
+    /// Mirrors CommunicationService.EnqueueDocumentAnalysisAsync for inbound parity.
+    /// </summary>
+    private async Task EnqueueDocumentAnalysisAsync(Guid documentId, Guid communicationId, CancellationToken ct)
+    {
+        try
+        {
+            var aiJob = new JobContract
+            {
+                JobId = Guid.NewGuid(),
+                JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName,
+                SubjectId = documentId.ToString(),
+                CorrelationId = communicationId.ToString("N"),
+                IdempotencyKey = $"DocAnalysis:{documentId}",
+                Attempt = 1,
+                MaxAttempts = 2,
+                CreatedAt = DateTimeOffset.UtcNow,
+                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new
+                {
+                    DocumentId = documentId,
+                    Source = "InboundEmailArchival",
+                    EnqueuedAt = DateTimeOffset.UtcNow
+                }))
+            };
+
+            await _jobSubmissionService.SubmitJobAsync(aiJob, ct);
+
+            _logger.LogInformation(
+                "Enqueued AI analysis job {JobId} for inbound document {DocumentId} | CommunicationId: {CommunicationId}",
+                aiJob.JobId, documentId, communicationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to enqueue AI analysis for inbound document {DocumentId} (non-fatal) | CommunicationId: {CommunicationId}",
+                documentId, communicationId);
+        }
+    }
+
+    /// <summary>
+    /// Enqueues a RAG indexing job for a document to enable semantic search.
+    /// Mirrors UploadFinalizationWorker.EnqueueRagIndexingAsync pattern.
+    /// </summary>
+    private async Task EnqueueRagIndexingAsync(
+        string driveId, string itemId, Guid documentId, string fileName,
+        Guid communicationId, CancellationToken ct)
+    {
+        try
+        {
+            var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
+
+            var indexingJob = new JobContract
+            {
+                JobId = Guid.NewGuid(),
+                JobType = RagIndexingJobHandler.JobTypeName,
+                SubjectId = documentId.ToString(),
+                CorrelationId = communicationId.ToString("N"),
+                IdempotencyKey = $"rag-index-{driveId}-{itemId}",
+                Attempt = 1,
+                MaxAttempts = 3,
+                CreatedAt = DateTimeOffset.UtcNow,
+                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new RagIndexingJobPayload
+                {
+                    TenantId = tenantId,
+                    DriveId = driveId,
+                    ItemId = itemId,
+                    FileName = fileName,
+                    DocumentId = documentId.ToString(),
+                    Source = "InboundEmail",
+                    EnqueuedAt = DateTimeOffset.UtcNow
+                }))
+            };
+
+            await _jobSubmissionService.SubmitJobAsync(indexingJob, ct);
+
+            _logger.LogInformation(
+                "Enqueued RAG indexing job {JobId} for inbound document {DocumentId} (file: {FileName}) | CommunicationId: {CommunicationId}",
+                indexingJob.JobId, documentId, fileName, communicationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to enqueue RAG indexing for inbound document {DocumentId} (non-fatal) | CommunicationId: {CommunicationId}",
+                documentId, communicationId);
+        }
+    }
+
+    /// <summary>
+    /// Extracts the mailbox email from a Graph resource path.
+    /// Resource format: "users/{email}/mailFolders/{folder}/messages/{id}"
+    ///               or "users/{email}/messages/{id}"
+    /// </summary>
+    private static string? ExtractMailboxFromResource(string? resource)
+    {
+        if (string.IsNullOrEmpty(resource))
+            return null;
+
+        const string prefix = "users/";
+        var startIndex = resource.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+        if (startIndex < 0)
+            return null;
+
+        var emailStart = startIndex + prefix.Length;
+        var nextSlash = resource.IndexOf('/', emailStart);
+
+        var extracted = nextSlash > emailStart
+            ? resource[emailStart..nextSlash]
+            : resource[emailStart..];
+
+        // Only return if it looks like an email (not a GUID)
+        return extracted.Contains('@') ? extracted : null;
     }
 
     private static string TruncateTo(string value, int maxLength)

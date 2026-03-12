@@ -1860,6 +1860,12 @@ public class DataverseWebApiService : IDataverseService
             "GetCommunicationByGraphMessageIdAsync is implemented in DataverseServiceClientImpl.");
     }
 
+    public Task<Entity?> GetCommunicationByInternetMessageIdAsync(string internetMessageId, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "GetCommunicationByInternetMessageIdAsync is implemented in DataverseServiceClientImpl.");
+    }
+
     public Task<Entity?> QueryContactByEmailAsync(string emailAddress, CancellationToken ct = default)
     {
         throw new NotImplementedException(
@@ -1882,5 +1888,11 @@ public class DataverseWebApiService : IDataverseService
     {
         throw new NotImplementedException(
             "QueryRecordTypeRefAsync is implemented in DataverseServiceClientImpl.");
+    }
+
+    public Task<Guid?> QuerySystemUserByAzureAdOidAsync(string azureAdObjectId, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "QuerySystemUserByAzureAdOidAsync is implemented in DataverseServiceClientImpl.");
     }
 }

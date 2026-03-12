@@ -1,8 +1,11 @@
+using System.Text.Json.Serialization;
+
 namespace Sprk.Bff.Api.Services.Communication.Models;
 
 /// <summary>
 /// Communication channel type. Maps to Dataverse field sprk_communicationtype.
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum CommunicationType
 {
     Email = 100000000,

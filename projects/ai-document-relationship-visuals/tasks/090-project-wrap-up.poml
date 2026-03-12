@@ -1,0 +1,92 @@
+<task id="090" project="ai-document-relationship-visuals">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <phase>6</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>documentation, cleanup</tags>
+    <dependencies>040</dependencies>
+    <blocks></blocks>
+    <status>not-started</status>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Wrap-up requires code-review + adr-check + repo-cleanup quality gates</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Complete project wrap-up: code review, ADR check, documentation updates, and repository cleanup</goal>
+    <context>
+      <background>
+        All implementation tasks are complete. This final task runs quality gates,
+        updates project status, documents lessons learned, and prepares the branch
+        for merge to master.
+      </background>
+      <relevant-files>
+        <file>projects/ai-document-relationship-visuals/README.md</file>
+        <file>projects/ai-document-relationship-visuals/plan.md</file>
+        <file>projects/ai-document-relationship-visuals/tasks/TASK-INDEX.md</file>
+      </relevant-files>
+    </context>
+    <constraints>
+      <constraint source="task-create">Must run /code-review + /adr-check and fix critical issues</constraint>
+      <constraint source="task-create">Must run /repo-cleanup</constraint>
+      <constraint source="task-create">Must update README status to Complete</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-relationship-visuals/CLAUDE.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run /code-review on all project changes</step>
+    <step order="2">Fix any critical issues found in code review</step>
+    <step order="3">Run /adr-check to validate architecture compliance</step>
+    <step order="4">Fix any ADR violations</step>
+    <step order="5">Run /repo-cleanup to audit repository structure</step>
+    <step order="6">Update README.md status to "Complete"</step>
+    <step order="7">Update plan.md milestone statuses to complete</step>
+    <step order="8">Update all task statuses in TASK-INDEX.md to completed</step>
+    <step order="9">Create notes/lessons-learned.md documenting:
+      - What went well
+      - What could be improved
+      - Patterns discovered for future projects
+      - Any gotchas encountered</step>
+    <step order="10">Final git commit with all updates</step>
+    <step order="11">Prompt user to run /merge-to-master to merge branch</step>
+  </steps>
+
+  <tools>
+    <tool>code-review skill</tool>
+    <tool>adr-check skill</tool>
+    <tool>repo-cleanup skill</tool>
+    <tool>Read, Edit for documentation updates</tool>
+    <tool>Bash for git commands</tool>
+  </tools>
+
+  <outputs>
+    <output>Code review results (issues fixed)</output>
+    <output>ADR compliance validation</output>
+    <output>Updated README.md (status: Complete)</output>
+    <output>Updated plan.md (milestones: complete)</output>
+    <output>notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Code review passes with no critical issues</criterion>
+    <criterion>ADR check passes</criterion>
+    <criterion>Repository cleanup passes</criterion>
+    <criterion>README status updated to Complete</criterion>
+    <criterion>Lessons learned documented</criterion>
+    <criterion>Branch ready for merge to master</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,112 @@
+<task id="002" project="ai-document-relationship-visuals">
+  <metadata>
+    <title>Create useForceSimulation Shared Hook</title>
+    <phase>1</phase>
+    <estimate>3-4 hours</estimate>
+    <tags>frontend, shared-component, d3-force</tags>
+    <dependencies></dependencies>
+    <blocks>003, 004, 020</blocks>
+    <status>not-started</status>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core shared hook with d3-force integration; must be React 16 compatible; BLOCKS multiple tasks</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Create the useForceSimulation shared hook in @spaarke/ui-components with synchronous d3-force pre-computation</goal>
+    <context>
+      <background>
+        This hook replaces the existing async useForceLayout hook. Instead of running d3-force
+        tick-by-tick with React state updates (causing a "Calculating layout..." spinner),
+        it runs all ticks synchronously before returning positioned nodes. The pattern is
+        proven in SearchResultsMap.tsx which uses sim.tick(300).
+
+        Must support two modes:
+        - hub-spoke: Source node pinned at center (DocumentRelationshipViewer)
+        - peer-mesh: No central node (future SemanticSearch)
+      </background>
+      <relevant-files>
+        <file>src/client/code-pages/DocumentRelationshipViewer/src/hooks/useForceLayout.ts</file>
+        <file>src/client/code-pages/SemanticSearch/src/components/SearchResultsMap.tsx</file>
+        <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+        <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+      </relevant-files>
+    </context>
+    <constraints>
+      <constraint source="ADR-022">Must use only useMemo — no React 18+ APIs (useTransition, useDeferredValue, startTransition)</constraint>
+      <constraint source="ADR-012">Must export via barrel AND support deep imports</constraint>
+      <constraint source="ADR-012">90%+ test coverage required</constraint>
+      <constraint source="spec">Synchronous pre-computation — no isSimulating state, no layout spinner</constraint>
+      <constraint source="spec">Hub-spoke mode: source node pinned at center with fx/fy</constraint>
+      <constraint source="spec">Peer-mesh mode: all nodes equal, no pinned nodes</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-relationship-visuals/spec.md</file>
+      <file>projects/ai-document-relationship-visuals/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing useForceLayout.ts (async pattern to understand current interface)</step>
+    <step order="2">Read SearchResultsMap.tsx for sync sim.tick(300) pattern</step>
+    <step order="3">Create src/client/shared/Spaarke.UI.Components/src/hooks/useForceSimulation.ts</step>
+    <step order="4">Implement ForceSimulationOptions interface:
+      - ticks (default 300), chargeStrength (default -800), linkDistanceMultiplier (default 400)
+      - collisionRadius (default 60), mode ("hub-spoke" | "peer-mesh"), center ({x, y})
+    </step>
+    <step order="5">Implement ForceNode and ForceEdge interfaces (generic, extensible)</step>
+    <step order="6">Implement useForceSimulation hook using useMemo:
+      - Create forceSimulation with forceLink, forceManyBody, forceCenter, forceCollide
+      - In hub-spoke mode: pin source node with fx/fy at center
+      - Call sim.stop() then sim.tick(ticks) synchronously
+      - Return positioned nodes with x/y coordinates
+      - Include viewport fitting computation (bounding box to scale/translate)
+    </step>
+    <step order="7">Add barrel export in src/hooks/index.ts and main src/index.ts</step>
+    <step order="8">Create useForceSimulation.test.ts with comprehensive tests:
+      - Hub-spoke mode: source at center, others positioned around
+      - Peer-mesh mode: no fixed nodes
+      - Zero nodes: empty result
+      - Single node: positioned at center
+      - Edge case: nodes without edges
+      - Verify useMemo dependency tracking
+      Target 90%+ coverage
+    </step>
+    <step order="9">Verify d3-force is in shared lib package.json dependencies (add if missing)</step>
+    <step order="10">Run npm run build and npm test</step>
+  </steps>
+
+  <tools>
+    <tool>Read, Write, Edit for file operations</tool>
+    <tool>Bash for npm build and test commands</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/shared/Spaarke.UI.Components/src/hooks/useForceSimulation.ts</output>
+    <output>src/client/shared/Spaarke.UI.Components/src/hooks/useForceSimulation.test.ts</output>
+    <output>Updated barrel exports</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Hook returns positioned nodes synchronously (no isSimulating state)</criterion>
+    <criterion>Hub-spoke mode pins source at center, others orbit</criterion>
+    <criterion>Peer-mesh mode has no pinned nodes</criterion>
+    <criterion>Configurable force parameters with sensible defaults</criterion>
+    <criterion>Includes viewport fitting utility (bounding box to scale/translate)</criterion>
+    <criterion>Uses only useMemo — no React 18+ APIs</criterion>
+    <criterion>90%+ test coverage</criterion>
+    <criterion>Builds cleanly in shared library</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

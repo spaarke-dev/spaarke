@@ -7,7 +7,7 @@
  * Columns: Document, Relationship, Similarity, Type, Parent, Modified
  */
 
-import React, { useMemo, useCallback } from "react";
+import React, { useMemo, useCallback, useEffect } from "react";
 import {
     makeStyles,
     tokens,
@@ -41,11 +41,20 @@ import {
 } from "@fluentui/react-icons";
 import type { DocumentNode, DocumentNodeData } from "../types/graph";
 
+export interface GridRow {
+    id: string;
+    data: DocumentNodeData;
+}
+
 export interface RelationshipGridProps {
     /** All nodes from the API (including source node) */
     nodes: DocumentNode[];
     /** Whether dark mode is enabled */
     isDarkMode?: boolean;
+    /** Quick search filter string (case-insensitive document name match) */
+    searchQuery?: string;
+    /** Callback to expose filtered rows to parent (for CSV export) */
+    onFilteredRowsChange?: (rows: GridRow[]) => void;
 }
 
 const useStyles = makeStyles({
@@ -100,11 +109,6 @@ const useStyles = makeStyles({
     },
 });
 
-interface GridRow {
-    id: string;
-    data: DocumentNodeData;
-}
-
 const getFileIcon = (fileType: string): React.ReactElement => {
     const type = fileType.toLowerCase();
     switch (type) {
@@ -137,11 +141,11 @@ const getRelationshipBadgeColor = (type: string): "brand" | "success" | "warning
     }
 };
 
-export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes }) => {
+export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes, searchQuery, onFilteredRowsChange }) => {
     const styles = useStyles();
 
     // Filter out hub nodes (matter/project/invoice/email) — show only documents
-    const rows = useMemo((): GridRow[] => {
+    const allRows = useMemo((): GridRow[] => {
         return nodes
             .filter((n) => {
                 const nodeType = n.data.nodeType;
@@ -149,6 +153,18 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes }) => 
             })
             .map((n) => ({ id: n.id, data: n.data }));
     }, [nodes]);
+
+    // Apply search filter (case-insensitive document name match)
+    const rows = useMemo((): GridRow[] => {
+        if (!searchQuery || searchQuery.trim() === "") return allRows;
+        const query = searchQuery.toLowerCase();
+        return allRows.filter((row) => row.data.name.toLowerCase().includes(query));
+    }, [allRows, searchQuery]);
+
+    // Notify parent of filtered rows for CSV export
+    useEffect(() => {
+        onFilteredRowsChange?.(rows);
+    }, [rows, onFilteredRowsChange]);
 
     const handleOpenRecord = useCallback((data: DocumentNodeData) => {
         if (!data.recordUrl && !data.documentId) return;

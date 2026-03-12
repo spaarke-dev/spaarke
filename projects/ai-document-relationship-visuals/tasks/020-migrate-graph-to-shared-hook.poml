@@ -1,0 +1,104 @@
+<task id="020" project="ai-document-relationship-visuals">
+  <metadata>
+    <title>Migrate DocumentGraph to Shared useForceSimulation Hook</title>
+    <phase>3</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>frontend, fluent-ui, code-page</tags>
+    <dependencies>003</dependencies>
+    <blocks>024</blocks>
+    <status>not-started</status>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies .tsx files; replaces core layout hook; regression risk</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Replace the async useForceLayout hook in DocumentGraph.tsx with the shared useForceSimulation hook from @spaarke/ui-components</goal>
+    <context>
+      <background>
+        The Code Page's DocumentGraph currently uses useForceLayout which runs d3-force
+        tick-by-tick with React state updates, causing a "Calculating layout..." spinner.
+        The new shared useForceSimulation runs all ticks synchronously before first render.
+
+        Key changes:
+        - Remove useForceLayout import, add useForceSimulation import
+        - Remove isSimulating state and loading overlay
+        - Positions are computed once via useMemo (synchronous)
+        - Remove tick-by-tick state updates
+        - Use hub-spoke mode (source document pinned at center)
+      </background>
+      <relevant-files>
+        <file>src/client/code-pages/DocumentRelationshipViewer/src/components/DocumentGraph.tsx</file>
+        <file>src/client/code-pages/DocumentRelationshipViewer/src/hooks/useForceLayout.ts</file>
+        <file>src/client/code-pages/DocumentRelationshipViewer/src/App.tsx</file>
+      </relevant-files>
+    </context>
+    <constraints>
+      <constraint source="ADR-021">Maintain dark mode support</constraint>
+      <constraint source="ADR-006">Code Page uses React 19 createRoot — barrel imports OK</constraint>
+      <constraint source="spec">Graph must render instantly — no layout spinner</constraint>
+      <constraint source="spec">All existing functionality must continue working</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-relationship-visuals/CLAUDE.md</file>
+      <file>.claude/adr/ADR-006.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current DocumentGraph.tsx and useForceLayout.ts to understand existing wiring</step>
+    <step order="2">Import useForceSimulation from @spaarke/ui-components (barrel import OK for Code Page)</step>
+    <step order="3">Replace useForceLayout call with useForceSimulation in hub-spoke mode</step>
+    <step order="4">Map the hook output (positioned nodes) to @xyflow/react node format</step>
+    <step order="5">Remove isSimulating state and loading overlay from DocumentGraph.tsx</step>
+    <step order="6">Remove or mark useForceLayout.ts as deprecated (keep file for now, remove import)</step>
+    <step order="7">Verify @xyflow fitView still works with synchronously-positioned nodes</step>
+    <step order="8">Test locally: npm run build, verify graph renders without spinner</step>
+  </steps>
+
+  <tools>
+    <tool>Read, Edit for file modifications</tool>
+    <tool>Bash for npm build</tool>
+  </tools>
+
+  <outputs>
+    <output>Modified DocumentGraph.tsx using shared useForceSimulation</output>
+    <output>Removed loading overlay (no more layout spinner)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>DocumentGraph imports useForceSimulation from @spaarke/ui-components</criterion>
+    <criterion>No "Calculating layout..." spinner on graph load</criterion>
+    <criterion>Graph nodes positioned correctly in hub-spoke layout</criterion>
+    <criterion>All existing interactions work (pan, zoom, minimap, node click, controls)</criterion>
+    <criterion>Dark mode still works</criterion>
+    <criterion>npm run build succeeds</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Graph Renders Without Spinner">
+      <steps>
+        <step>Open DocumentRelationshipViewer with test document</step>
+        <step>Verify graph appears immediately without "Calculating layout..." message</step>
+        <step>Verify nodes are positioned (not stacked at origin)</step>
+      </steps>
+      <expected>Graph renders instantly with nodes positioned in hub-spoke layout</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps>
+        <step>Open viewer with theme=dark URL parameter</step>
+        <step>Verify background, nodes, edges adapt to dark theme</step>
+      </steps>
+      <expected>All graph elements use semantic tokens per ADR-021</expected>
+    </test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

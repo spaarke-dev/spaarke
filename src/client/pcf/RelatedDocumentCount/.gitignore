@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+out/
+obj/
+bin/
+
+# PCF generated
+generated/
+
+# IDE
+.vs/
+*.user
+
+# Logs
+*.log
+npm-debug.log*

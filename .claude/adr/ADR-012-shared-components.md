@@ -1,8 +1,8 @@
 # ADR-012: Shared Component Library (Concise)
 
-> **Status**: Accepted (Revised 2026-02-23)
+> **Status**: Accepted (Revised 2026-03-10)
 > **Domain**: PCF/Frontend Architecture
-> **Last Updated**: 2026-02-23
+> **Last Updated**: 2026-03-10
 
 ---
 
@@ -27,6 +27,7 @@ Maintain a shared TypeScript/React component library at `src/client/shared/Spaar
 - **MUST** achieve 90%+ test coverage on shared components
 - **MUST** author components to be React 18-compatible (used in Code Pages)
 - **MUST** verify React 16/17 compatibility for components consumed by PCF
+- **MUST** use callback-based props (zero service dependencies in shared components)
 
 ### ❌ MUST NOT
 
@@ -36,118 +37,61 @@ Maintain a shared TypeScript/React component library at `src/client/shared/Spaar
 - **MUST NOT** use custom CSS (Fluent tokens only)
 - **MUST NOT** use React 18-only APIs (`useTransition`, `useDeferredValue`) in components intended for PCF
 - **MUST NOT** export components without tests
+- **MUST NOT** import services directly — accept behavior via callback props
 
 ---
 
-## Library Structure
+## Component Inventory (v2.0.0)
 
-```
-src/client/shared/Spaarke.UI.Components/
-├── src/
-│   ├── components/
-│   │   ├── layout/
-│   │   │   ├── WizardDialog/       # Multi-step wizard (Create Matter, etc.)
-│   │   │   ├── SidePanel/          # Slide-in panel (filter pane, detail pane)
-│   │   │   └── PageLayout/         # Standard page with header + main + sidebar
-│   │   ├── data/
-│   │   │   ├── DataGrid/           # Virtualized grid with selection/bulk ops
-│   │   │   ├── CommandBar/         # Action bar for grids and pages
-│   │   │   └── FilterPanel/        # Faceted filter panel
-│   │   ├── feedback/
-│   │   │   ├── StatusBadge/        # Status indicator
-│   │   │   ├── LoadingState/       # Skeleton loaders
-│   │   │   ├── EmptyState/         # Zero-results state
-│   │   │   └── ErrorState/         # Error with retry
-│   │   └── navigation/
-│   │       └── StepIndicator/      # Wizard step progress
-│   ├── hooks/
-│   │   ├── useDataverseFetch/      # Dataverse WebAPI wrapper
-│   │   ├── usePagination/
-│   │   └── useSelection/
-│   ├── services/
-│   │   ├── EntityMetadataService/
-│   │   └── FormatterService/
-│   ├── types/                      # Shared TypeScript types
-│   ├── theme/
-│   │   ├── spaarkeLight.ts
-│   │   └── spaarkeDark.ts
-│   └── utils/                      # formatters, transformers, validators
-└── package.json                    # @spaarke/ui-components
-```
+### Components (16 groups)
 
----
+| Component | Description | PCF Safe? |
+|-----------|-------------|-----------|
+| SprkButton | Button with tooltip | Yes |
+| DatasetGrid (Grid/Card/List/Virtualized) | Multi-view dataset | Yes |
+| ViewSelector | View mode switcher | Yes |
+| CommandToolbar | Action bar | Yes |
+| PageChrome | Page header (OOB parity) | Yes |
+| ChoiceDialog | Simple choice dialog | Yes |
+| EventDueDateCard | Event date display | Yes |
+| SidePaneShell | Slide-in side panel | Yes |
+| WizardShell / Stepper / SuccessScreen | Multi-step wizard | Yes |
+| DiffCompareView | AI diff viewer | Yes |
+| LookupField | Search-as-you-type lookup | Yes |
+| SendEmailDialog | Email composition | Yes |
+| AiSummaryPopover | AI summary with lazy fetch | Yes (deep import) |
+| FindSimilarDialog | Iframe dialog shell | Yes (deep import) |
+| RichTextEditor | Lexical WYSIWYG | **No** (needs jsx-runtime) |
+| SprkChat | SSE streaming chat | Code Pages only |
 
-## Standard Layout Templates
+### Hooks (10)
 
-### WizardDialog (multi-step form)
+`useDatasetMode`, `useHeadlessMode`, `useVirtualization`, `useKeyboardShortcuts`, `useEntityTypeConfig`, `useDirtyFields`, `useOptimisticSave`, `useWriteMode`, `useSseStream`, `useAiSummary`
 
-Used by: Create Matter wizard, Create Project wizard, Document Upload wizard.
+### Services (8)
 
-```tsx
-import { WizardDialog, WizardStep } from "@spaarke/ui-components";
+`CommandRegistry`, `CommandExecutor`, `FieldMappingService`, `EventTypeService`, `FetchXmlService`, `ViewService`, `ConfigurationService`, `SprkChatBridge`
 
-<WizardDialog
-    title="Create New Matter"
-    steps={[
-        { id: "files", label: "Add file(s)", icon: <DocumentAdd20Regular /> },
-        { id: "record", label: "Create record", icon: <FormNew20Regular /> },
-        { id: "next", label: "Next Steps", icon: <CheckmarkCircle20Regular /> },
-    ]}
-    activeStep="files"
-    onCancel={handleCancel}
-    onNext={handleNext}
-    onComplete={handleComplete}
->
-    <AddFilesStep onFilesSelected={setFiles} />
-</WizardDialog>
-```
+### Theme
 
-### SidePanel (filter / detail pane)
-
-Used by: Events calendar filter, Document details pane, date range picker pane.
-
-```tsx
-import { SidePanel } from "@spaarke/ui-components";
-
-<SidePanel
-    title="Date Filter: Event"
-    position="end"         // "start" | "end"
-    width={320}
-    open={isPanelOpen}
-    onDismiss={() => setPanelOpen(false)}
->
-    <DateRangeFilter onApply={handleFilter} onClear={handleClear} />
-</SidePanel>
-```
+`spaarkeBrand` (BrandVariants #2173d7), `spaarkeLight`, `spaarkeDark`
 
 ---
 
-## Consumption in PCF (React 16/17)
+## PCF Import Pattern (Critical)
+
+PCF controls **must use deep imports** to avoid pulling in Lexical/RichTextEditor which requires `react/jsx-runtime` (unavailable in React 16):
 
 ```typescript
-import { DataGrid, StatusBadge, FilterPanel } from "@spaarke/ui-components";
-import { FluentProvider } from "@fluentui/react-components";
-import { spaarkeLight } from "@spaarke/ui-components/theme";
+// ✅ PCF — deep import
+import { FindSimilarDialog } from "@spaarke/ui-components/dist/components/FindSimilarDialog";
+import { AiSummaryPopover } from "@spaarke/ui-components/dist/components/AiSummaryPopover";
 
-ReactDOM.render(   // React 16 API
-    <FluentProvider theme={spaarkeLight}>
-        <DataGrid items={items} columns={columns} />
-    </FluentProvider>,
-    this.container
-);
-```
+// ❌ PCF — barrel import pulls in ALL components
+import { FindSimilarDialog } from "@spaarke/ui-components";
 
-## Consumption in Code Page (React 18)
-
-```typescript
-import { WizardDialog, SidePanel } from "@spaarke/ui-components";
-import { createRoot } from "react-dom/client";  // React 18
-
-createRoot(document.getElementById("root")!).render(
-    <FluentProvider theme={webLightTheme}>
-        <WizardDialog ... />
-    </FluentProvider>
-);
+// ✅ Code Pages — barrel is safe (React 18 has jsx-runtime)
+import { FindSimilarDialog, WizardShell } from "@spaarke/ui-components";
 ```
 
 ---
@@ -158,7 +102,7 @@ createRoot(document.getElementById("root")!).render(
 |----------------------|----------------|
 | Used by 2+ modules/surfaces | Module-specific logic |
 | Core Spaarke UX pattern (wizard, side panel) | Experimental/POC |
-| Clear, reusable API with props | Tight coupling to business context |
+| Clear, callback-based API with props | Tight coupling to services/context |
 | Layout primitive | One-off dialog with unique flow |
 
 ---
@@ -170,13 +114,15 @@ createRoot(document.getElementById("root")!).render(
 | [ADR-006](ADR-006-pcf-over-webresources.md) | Shared library consumed by both PCF and Code Pages |
 | [ADR-011](ADR-011-dataset-pcf.md) | DataGrid, CommandBar used by Dataset PCF |
 | [ADR-021](ADR-021-fluent-design-system.md) | All components use Fluent v9 tokens |
+| [ADR-022](ADR-022-pcf-platform-libraries.md) | PCF uses React 16 (platform); Code Pages use React 18 (bundled) |
 
 ---
 
 ## Source Documentation
 
-**Full ADR**: [docs/adr/ADR-012-shared-component-library.md](../../docs/adr/ADR-012-shared-component-library.md)
+- **Full ADR**: [docs/adr/ADR-012-shared-component-library.md](../../docs/adr/ADR-012-shared-component-library.md)
+- **Developer Guide**: [docs/guides/SHARED-UI-COMPONENTS-GUIDE.md](../../docs/guides/SHARED-UI-COMPONENTS-GUIDE.md)
 
 ---
 
-**Lines**: ~130
+**Lines**: ~120
