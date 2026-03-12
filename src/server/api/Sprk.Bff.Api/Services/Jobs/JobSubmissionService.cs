@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Options;
@@ -85,10 +87,19 @@ public class JobSubmissionService
                 WriteIndented = false
             });
 
+            // Use IdempotencyKey as MessageId when available so that Service Bus
+            // duplicate detection rejects messages for the same logical operation
+            // (e.g., same email processed by multiple webhook subscriptions or instances).
+            // Falls back to JobId for jobs without an idempotency key.
+            // Service Bus MessageId has a 128-character limit; hash if needed.
+            var sbMessageId = !string.IsNullOrWhiteSpace(job.IdempotencyKey)
+                ? ToSafeMessageId(job.IdempotencyKey)
+                : job.JobId.ToString();
+
             var message = new ServiceBusMessage(messageBody)
             {
-                MessageId = job.JobId.ToString(),
-                CorrelationId = job.IdempotencyKey,
+                MessageId = sbMessageId,
+                CorrelationId = job.CorrelationId,
                 ContentType = "application/json",
                 Subject = job.JobType,
                 ApplicationProperties =
@@ -114,4 +125,16 @@ public class JobSubmissionService
         }
     }
 
+    /// <summary>
+    /// Converts an idempotency key to a safe Service Bus MessageId (max 128 chars).
+    /// If the key fits, use it directly. Otherwise, SHA-256 hash it.
+    /// </summary>
+    private static string ToSafeMessageId(string idempotencyKey)
+    {
+        if (idempotencyKey.Length <= 128)
+            return idempotencyKey;
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(idempotencyKey));
+        return Convert.ToHexString(hash); // 64-char hex string
+    }
 }

@@ -53,7 +53,7 @@ public sealed class CommunicationAccountService
         return await GetCachedAccountsAsync(
             ReceiveEnabledCacheKey,
             "sprk_receiveenabled eq true and statecode eq 0",
-            "sprk_emailaddress,sprk_displayname,sprk_accounttype,sprk_name,sprk_graphsubscriptionid,sprk_graphsubscriptionexpiry,sprk_monitorfolder,sprk_autocreaterecords,sprk_securitygroupid,sprk_securitygroupname",
+            "sprk_emailaddress,sprk_displayname,sprk_accounttype,sprk_name,sprk_graphsubscriptionid,sprk_graphsubscriptionexpiry,sprk_monitorfolder,sprk_autocreaterecords,sprk_archiveincomingoptin,sprk_securitygroupid,sprk_securitygroupname",
             ct);
     }
 

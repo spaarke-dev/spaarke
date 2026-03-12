@@ -729,10 +729,30 @@ public sealed class CommunicationService
             ["sprk_correlationid"] = correlationId
         };
 
-        // Note: sprk_sentby is a lookup field (EntityReference), not a string.
-        // Setting the user's Azure AD object ID as a string would cause a Dataverse validation error.
-        // TODO: Resolve systemuser ID from Azure AD oid to set sprk_sentby as EntityReference.
-        // For now, store the sender identity in sprk_from (string field) which is already set above.
+        // Resolve Azure AD oid → Dataverse systemuserid for sprk_sentby lookup
+        if (!string.IsNullOrEmpty(userObjectId))
+        {
+            try
+            {
+                var systemUserId = await _dataverseService.QuerySystemUserByAzureAdOidAsync(userObjectId, ct);
+                if (systemUserId.HasValue)
+                {
+                    communication["sprk_sentby"] = new EntityReference("systemuser", systemUserId.Value);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Could not resolve systemuser for Azure AD OID {UserObjectId}; sprk_sentby will be null",
+                        userObjectId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to resolve systemuser for sprk_sentby (Azure AD OID: {UserObjectId}); continuing without",
+                    userObjectId);
+            }
+        }
 
         // Only set CC/BCC if provided
         if (request.Cc is { Length: > 0 })
@@ -973,12 +993,19 @@ public sealed class CommunicationService
         // 3. Create sprk_document record linking to the archived file
         var document = new DataverseEntity("sprk_document")
         {
-            ["sprk_name"] = $"Archived: {TruncateTo(request.Subject, 180)}",
-            ["sprk_documenttype"] = new OptionSetValue(100000002), // Communication
-            ["sprk_sourcetype"] = new OptionSetValue(100000001), // CommunicationArchive
+            ["sprk_documentname"] = $"Archived: {TruncateTo(request.Subject, 180)}",
+            ["sprk_filename"] = emlResult.FileName, // AI analyzer reads this for file type detection
+            ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
+            ["sprk_sourcetype"] = new OptionSetValue(659490003), // Email Archive
             ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
             ["sprk_graphitemid"] = fileHandle?.Id,
             ["sprk_graphdriveid"] = driveId,
+            ["sprk_isemailarchive"] = true,
+            ["sprk_emailsubject"] = request.Subject,
+            ["sprk_emailfrom"] = partialResponse.From,
+            ["sprk_emailto"] = string.Join("; ", request.To),
+            ["sprk_emaildirection"] = new OptionSetValue(100000001), // Sent
+            ["sprk_emaildate"] = partialResponse.SentAt.DateTime,
         };
 
         var documentId = await _dataverseService.CreateAsync(document, ct);
@@ -1058,9 +1085,10 @@ public sealed class CommunicationService
             {
                 var attachmentDoc = new DataverseEntity("sprk_document")
                 {
-                    ["sprk_name"] = TruncateTo(fileName, 200),
-                    ["sprk_documenttype"] = new OptionSetValue(100000000), // General
-                    ["sprk_sourcetype"] = new OptionSetValue(100000001), // CommunicationArchive
+                    ["sprk_documentname"] = TruncateTo(fileName, 200),
+                    ["sprk_filename"] = fileName, // AI analyzer reads this for file type detection
+                    ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
+                    ["sprk_sourcetype"] = new OptionSetValue(659490004), // Email Attachment
                     ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
                     ["sprk_graphitemid"] = speItemId,
                     ["sprk_graphdriveid"] = driveId,

@@ -12,5 +12,9 @@ public sealed class VerificationResult
     public required DateTimeOffset VerifiedAt { get; init; }
     public bool? SendCapabilityVerified { get; init; }
     public bool? ReadCapabilityVerified { get; init; }
+
+    /// <summary>Whether a Graph webhook subscription was created for inbound email monitoring.</summary>
+    public bool SubscriptionCreated { get; init; }
+
     public string? FailureReason { get; init; }
 }
