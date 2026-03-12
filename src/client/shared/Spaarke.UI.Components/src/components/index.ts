@@ -57,3 +57,6 @@ export * from "./FileUpload";
 
 // CreateRecordWizard - Reusable multi-step record creation wizard
 export * from "./CreateRecordWizard";
+
+// AiFieldTag - "AI" badge pill for pre-filled form fields
+export * from "./AiFieldTag";

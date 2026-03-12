@@ -38,6 +38,8 @@ import {
 } from '../CreateMatter/matterService';
 
 import { EntityCreationService } from '../../services/EntityCreationService';
+import { getBffBaseUrl } from '../../config/bffConfig';
+import { authenticatedFetch } from '../../services/authInit';
 import { getSpeContainerIdFromBusinessUnit } from '../../services/xrmProvider';
 import { navigateToEntity } from '../../utils/navigation';
 import type { IWebApi } from '../../types/xrm';
@@ -163,7 +165,7 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
         // 2. Upload files to SPE + create document records
         if (context.uploadedFiles.length > 0 && context.speContainerId) {
           try {
-            const entityService = new EntityCreationService(webApi);
+            const entityService = new EntityCreationService(webApi, authenticatedFetch, getBffBaseUrl());
 
             const uploadResult = await entityService.uploadFilesToSpe(
               context.speContainerId,

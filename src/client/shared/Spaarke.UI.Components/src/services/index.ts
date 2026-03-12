@@ -1,3 +1,11 @@
+export { EntityCreationService } from "./EntityCreationService";
+export type {
+  IFileUploadResult,
+  ISpeFileMetadata,
+  IDocumentLinkResult,
+  IUploadProgress,
+  AuthenticatedFetchFn,
+} from "./EntityCreationService";
 export * from "./CommandRegistry";
 export * from "./CommandExecutor";
 export { FieldMappingService } from "./FieldMappingService";

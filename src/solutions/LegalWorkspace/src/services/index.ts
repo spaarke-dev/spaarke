@@ -10,7 +10,7 @@
 export { DataverseService } from './DataverseService';
 export * from './queryHelpers';
 export { EntityCreationService } from './EntityCreationService';
-export type { IFileUploadResult, ISpeFileMetadata, IDocumentLinkResult, IAiPreFillResponse, IUploadProgress } from './EntityCreationService';
+export type { IFileUploadResult, ISpeFileMetadata, IDocumentLinkResult, IUploadProgress, AuthenticatedFetchFn } from './EntityCreationService';
 export { authenticatedFetch, getTenantId } from './authInit';
 export { bffAuthProvider } from './bffAuthProvider';
 export type { IBffAuthProvider } from './bffAuthProvider';

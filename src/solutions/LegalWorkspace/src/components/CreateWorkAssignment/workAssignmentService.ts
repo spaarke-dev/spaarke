@@ -117,7 +117,7 @@ export class WorkAssignmentService {
     private readonly _webApi: IWebApi,
     private readonly _containerId?: string
   ) {
-    this._entityService = new EntityCreationService(_webApi);
+    this._entityService = new EntityCreationService(_webApi, authenticatedFetch, getBffBaseUrl());
   }
 
   // ── Record Search (Step 1) ──────────────────────────────────────────────

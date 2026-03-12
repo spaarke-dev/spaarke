@@ -1,14 +1,14 @@
 # Workspace Entity Creation Guide
 
-> **Version:** 1.0.0
-> **Last Updated:** February 20, 2026
-> **Applies To:** Corporate Workspace SPA — Create New Matter wizard (extensible to Project, Invoice, etc.)
+> **Version:** 2.0.0
+> **Last Updated:** March 12, 2026
+> **Applies To:** Corporate Workspace SPA — Create New Matter, Project, Event, Todo, Work Assignment wizards
 
 ---
 
 ## TL;DR
 
-The Legal Workspace provides a multi-step wizard for creating Dataverse entity records (starting with Matters) from a standalone Vite SPA deployed as a Dataverse web resource. The wizard handles: file upload to SPE, Dataverse record creation with OData lookup bindings, document record linking, Document Profile AI analysis queuing, and follow-on actions (assign counsel, send email, draft summary). The architecture is entity-agnostic — `EntityCreationService` and navigation property discovery work for any entity type.
+The Legal Workspace provides multi-step wizards for creating Dataverse entity records (Matter, Project, Event, Todo, Work Assignment) from a standalone Vite SPA deployed as a Dataverse web resource. The wizard handles: file upload to SPE, Dataverse record creation with OData lookup bindings, document record linking, Document Profile AI analysis queuing, AI pre-fill from uploaded documents, and follow-on actions. The architecture is entity-agnostic — shared library components (`EntityCreationService`, `useAiPrefill`, `AiFieldTag`, `findBestLookupMatch`) work for any entity type via dependency injection and configuration.
 
 ---
 
@@ -35,15 +35,27 @@ The Legal Workspace provides a multi-step wizard for creating Dataverse entity r
 
 ### Key Components
 
+#### Shared Library (`src/client/shared/Spaarke.UI.Components/`)
+
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| **WizardDialog.tsx** | `src/solutions/LegalWorkspace/src/components/CreateMatter/` | Multi-step dialog shell (sidebar nav, step routing) |
-| **MatterService** | `matterService.ts` | Matter-specific orchestrator (entity payload, follow-on actions) |
-| **EntityCreationService** | `src/solutions/LegalWorkspace/src/services/EntityCreationService.ts` | Entity-agnostic: SPE upload, document record creation, AI analysis trigger |
-| **xrmProvider.ts** | `src/solutions/LegalWorkspace/src/services/xrmProvider.ts` | Frame-walk to find Xrm global, user ID, SPE container resolution |
-| **bffAuthProvider.ts** | `src/solutions/LegalWorkspace/src/services/bffAuthProvider.ts` | OBO token acquisition for BFF API calls |
-| **navigation.ts** | `src/solutions/LegalWorkspace/src/utils/navigation.ts` | Open records via Xrm.Navigation.openForm |
-| **LookupField.tsx** | `src/solutions/LegalWorkspace/src/components/CreateMatter/LookupField.tsx` | Reusable search-as-you-type lookup component |
+| **EntityCreationService** | `src/services/EntityCreationService.ts` | Entity-agnostic: SPE upload, document record creation, AI analysis trigger. Constructor-injected `authenticatedFetch` and `bffBaseUrl`. |
+| **useAiPrefill** | `src/hooks/useAiPrefill.ts` | Reusable hook for AI pre-fill from uploaded documents. Configurable field extractors and lookup resolvers. |
+| **AiFieldTag** | `src/components/AiFieldTag/AiFieldTag.tsx` | "AI" sparkle badge for pre-filled form fields |
+| **findBestLookupMatch** | `src/utils/lookupMatching.ts` | Fuzzy match AI display names against Dataverse lookup results |
+| **LookupField** | `src/components/LookupField/` | Reusable search-as-you-type lookup component |
+| **CreateRecordWizard** | `src/components/CreateRecordWizard/` | Reusable multi-step wizard shell (sidebar nav, step routing) |
+| **FileUploadZone** | `src/components/FileUpload/` | Drag-and-drop file upload with preview |
+
+#### Solution-Specific (`src/solutions/LegalWorkspace/`)
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| **MatterService** | `components/CreateMatter/matterService.ts` | Matter-specific orchestrator (entity payload, follow-on actions) |
+| **ProjectService** | `components/CreateProject/projectService.ts` | Project-specific orchestrator |
+| **xrmProvider.ts** | `services/xrmProvider.ts` | Frame-walk to find Xrm global, user ID, SPE container resolution |
+| **bffAuthProvider.ts** | `services/bffAuthProvider.ts` | OBO token acquisition for BFF API calls |
+| **bffConfig.ts** | `config/bffConfig.ts` | BFF base URL configuration |
 
 ---
 
@@ -231,37 +243,62 @@ Failures are non-fatal — the document exists and can be profiled later.
 
 ## Extending to Other Entity Types
 
-The architecture separates entity-specific logic from reusable infrastructure:
+The architecture separates entity-specific logic from reusable infrastructure via the shared library.
 
-### Reusable (EntityCreationService)
+### Shared Library Components (import from `@spaarke/ui-components`)
 
-- `uploadFilesToSpe()` — works for any entity type
-- `createDocumentRecords()` — parameterized by parent entity name and nav-prop
-- `_triggerDocumentAnalysis()` — works for any document
-- `requestAiPreFill()` — could accept entity type parameter
+| Component | Method | Purpose |
+|-----------|--------|---------|
+| `EntityCreationService` | `uploadFilesToSpe()` | Upload files to SPE container (any entity) |
+| `EntityCreationService` | `createDocumentRecords()` | Create `sprk_document` records linked to parent entity |
+| `EntityCreationService` | `_triggerDocumentAnalysis()` | Queue Document Profile AI analysis |
+| `useAiPrefill` | (hook) | AI pre-fill from uploaded documents (any entity with a BFF endpoint) |
+| `findBestLookupMatch` | (function) | Fuzzy match AI values to Dataverse lookups |
+| `AiFieldTag` | (component) | Visual badge for AI-populated fields |
+| `LookupField` | (component) | Search-as-you-type lookup with Dataverse integration |
+| `CreateRecordWizard` | (component) | Multi-step wizard shell with sidebar navigation |
 
-### Entity-Specific (MatterService pattern)
+### EntityCreationService — Dependency Injection
 
-To add **Create New Project**, create a `ProjectService` that:
+The service uses constructor injection so it works in any environment:
 
-1. Builds the `sprk_project` entity payload with project-specific fields
-2. Calls `_discoverNavProps('sprk_project')` for lookup bindings
-3. Calls `EntityCreationService.uploadFilesToSpe()` for file handling
-4. Calls `EntityCreationService.createDocumentRecords()` with:
-   - `parentEntityName: 'sprk_projects'`
-   - `navigationProperty: docNavProps['sprk_project']` (discovered at runtime)
-5. Implements project-specific follow-on actions
+```typescript
+import { EntityCreationService } from '@spaarke/ui-components';
+import { authenticatedFetch } from '../../services/authInit';
+import { getBffBaseUrl } from '../../config/bffConfig';
+
+// In your entity service constructor:
+this._creationService = new EntityCreationService(
+  webApi,                 // IWebApiWithCreate (Xrm.WebApi)
+  authenticatedFetch,     // OBO token fetch function
+  getBffBaseUrl(),        // BFF base URL string
+);
+```
+
+### Entity-Specific (Service Pattern)
+
+Each entity wizard creates an `{Entity}Service.ts` that:
+
+1. Builds the entity payload with entity-specific fields
+2. Calls `_discoverNavProps(entityLogicalName)` for OData lookup bindings
+3. Delegates to `EntityCreationService` for file upload + document records
+4. Implements entity-specific follow-on actions
+
+**Implemented entities**: Matter (`matterService.ts`), Project (`projectService.ts`), Event (`eventService.ts`), Todo (`todoService.ts`), Work Assignment (`workAssignmentService.ts`)
 
 ### Checklist for New Entity Type
 
 - [ ] Create `{Entity}Service.ts` with entity-specific payload builder
-- [ ] Create form types (`formTypes.ts`) for the entity's fields
-- [ ] Create wizard steps (reuse `LookupField.tsx`, `FileUploadStep`)
+- [ ] Instantiate `EntityCreationService` with DI: `new EntityCreationService(webApi, authenticatedFetch, getBffBaseUrl())`
+- [ ] Create form types (`{entity}FormTypes.ts`) for the entity's fields
+- [ ] Create wizard step component — use `useAiPrefill` hook for AI pre-fill if applicable
+- [ ] Create `{Entity}WizardDialog.tsx` using `CreateRecordWizard` (or `WizardShell` for non-standard flows)
 - [ ] Add search functions for entity-specific ref tables
 - [ ] Ensure `sprk_containerid` field exists on the entity (for PCF grid)
 - [ ] Ensure `sprk_document` has a lookup to the new entity type
 - [ ] Test nav-prop discovery for the entity's lookup columns
 - [ ] Test document record creation with correct parent binding
+- [ ] If adding AI pre-fill: create BFF pre-fill service + playbook with `$choices`
 
 ---
 
@@ -281,28 +318,45 @@ To add **Create New Project**, create a `ProjectService` that:
 
 ## Key Files Reference
 
+### Shared Library (`src/client/shared/Spaarke.UI.Components/src/`)
+
 ```
-src/solutions/LegalWorkspace/src/
-├── components/CreateMatter/
-│   ├── WizardDialog.tsx          # Multi-step dialog shell
-│   ├── FileUploadStep.tsx        # Step 1: drag-and-drop upload
-│   ├── CreateRecordStep.tsx      # Step 2: form with lookups
-│   ├── NextStepsStep.tsx         # Step 3: follow-on action selection
-│   ├── LookupField.tsx           # Reusable search lookup component
+hooks/
+│   └── useAiPrefill.ts           # AI pre-fill hook (shared across all entity wizards)
+utils/
+│   └── lookupMatching.ts         # findBestLookupMatch utility
+components/
+│   ├── AiFieldTag/               # "AI" badge for pre-filled fields
+│   ├── LookupField/              # Search-as-you-type lookup
+│   ├── CreateRecordWizard/       # Multi-step wizard shell
+│   └── FileUpload/               # Drag-and-drop file upload
+services/
+│   └── EntityCreationService.ts  # Entity-agnostic: SPE upload, doc records, AI analysis
+types/
+│   └── WebApiLike.ts             # IWebApiLike, IWebApiWithCreate interfaces
+```
+
+### Solution (`src/solutions/LegalWorkspace/src/`)
+
+```
+components/CreateMatter/
+│   ├── WizardDialog.tsx          # Matter wizard dialog
+│   ├── CreateRecordStep.tsx      # Matter form step (uses useAiPrefill)
+│   ├── NextStepsStep.tsx         # Follow-on action selection
+│   ├── LookupField.tsx           # Thin wrapper (imports from shared lib)
+│   ├── AiFieldTag.tsx            # Re-export from shared lib
 │   ├── matterService.ts          # Matter-specific orchestrator
-│   ├── formTypes.ts              # Form state types and reducer actions
-│   └── wizardTypes.ts            # Shared wizard types
-├── services/
-│   ├── EntityCreationService.ts  # Entity-agnostic CRUD + SPE + AI
+│   └── formTypes.ts              # Matter form state types
+components/CreateProject/
+│   ├── ProjectWizardDialog.tsx   # Project wizard dialog
+│   ├── CreateProjectStep.tsx     # Project form step (uses useAiPrefill)
+│   └── projectService.ts        # Project-specific orchestrator
+services/
+│   ├── EntityCreationService.ts  # Re-export from shared lib
 │   ├── xrmProvider.ts            # Xrm frame-walk, userId, container resolution
 │   └── bffAuthProvider.ts        # OBO token acquisition for BFF
-├── config/
+config/
 │   └── bffConfig.ts              # BFF base URL configuration
-├── utils/
-│   └── navigation.ts             # Xrm.Navigation.openForm wrapper
-└── types/
-    ├── entities.ts               # Dataverse entity interfaces
-    └── xrm.ts                    # IWebApi, WebApiEntity types
 ```
 
 ### BFF API (Server-Side)
