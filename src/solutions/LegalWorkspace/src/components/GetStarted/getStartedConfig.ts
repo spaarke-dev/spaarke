@@ -51,9 +51,9 @@ export const ACTION_CARD_CONFIGS: IActionCardConfig[] = [
   },
   {
     id: "assign-to-counsel",
-    label: "Assign to Counsel",
+    label: "Assign Work",
     icon: PersonAddRegular,
-    ariaLabel: "Assign a matter or task to counsel",
+    ariaLabel: "Create a new work assignment",
   },
   {
     id: "summarize-new-files",

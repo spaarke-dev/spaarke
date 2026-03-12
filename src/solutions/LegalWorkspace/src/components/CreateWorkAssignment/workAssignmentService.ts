@@ -23,6 +23,11 @@ import type { IUploadProgress } from '../../services/EntityCreationService';
 import type { IUploadedFile } from '../CreateMatter/wizardTypes';
 import { getBffBaseUrl } from '../../config/bffConfig';
 import { authenticatedFetch } from '../../services/authInit';
+import {
+  applyResolverFields,
+  findNavProp,
+} from '../../../../../client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService';
+import type { INavPropEntry } from '../../../../../client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService';
 
 // Re-export shared search helpers for use by step components
 export {
@@ -37,15 +42,9 @@ export {
 // Metadata discovery (same pattern as MatterService/EventService)
 // ---------------------------------------------------------------------------
 
-interface NavPropEntry {
-  columnName: string;
-  navPropName: string;
-  referencedEntity: string;
-}
+const _navPropCache: Record<string, INavPropEntry[]> = {};
 
-const _navPropCache: Record<string, NavPropEntry[]> = {};
-
-async function _discoverNavProps(entityLogicalName: string): Promise<NavPropEntry[]> {
+async function _discoverNavProps(entityLogicalName: string): Promise<INavPropEntry[]> {
   if (_navPropCache[entityLogicalName]) {
     return _navPropCache[entityLogicalName];
   }
@@ -71,7 +70,7 @@ async function _discoverNavProps(entityLogicalName: string): Promise<NavPropEntr
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (json as any).value ?? [];
 
-    const entries: NavPropEntry[] = rels.map((r) => ({
+    const entries: INavPropEntry[] = rels.map((r) => ({
       columnName: r.ReferencingAttribute,
       navPropName: r.ReferencingEntityNavigationPropertyName,
       referencedEntity: r.ReferencedEntity,
@@ -86,25 +85,8 @@ async function _discoverNavProps(entityLogicalName: string): Promise<NavPropEntr
   }
 }
 
-/**
- * Find a navigation property by referenced entity and optional column hint.
- * Returns the nav-prop name or undefined if not found.
- */
-function _findNavProp(
-  entries: NavPropEntry[],
-  referencedEntity: string,
-  columnHint?: string,
-): string | undefined {
-  const matches = entries.filter((e) => e.referencedEntity === referencedEntity);
-  if (matches.length === 0) return undefined;
-  if (matches.length === 1) return matches[0].navPropName;
-  if (columnHint) {
-    const hinted = matches.find((e) => e.columnName.includes(columnHint));
-    if (hinted) return hinted.navPropName;
-  }
-  return matches[0].navPropName;
-}
-
+// findNavProp, resolveRecordType, buildRecordUrl, applyResolverFields
+// are imported from the shared PolymorphicResolverService.
 
 // ---------------------------------------------------------------------------
 // WorkAssignmentService class
@@ -182,30 +164,112 @@ export class WorkAssignmentService {
     }
   }
 
-  // ── Document Search (Step 2) ────────────────────────────────────────────
+  // ── Record Pre-fill (Step 3 — read selected record fields) ─────────────
 
   /**
-   * Search sprk_document records by name fragment for the "Share Documents" step.
+   * Read the selected record's fields for pre-filling the Enter Info step.
+   * Maps entity-specific field names to form state fields.
    */
-  async searchDocuments(nameFilter: string): Promise<ILookupItem[]> {
-    if (!nameFilter || nameFilter.trim().length < 1) return [];
+  async readRecordForPrefill(
+    recordType: 'matter' | 'project' | 'invoice' | 'event',
+    recordId: string
+  ): Promise<Partial<ICreateWorkAssignmentFormState>> {
+    const fieldMaps: Record<string, {
+      entity: string;
+      nameField: string;
+      descField?: string;
+      matterTypeField?: string;
+      practiceAreaField?: string;
+      priorityField?: string;
+    }> = {
+      matter: {
+        entity: 'sprk_matter',
+        nameField: 'sprk_mattername',
+        descField: 'sprk_matterdescription',
+        matterTypeField: '_sprk_mattertype_value',
+        practiceAreaField: '_sprk_practicearea_value',
+      },
+      project: {
+        entity: 'sprk_project',
+        nameField: 'sprk_projectname',
+        descField: 'sprk_projectdescription',
+        matterTypeField: '_sprk_mattertype_value',
+        practiceAreaField: '_sprk_practicearea_value',
+      },
+      invoice: {
+        entity: 'sprk_invoice',
+        nameField: 'sprk_name',
+        descField: 'sprk_description',
+      },
+      event: {
+        entity: 'sprk_event',
+        nameField: 'sprk_eventname',
+        descField: 'sprk_description',
+        priorityField: 'sprk_priority',
+      },
+    };
 
-    const safeFilter = nameFilter.trim().replace(/'/g, "''");
-    const query =
-      `?$select=sprk_documentid,sprk_documentname` +
-      `&$filter=contains(sprk_documentname,'${safeFilter}')` +
-      `&$orderby=sprk_documentname asc` +
-      `&$top=10`;
+    const mapping = fieldMaps[recordType];
+    if (!mapping) return {};
+
+    // Build $select with all fields we want to read
+    const selectFields = [mapping.nameField];
+    if (mapping.descField) selectFields.push(mapping.descField);
+    if (mapping.matterTypeField) selectFields.push(mapping.matterTypeField);
+    if (mapping.practiceAreaField) selectFields.push(mapping.practiceAreaField);
+    if (mapping.priorityField) selectFields.push(mapping.priorityField);
+
+    // Also request formatted values for lookups
+    const lookupFields: string[] = [];
+    if (mapping.matterTypeField) lookupFields.push(mapping.matterTypeField);
+    if (mapping.practiceAreaField) lookupFields.push(mapping.practiceAreaField);
 
     try {
-      const result = await this._webApi.retrieveMultipleRecords('sprk_document', query, 10);
-      return result.entities.map((e) => ({
-        id: e['sprk_documentid'] as string,
-        name: e['sprk_documentname'] as string,
-      }));
+      const query = `?$select=${selectFields.join(',')}`;
+      const record = await this._webApi.retrieveRecord(mapping.entity, recordId, query);
+
+      const result: Partial<ICreateWorkAssignmentFormState> = {};
+
+      // Name
+      const nameVal = record[mapping.nameField] as string | undefined;
+      if (nameVal) result.name = nameVal;
+
+      // Description
+      if (mapping.descField) {
+        const descVal = record[mapping.descField] as string | undefined;
+        if (descVal) result.description = descVal;
+      }
+
+      // Matter Type (lookup — value is GUID, formatted value is display name)
+      if (mapping.matterTypeField) {
+        const mtId = record[mapping.matterTypeField] as string | undefined;
+        if (mtId) {
+          result.matterTypeId = mtId;
+          const formattedKey = `${mapping.matterTypeField}@OData.Community.Display.V1.FormattedValue`;
+          result.matterTypeName = (record[formattedKey] as string) ?? '';
+        }
+      }
+
+      // Practice Area (lookup)
+      if (mapping.practiceAreaField) {
+        const paId = record[mapping.practiceAreaField] as string | undefined;
+        if (paId) {
+          result.practiceAreaId = paId;
+          const formattedKey = `${mapping.practiceAreaField}@OData.Community.Display.V1.FormattedValue`;
+          result.practiceAreaName = (record[formattedKey] as string) ?? '';
+        }
+      }
+
+      // Priority (option set)
+      if (mapping.priorityField) {
+        const prioVal = record[mapping.priorityField] as number | undefined;
+        if (prioVal) result.priority = prioVal;
+      }
+
+      return result;
     } catch (err) {
-      console.error('[WorkAssignmentService] searchDocuments error:', err);
-      throw err;
+      console.warn(`[WorkAssignmentService] readRecordForPrefill(${recordType}, ${recordId}) failed:`, err);
+      return {};
     }
   }
 
@@ -246,14 +310,13 @@ export class WorkAssignmentService {
    * Full work assignment creation flow:
    *   1. Create sprk_workassignment record
    *   2. Upload files to SPE + create sprk_document records
-   *   3. Link existing documents
-   *   4. Apply Assign Work data if provided
+   *   3. Apply Assign Work data if provided
    *
    * Returns ICreateWorkAssignmentResult — never throws.
    */
   async createWorkAssignment(
     form: ICreateWorkAssignmentFormState,
-    linkedDocIds: string[],
+    _linkedDocIds: string[],
     uploadedFiles: IUploadedFile[],
     assignWork?: IAssignWorkState,
     onUploadProgress?: (progress: IUploadProgress) => void
@@ -284,7 +347,7 @@ export class WorkAssignmentService {
       guid: string,
       columnHint?: string
     ) => {
-      const navProp = _findNavProp(navProps, referencedEntity, columnHint);
+      const navProp = findNavProp(navProps, referencedEntity, columnHint);
       if (navProp) {
         entity[`${navProp}@odata.bind`] = `/${entitySet}(${guid})`;
       } else {
@@ -293,6 +356,8 @@ export class WorkAssignmentService {
     };
 
     // Related record (matter, project, invoice, event)
+    // Uses the shared Polymorphic Resolver pattern (ADR-024):
+    //   Entity-specific lookup + 4 denormalized resolver fields
     if (form.recordId && form.recordType) {
       const refMap: Record<string, { refEntity: string; entitySet: string; hint: string }> = {
         matter: { refEntity: 'sprk_matter', entitySet: 'sprk_matters', hint: 'matter' },
@@ -302,7 +367,16 @@ export class WorkAssignmentService {
       };
       const mapping = refMap[form.recordType];
       if (mapping) {
-        bindLookup(mapping.refEntity, mapping.entitySet, form.recordId, mapping.hint);
+        await applyResolverFields(
+          this._webApi,
+          entity,
+          navProps,
+          mapping.refEntity,
+          mapping.entitySet,
+          form.recordId,
+          form.recordName,
+          mapping.hint
+        );
       }
     }
 
@@ -348,25 +422,25 @@ export class WorkAssignmentService {
           'Files can be added from the work assignment record.'
         );
       } else if (uploadResult.uploadedFiles.length > 0) {
-        const docNavProps = await _discoverNavProps('sprk_document');
-        const docWaNavProp = _findNavProp(docNavProps, 'sprk_workassignment');
-
-        if (docWaNavProp) {
-          const linkResult = await this._entityService.createDocumentRecords(
+        // Create document records in SPE (no Dataverse linking — documents
+        // do not need to be associated to the work assignment record)
+        try {
+          const createResult = await this._entityService.createDocumentRecords(
             'sprk_workassignments',
             workAssignmentId,
-            docWaNavProp,
+            '', // No nav-prop — skip Dataverse linking
             uploadResult.uploadedFiles,
             {
               containerId: this._containerId,
               parentRecordName: form.name.trim(),
             }
           );
-          if (linkResult.warnings.length > 0) {
-            warnings.push(...linkResult.warnings);
+          if (createResult.warnings.length > 0) {
+            warnings.push(...createResult.warnings);
           }
-        } else {
-          warnings.push('Could not link uploaded documents — relationship not found. Link them manually.');
+        } catch (err) {
+          console.warn('[WorkAssignmentService] Document record creation failed:', err);
+          warnings.push('Uploaded files saved to storage but document records could not be created.');
         }
       }
 
@@ -378,28 +452,6 @@ export class WorkAssignmentService {
       }
     } else if (uploadedFiles.length > 0 && !this._containerId) {
       warnings.push('File upload skipped — no SPE container configured. Files can be added later.');
-    }
-
-    // ── Step 3: Link existing documents ─────────────────────────────────
-    if (linkedDocIds.length > 0) {
-      const docNavProps = await _discoverNavProps('sprk_document');
-      const docWaNavProp = _findNavProp(docNavProps, 'sprk_workassignment');
-
-      if (docWaNavProp) {
-        for (const docId of linkedDocIds) {
-          try {
-            const updatePayload: WebApiEntity = {
-              [`${docWaNavProp}@odata.bind`]: `/sprk_workassignments(${workAssignmentId})`,
-            };
-            await this._webApi.updateRecord('sprk_document', docId, updatePayload);
-          } catch (err) {
-            console.warn(`[WorkAssignmentService] Failed to link document ${docId}:`, err);
-            warnings.push(`Could not link document (${docId}). Link it manually from the record.`);
-          }
-        }
-      } else {
-        warnings.push('Could not link existing documents — relationship not found. Link them manually.');
-      }
     }
 
     return {
@@ -437,16 +489,19 @@ export class WorkAssignmentService {
       if (eventState.eventFinalDueDate) {
         entity['sprk_finalduedate'] = eventState.eventFinalDueDate;
       }
+      if (eventState.addTodo) {
+        entity['sprk_todoflag'] = true;
+      }
 
       // Link to work assignment
-      const waNavProp = _findNavProp(navProps, 'sprk_workassignment', 'workassignment');
+      const waNavProp = findNavProp(navProps, 'sprk_workassignment', 'workassignment');
       if (waNavProp) {
         entity[`${waNavProp}@odata.bind`] = `/sprk_workassignments(${workAssignmentId})`;
       }
 
       // Assigned To (systemuser)
       if (eventState.assignedToId) {
-        const assignedNavProp = _findNavProp(navProps, 'systemuser', 'assignedto');
+        const assignedNavProp = findNavProp(navProps, 'systemuser', 'assignedto');
         if (assignedNavProp) {
           entity[`${assignedNavProp}@odata.bind`] = `/systemusers(${eventState.assignedToId})`;
         }
@@ -473,10 +528,12 @@ export class WorkAssignmentService {
     workAssignmentName: string,
     to: string,
     subject: string,
-    body: string
+    body: string,
+    cc?: string
   ): Promise<{ success: boolean; warning?: string }> {
     try {
       const bffBaseUrl = getBffBaseUrl();
+      const ccAddresses = cc ? cc.split(/[;,]/).map((a: string) => a.trim()).filter(Boolean) : [];
       const response = await authenticatedFetch(
         `${bffBaseUrl}/api/communications/send`,
         {
@@ -484,9 +541,10 @@ export class WorkAssignmentService {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             to: to.split(/[;,]/).map((a: string) => a.trim()).filter(Boolean),
+            cc: ccAddresses.length > 0 ? ccAddresses : undefined,
             subject,
             body,
-            bodyFormat: 'HTML',
+            bodyFormat: 'Text',
             associations: [
               {
                 entityType: 'sprk_workassignment',

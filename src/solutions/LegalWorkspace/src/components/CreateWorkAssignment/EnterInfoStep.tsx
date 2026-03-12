@@ -2,7 +2,13 @@
  * EnterInfoStep.tsx
  * Step 3: "Enter Info" — core work assignment fields.
  *
- * Fields: Name (required), Description, Matter Type, Practice Area, Priority, Response Due Date.
+ * Fields: Name (required), Description, Matter Type, Practice Area,
+ *         Priority (required), Response Due Date (required).
+ *
+ * Pre-fill:
+ *   - From the record selected in Step 1 (matching fields)
+ *   - From AI processing output when no record is associated
+ *   The orchestrator passes pre-filled values via initialValues.
  */
 import * as React from 'react';
 import {
@@ -51,18 +57,22 @@ const PRIORITY_OPTIONS = [
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  form: {
+  root: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
+    gap: '10px',
+  },
+  headerText: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    marginBottom: tokens.spacingVerticalS,
   },
   stepTitle: {
     color: tokens.colorNeutralForeground1,
-    marginBottom: tokens.spacingVerticalXS,
   },
   stepSubtitle: {
     color: tokens.colorNeutralForeground3,
-    marginBottom: tokens.spacingVerticalM,
   },
   row: {
     display: 'grid',
@@ -92,8 +102,35 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
   const [priority, setPriority] = React.useState(initialValues?.priority ?? 100000001);
   const [responseDueDate, setResponseDueDate] = React.useState(initialValues?.responseDueDate ?? '');
 
+  // Track whether initial values have been applied (for pre-fill)
+  const appliedPrefillRef = React.useRef(false);
+
+  // Apply pre-fill values when initialValues change (e.g., record loaded)
   React.useEffect(() => {
-    const isValid = name.trim().length > 0;
+    if (!initialValues || appliedPrefillRef.current) return;
+    if (initialValues.name || initialValues.description || initialValues.matterTypeId || initialValues.practiceAreaId) {
+      if (initialValues.name) setName(initialValues.name);
+      if (initialValues.description) setDescription(initialValues.description);
+      if (initialValues.matterTypeId) {
+        setMatterTypeId(initialValues.matterTypeId);
+        setMatterTypeName(initialValues.matterTypeName ?? '');
+      }
+      if (initialValues.practiceAreaId) {
+        setPracticeAreaId(initialValues.practiceAreaId);
+        setPracticeAreaName(initialValues.practiceAreaName ?? '');
+      }
+      if (initialValues.priority) setPriority(initialValues.priority);
+      if (initialValues.responseDueDate) setResponseDueDate(initialValues.responseDueDate);
+      appliedPrefillRef.current = true;
+    }
+  }, [initialValues]);
+
+  // Report validity + values — Priority and Response Due Date are mandatory
+  React.useEffect(() => {
+    const isValid =
+      name.trim().length > 0 &&
+      priority > 0 &&
+      responseDueDate.trim().length > 0;
     onValidChange(isValid);
     onFormValues({ name, description, matterTypeId, matterTypeName, practiceAreaId, practiceAreaName, priority, responseDueDate });
   }, [name, description, matterTypeId, matterTypeName, practiceAreaId, practiceAreaName, priority, responseDueDate, onValidChange, onFormValues]);
@@ -151,8 +188,9 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
   const selectedPriorityText = PRIORITY_OPTIONS.find((o) => o.key === priority)?.text ?? 'Normal';
 
   return (
-    <div className={styles.form}>
-      <div>
+    <div className={styles.root}>
+      {/* Step header — title and description on separate lines */}
+      <div className={styles.headerText}>
         <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
           Enter Info
         </Text>
@@ -175,7 +213,7 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
           value={description}
           onChange={handleDescriptionChange}
           placeholder="Describe the work assignment..."
-          rows={3}
+          rows={6}
           resize="vertical"
         />
       </Field>
@@ -198,7 +236,7 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
       </div>
 
       <div className={styles.row}>
-        <Field label="Priority">
+        <Field label="Priority" required>
           <Dropdown
             value={selectedPriorityText}
             selectedOptions={[String(priority)]}
@@ -211,7 +249,7 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
             ))}
           </Dropdown>
         </Field>
-        <Field label="Response Due Date">
+        <Field label="Response Due Date" required>
           <Input
             type="date"
             value={responseDueDate}

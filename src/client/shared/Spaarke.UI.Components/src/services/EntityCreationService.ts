@@ -31,6 +31,7 @@
 
 import type { IWebApiWithCreate } from '../types/WebApiLike';
 import type { IUploadedFile } from '../components/FileUpload/fileUploadTypes';
+import { resolveRecordType, buildRecordUrl, findNavProp, type INavPropEntry } from './PolymorphicResolverService';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -218,8 +219,10 @@ export class EntityCreationService {
     options?: {
       /** SPE container/drive ID — stored as sprk_graphdriveid and sprk_containerid */
       containerId?: string;
-      /** Parent record display name — stored in sprk_regardingrecordid for resolver queries */
+      /** Parent record display name — stored in sprk_regardingrecordname for resolver fields */
       parentRecordName?: string;
+      /** Parent entity logical name (e.g., 'sprk_matter'). If omitted, derived from parentEntityName by removing trailing 's'. */
+      parentEntityLogicalName?: string;
     }
   ): Promise<IDocumentLinkResult> {
     const warnings: string[] = [];
@@ -227,6 +230,38 @@ export class EntityCreationService {
     const createdDocumentIds: string[] = [];
 
     const containerId = options?.containerId;
+    // Derive entity logical name: 'sprk_matters' → 'sprk_matter'
+    const entityLogicalName =
+      options?.parentEntityLogicalName ||
+      parentEntityName.replace(/e?s$/, '');
+
+    // Resolve record type ref + nav-prop once for all documents in this batch
+    let recordTypeRefBind: string | undefined;
+    let rtNavPropName: string | undefined;
+    try {
+      const recordType = await resolveRecordType(this._webApi, entityLogicalName);
+      if (recordType) {
+        // Discover nav-prop for sprk_document → sprk_recordtype_ref (regardingrecordtype column)
+        const metaQuery =
+          `EntityDefinitions(LogicalName='sprk_document')/ManyToOneRelationships` +
+          `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntityNavigationPropertyName,ReferencedEntity` +
+          `&$filter=ReferencedEntity eq 'sprk_recordtype_ref'`;
+        const metaResult = await this._webApi.retrieveMultipleRecords('', metaQuery);
+        const docNavProps: INavPropEntry[] = (metaResult.entities ?? []).map(
+          (r: Record<string, unknown>) => ({
+            columnName: r['ReferencingAttribute'] as string,
+            navPropName: r['ReferencingEntityNavigationPropertyName'] as string,
+            referencedEntity: r['ReferencedEntity'] as string,
+          })
+        );
+        rtNavPropName = findNavProp(docNavProps, 'sprk_recordtype_ref', 'regardingrecordtype');
+        if (rtNavPropName) {
+          recordTypeRefBind = `/sprk_recordtype_refs(${recordType.id})`;
+        }
+      }
+    } catch {
+      console.warn(`[EntityCreationService] Could not resolve record type for ${entityLogicalName}`);
+    }
 
     for (const file of uploadedFiles) {
       try {
@@ -239,13 +274,22 @@ export class EntityCreationService {
           sprk_sourcetype: 659490000,
           // Mark for Document Profile processing: Pending (100000001)
           sprk_filesummarystatus: 100000001,
-          // Association resolver: store parent record GUID as text
-          sprk_regardingrecordid: parentEntityId,
+          // Polymorphic resolver fields (ADR-024)
+          sprk_regardingrecordid: parentEntityId.replace(/[{}]/g, '').toLowerCase(),
+          sprk_regardingrecordname: options?.parentRecordName ?? '',
+          sprk_regardingrecordurl: buildRecordUrl(entityLogicalName, parentEntityId),
         };
 
+        // Bind sprk_regardingrecordtype lookup to sprk_recordtype_ref
+        if (recordTypeRefBind && rtNavPropName) {
+          documentEntity[`${rtNavPropName}@odata.bind`] = recordTypeRefBind;
+        }
+
         // Add @odata.bind navigation property to link document to parent entity
-        documentEntity[`${navigationProperty}@odata.bind`] =
-          `/${parentEntityName}(${parentEntityId})`;
+        if (navigationProperty) {
+          documentEntity[`${navigationProperty}@odata.bind`] =
+            `/${parentEntityName}(${parentEntityId})`;
+        }
 
         if (file.webUrl) {
           documentEntity['sprk_filepath'] = file.webUrl;

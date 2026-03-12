@@ -46,13 +46,17 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalL,
   },
+  headerText: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    marginBottom: tokens.spacingVerticalM,
+  },
   stepTitle: {
     color: tokens.colorNeutralForeground1,
-    marginBottom: tokens.spacingVerticalXS,
   },
   stepSubtitle: {
     color: tokens.colorNeutralForeground3,
-    marginBottom: tokens.spacingVerticalM,
   },
   section: {
     display: 'flex',
@@ -198,7 +202,7 @@ export const AssignWorkStep: React.FC<IAssignWorkStepProps> = ({
 
   return (
     <div className={styles.form}>
-      <div>
+      <div className={styles.headerText}>
         <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
           Assign Work
         </Text>

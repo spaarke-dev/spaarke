@@ -13,8 +13,10 @@ import {
   Dropdown,
   Option,
   Field,
+  Checkbox,
   makeStyles,
   tokens,
+  mergeClasses,
 } from '@fluentui/react-components';
 import { LookupField } from '../../../../../client/shared/Spaarke.UI.Components/src/components/LookupField/LookupField';
 import type { ILookupItem } from '../../../../../client/shared/Spaarke.UI.Components/src/types/LookupTypes';
@@ -55,18 +57,28 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
+  headerText: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    marginBottom: tokens.spacingVerticalM,
+  },
   stepTitle: {
     color: tokens.colorNeutralForeground1,
-    marginBottom: tokens.spacingVerticalXS,
   },
   stepSubtitle: {
     color: tokens.colorNeutralForeground3,
-    marginBottom: tokens.spacingVerticalM,
   },
   row: {
     display: 'grid',
     gridTemplateColumns: '1fr 1fr',
     gap: tokens.spacingHorizontalM,
+  },
+  todoCheckbox: {
+    color: tokens.colorNeutralForeground1,
+  },
+  todoCheckboxActive: {
+    color: tokens.colorBrandForeground1,
   },
 });
 
@@ -139,6 +151,13 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
     []
   );
 
+  const handleTodoChange = React.useCallback(
+    (_e: unknown, data: { checked: boolean | 'mixed' }) => {
+      setFormValues((prev) => ({ ...prev, addTodo: data.checked === true }));
+    },
+    []
+  );
+
   const handleSearchUsers = React.useCallback(
     (query: string) => searchUsersAsLookup(webApi, query),
     [webApi]
@@ -151,7 +170,7 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
 
   return (
     <div className={styles.form}>
-      <div>
+      <div className={styles.headerText}>
         <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
           Create Event
         </Text>
@@ -174,7 +193,7 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
           value={formValues.eventDescription}
           onChange={handleDescriptionChange}
           placeholder="Describe the event..."
-          rows={3}
+          rows={6}
           resize="vertical"
         />
       </Field>
@@ -218,6 +237,16 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
           />
         </Field>
       </div>
+
+      <Checkbox
+        checked={formValues.addTodo}
+        onChange={handleTodoChange}
+        label="Add a 'To Do' Item"
+        className={mergeClasses(
+          styles.todoCheckbox,
+          formValues.addTodo && styles.todoCheckboxActive
+        )}
+      />
     </div>
   );
 };

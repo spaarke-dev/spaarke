@@ -3,18 +3,23 @@
  * Orchestrator for the Work Assignment creation wizard.
  *
  * Uses WizardShell directly (not CreateRecordWizard) because the step
- * sequence differs: Step 1 is record selection, Step 2 is document sharing,
+ * sequence differs: Step 1 is record selection, Step 2 is file upload,
  * and follow-on steps have different fields.
  *
  * Steps:
  *   [0] Work to Assign (SelectWorkStep)
- *   [1] Share Documents (ShareDocumentsStep) — skippable
- *   [2] Enter Info (EnterInfoStep)
+ *   [1] Add Files (AddFilesStep) — skippable
+ *   [2] Enter Info (EnterInfoStep) — pre-filled from record or AI
  *   [3] Next Steps (NextStepsSelectionStep) — early finish if 0 selected
  *   [4+] Dynamic: Assign Work, Send Email, Create Event
+ *
+ * Processing:
+ *   When files are uploaded, the finish handler uploads to SPE, creates
+ *   document records, and triggers AI analysis (same as Create Matter).
+ *   The finishing label changes to "Processing..." when files exist.
  */
 import * as React from 'react';
-import { Button, Text, tokens } from '@fluentui/react-components';
+import { Button, Text, Spinner, tokens } from '@fluentui/react-components';
 import { CheckmarkCircleRegular } from '@fluentui/react-icons';
 
 import { WizardShell } from '../../../../../client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell';
@@ -42,13 +47,14 @@ import {
 } from './formTypes';
 import { WorkAssignmentService } from './workAssignmentService';
 import { SelectWorkStep } from './SelectWorkStep';
-import { ShareDocumentsStep } from './ShareDocumentsStep';
+import { AddFilesStep } from './AddFilesStep';
 import { EnterInfoStep } from './EnterInfoStep';
 import { NextStepsSelectionStep } from './NextStepsSelectionStep';
 import { AssignWorkStep } from './AssignWorkStep';
 import { CreateFollowOnEventStep } from './CreateFollowOnEventStep';
 import type { IUploadedFile } from '../CreateMatter/wizardTypes';
 import type { IWebApi } from '../../types/xrm';
+import { getSpeContainerIdFromBusinessUnit } from '../../services/xrmProvider';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -75,7 +81,6 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
 
   // ── Form state ────────────────────────────────────────────────────────
   const [formState, setFormState] = React.useState<ICreateWorkAssignmentFormState>(EMPTY_WORK_ASSIGNMENT_FORM);
-  const [linkedDocIds, setLinkedDocIds] = React.useState<string[]>([]);
   const [uploadedFiles, setUploadedFiles] = React.useState<IUploadedFile[]>([]);
   const [selectedActions, setSelectedActions] = React.useState<WorkAssignmentFollowOnId[]>([]);
   const [assignWorkState, setAssignWorkState] = React.useState<IAssignWorkState>(EMPTY_ASSIGN_WORK_STATE);
@@ -83,6 +88,13 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   const [emailTo, setEmailTo] = React.useState('');
   const [emailSubject, setEmailSubject] = React.useState('');
   const [emailBody, setEmailBody] = React.useState('');
+
+  // Pre-fill values from selected record (loaded asynchronously)
+  const [prefillValues, setPrefillValues] = React.useState<Partial<ICreateWorkAssignmentFormState> | undefined>(undefined);
+  const [isPrefilling, setIsPrefilling] = React.useState(false);
+
+  // Email CC state
+  const [emailCc, setEmailCc] = React.useState('');
 
   // ── canAdvance tracking via refs ──────────────────────────────────────
   const selectWorkValidRef = React.useRef(false);
@@ -92,8 +104,6 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   // ── Refs for stale closure prevention ─────────────────────────────────
   const formStateRef = React.useRef(formState);
   formStateRef.current = formState;
-  const linkedDocIdsRef = React.useRef(linkedDocIds);
-  linkedDocIdsRef.current = linkedDocIds;
   const uploadedFilesRef = React.useRef(uploadedFiles);
   uploadedFilesRef.current = uploadedFiles;
   const selectedActionsRef = React.useRef(selectedActions);
@@ -108,25 +118,56 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   emailSubjectRef.current = emailSubject;
   const emailBodyRef = React.useRef(emailBody);
   emailBodyRef.current = emailBody;
+  const emailCcRef = React.useRef(emailCc);
+  emailCcRef.current = emailCc;
 
-  // ── Service ───────────────────────────────────────────────────────────
+  // Refs for pre-fill state (stale closure prevention in renderContent)
+  const isPrefillRef = React.useRef(isPrefilling);
+  isPrefillRef.current = isPrefilling;
+  const prefillRef = React.useRef(prefillValues);
+  prefillRef.current = prefillValues;
+
+  // ── Service (re-created when containerId resolves) ──────────────────
+  const [resolvedContainerId, setResolvedContainerId] = React.useState(containerId ?? '');
   const serviceRef = React.useRef<WorkAssignmentService | null>(null);
   if (!serviceRef.current) {
-    serviceRef.current = new WorkAssignmentService(webApi, containerId);
+    serviceRef.current = new WorkAssignmentService(webApi, resolvedContainerId || containerId);
   }
+
+  // ── Resolve container ID from business unit on open ───────────────────
+  React.useEffect(() => {
+    if (!open) return;
+    if (containerId) {
+      setResolvedContainerId(containerId);
+      serviceRef.current = new WorkAssignmentService(webApi, containerId);
+      return;
+    }
+    let cancelled = false;
+    getSpeContainerIdFromBusinessUnit(webApi).then((cid) => {
+      if (!cancelled && cid) {
+        setResolvedContainerId(cid);
+        serviceRef.current = new WorkAssignmentService(webApi, cid);
+      }
+    }).catch((err) => {
+      console.warn('[WorkAssignmentWizard] Container ID resolution failed:', err);
+    });
+    return () => { cancelled = true; };
+  }, [open, webApi, containerId]);
 
   // ── Reset on open ─────────────────────────────────────────────────────
   React.useEffect(() => {
     if (open) {
       setFormState(EMPTY_WORK_ASSIGNMENT_FORM);
-      setLinkedDocIds([]);
       setUploadedFiles([]);
       setSelectedActions([]);
       setAssignWorkState(EMPTY_ASSIGN_WORK_STATE);
       setFollowOnEventState(EMPTY_FOLLOW_ON_EVENT_STATE);
       setEmailTo('');
+      setEmailCc('');
       setEmailSubject('');
       setEmailBody('');
+      setPrefillValues(undefined);
+      setIsPrefilling(false);
       selectWorkValidRef.current = false;
       enterInfoValidRef.current = false;
       followOnEventValidRef.current = true;
@@ -146,7 +187,35 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
     []
   );
 
-  const handleLinkedDocsChange = React.useCallback((ids: string[]) => setLinkedDocIds(ids), []);
+  // ── Pre-fill from selected record ─────────────────────────────────────
+  React.useEffect(() => {
+    const { recordType, recordId, assignWithoutRecord } = formState;
+    if (!recordId || !recordType || assignWithoutRecord) {
+      setPrefillValues(undefined);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      setIsPrefilling(true);
+      try {
+        const values = await serviceRef.current!.readRecordForPrefill(
+          recordType as 'matter' | 'project' | 'invoice' | 'event',
+          recordId
+        );
+        if (!cancelled) {
+          setPrefillValues(values);
+        }
+      } catch {
+        // Non-fatal — user can still fill in manually
+      } finally {
+        if (!cancelled) setIsPrefilling(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [formState.recordId, formState.recordType, formState.assignWithoutRecord]);
+
   const handleUploadedFilesChange = React.useCallback((files: IUploadedFile[]) => setUploadedFiles(files), []);
 
   const handleEnterInfoValid = React.useCallback((valid: boolean) => {
@@ -213,8 +282,11 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
             if (stepId === 'followon-wa-send-email') {
               return (
                 <SendEmailStep
+                  title="Send Email"
                   emailTo={emailToRef.current}
                   onEmailToChange={setEmailTo}
+                  emailCc={emailCcRef.current}
+                  onEmailCcChange={setEmailCc}
                   emailSubject={emailSubjectRef.current}
                   onEmailSubjectChange={setEmailSubject}
                   emailBody={emailBodyRef.current}
@@ -255,17 +327,22 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
     if (selectedActions.includes('send-email') && emailSubject === '' && formStateRef.current.name) {
       const f = formStateRef.current;
       setEmailSubject(`Work Assignment: ${f.name}`);
-      setEmailBody(
-        `<p>A new work assignment has been created:</p>` +
-        `<p><strong>Name:</strong> ${f.name}</p>` +
-        (f.description ? `<p><strong>Description:</strong> ${f.description}</p>` : '') +
-        (f.matterTypeName ? `<p><strong>Matter Type:</strong> ${f.matterTypeName}</p>` : '') +
-        (f.practiceAreaName ? `<p><strong>Practice Area:</strong> ${f.practiceAreaName}</p>` : '') +
-        (f.responseDueDate ? `<p><strong>Response Due Date:</strong> ${f.responseDueDate}</p>` : '') +
-        `<p><strong>Priority:</strong> ${getPriorityLabel(f.priority)}</p>`
-      );
+      const lines = [`A new work assignment has been created:`, '', `Name: ${f.name}`];
+      if (f.description) lines.push(`Description: ${f.description}`);
+      if (f.matterTypeName) lines.push(`Matter Type: ${f.matterTypeName}`);
+      if (f.practiceAreaName) lines.push(`Practice Area: ${f.practiceAreaName}`);
+      if (f.responseDueDate) lines.push(`Response Due Date: ${f.responseDueDate}`);
+      lines.push(`Priority: ${getPriorityLabel(f.priority)}`);
+      setEmailBody(lines.join('\n'));
+
+      // Auto-CC the current user
+      if (!emailCc) {
+        resolveCurrentUserEmail(webApi).then((email) => {
+          if (email) setEmailCc(email);
+        }).catch(() => {});
+      }
     }
-  }, [selectedActions, emailSubject]);
+  }, [selectedActions, emailSubject, emailCc, webApi]);
 
   // ── Build base steps ──────────────────────────────────────────────────
   const steps = React.useMemo<IWizardStepConfig[]>(
@@ -276,23 +353,18 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
         canAdvance: () => selectWorkValidRef.current,
         renderContent: () => (
           <SelectWorkStep
-            webApi={webApi}
-            containerId={containerId}
             onValidChange={handleSelectWorkValid}
             onFormValues={handleSelectWorkValues}
           />
         ),
       },
       {
-        id: 'share-documents',
-        label: 'Share Documents',
+        id: 'add-files',
+        label: 'Add Files',
         canAdvance: () => true,
         isSkippable: true,
         renderContent: () => (
-          <ShareDocumentsStep
-            webApi={webApi}
-            containerId={containerId}
-            onLinkedDocsChange={handleLinkedDocsChange}
+          <AddFilesStep
             onUploadedFilesChange={handleUploadedFilesChange}
           />
         ),
@@ -301,13 +373,23 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
         id: 'enter-info',
         label: 'Enter Info',
         canAdvance: () => enterInfoValidRef.current,
-        renderContent: () => (
-          <EnterInfoStep
-            webApi={webApi}
-            onValidChange={handleEnterInfoValid}
-            onFormValues={handleEnterInfoValues}
-          />
-        ),
+        renderContent: () => {
+          if (isPrefillRef.current) {
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: tokens.spacingVerticalL, padding: tokens.spacingVerticalXXL }}>
+                <Spinner size="medium" label="Loading record details..." />
+              </div>
+            );
+          }
+          return (
+            <EnterInfoStep
+              webApi={webApi}
+              onValidChange={handleEnterInfoValid}
+              onFormValues={handleEnterInfoValues}
+              initialValues={prefillRef.current}
+            />
+          );
+        },
       },
       {
         id: 'next-steps',
@@ -322,20 +404,21 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
         ),
       },
     ],
-    [webApi, containerId, selectedActions, handleSelectWorkValid, handleSelectWorkValues, handleLinkedDocsChange, handleUploadedFilesChange, handleEnterInfoValid, handleEnterInfoValues]
+    [webApi, containerId, selectedActions, handleSelectWorkValid, handleSelectWorkValues, handleUploadedFilesChange, handleEnterInfoValid, handleEnterInfoValues]
   );
 
   // ── Finish handler ────────────────────────────────────────────────────
   const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig | void> => {
     const form = formStateRef.current;
     const actions = selectedActionsRef.current;
+    const files = uploadedFilesRef.current;
     const service = serviceRef.current!;
 
-    // 1. Create work assignment record
+    // 1. Create work assignment record (includes file upload + document records)
     const result = await service.createWorkAssignment(
       form,
-      linkedDocIdsRef.current,
-      uploadedFilesRef.current,
+      [], // No linked doc IDs — docs are on the associated record
+      files,
       actions.includes('assign-work') ? assignWorkStateRef.current : undefined
     );
 
@@ -363,7 +446,8 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
         form.name,
         emailToRef.current,
         emailSubjectRef.current,
-        emailBodyRef.current
+        emailBodyRef.current,
+        emailCcRef.current
       );
       if (!emailResult.success && emailResult.warning) {
         warnings.push(emailResult.warning);
@@ -398,6 +482,10 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
     };
   }, [onClose]);
 
+  // ── Determine finishing label based on whether files exist ─────────────
+  const hasFiles = uploadedFiles.length > 0;
+  const finishingLabel = hasFiles ? 'Processing...' : 'Creating...';
+
   // ── Render ────────────────────────────────────────────────────────────
   return (
     <WizardShell
@@ -408,7 +496,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       onClose={onClose}
       onFinish={handleFinish}
       finishLabel="Create"
-      finishingLabel="Creating..."
+      finishingLabel={finishingLabel}
     />
   );
 };
@@ -416,6 +504,37 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+async function resolveCurrentUserEmail(webApi: IWebApi): Promise<string | null> {
+  try {
+    // Get current user ID from Xrm
+    const frames: Window[] = [window];
+    try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
+    try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* cross-origin */ }
+
+    let userId = '';
+    for (const frame of frames) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const xrm = (frame as any).Xrm;
+        if (xrm?.Utility?.getGlobalContext) {
+          const ctx = xrm.Utility.getGlobalContext();
+          userId = ctx.userSettings?.userId?.replace(/[{}]/g, '').toLowerCase() ?? '';
+          if (userId) break;
+        }
+      } catch { /* cross-origin */ }
+    }
+    if (!userId) return null;
+
+    const result = await webApi.retrieveRecord(
+      'systemuser', userId,
+      '?$select=internalemailaddress'
+    );
+    return (result['internalemailaddress'] as string) || null;
+  } catch {
+    return null;
+  }
+}
 
 function getPriorityLabel(priority: number): string {
   switch (priority) {

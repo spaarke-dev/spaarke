@@ -68,8 +68,8 @@ export function buildQuery(opts: IQueryOptions): string {
  * Build an OData $filter predicate that matches records where the user is:
  *   - owner (ownerid)
  *   - last modifier (modifiedby)
- *   - assigned attorney (sprk_assignedattorney — contact lookup)
- *   - assigned paralegal (sprk_assignedparalegal — contact lookup)
+ *   - assigned attorney (sprk_assignedattorney1 — contact lookup)
+ *   - assigned paralegal (sprk_assignedparalegal1 — contact lookup)
  *
  * The attorney/paralegal fields are contact lookups, so `contactId` is the
  * user's linked contact record resolved from `systemuser._contactid_value`.
@@ -82,8 +82,8 @@ export function buildBroadOwnerFilter(userId: string, contactId: string | null):
   ];
 
   if (contactId) {
-    clauses.push(`_sprk_assignedattorney_value eq ${contactId}`);
-    clauses.push(`_sprk_assignedparalegal_value eq ${contactId}`);
+    clauses.push(`_sprk_assignedattorney1_value eq ${contactId}`);
+    clauses.push(`_sprk_assignedparalegal1_value eq ${contactId}`);
   }
 
   return clauses.join(' or ');
@@ -147,8 +147,8 @@ export const MATTER_TAB_SELECT_FIELDS: string[] = [
   'statuscode',
   '_ownerid_value',
   '_modifiedby_value',
-  '_sprk_assignedattorney_value',
-  '_sprk_assignedparalegal_value',
+  '_sprk_assignedattorney1_value',
+  '_sprk_assignedparalegal1_value',
   'createdon',
   'modifiedon',
 ];
@@ -298,8 +298,8 @@ export const PROJECT_TAB_SELECT_FIELDS: string[] = [
   '_sprk_projecttype_ref_value',  // Lookup → sprk_projecttype_ref (display via formatted value)
   '_ownerid_value',
   '_modifiedby_value',
-  '_sprk_assignedattorney_value',
-  '_sprk_assignedparalegal_value',
+  '_sprk_assignedattorney1_value',
+  '_sprk_assignedparalegal1_value',
   'createdon',
   'modifiedon',
 ];
@@ -332,8 +332,8 @@ export const INVOICE_SELECT_FIELDS: string[] = [
   'statuscode',
   '_ownerid_value',
   '_modifiedby_value',
-  '_sprk_assignedattorney_value',
-  '_sprk_assignedparalegal_value',
+  '_sprk_assignedattorney1_value',
+  '_sprk_assignedparalegal1_value',
   'createdon',
   'modifiedon',
 ];

@@ -40,6 +40,18 @@ export type {
   IGridFeatures,
   GridConfigViewType,
 } from "./ConfigurationService";
+export {
+  resolveRecordType,
+  buildRecordUrl,
+  findNavProp,
+  applyResolverFields,
+} from "./PolymorphicResolverService";
+export type {
+  IPolymorphicWebApi,
+  IRecordTypeRef,
+  INavPropEntry,
+  IResolverFieldValues,
+} from "./PolymorphicResolverService";
 export { SprkChatBridge } from "./SprkChatBridge";
 export type {
   SprkChatBridgeEventMap,

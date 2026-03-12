@@ -2,33 +2,38 @@
  * SelectWorkStep.tsx
  * Step 1: "Work to Assign" — select the entity record this work relates to.
  *
- * - Record Type dropdown: Matter, Project, Invoice, Event
- * - LookupField for record search (shown when type selected AND !assignWithoutRecord)
- * - Checkbox: "Assign Work without specific record"
+ * Follows the AssociateToStep pattern from DocumentUploadWizard:
+ *   - Record Type dropdown + "Select Record" button (Xrm.Utility.lookupObjects)
+ *   - Selected record display with checkmark + clear
+ *   - Divider with "or"
+ *   - Checkbox: "Assign work without a specific record"
  */
 import * as React from 'react';
 import {
   Text,
   Dropdown,
   Option,
+  Button,
   Checkbox,
-  Field,
+  Divider,
+  Spinner,
+  MessageBar,
+  MessageBarBody,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { LookupField } from '../../../../../client/shared/Spaarke.UI.Components/src/components/LookupField/LookupField';
-import type { ILookupItem } from '../../../../../client/shared/Spaarke.UI.Components/src/types/LookupTypes';
-import { WorkAssignmentService } from './workAssignmentService';
+import {
+  SearchRegular,
+  DismissRegular,
+  CheckmarkCircleRegular,
+} from '@fluentui/react-icons';
 import type { ICreateWorkAssignmentFormState } from './formTypes';
-import type { IWebApi } from '../../types/xrm';
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
 export interface ISelectWorkStepProps {
-  webApi: IWebApi;
-  containerId?: string;
   onValidChange: (isValid: boolean) => void;
   onFormValues: (values: Pick<ICreateWorkAssignmentFormState, 'recordType' | 'recordId' | 'recordName' | 'assignWithoutRecord'>) => void;
   initialValues?: Pick<ICreateWorkAssignmentFormState, 'recordType' | 'recordId' | 'recordName' | 'assignWithoutRecord'>;
@@ -38,30 +43,108 @@ export interface ISelectWorkStepProps {
 // Record Type options
 // ---------------------------------------------------------------------------
 
-const RECORD_TYPE_OPTIONS = [
-  { key: 'matter' as const, text: 'Matter' },
-  { key: 'project' as const, text: 'Project' },
-  { key: 'invoice' as const, text: 'Invoice' },
-  { key: 'event' as const, text: 'Event' },
+const RECORD_TYPE_OPTIONS: { key: string; text: string; entityLogicalName: string }[] = [
+  { key: 'matter', text: 'Matter', entityLogicalName: 'sprk_matter' },
+  { key: 'project', text: 'Project', entityLogicalName: 'sprk_project' },
+  { key: 'invoice', text: 'Invoice', entityLogicalName: 'sprk_invoice' },
+  { key: 'event', text: 'Event', entityLogicalName: 'sprk_event' },
 ];
+
+// ---------------------------------------------------------------------------
+// Xrm helpers (frame-walking pattern)
+// ---------------------------------------------------------------------------
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+interface XrmUtility {
+  lookupObjects: (options: Record<string, unknown>) => Promise<Array<{ id: string; name: string; entityType: string }>>;
+}
+
+interface XrmHandle {
+  Utility: XrmUtility;
+}
+
+function resolveXrm(): XrmHandle | null {
+  const frames: Window[] = [window];
+  try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
+  try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* cross-origin */ }
+
+  for (const frame of frames) {
+    try {
+      const xrm = (frame as any).Xrm;
+      if (xrm?.Utility?.lookupObjects) {
+        return xrm as XrmHandle;
+      }
+    } catch {
+      // Cross-origin frame — skip
+    }
+  }
+  return null;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  form: {
+  root: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
+    gap: tokens.spacingVerticalL,
+  },
+  headerText: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
   },
   stepTitle: {
     color: tokens.colorNeutralForeground1,
-    marginBottom: tokens.spacingVerticalXS,
   },
   stepSubtitle: {
     color: tokens.colorNeutralForeground3,
-    marginBottom: tokens.spacingVerticalM,
+  },
+  formRow: {
+    display: 'flex',
+    alignItems: 'flex-end',
+    gap: tokens.spacingHorizontalM,
+  },
+  dropdownWrapper: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    flex: 1,
+    maxWidth: '300px',
+  },
+  fieldLabel: {
+    color: tokens.colorNeutralForeground2,
+  },
+  selectedRecord: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground3,
+  },
+  selectedIcon: {
+    color: tokens.colorBrandForeground1,
+    flexShrink: 0,
+  },
+  selectedText: {
+    flex: 1,
+    color: tokens.colorNeutralForeground1,
+  },
+  checkboxSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+  },
+  checkboxHint: {
+    color: tokens.colorNeutralForeground3,
+    paddingLeft: '30px',
   },
 });
 
@@ -70,8 +153,6 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export const SelectWorkStep: React.FC<ISelectWorkStepProps> = ({
-  webApi,
-  containerId,
   onValidChange,
   onFormValues,
   initialValues,
@@ -82,11 +163,8 @@ export const SelectWorkStep: React.FC<ISelectWorkStepProps> = ({
   const [recordId, setRecordId] = React.useState(initialValues?.recordId ?? '');
   const [recordName, setRecordName] = React.useState(initialValues?.recordName ?? '');
   const [assignWithoutRecord, setAssignWithoutRecord] = React.useState(initialValues?.assignWithoutRecord ?? false);
-
-  const serviceRef = React.useRef<WorkAssignmentService | null>(null);
-  if (!serviceRef.current) {
-    serviceRef.current = new WorkAssignmentService(webApi, containerId);
-  }
+  const [isSelecting, setIsSelecting] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
   // Report validity + values
   React.useEffect(() => {
@@ -99,27 +177,55 @@ export const SelectWorkStep: React.FC<ISelectWorkStepProps> = ({
     (_e: unknown, data: { optionValue?: string }) => {
       const val = (data.optionValue ?? '') as '' | 'matter' | 'project' | 'invoice' | 'event';
       setRecordType(val);
-      setRecordId('');
-      setRecordName('');
+      // Clear previous selection when entity type changes
+      if (recordId) {
+        setRecordId('');
+        setRecordName('');
+      }
     },
-    []
+    [recordId]
   );
 
-  const handleRecordChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setRecordId(item?.id ?? '');
-      setRecordName(item?.name ?? '');
-    },
-    []
-  );
+  // Handle record selection via Xrm.Utility.lookupObjects
+  const handleSelectRecord = React.useCallback(async () => {
+    if (!recordType) return;
 
-  const handleSearchRecords = React.useCallback(
-    (query: string) => {
-      if (!recordType) return Promise.resolve([]);
-      return serviceRef.current!.searchRecordsByType(recordType, query);
-    },
-    [recordType]
-  );
+    const option = RECORD_TYPE_OPTIONS.find((o) => o.key === recordType);
+    if (!option) return;
+
+    const xrm = resolveXrm();
+    if (!xrm) {
+      setError('Xrm not available — cannot open record picker.');
+      return;
+    }
+
+    try {
+      setError(null);
+      setIsSelecting(true);
+      const results = await xrm.Utility.lookupObjects({
+        defaultEntityType: option.entityLogicalName,
+        entityTypes: [option.entityLogicalName],
+        allowMultiSelect: false,
+      });
+
+      if (!results || results.length === 0) return; // User cancelled
+
+      const selected = results[0];
+      const cleanId = selected.id.replace(/[{}]/g, '').toLowerCase();
+      setRecordId(cleanId);
+      setRecordName(selected.name);
+    } catch (err) {
+      console.error('[SelectWorkStep] Record selection failed:', err);
+      setError(err instanceof Error ? err.message : 'Failed to select record.');
+    } finally {
+      setIsSelecting(false);
+    }
+  }, [recordType]);
+
+  const handleClear = React.useCallback(() => {
+    setRecordId('');
+    setRecordName('');
+  }, []);
 
   const handleAssignWithoutChange = React.useCallback(
     (_e: unknown, data: { checked: boolean | 'mixed' }) => {
@@ -134,11 +240,12 @@ export const SelectWorkStep: React.FC<ISelectWorkStepProps> = ({
   );
 
   const selectedTypeText = RECORD_TYPE_OPTIONS.find((o) => o.key === recordType)?.text ?? '';
-  const recordValue: ILookupItem | null = recordId ? { id: recordId, name: recordName } : null;
+  const hasSelection = recordId !== '';
 
   return (
-    <div className={styles.form}>
-      <div>
+    <div className={styles.root}>
+      {/* Step header */}
+      <div className={styles.headerText}>
         <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
           Work to Assign
         </Text>
@@ -147,36 +254,84 @@ export const SelectWorkStep: React.FC<ISelectWorkStepProps> = ({
         </Text>
       </div>
 
-      <Field label="Record Type">
-        <Dropdown
-          value={selectedTypeText}
-          selectedOptions={recordType ? [recordType] : []}
-          onOptionSelect={handleRecordTypeChange}
-          placeholder="Select record type..."
-        >
-          {RECORD_TYPE_OPTIONS.map((opt) => (
-            <Option key={opt.key} value={opt.key}>
-              {opt.text}
-            </Option>
-          ))}
-        </Dropdown>
-      </Field>
-
-      {recordType && !assignWithoutRecord && (
-        <LookupField
-          label={`Select ${selectedTypeText}`}
-          value={recordValue}
-          onChange={handleRecordChange}
-          onSearch={handleSearchRecords}
-          placeholder={`Search ${selectedTypeText.toLowerCase()}s...`}
-        />
+      {/* Error banner */}
+      {error && (
+        <MessageBar intent="error">
+          <MessageBarBody>{error}</MessageBarBody>
+        </MessageBar>
       )}
 
-      <Checkbox
-        checked={assignWithoutRecord}
-        onChange={handleAssignWithoutChange}
-        label="Assign work without a specific record"
-      />
+      {/* Record Type dropdown + Select Record button */}
+      <div className={styles.formRow}>
+        <div className={styles.dropdownWrapper}>
+          <Text size={200} weight="semibold" className={styles.fieldLabel}>
+            Record Type
+          </Text>
+          <Dropdown
+            value={selectedTypeText}
+            selectedOptions={recordType ? [recordType] : []}
+            onOptionSelect={handleRecordTypeChange}
+            placeholder="Select record type..."
+            disabled={assignWithoutRecord || isSelecting}
+          >
+            {RECORD_TYPE_OPTIONS.map((opt) => (
+              <Option key={opt.key} value={opt.key}>
+                {opt.text}
+              </Option>
+            ))}
+          </Dropdown>
+        </div>
+        <Button
+          appearance="primary"
+          icon={<SearchRegular />}
+          onClick={handleSelectRecord}
+          disabled={!recordType || assignWithoutRecord || isSelecting}
+        >
+          Select Record
+        </Button>
+      </div>
+
+      {/* Selected record display */}
+      {hasSelection && (
+        <div className={styles.selectedRecord}>
+          <CheckmarkCircleRegular fontSize={20} className={styles.selectedIcon} />
+          <Text size={300} weight="semibold" className={styles.selectedText}>
+            {recordName}
+          </Text>
+          <Text size={200} className={styles.fieldLabel}>
+            ({selectedTypeText})
+          </Text>
+          <Button
+            appearance="subtle"
+            icon={<DismissRegular />}
+            size="small"
+            onClick={handleClear}
+            aria-label="Clear selection"
+          />
+        </div>
+      )}
+
+      {/* Resolving spinner */}
+      {isSelecting && (
+        <Spinner size="tiny" label="Opening record picker..." />
+      )}
+
+      {/* Divider */}
+      <Divider>or</Divider>
+
+      {/* Assign without record checkbox */}
+      <div className={styles.checkboxSection}>
+        <Checkbox
+          label="Assign work without a specific record"
+          checked={assignWithoutRecord}
+          onChange={handleAssignWithoutChange}
+          disabled={isSelecting}
+        />
+        <Text size={200} className={styles.checkboxHint}>
+          The work assignment will be created without a parent record link.
+          You can associate it later.
+        </Text>
+      </div>
     </div>
   );
 };

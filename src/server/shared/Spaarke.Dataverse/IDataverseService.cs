@@ -525,4 +525,14 @@ public interface IDataverseService
     /// <param name="ct">Cancellation token</param>
     /// <returns>First matching matter entity, or null</returns>
     Task<Entity?> QueryMatterByReferenceNumberAsync(string referenceNumber, CancellationToken ct = default);
+
+    /// <summary>
+    /// Query sprk_recordtype_ref by entity logical name.
+    /// Used by the Polymorphic Resolver pattern (ADR-024) to resolve the record type
+    /// lookup for denormalized resolver fields.
+    /// </summary>
+    /// <param name="entityLogicalName">Entity logical name (e.g., "sprk_matter")</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>First matching sprk_recordtype_ref entity, or null</returns>
+    Task<Entity?> QueryRecordTypeRefAsync(string entityLogicalName, CancellationToken ct = default);
 }

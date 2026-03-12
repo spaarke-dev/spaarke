@@ -1917,6 +1917,24 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return results.Entities.Count > 0 ? results.Entities[0] : null;
     }
 
+    public async Task<Entity?> QueryRecordTypeRefAsync(string entityLogicalName, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying sprk_recordtype_ref by logical name: {EntityLogicalName}", entityLogicalName);
+
+        var query = new QueryExpression("sprk_recordtype_ref")
+        {
+            ColumnSet = new ColumnSet("sprk_recordtype_refid", "sprk_recorddisplayname"),
+            TopCount = 1
+        };
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("sprk_recordlogicalname", ConditionOperator.Equal, entityLogicalName));
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("statecode", ConditionOperator.Equal, 0));
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        return results.Entities.Count > 0 ? results.Entities[0] : null;
+    }
+
     public void Dispose()
     {
         if (!_disposed)

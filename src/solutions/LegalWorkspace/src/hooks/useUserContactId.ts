@@ -1,7 +1,7 @@
 /**
  * useUserContactId — resolves the linked contact ID for a systemuser.
  *
- * Many Dataverse lookup fields (sprk_assignedattorney, sprk_assignedparalegal)
+ * Many Dataverse lookup fields (sprk_assignedattorney1, sprk_assignedparalegal1)
  * reference contacts rather than systemusers. This hook resolves the
  * systemuser._contactid_value lookup once and caches the result at module level
  * for the lifetime of the session (contact link never changes mid-session).

@@ -1877,4 +1877,10 @@ public class DataverseWebApiService : IDataverseService
         throw new NotImplementedException(
             "QueryMatterByReferenceNumberAsync is implemented in DataverseServiceClientImpl.");
     }
+
+    public Task<Entity?> QueryRecordTypeRefAsync(string entityLogicalName, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "QueryRecordTypeRefAsync is implemented in DataverseServiceClientImpl.");
+    }
 }

@@ -98,6 +98,7 @@ export interface ICreateFollowOnEventState {
   eventFinalDueDate: string;
   assignedToId: string;
   assignedToName: string;
+  addTodo: boolean;
 }
 
 export const EMPTY_FOLLOW_ON_EVENT_STATE: ICreateFollowOnEventState = {
@@ -108,6 +109,7 @@ export const EMPTY_FOLLOW_ON_EVENT_STATE: ICreateFollowOnEventState = {
   eventFinalDueDate: '',
   assignedToId: '',
   assignedToName: '',
+  addTodo: false,
 };
 
 // ---------------------------------------------------------------------------

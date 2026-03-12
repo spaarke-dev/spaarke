@@ -25,10 +25,16 @@ import type { ILookupItem } from '../../../types/LookupTypes';
 // ---------------------------------------------------------------------------
 
 export interface ISendEmailStepProps {
+  /** Optional step title override (default: "Send Email to Client"). */
+  title?: string;
   /** Controlled "To" value (email address string). */
   emailTo: string;
   /** Called when "To" changes. */
   onEmailToChange: (value: string) => void;
+  /** Controlled "CC" value (email address string). */
+  emailCc?: string;
+  /** Called when "CC" changes. */
+  onEmailCcChange?: (value: string) => void;
   /** Controlled subject value. */
   emailSubject: string;
   /** Called when subject changes. */
@@ -89,8 +95,11 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
+  title = 'Send Email to Client',
   emailTo: _emailTo,
   onEmailToChange,
+  emailCc,
+  onEmailCcChange,
   emailSubject,
   onEmailSubjectChange,
   emailBody,
@@ -128,7 +137,7 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
     <div className={styles.root}>
       <div className={styles.headerText}>
         <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
-          Send Email to Client
+          {title}
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
           Compose an introductory email. It will be created as an email activity
@@ -146,6 +155,17 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
           onSearch={onSearchUsers}
           minSearchLength={2}
         />
+
+        {onEmailCcChange && (
+          <Field label="CC">
+            <Input
+              value={emailCc ?? ''}
+              onChange={(e) => onEmailCcChange(e.target.value)}
+              placeholder="CC email addresses (separate with ;)"
+              aria-label="CC"
+            />
+          </Field>
+        )}
 
         <Field label={renderLabel('Subject', true)} required>
           <Input
