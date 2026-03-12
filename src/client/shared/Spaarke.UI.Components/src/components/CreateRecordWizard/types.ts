@@ -49,8 +49,8 @@ export interface IEntityInfoStep {
   label: string;
   /** Returns true when the user may advance past this step. */
   canAdvance: () => boolean;
-  /** Renders the entity-specific form content. */
-  renderContent: () => React.ReactNode;
+  /** Renders the entity-specific form content. Receives the uploaded files from Step 1. */
+  renderContent: (uploadedFiles: import('../FileUpload/fileUploadTypes').IUploadedFile[]) => React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------

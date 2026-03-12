@@ -83,7 +83,7 @@ const EventWizardDialog: React.FC<IEventWizardDialogProps> = ({ open, onClose, w
         id: 'create-record',
         label: 'Event Details',
         canAdvance: () => formValid,
-        renderContent: () => (
+        renderContent: (_wizardFiles) => (
           <CreateEventStep
             webApi={webApi}
             onValidChange={setFormValid}

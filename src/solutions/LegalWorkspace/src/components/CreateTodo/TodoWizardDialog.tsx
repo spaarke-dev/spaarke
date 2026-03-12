@@ -83,7 +83,7 @@ const TodoWizardDialog: React.FC<ITodoWizardDialogProps> = ({ open, onClose, web
         id: 'create-record',
         label: 'To Do Details',
         canAdvance: () => formValid,
-        renderContent: () => (
+        renderContent: (_wizardFiles) => (
           <CreateTodoStep
             webApi={webApi}
             onValidChange={setFormValid}

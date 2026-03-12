@@ -492,7 +492,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
         id: config.infoStep.id,
         label: config.infoStep.label,
         canAdvance: config.infoStep.canAdvance,
-        renderContent: config.infoStep.renderContent,
+        renderContent: () => config.infoStep.renderContent(fileStateRef.current.uploadedFiles),
       },
       {
         id: 'next-steps',

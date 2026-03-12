@@ -115,11 +115,11 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
         id: 'create-record',
         label: 'Enter Info',
         canAdvance: () => step2Valid,
-        renderContent: () => (
+        renderContent: (wizardFiles) => (
           <CreateRecordStep
             webApi={webApi!}
-            uploadedFileNames={[]}
-            uploadedFiles={[]}
+            uploadedFileNames={wizardFiles.map((f) => f.name)}
+            uploadedFiles={wizardFiles}
             onValidChange={setStep2Valid}
             onSubmit={(values) => setStep2FormValues(values)}
             initialFormValues={step2FormValues}

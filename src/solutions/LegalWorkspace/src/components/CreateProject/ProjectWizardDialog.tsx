@@ -98,12 +98,12 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
         id: 'create-record',
         label: 'Enter Info',
         canAdvance: () => formValid,
-        renderContent: () => (
+        renderContent: (wizardFiles) => (
           <CreateProjectStep
             webApi={webApi}
             onValidChange={setFormValid}
             onFormValues={setFormValues}
-            uploadedFiles={[]}
+            uploadedFiles={wizardFiles}
             initialFormValues={formValues}
           />
         ),
