@@ -18,16 +18,13 @@ import {
     DataGridRow,
     DataGridCell,
     TableColumnDefinition,
+    TableColumnSizingOptions,
     createTableColumn,
     Badge,
     Text,
-    Button,
-    Tooltip,
     TableCellLayout,
 } from "@fluentui/react-components";
 import {
-    Open20Regular,
-    Globe20Regular,
     Document20Regular,
     DocumentPdf20Regular,
     DocumentText20Regular,
@@ -55,6 +52,8 @@ export interface RelationshipGridProps {
     searchQuery?: string;
     /** Callback to expose filtered rows to parent (for CSV export) */
     onFilteredRowsChange?: (rows: GridRow[]) => void;
+    /** Callback when a row is clicked — opens FilePreviewDialog */
+    onRowClick?: (documentId: string, documentName: string) => void;
 }
 
 const useStyles = makeStyles({
@@ -103,9 +102,11 @@ const useStyles = makeStyles({
         gap: tokens.spacingHorizontalXXS,
         flexWrap: "wrap",
     },
-    actionsCell: {
-        display: "flex",
-        gap: tokens.spacingHorizontalXS,
+    clickableRow: {
+        cursor: "pointer",
+        ":hover": {
+            backgroundColor: tokens.colorNeutralBackground1Hover,
+        },
     },
 });
 
@@ -141,7 +142,7 @@ const getRelationshipBadgeColor = (type: string): "brand" | "success" | "warning
     }
 };
 
-export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes, searchQuery, onFilteredRowsChange }) => {
+export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes, searchQuery, onFilteredRowsChange, onRowClick }) => {
     const styles = useStyles();
 
     // Filter out hub nodes (matter/project/invoice/email) — show only documents
@@ -166,19 +167,11 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes, searc
         onFilteredRowsChange?.(rows);
     }, [rows, onFilteredRowsChange]);
 
-    const handleOpenRecord = useCallback((data: DocumentNodeData) => {
-        if (!data.recordUrl && !data.documentId) return;
-        if (data.recordUrl) {
-            window.open(data.recordUrl, "_blank", "noopener,noreferrer");
-        } else if (data.documentId) {
-            const baseUrl = window.location.origin;
-            window.open(`${baseUrl}/main.aspx?etn=sprk_document&id=${data.documentId}&pagetype=entityrecord`, "_blank");
+    const handleRowClickInternal = useCallback((row: GridRow) => {
+        if (onRowClick && row.data.documentId) {
+            onRowClick(row.data.documentId, row.data.name);
         }
-    }, []);
-
-    const handleViewFile = useCallback((data: DocumentNodeData) => {
-        if (data.fileUrl) window.open(data.fileUrl, "_blank", "noopener,noreferrer");
-    }, []);
+    }, [onRowClick]);
 
     const columns: TableColumnDefinition<GridRow>[] = useMemo(() => [
         createTableColumn<GridRow>({
@@ -263,37 +256,16 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes, searc
                 </TableCellLayout>
             ),
         }),
-        createTableColumn<GridRow>({
-            columnId: "actions",
-            renderHeaderCell: () => "",
-            renderCell: (row) => (
-                <TableCellLayout>
-                    <div className={styles.actionsCell}>
-                        <Tooltip content="Open document record" relationship="label">
-                            <Button
-                                size="small"
-                                appearance="subtle"
-                                icon={<Open20Regular />}
-                                onClick={() => handleOpenRecord(row.data)}
-                                disabled={row.data.isOrphanFile || (!row.data.recordUrl && !row.data.documentId)}
-                                aria-label="Open record"
-                            />
-                        </Tooltip>
-                        <Tooltip content="View in SharePoint" relationship="label">
-                            <Button
-                                size="small"
-                                appearance="subtle"
-                                icon={<Globe20Regular />}
-                                onClick={() => handleViewFile(row.data)}
-                                disabled={!row.data.fileUrl}
-                                aria-label="View file"
-                            />
-                        </Tooltip>
-                    </div>
-                </TableCellLayout>
-            ),
-        }),
-    ], [styles, handleOpenRecord, handleViewFile]);
+    ], [styles, handleRowClickInternal]);
+
+    const columnSizingOptions: TableColumnSizingOptions = useMemo(() => ({
+        name:         { defaultWidth: 400, minWidth: 200, idealWidth: 400 },
+        relationship: { defaultWidth: 160, minWidth: 100, idealWidth: 160 },
+        similarity:   { defaultWidth: 100, minWidth: 80,  idealWidth: 100 },
+        type:         { defaultWidth: 100, minWidth: 80,  idealWidth: 100 },
+        parent:       { defaultWidth: 180, minWidth: 100, idealWidth: 180 },
+        modified:     { defaultWidth: 130, minWidth: 100, idealWidth: 130 },
+    }), []);
 
     if (rows.length === 0) {
         return (
@@ -313,6 +285,8 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes, searc
                 items={rows}
                 columns={columns}
                 sortable
+                resizableColumns
+                columnSizingOptions={columnSizingOptions}
                 getRowId={(row) => row.id}
                 focusMode="composite"
             >
@@ -325,7 +299,11 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes, searc
                 </DataGridHeader>
                 <DataGridBody<GridRow>>
                     {({ item, rowId }) => (
-                        <DataGridRow<GridRow> key={rowId}>
+                        <DataGridRow<GridRow>
+                            key={rowId}
+                            className={onRowClick ? styles.clickableRow : undefined}
+                            onClick={() => handleRowClickInternal(item)}
+                        >
                             {({ renderCell }) => (
                                 <DataGridCell>{renderCell(item)}</DataGridCell>
                             )}

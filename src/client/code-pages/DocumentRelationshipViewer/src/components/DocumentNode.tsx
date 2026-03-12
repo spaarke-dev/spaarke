@@ -16,7 +16,7 @@ import {
     Folder20Regular, Table20Regular, SlideText20Regular, Mail20Regular, Code20Regular,
     FolderZip20Regular, Video20Regular, DocumentQuestionMark20Regular,
     Briefcase24Regular, Building24Regular, Receipt24Regular, MailInbox24Regular,
-    Open16Regular, Info16Regular,
+    Eye16Regular,
 } from "@fluentui/react-icons";
 import type { DocumentNode as TDocumentNode, DocumentNodeData } from "../types/graph";
 import { isParentHubNode, type NodeType } from "../types/api";
@@ -73,24 +73,20 @@ const useStyles = makeStyles({
     sourceCard: {
         backgroundColor: tokens.colorBrandBackground,
         border: `2px solid ${tokens.colorBrandStroke1}`,
-        boxShadow: tokens.shadow8,
         "& *": { color: tokens.colorNeutralForegroundOnBrand },
     },
     relatedCard: {
         backgroundColor: tokens.colorNeutralBackground1,
         border: `1px solid ${tokens.colorNeutralStroke1}`,
-        boxShadow: tokens.shadow4,
     },
     orphanCard: {
         backgroundColor: tokens.colorNeutralBackground2,
         border: `2px dashed ${tokens.colorNeutralStroke2}`,
-        boxShadow: tokens.shadow2,
         opacity: 0.9,
     },
     parentHubCard: {
         backgroundColor: tokens.colorPaletteGreenBackground2,
         border: `2px solid ${tokens.colorPaletteGreenBorder2}`,
-        boxShadow: tokens.shadow8,
         minWidth: "120px",
         maxWidth: "150px",
     },
@@ -109,7 +105,7 @@ const useStyles = makeStyles({
     compactContainer: { display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" },
     compactIcon: {
         display: "flex", alignItems: "center", justifyContent: "center",
-        width: "40px", height: "40px", borderRadius: "50%", boxShadow: tokens.shadow4,
+        width: "40px", height: "40px", borderRadius: "50%",
     },
     compactSourceIcon: {
         backgroundColor: tokens.colorBrandBackground,
@@ -227,11 +223,11 @@ export const DocumentNode: React.FC<NodeProps<TDocumentNode>> = ({ data, selecte
     if (compactMode) {
         return (
             <>
-                <Handle type="target" position={Position.Top} style={{ width: "6px", height: "6px", background: isParentHub ? tokens.colorPaletteGreenBorder2 : tokens.colorBrandBackground, border: `1px solid ${tokens.colorNeutralBackground1}` }} />
+                <Handle type="target" position={Position.Left} style={{ width: "6px", height: "6px", background: isParentHub ? tokens.colorPaletteGreenBorder2 : tokens.colorBrandBackground, border: `1px solid ${tokens.colorNeutralBackground1}` }} />
                 <div className={mergeClasses(styles.compactContainer, styles.compactIcon, isParentHub ? styles.compactParentHubIcon : isSource ? styles.compactSourceIcon : isOrphanFile ? styles.compactOrphanIcon : styles.compactRelatedIcon)}>
                     {isParentHub ? getParentHubIcon(nodeType) : getFileTypeIcon(fileType)}
                 </div>
-                <Handle type="source" position={Position.Bottom} style={{ width: "6px", height: "6px", background: isParentHub ? tokens.colorPaletteGreenBorder2 : tokens.colorBrandBackground, border: `1px solid ${tokens.colorNeutralBackground1}` }} />
+                <Handle type="source" position={Position.Right} style={{ width: "6px", height: "6px", background: isParentHub ? tokens.colorPaletteGreenBorder2 : tokens.colorBrandBackground, border: `1px solid ${tokens.colorNeutralBackground1}` }} />
             </>
         );
     }
@@ -239,35 +235,43 @@ export const DocumentNode: React.FC<NodeProps<TDocumentNode>> = ({ data, selecte
     if (isParentHub) {
         return (
             <>
+                <Handle type="target" position={Position.Left} style={{ width: "8px", height: "8px", background: tokens.colorPaletteGreenBorder2, border: `1px solid ${tokens.colorNeutralBackground1}` }} />
                 <Card className={mergeClasses(styles.nodeContainer, styles.parentHubCard)} selected={selected} size="small">
                     <CardHeader className={styles.cardHeader} image={<div className={styles.parentHubIcon}>{getParentHubIcon(nodeType)}</div>} header={<div className={styles.headerContent}><Body1Strong className={styles.documentName}>{data.name}</Body1Strong><Caption1 className={styles.caption}>{getParentHubLabel(nodeType)}</Caption1></div>} />
                     <div className={styles.footer}>
                         <div className={styles.footerRow}>
-                            <Badge appearance="tint" color="success" size="small">{getParentHubLabel(nodeType)}</Badge>
-                            <Tooltip content={tooltipContent} relationship="description" positioning="above" withArrow><div className={styles.infoIcon}><Info16Regular /></div></Tooltip>
+                            <div style={{ width: "20px", height: "20px", borderRadius: "50%", backgroundColor: tokens.colorPaletteGreenBorder2, flexShrink: 0 }} />
                         </div>
                     </div>
                 </Card>
-                <Handle type="target" position={Position.Right} style={{ width: "8px", height: "8px", background: tokens.colorPaletteGreenBorder2, border: `1px solid ${tokens.colorNeutralBackground1}` }} />
+                <Handle type="source" position={Position.Right} style={{ width: "8px", height: "8px", background: tokens.colorPaletteGreenBorder2, border: `1px solid ${tokens.colorNeutralBackground1}` }} />
             </>
         );
     }
 
+    /** Render a colored dot for semantic and same_matter/project, badge for others */
+    const renderRelationshipIndicator = (rel: { type: string; label: string }) => {
+        if (rel.type === "semantic") {
+            return <div key={rel.type} style={{ width: "20px", height: "20px", borderRadius: "50%", backgroundColor: tokens.colorBrandStroke1, flexShrink: 0 }} title="Semantic" />;
+        }
+        if (rel.type === "same_matter" || rel.type === "same_project") {
+            return <div key={rel.type} style={{ width: "20px", height: "20px", borderRadius: "50%", backgroundColor: tokens.colorPaletteGreenBorder2, flexShrink: 0 }} title={rel.label} />;
+        }
+        return <Badge key={rel.type} appearance="outline" color={getRelationshipBadgeColor(rel.type)} size="small">{rel.label}</Badge>;
+    };
+
     return (
         <>
-            <Handle type="source" position={Position.Left} style={{ width: "6px", height: "6px", background: tokens.colorBrandBackground, border: `1px solid ${tokens.colorNeutralBackground1}` }} />
+            <Handle type="target" position={Position.Left} style={{ width: "6px", height: "6px", background: tokens.colorBrandBackground, border: `1px solid ${tokens.colorNeutralBackground1}` }} />
             <Card className={mergeClasses(styles.nodeContainer, isSource ? styles.sourceCard : isOrphanFile ? styles.orphanCard : styles.relatedCard)} selected={selected} size="small">
                 <CardHeader className={styles.cardHeader} image={<div className={mergeClasses(styles.icon, isSource && styles.sourceIcon)}>{getFileTypeIcon(fileType)}</div>} header={<div className={styles.headerContent}><Body1Strong className={styles.documentName}>{data.name}</Body1Strong>{isSource && <Caption1 className={mergeClasses(styles.caption, styles.sourceCaption)}>Source</Caption1>}</div>} />
                 {!isSource && (
                     <div className={styles.footer}>
                         <div className={styles.footerRow}>
                             {data.relationshipTypes && data.relationshipTypes.length > 0 ? (
-                                data.relationshipTypes.slice(0, 2).map((rel) => (
-                                    <Badge key={rel.type} appearance="outline" color={getRelationshipBadgeColor(rel.type)} size="small">{rel.label}</Badge>
-                                ))
+                                data.relationshipTypes.slice(0, 2).map(renderRelationshipIndicator)
                             ) : isOrphanFile ? <Badge className={styles.orphanBadge} appearance="outline" color="warning" size="small">File only</Badge> : <span />}
-                            <Tooltip content={tooltipContent} relationship="description" positioning="above" withArrow><div className={styles.infoIcon}><Info16Regular /></div></Tooltip>
-                            {recordUrl && <Link className={styles.openLink} onClick={handleOpenRecord} title="Open in Dataverse"><Open16Regular /></Link>}
+                            <Link className={styles.openLink} onClick={(e) => e.stopPropagation()} title="Preview document"><Eye16Regular /></Link>
                         </div>
                     </div>
                 )}
@@ -275,13 +279,12 @@ export const DocumentNode: React.FC<NodeProps<TDocumentNode>> = ({ data, selecte
                     <div className={mergeClasses(styles.footer, styles.sourceFooter)}>
                         <div className={styles.footerRow}>
                             <Badge appearance="filled" color="brand" size="small">Source</Badge>
-                            <Tooltip content={tooltipContent} relationship="description" positioning="above" withArrow><div className={mergeClasses(styles.infoIcon, styles.sourceInfoIcon)}><Info16Regular /></div></Tooltip>
-                            {recordUrl && <Link className={mergeClasses(styles.openLink, styles.sourceOpenLink)} onClick={handleOpenRecord} title="Open in Dataverse"><Open16Regular /></Link>}
+                            <Link className={mergeClasses(styles.openLink, styles.sourceOpenLink)} onClick={(e) => e.stopPropagation()} title="Preview document"><Eye16Regular /></Link>
                         </div>
                     </div>
                 )}
             </Card>
-            <Handle type="target" position={Position.Right} style={{ width: "6px", height: "6px", background: tokens.colorBrandBackground, border: `1px solid ${tokens.colorNeutralBackground1}` }} />
+            <Handle type="source" position={Position.Right} style={{ width: "6px", height: "6px", background: tokens.colorBrandBackground, border: `1px solid ${tokens.colorNeutralBackground1}` }} />
         </>
     );
 };

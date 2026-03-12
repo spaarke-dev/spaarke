@@ -9,11 +9,13 @@
 import React, { useMemo, useEffect, useCallback } from "react";
 import {
     ReactFlow,
+    ReactFlowProvider,
     Background,
     Controls,
     MiniMap,
     useNodesState,
     useEdgesState,
+    useReactFlow,
     BackgroundVariant,
     type NodeTypes,
     type EdgeTypes,
@@ -37,7 +39,7 @@ export interface DocumentGraphProps {
 }
 
 const useStyles = makeStyles({
-    container: { width: "100%", height: "100%", minHeight: "300px", position: "relative" },
+    container: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
     emptyState: {
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
         height: "100%", color: tokens.colorNeutralForeground3, gap: tokens.spacingVerticalM,
@@ -52,7 +54,18 @@ const edgeTypes: EdgeTypes = {
     similarity: DocumentEdgeComponent as EdgeTypes[string],
 };
 
-export const DocumentGraph: React.FC<DocumentGraphProps> = ({
+/** Auto-fit graph to canvas when node count changes */
+const AutoFitOnChange: React.FC<{ nodeCount: number }> = ({ nodeCount }) => {
+    const { fitView } = useReactFlow();
+    useEffect(() => {
+        // Small delay to let nodes render before fitting
+        const timer = setTimeout(() => fitView({ padding: 0.2, maxZoom: 1.5, duration: 200 }), 100);
+        return () => clearTimeout(timer);
+    }, [nodeCount, fitView]);
+    return null;
+};
+
+const DocumentGraphInner: React.FC<DocumentGraphProps> = ({
     nodes: inputNodes,
     edges: inputEdges,
     isDarkMode = false,
@@ -160,9 +173,17 @@ export const DocumentGraph: React.FC<DocumentGraphProps> = ({
                         style={{ backgroundColor: isDarkMode ? tokens.colorNeutralBackground2 : tokens.colorNeutralBackground1 }}
                     />
                 )}
+                <AutoFitOnChange nodeCount={inputNodes.length} />
             </ReactFlow>
         </div>
     );
 };
+
+/** Wrap in ReactFlowProvider so useReactFlow works inside AutoFitOnChange */
+export const DocumentGraph: React.FC<DocumentGraphProps> = (props) => (
+    <ReactFlowProvider>
+        <DocumentGraphInner {...props} />
+    </ReactFlowProvider>
+);
 
 export default DocumentGraph;

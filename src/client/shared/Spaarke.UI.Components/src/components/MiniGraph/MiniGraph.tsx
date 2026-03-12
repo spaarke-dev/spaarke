@@ -70,10 +70,32 @@ function getPrimaryRelationshipType(
 export const MiniGraph: React.FC<IMiniGraphProps> = ({
     nodes,
     edges,
-    width = DEFAULT_WIDTH,
-    height = DEFAULT_HEIGHT,
+    width,
+    height,
     onClick,
 }) => {
+    // Use a ref to measure the container and fill available space
+    const containerRef = React.useRef<HTMLDivElement>(null);
+    const [measuredSize, setMeasuredSize] = React.useState<{ w: number; h: number } | null>(null);
+
+    React.useEffect(() => {
+        if (!containerRef.current) return;
+        const el = containerRef.current;
+        const observe = () => {
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                setMeasuredSize({ w: Math.floor(rect.width), h: Math.floor(rect.height) });
+            }
+        };
+        observe();
+        const ro = new ResizeObserver(observe);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
+
+    // Use explicit props if provided, otherwise measured container size, fallback to defaults
+    const effectiveWidth = width ?? measuredSize?.w ?? DEFAULT_WIDTH;
+    const effectiveHeight = height ?? measuredSize?.h ?? DEFAULT_HEIGHT;
     // Map to ForceNode / ForceEdge for the simulation hook
     const forceNodes: ForceNode[] = React.useMemo(
         () =>
@@ -129,16 +151,16 @@ export const MiniGraph: React.FC<IMiniGraphProps> = ({
         const rawSpanX = maxX - minX || 1;
         const rawSpanY = maxY - minY || 1;
         const pad = VIEWBOX_PADDING;
-        const usableW = width - pad * 2;
-        const usableH = height - pad * 2;
+        const usableW = effectiveWidth - pad * 2;
+        const usableH = effectiveHeight - pad * 2;
         const scale = Math.min(usableW / rawSpanX, usableH / rawSpanY);
         const midX = (minX + maxX) / 2;
         const midY = (minY + maxY) / 2;
 
         const mappedNodes = positioned.map((n) => ({
             ...n,
-            px: (n.x - midX) * scale + width / 2,
-            py: (n.y - midY) * scale + height / 2,
+            px: (n.x - midX) * scale + effectiveWidth / 2,
+            py: (n.y - midY) * scale + effectiveHeight / 2,
         }));
 
         const nodePos = new Map<string, { px: number; py: number }>();
@@ -159,18 +181,27 @@ export const MiniGraph: React.FC<IMiniGraphProps> = ({
         });
 
         return { nodes: mappedNodes, edges: mappedEdges, scale };
-    }, [positioned, positionedEdges, width, height]);
+    }, [positioned, positionedEdges, effectiveWidth, effectiveHeight]);
 
     // Don't render if no nodes
     if (nodes.length === 0) {
-        return null;
+        return (
+            <div
+                ref={containerRef}
+                style={{ width: "100%", height: "100%", minHeight: "80px" }}
+            />
+        );
     }
 
     return (
+        <div
+            ref={containerRef}
+            style={{ width: "100%", height: "100%", minHeight: "80px" }}
+        >
         <svg
             width="100%"
-            height={height}
-            viewBox={`0 0 ${width} ${height}`}
+            height="100%"
+            viewBox={`0 0 ${effectiveWidth} ${effectiveHeight}`}
             preserveAspectRatio="xMidYMid meet"
             onClick={onClick}
             style={{
@@ -235,6 +266,7 @@ export const MiniGraph: React.FC<IMiniGraphProps> = ({
                 );
             })}
         </svg>
+        </div>
     );
 };
 

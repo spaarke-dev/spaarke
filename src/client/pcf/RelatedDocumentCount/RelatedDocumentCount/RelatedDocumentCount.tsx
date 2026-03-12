@@ -139,14 +139,12 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
         ? React.createElement(MiniGraph, {
               nodes: graphNodes,
               edges: graphEdges,
-              width: 260,
-              height: 140,
               onClick: handleOpen,
           })
         : null;
 
     return (
-        <div data-pcf-version="1.0.15">
+        <div data-pcf-version="1.0.17">
             <RelationshipCountCard
                 count={count}
                 isLoading={effectiveIsLoading}

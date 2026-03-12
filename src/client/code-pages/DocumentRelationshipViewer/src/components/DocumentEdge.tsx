@@ -32,10 +32,10 @@ const getRelationshipStroke = (type?: string): string => {
 
 const getEdgeStyle = (similarity: number, relationshipType?: string): EdgeStyle => {
     const stroke = getRelationshipStroke(relationshipType);
-    if (similarity >= 0.9) return { strokeWidth: 4, stroke, opacity: 0.9 };
-    if (similarity >= 0.75) return { strokeWidth: 3, stroke, opacity: 0.8 };
-    if (similarity >= 0.65) return { strokeWidth: 2, stroke, opacity: 0.7 };
-    return { strokeWidth: 1.5, stroke, strokeDasharray: "5,5", opacity: 0.5 };
+    if (similarity >= 0.9) return { strokeWidth: 2.5, stroke, opacity: 0.9 };
+    if (similarity >= 0.75) return { strokeWidth: 2, stroke, opacity: 0.8 };
+    if (similarity >= 0.65) return { strokeWidth: 1.5, stroke, opacity: 0.7 };
+    return { strokeWidth: 1, stroke, strokeDasharray: "5,5", opacity: 0.5 };
 };
 
 /** Color-code edge label by relationship type */

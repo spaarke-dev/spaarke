@@ -16,7 +16,7 @@
  *   - Node action bar: open record, view file, expand
  */
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
     makeStyles,
     tokens,
@@ -40,19 +40,25 @@ import {
     Filter20Regular,
     FilterDismiss20Regular,
     ArrowDownload20Regular,
+    ArrowSync20Regular,
 } from "@fluentui/react-icons";
 import { DocumentGraph } from "./components/DocumentGraph";
 import { RelationshipGrid, type GridRow } from "./components/RelationshipGrid";
+// Network and Timeline views available but not in toolbar yet:
+// import { RelationshipNetwork } from "./components/RelationshipNetwork";
+// import { RelationshipTimeline } from "./components/RelationshipTimeline";
 import { ControlPanel, DEFAULT_FILTER_SETTINGS, DOCUMENT_TYPES, type FilterSettings } from "./components/ControlPanel";
-import { NodeActionBar } from "./components/NodeActionBar";
+// NodeActionBar removed — node click now opens FilePreviewDialog
 import { useVisualizationApi, formatVisualizationError } from "./hooks/useVisualizationApi";
 import { initializeAuth, getToken } from "./services/authInit";
 import { exportToCsv } from "./services/CsvExportService";
+import { createFilePreviewServices } from "./services/FilePreviewServiceAdapter";
+import { FilePreviewDialog } from "../../../shared/Spaarke.UI.Components/dist/components/FilePreview";
 import type { DocumentNode } from "./types/graph";
 
 const DEFAULT_API_BASE_URL = "https://spe-api-dev-67e2xz.azurewebsites.net";
 
-type ViewMode = "graph" | "grid";
+type ViewMode = "graph" | "grid" | "network" | "timeline";
 
 interface AppProps {
     params: URLSearchParams;
@@ -71,7 +77,8 @@ const useStyles = makeStyles({
     toolbar: {
         display: "flex",
         alignItems: "center",
-        padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
+        height: "37px",
+        padding: `0 ${tokens.spacingHorizontalM}`,
         borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
         backgroundColor: tokens.colorNeutralBackground2,
         gap: tokens.spacingHorizontalS,
@@ -79,7 +86,7 @@ const useStyles = makeStyles({
     },
     main: {
         display: "flex",
-        flex: 1,
+        flex: "1 1 0",
         minHeight: 0,
         overflow: "hidden",
         position: "relative",
@@ -87,15 +94,16 @@ const useStyles = makeStyles({
     filterPanel: {
         position: "absolute",
         top: tokens.spacingVerticalM,
-        left: tokens.spacingHorizontalM,
+        right: tokens.spacingHorizontalM,
         zIndex: 50,
         maxHeight: "calc(100% - 32px)",
         overflowY: "auto",
     },
     content: {
-        flex: 1,
+        flex: "1 1 0",
         overflow: "hidden",
         position: "relative",
+        minHeight: 0,
     },
     footer: {
         display: "flex",
@@ -137,6 +145,18 @@ const useStyles = makeStyles({
         minWidth: "200px",
         maxWidth: "300px",
     },
+    toolbarSpacer: {
+        flex: 1,
+    },
+    gridToolbar: {
+        display: "flex",
+        alignItems: "center",
+        gap: tokens.spacingHorizontalS,
+        padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
+        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        backgroundColor: tokens.colorNeutralBackground1,
+        flexShrink: 0,
+    },
 });
 
 export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
@@ -153,12 +173,21 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
     const [isAuthInitializing, setIsAuthInitializing] = useState(true);
 
     // UI state
-    const [viewMode, setViewMode] = useState<ViewMode>("graph");
-    const [showFilterPanel, setShowFilterPanel] = useState(false);
+    const [viewMode, setViewMode] = useState<ViewMode>("grid");
+    const [showFilterPanel, setShowFilterPanel] = useState(true);
     const [filters, setFilters] = useState<FilterSettings>(DEFAULT_FILTER_SETTINGS);
     const [selectedNode, setSelectedNode] = useState<DocumentNode | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const filteredRowsRef = useRef<GridRow[]>([]);
+
+    // File preview dialog state
+    const [previewDocumentId, setPreviewDocumentId] = useState<string | null>(null);
+    const [previewDocumentName, setPreviewDocumentName] = useState<string>("");
+    const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+    const [previewInWorkspace, setPreviewInWorkspace] = useState(false);
+
+    // FilePreviewDialog services adapter (memoized)
+    const filePreviewServices = useMemo(() => createFilePreviewServices(apiBaseUrl), [apiBaseUrl]);
 
     // Auth initialization — uses @spaarke/auth (multi-tenant, no hardcoded values)
     useEffect(() => {
@@ -191,7 +220,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
         : undefined;
 
     // Fetch visualization data
-    const { nodes, edges, metadata, isLoading, error } = useVisualizationApi({
+    const { nodes, edges, metadata, isLoading, error, refetch } = useVisualizationApi({
         apiBaseUrl,
         documentId,
         tenantId,
@@ -205,10 +234,23 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
 
     const handleNodeSelect = useCallback((node: DocumentNode) => {
         setSelectedNode(node);
+        // Open FilePreviewDialog for the selected node
+        if (node.data.documentId) {
+            setPreviewDocumentId(node.data.documentId);
+            setPreviewDocumentName(node.data.name ?? "Document");
+            setIsPreviewOpen(true);
+        }
     }, []);
 
-    const handleCloseActionBar = useCallback(() => {
-        setSelectedNode(null);
+    const handleRowClick = useCallback((documentId: string, documentName: string) => {
+        setPreviewDocumentId(documentId);
+        setPreviewDocumentName(documentName);
+        setIsPreviewOpen(true);
+    }, []);
+
+    const handlePreviewClose = useCallback(() => {
+        setIsPreviewOpen(false);
+        setPreviewDocumentId(null);
     }, []);
 
     const handleFilterChange = useCallback((newFilters: FilterSettings) => {
@@ -264,23 +306,27 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
 
     return (
         <div className={styles.root}>
-            {/* Toolbar */}
+            {/* Toolbar: [Refresh] | ——spacer—— [Grid] [Graph] [Network] [Timeline] [Settings] */}
             <div className={styles.toolbar}>
-                {/* View toggle */}
+                {/* Left: Refresh */}
+                <Tooltip content="Refresh data" relationship="label">
+                    <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<ArrowSync20Regular />}
+                        onClick={refetch}
+                        aria-label="Refresh"
+                    >
+                        Refresh
+                    </Button>
+                </Tooltip>
+                <ToolbarDivider />
+
+                {/* Spacer */}
+                <div className={styles.toolbarSpacer} />
+
+                {/* Right: View toggles + Settings */}
                 <div className={styles.viewToggle}>
-                    <Tooltip content="Graph view" relationship="label">
-                        <Button
-                            className={`${styles.viewButton} ${viewMode === "graph" ? styles.activeViewButton : ""}`}
-                            appearance={viewMode === "graph" ? "primary" : "subtle"}
-                            size="small"
-                            icon={<NetworkCheck20Regular />}
-                            onClick={() => setViewMode("graph")}
-                            aria-label="Graph view"
-                            aria-pressed={viewMode === "graph"}
-                        >
-                            Graph
-                        </Button>
-                    </Tooltip>
                     <Tooltip content="Grid view" relationship="label">
                         <Button
                             className={`${styles.viewButton} ${viewMode === "grid" ? styles.activeViewButton : ""}`}
@@ -294,42 +340,56 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
                             Grid
                         </Button>
                     </Tooltip>
-                </div>
-
-                <Toolbar>
-                    <ToolbarDivider />
-                    <Tooltip content={showFilterPanel ? "Hide filters" : "Show filters"} relationship="label">
-                        <ToolbarButton
-                            icon={showFilterPanel ? <FilterDismiss20Regular /> : <Filter20Regular />}
-                            onClick={() => setShowFilterPanel(!showFilterPanel)}
-                            aria-label="Toggle filters"
-                            aria-pressed={showFilterPanel}
-                        />
+                    <Tooltip content="Graph view" relationship="label">
+                        <Button
+                            className={`${styles.viewButton} ${viewMode === "graph" ? styles.activeViewButton : ""}`}
+                            appearance={viewMode === "graph" ? "primary" : "subtle"}
+                            size="small"
+                            icon={<NetworkCheck20Regular />}
+                            onClick={() => setViewMode("graph")}
+                            aria-label="Graph view"
+                            aria-pressed={viewMode === "graph"}
+                        >
+                            Graph
+                        </Button>
                     </Tooltip>
-                    {viewMode === "grid" && (
-                        <>
-                            <ToolbarDivider />
-                            <SearchBox
-                                className={styles.searchBox}
-                                placeholder="Search documents..."
-                                size="small"
-                                value={searchQuery}
-                                onChange={handleSearchChange}
-                                aria-label="Search documents by name"
-                            />
-                            <Tooltip content="Export filtered rows to CSV" relationship="label">
-                                <ToolbarButton
-                                    icon={<ArrowDownload20Regular />}
-                                    onClick={handleExport}
-                                    aria-label="Export to CSV"
-                                >
-                                    Export
-                                </ToolbarButton>
-                            </Tooltip>
-                        </>
-                    )}
-                </Toolbar>
+                </div>
+                <Tooltip content={showFilterPanel ? "Hide settings" : "Show settings"} relationship="label">
+                    <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={showFilterPanel ? <FilterDismiss20Regular /> : <Filter20Regular />}
+                        onClick={() => setShowFilterPanel(!showFilterPanel)}
+                        aria-label="Toggle settings"
+                        aria-pressed={showFilterPanel}
+                    />
+                </Tooltip>
             </div>
+
+            {/* Grid-specific inline toolbar (search + export) */}
+            {viewMode === "grid" && (
+                <div className={styles.gridToolbar}>
+                    <SearchBox
+                        className={styles.searchBox}
+                        placeholder="Search documents..."
+                        size="small"
+                        value={searchQuery}
+                        onChange={handleSearchChange}
+                        aria-label="Search documents by name"
+                    />
+                    <Tooltip content="Export filtered rows to CSV" relationship="label">
+                        <Button
+                            appearance="subtle"
+                            size="small"
+                            icon={<ArrowDownload20Regular />}
+                            onClick={handleExport}
+                            aria-label="Export to CSV"
+                        >
+                            Export
+                        </Button>
+                    </Tooltip>
+                </div>
+            )}
 
             {/* Auth or API error */}
             {(authError ?? (error && !isLoading)) && (
@@ -346,7 +406,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
                 {/* Filter panel (floating, graph view only in this position) */}
                 {showFilterPanel && (
                     <div className={styles.filterPanel}>
-                        <ControlPanel settings={filters} onSettingsChange={handleFilterChange} />
+                        <ControlPanel settings={filters} onSettingsChange={handleFilterChange} viewMode={viewMode} />
                     </div>
                 )}
 
@@ -356,29 +416,22 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
                             <Spinner size="large" label="Loading document relationships..." />
                         </div>
                     ) : viewMode === "graph" ? (
-                        <>
-                            <DocumentGraph
-                                nodes={nodes}
-                                edges={edges}
-                                isDarkMode={isDarkMode}
-                                onNodeSelect={handleNodeSelect}
-                                showMinimap
-                            />
-                            {selectedNode && (
-                                <NodeActionBar
-                                    nodeData={selectedNode.data}
-                                    onClose={handleCloseActionBar}
-                                />
-                            )}
-                        </>
-                    ) : (
+                        <DocumentGraph
+                            nodes={nodes}
+                            edges={edges}
+                            isDarkMode={isDarkMode}
+                            onNodeSelect={handleNodeSelect}
+                            showMinimap
+                        />
+                    ) : viewMode === "grid" ? (
                         <RelationshipGrid
                             nodes={nodes}
                             isDarkMode={isDarkMode}
                             searchQuery={searchQuery}
                             onFilteredRowsChange={handleFilteredRowsChange}
+                            onRowClick={handleRowClick}
                         />
-                    )}
+                    ) : null}
                 </div>
             </div>
 
@@ -409,6 +462,19 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
                     DocumentRelationshipViewer v1.0.0
                 </Text>
             </div>
+
+            {/* File Preview Dialog — shared between grid and graph views */}
+            {previewDocumentId && (
+                <FilePreviewDialog
+                    open={isPreviewOpen}
+                    documentName={previewDocumentName}
+                    documentId={previewDocumentId}
+                    isInWorkspace={previewInWorkspace}
+                    services={filePreviewServices}
+                    onClose={handlePreviewClose}
+                    onWorkspaceFlagChanged={(newFlag: boolean) => setPreviewInWorkspace(newFlag)}
+                />
+            )}
         </div>
     );
 };
