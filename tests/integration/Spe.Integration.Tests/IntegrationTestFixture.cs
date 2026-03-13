@@ -81,7 +81,25 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
                 ["Redis:Enabled"] = "false",
 
                 // ModelSelector options
-                ["ModelSelector:DefaultModel"] = "gpt-4o"
+                ["ModelSelector:DefaultModel"] = "gpt-4o",
+
+                // AzureOpenAI options (required by AiModule for IChatClient registration)
+                ["AzureOpenAI:Endpoint"] = "https://test.openai.azure.com/",
+                ["AzureOpenAI:ChatModelName"] = "gpt-4o",
+
+                // Record Matching (required by Phase2RecordMatchingTests)
+                ["DocumentIntelligence:RecordMatchingEnabled"] = "true",
+
+                // AiSearchResilience options (ValidateDataAnnotations)
+                ["AiSearchResilience:MaxRetryAttempts"] = "3",
+                ["AiSearchResilience:CircuitBreakerFailureThreshold"] = "5",
+                ["AiSearchResilience:CircuitBreakerDuration"] = "00:00:30",
+
+                // GraphResilience options
+                ["GraphResilience:MaxRetryAttempts"] = "3",
+                ["GraphResilience:RetryDelay"] = "00:00:01",
+                ["GraphResilience:CircuitBreakerFailureThreshold"] = "5",
+                ["GraphResilience:CircuitBreakerDuration"] = "00:00:30"
             };
             config.AddInMemoryCollection(dict!);
         });

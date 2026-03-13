@@ -266,6 +266,17 @@ public class AuthorizationTestFixture : WebApplicationFactory<Program>
                 ["DocumentIntelligence:AiSearchEndpoint"] = "",
                 ["DocumentIntelligence:AiSearchKey"] = "",
                 ["Redis:Enabled"] = "false",
+
+                // AiSearchResilience options (ValidateDataAnnotations)
+                ["AiSearchResilience:MaxRetryAttempts"] = "3",
+                ["AiSearchResilience:CircuitBreakerFailureThreshold"] = "5",
+                ["AiSearchResilience:CircuitBreakerDuration"] = "00:00:30",
+
+                // GraphResilience options
+                ["GraphResilience:MaxRetryAttempts"] = "3",
+                ["GraphResilience:RetryDelay"] = "00:00:01",
+                ["GraphResilience:CircuitBreakerFailureThreshold"] = "5",
+                ["GraphResilience:CircuitBreakerDuration"] = "00:00:30",
             };
             config.AddInMemoryCollection(dict!);
         });

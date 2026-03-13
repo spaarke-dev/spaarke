@@ -1792,31 +1792,27 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
     app.MapHandlerEndpoints(); // Handler Discovery API (ai-scope-resolution-enhancements project)
 }
 
-// RAG endpoints for knowledge base operations (R3)
-app.MapRagEndpoints();
-
-// Knowledge base management endpoints (AIPL-015 — Workstream A: Retrieval Foundation)
-// Provides: GET /indexes/health, GET /indexes/{indexName}/documents,
-//           DELETE /indexes/{indexName}/documents/{documentId},
-//           POST /indexes/reindex/{documentId}, POST /test-search
-app.MapKnowledgeBaseEndpoints();
-
-// SprkChat session and SSE streaming endpoints (AIPL-054 — Workstream C: SprkChat)
-// Provides: POST /sessions, GET /sessions/{id}/history, POST /sessions/{id}/messages (SSE),
-//           POST /sessions/{id}/refine (SSE), PATCH /sessions/{id}/context, DELETE /sessions/{id}
-app.MapChatEndpoints();
-
-// Semantic Search endpoints for hybrid search (R1)
-// Only map if semantic search services are registered (requires DocumentIntelligence + Analysis enabled)
+// AI Platform endpoints — depend on services from AiModule (registered when Analysis + DocIntel enabled)
+// Gated to prevent endpoint parameter inference failures when AI services are not registered.
 if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
     app.Configuration.GetValue<bool>("Analysis:Enabled", true))
 {
+    // RAG endpoints for knowledge base operations (R3)
+    app.MapRagEndpoints();
+
+    // Knowledge base management endpoints (AIPL-015 — Workstream A: Retrieval Foundation)
+    app.MapKnowledgeBaseEndpoints();
+
+    // SprkChat session and SSE streaming endpoints (AIPL-054 — Workstream C: SprkChat)
+    app.MapChatEndpoints();
+
+    // Semantic Search endpoints for hybrid search (R1)
     app.MapSemanticSearchEndpoints();
     app.MapRecordSearchEndpoints();
-}
 
-// Visualization endpoints for document relationship discovery
-app.MapVisualizationEndpoints();
+    // Visualization endpoints for document relationship discovery
+    app.MapVisualizationEndpoints();
+}
 
 // Resilience monitoring endpoints (circuit breaker status)
 app.MapResilienceEndpoints();
@@ -1837,8 +1833,11 @@ if (app.Configuration.GetValue<bool>("Analysis:Enabled"))
 }
 
 // Builder Scope Admin endpoints (ai-playbook-node-builder-r2 Phase 4)
-// Allows importing builder scope JSON files into Dataverse
-app.MapBuilderScopeAdminEndpoints();
+// Gated: depends on BuilderScopeImporter registered in Analysis block (Analysis:Enabled=true)
+if (app.Configuration.GetValue<bool>("Analysis:Enabled"))
+{
+    app.MapBuilderScopeAdminEndpoints();
+}
 
 // Legal Operations Workspace endpoints (portfolio aggregation + scoring — home-corporate-workspace-r1)
 app.MapWorkspaceEndpoints();
