@@ -3,6 +3,8 @@ export type {
   IFileUploadResult,
   ISpeFileMetadata,
   IDocumentLinkResult,
+  ISendEmailInput,
+  ISendEmailResult,
   IUploadProgress,
   AuthenticatedFetchFn,
 } from "./EntityCreationService";

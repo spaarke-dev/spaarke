@@ -18,14 +18,19 @@ import {
   Dropdown,
   Option,
   Field,
+  Spinner,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
 import { LookupField } from '../../../../../client/shared/Spaarke.UI.Components/src/components/LookupField/LookupField';
 import type { ILookupItem } from '../../../../../client/shared/Spaarke.UI.Components/src/types/LookupTypes';
+import { useAiPrefill, type IResolvedPrefillFields } from '../../../../../client/shared/Spaarke.UI.Components/src/hooks/useAiPrefill';
+import type { IUploadedFile } from '../../../../../client/shared/Spaarke.UI.Components/src/components/FileUpload/fileUploadTypes';
 import { searchMatterTypes, searchPracticeAreas } from './workAssignmentService';
 import type { ICreateWorkAssignmentFormState } from './formTypes';
 import type { IWebApi } from '../../types/xrm';
+import { authenticatedFetch } from '../../services/authInit';
+import { getBffBaseUrl } from '../../config/bffConfig';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -39,6 +44,10 @@ export interface IEnterInfoStepProps {
     'name' | 'description' | 'matterTypeId' | 'matterTypeName' | 'practiceAreaId' | 'practiceAreaName' | 'priority' | 'responseDueDate'
   >) => void;
   initialValues?: Partial<ICreateWorkAssignmentFormState>;
+  /** Files uploaded in the Add Files step — used for AI pre-fill when no record is selected. */
+  uploadedFiles?: IUploadedFile[];
+  /** True when initialValues came from a selected record (skip AI pre-fill). */
+  hasInitialValues?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +99,8 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
   onValidChange,
   onFormValues,
   initialValues,
+  uploadedFiles = [],
+  hasInitialValues = false,
 }) => {
   const styles = useStyles();
 
@@ -124,6 +135,52 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
       appliedPrefillRef.current = true;
     }
   }, [initialValues]);
+
+  // ── AI Pre-fill via shared hook ──────────────────────────────────────────
+  const handlePrefillApply = React.useCallback(
+    (resolved: IResolvedPrefillFields) => {
+      for (const [key, value] of Object.entries(resolved)) {
+        if (typeof value === 'string') {
+          if (key === 'name') setName(value);
+          else if (key === 'description') setDescription(value);
+        } else {
+          // Lookup resolved: { id, name }
+          if (key === 'matterTypeName') {
+            setMatterTypeId(value.id);
+            setMatterTypeName(value.name);
+          } else if (key === 'practiceAreaName') {
+            setPracticeAreaId(value.id);
+            setPracticeAreaName(value.name);
+          }
+        }
+      }
+    },
+    []
+  );
+
+  const prefill = useAiPrefill({
+    endpoint: '/workspace/matters/pre-fill',
+    uploadedFiles,
+    authenticatedFetch,
+    bffBaseUrl: getBffBaseUrl(),
+    fieldExtractor: (data) => ({
+      textFields: {
+        name: data.matterName as string | undefined,
+        description: data.summary as string | undefined,
+      },
+      lookupFields: {
+        matterTypeName: (data.matterTypeName || data.matterType) as string | undefined,
+        practiceAreaName: (data.practiceAreaName || data.practiceArea) as string | undefined,
+      },
+    }),
+    lookupResolvers: {
+      matterTypeName: (v) => searchMatterTypes(webApi, v),
+      practiceAreaName: (v) => searchPracticeAreas(webApi, v),
+    },
+    onApply: handlePrefillApply,
+    skipIfInitialized: hasInitialValues,
+    logPrefix: 'WorkAssignment',
+  });
 
   // Report validity + values — Priority and Response Due Date are mandatory
   React.useEffect(() => {
@@ -186,6 +243,14 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
   const matterTypeValue: ILookupItem | null = matterTypeId ? { id: matterTypeId, name: matterTypeName } : null;
   const practiceAreaValue: ILookupItem | null = practiceAreaId ? { id: practiceAreaId, name: practiceAreaName } : null;
   const selectedPriorityText = PRIORITY_OPTIONS.find((o) => o.key === priority)?.text ?? 'Normal';
+
+  if (prefill.status === 'loading') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: tokens.spacingVerticalL, padding: tokens.spacingVerticalXXL }}>
+        <Spinner size="medium" label="Analyzing uploaded files..." />
+      </div>
+    );
+  }
 
   return (
     <div className={styles.root}>

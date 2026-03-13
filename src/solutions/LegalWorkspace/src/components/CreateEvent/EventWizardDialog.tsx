@@ -27,6 +27,9 @@ import {
   searchUsersAsLookup,
 } from '../CreateMatter/matterService';
 
+import { EntityCreationService } from '../../services/EntityCreationService';
+import { getBffBaseUrl } from '../../config/bffConfig';
+import { authenticatedFetch } from '../../services/authInit';
 import { getSpeContainerIdFromBusinessUnit } from '../../services/xrmProvider';
 import { navigateToEntity } from '../../utils/navigation';
 import type { IWebApi } from '../../types/xrm';
@@ -121,6 +124,21 @@ const EventWizardDialog: React.FC<IEventWizardDialogProps> = ({ open, onClose, w
 
         const eventId = result.eventId!;
         const eventName = result.eventName!;
+        const warnings: string[] = [];
+
+        // Send email (if selected)
+        if (_context.selectedActions.includes('send-email') && _context.followOn.emailTo.trim()) {
+          const entityService = new EntityCreationService(webApi, authenticatedFetch, getBffBaseUrl());
+          const emailResult = await entityService.sendEmail({
+            to: _context.followOn.emailTo,
+            subject: _context.followOn.emailSubject,
+            body: _context.followOn.emailBody,
+            associations: [{ entityType: 'sprk_event', entityId: eventId, entityName: eventName }],
+          });
+          if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
+        }
+
+        const hasWarnings = warnings.length > 0;
 
         const viewEvent = () => {
           navigateToEntity({
@@ -138,13 +156,16 @@ const EventWizardDialog: React.FC<IEventWizardDialogProps> = ({ open, onClose, w
               style={{ color: tokens.colorPaletteGreenForeground1 }}
             />
           ),
-          title: 'Event created!',
+          title: hasWarnings ? 'Event created with warnings' : 'Event created!',
           body: (
             <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
               <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>
                 &ldquo;{eventName}&rdquo;
               </span>{' '}
-              has been created and is ready to use.
+              has been created
+              {hasWarnings
+                ? ', though some operations could not complete. See details below.'
+                : ' and is ready to use.'}
             </Text>
           ),
           actions: (
@@ -161,7 +182,7 @@ const EventWizardDialog: React.FC<IEventWizardDialogProps> = ({ open, onClose, w
               </Button>
             </>
           ),
-          warnings: [],
+          warnings,
         };
       },
     }),

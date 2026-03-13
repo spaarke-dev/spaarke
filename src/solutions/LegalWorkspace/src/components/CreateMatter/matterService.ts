@@ -59,19 +59,10 @@ export interface IDraftSummaryInput {
   recipientEmails: string[];
 }
 
-export interface ISendEmailInput {
-  /** Email recipient address(es). */
-  to: string;
-  /** Email subject line. */
-  subject: string;
-  /** Email body. */
-  body: string;
-}
-
 export interface IFollowOnActions {
   assignCounsel?: IAssignCounselInput;
   draftSummary?: IDraftSummaryInput;
-  sendEmail?: ISendEmailInput;
+  sendEmail?: { to: string; subject: string; body: string };
 }
 
 // ---------------------------------------------------------------------------
@@ -308,10 +299,12 @@ export class MatterService {
     }
 
     if (followOnActions.sendEmail) {
-      const emailResult = await this._sendEmailViaBff(
-        matterId,
-        followOnActions.sendEmail
-      );
+      const emailResult = await this._entityService.sendEmail({
+        to: followOnActions.sendEmail.to,
+        subject: followOnActions.sendEmail.subject,
+        body: followOnActions.sendEmail.body,
+        associations: [{ entityType: 'sprk_matter', entityId: matterId, entityName: form.matterName.trim() }],
+      });
       if (!emailResult.success) {
         warnings.push(emailResult.warning ?? 'Failed to create email activity. Please send manually.');
       }
@@ -353,95 +346,16 @@ export class MatterService {
     matterName: string,
     input: IDraftSummaryInput
   ): Promise<{ success: boolean; warning?: string }> {
-    try {
-      if (input.recipientEmails.length === 0) {
-        return { success: true };
-      }
-
-      const bffBaseUrl = getBffBaseUrl();
-      const response = await authenticatedFetch(
-        `${bffBaseUrl}/api/communications/send`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            to: input.recipientEmails,
-            subject: `Matter Summary: ${matterName}`,
-            body: `Summary distribution for matter "${matterName}" to: ${input.recipientEmails.join('; ')}`,
-            bodyFormat: 'HTML',
-            associations: [
-              {
-                entityType: 'sprk_matter',
-                entityId: matterId,
-                entityName: matterName,
-              },
-            ],
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error');
-        console.warn('[MatterService] Summary email failed:', response.status, errorText);
-        return {
-          success: false,
-          warning: `Could not send summary email (${response.status}). Please distribute manually.`,
-        };
-      }
-
+    if (input.recipientEmails.length === 0) {
       return { success: true };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      return {
-        success: false,
-        warning: `Could not create summary email (${message}). Please distribute manually.`,
-      };
     }
-  }
 
-  private async _sendEmailViaBff(
-    matterId: string,
-    input: ISendEmailInput
-  ): Promise<{ success: boolean; warning?: string }> {
-    try {
-      const bffBaseUrl = getBffBaseUrl();
-      const response = await authenticatedFetch(
-        `${bffBaseUrl}/api/communications/send`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            to: input.to.split(/[;,]/).map((a: string) => a.trim()).filter(Boolean),
-            subject: input.subject,
-            body: input.body,
-            bodyFormat: 'HTML',
-            associations: [
-              {
-                entityType: 'sprk_matter',
-                entityId: matterId,
-              },
-            ],
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error');
-        console.warn('[MatterService] Email send failed:', response.status, errorText);
-        return {
-          success: false,
-          warning: `Could not send email (${response.status}). Please send manually.`,
-        };
-      }
-
-      return { success: true };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      return {
-        success: false,
-        warning: `Could not send email (${message}). Please send manually.`,
-      };
-    }
+    return this._entityService.sendEmail({
+      to: input.recipientEmails,
+      subject: `Matter Summary: ${matterName}`,
+      body: `Summary distribution for matter "${matterName}" to: ${input.recipientEmails.join('; ')}`,
+      associations: [{ entityType: 'sprk_matter', entityId: matterId, entityName: matterName }],
+    });
   }
 
 }

@@ -31,7 +31,7 @@
 
 import type { IWebApiWithCreate } from '../types/WebApiLike';
 import type { IUploadedFile } from '../components/FileUpload/fileUploadTypes';
-import { resolveRecordType, buildRecordUrl, findNavProp, type INavPropEntry } from './PolymorphicResolverService';
+// PolymorphicResolverService not needed — document records use canonical field set only
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,6 +66,22 @@ export interface IDocumentLinkResult {
   /** GUIDs of successfully created sprk_document records. */
   createdDocumentIds: string[];
   warnings: string[];
+}
+
+/** Input for sending email via BFF Communication service. */
+export interface ISendEmailInput {
+  to: string | string[];
+  cc?: string | string[];
+  subject: string;
+  body: string;
+  bodyFormat?: 'HTML' | 'Text';
+  associations?: Array<{ entityType: string; entityId: string; entityName?: string }>;
+}
+
+/** Result of a send-email operation. */
+export interface ISendEmailResult {
+  success: boolean;
+  warning?: string;
 }
 
 /** Progress callback for multi-file uploads. */
@@ -230,60 +246,18 @@ export class EntityCreationService {
     const createdDocumentIds: string[] = [];
 
     const containerId = options?.containerId;
-    // Derive entity logical name: 'sprk_matters' → 'sprk_matter'
-    const entityLogicalName =
-      options?.parentEntityLogicalName ||
-      parentEntityName.replace(/e?s$/, '');
-
-    // Resolve record type ref + nav-prop once for all documents in this batch
-    let recordTypeRefBind: string | undefined;
-    let rtNavPropName: string | undefined;
-    try {
-      const recordType = await resolveRecordType(this._webApi, entityLogicalName);
-      if (recordType) {
-        // Discover nav-prop for sprk_document → sprk_recordtype_ref (regardingrecordtype column)
-        const metaQuery =
-          `EntityDefinitions(LogicalName='sprk_document')/ManyToOneRelationships` +
-          `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntityNavigationPropertyName,ReferencedEntity` +
-          `&$filter=ReferencedEntity eq 'sprk_recordtype_ref'`;
-        const metaResult = await this._webApi.retrieveMultipleRecords('', metaQuery);
-        const docNavProps: INavPropEntry[] = (metaResult.entities ?? []).map(
-          (r: Record<string, unknown>) => ({
-            columnName: r['ReferencingAttribute'] as string,
-            navPropName: r['ReferencingEntityNavigationPropertyName'] as string,
-            referencedEntity: r['ReferencedEntity'] as string,
-          })
-        );
-        rtNavPropName = findNavProp(docNavProps, 'sprk_recordtype_ref', 'regardingrecordtype');
-        if (rtNavPropName) {
-          recordTypeRefBind = `/sprk_recordtype_refs(${recordType.id})`;
-        }
-      }
-    } catch {
-      console.warn(`[EntityCreationService] Could not resolve record type for ${entityLogicalName}`);
-    }
 
     for (const file of uploadedFiles) {
       try {
+        // Payload aligned with canonical DocumentRecordService fields
         const documentEntity: Record<string, unknown> = {
           sprk_documentname: file.name,
           sprk_filename: file.name,
-          sprk_driveitemid: file.id,
+          sprk_filesize: file.size ?? null,
           sprk_graphitemid: file.id,
-          // Source type: User Upload (659490000)
-          sprk_sourcetype: 659490000,
-          // Mark for Document Profile processing: Pending (100000001)
-          sprk_filesummarystatus: 100000001,
-          // Polymorphic resolver fields (ADR-024)
-          sprk_regardingrecordid: parentEntityId.replace(/[{}]/g, '').toLowerCase(),
-          sprk_regardingrecordname: options?.parentRecordName ?? '',
-          sprk_regardingrecordurl: buildRecordUrl(entityLogicalName, parentEntityId),
+          sprk_graphdriveid: containerId ?? null,
+          sprk_filepath: file.webUrl ?? null,
         };
-
-        // Bind sprk_regardingrecordtype lookup to sprk_recordtype_ref
-        if (recordTypeRefBind && rtNavPropName) {
-          documentEntity[`${rtNavPropName}@odata.bind`] = recordTypeRefBind;
-        }
 
         // Add @odata.bind navigation property to link document to parent entity
         if (navigationProperty) {
@@ -291,22 +265,15 @@ export class EntityCreationService {
             `/${parentEntityName}(${parentEntityId})`;
         }
 
-        if (file.webUrl) {
-          documentEntity['sprk_filepath'] = file.webUrl;
-        }
-        if (file.size) {
-          documentEntity['sprk_filesize'] = file.size;
-        }
-        if (containerId) {
-          documentEntity['sprk_graphdriveid'] = containerId;
-          documentEntity['sprk_containerid'] = containerId;
-        }
-
+        console.info('[EntityCreationService] createDocumentRecord payload:', JSON.stringify(documentEntity, null, 2));
         const result = await this._webApi.createRecord('sprk_document', documentEntity);
         createdDocumentIds.push(result.id);
         linkedCount++;
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const errObj = err as any;
+        const message = errObj?.message || (err instanceof Error ? err.message : 'Unknown error');
+        console.error('[EntityCreationService] createDocumentRecord failed:', message, err);
         warnings.push(`Failed to create document record for "${file.name}": ${message}`);
       }
     }
@@ -347,6 +314,61 @@ export class EntityCreationService {
       } catch (err) {
         console.warn(`[EntityCreationService] Could not queue analysis for ${docId}:`, err);
       }
+    }
+  }
+
+  /**
+   * Send an email via the BFF Communication service (Graph API).
+   *
+   * Normalizes `to`/`cc` from string or array (splits on `;,`).
+   * Returns `{ success, warning? }` — never throws.
+   */
+  async sendEmail(input: ISendEmailInput): Promise<ISendEmailResult> {
+    try {
+      const normalize = (val: string | string[] | undefined): string[] => {
+        if (!val) return [];
+        const arr = Array.isArray(val) ? val : val.split(/[;,]/);
+        return arr.map((a) => a.trim()).filter(Boolean);
+      };
+
+      const to = normalize(input.to);
+      if (to.length === 0) {
+        return { success: true };
+      }
+
+      const cc = normalize(input.cc);
+      const response = await this._authenticatedFetch(
+        `${this._bffBaseUrl}/communications/send`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to,
+            cc: cc.length > 0 ? cc : undefined,
+            subject: input.subject,
+            body: input.body,
+            bodyFormat: input.bodyFormat ?? 'HTML',
+            associations: input.associations,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        console.warn('[EntityCreationService] Email send failed:', response.status, errorText);
+        return {
+          success: false,
+          warning: `Could not send email (${response.status}). Please send manually.`,
+        };
+      }
+
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      return {
+        success: false,
+        warning: `Could not send email (${message}). Please send manually.`,
+      };
     }
   }
 }

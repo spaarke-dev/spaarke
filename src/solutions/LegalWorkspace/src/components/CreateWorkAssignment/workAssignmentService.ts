@@ -88,6 +88,20 @@ async function _discoverNavProps(entityLogicalName: string): Promise<INavPropEnt
 // findNavProp, resolveRecordType, buildRecordUrl, applyResolverFields
 // are imported from the shared PolymorphicResolverService.
 
+/**
+ * Resolve navigation property name for a document lookup by referenced entity.
+ * Used when creating sprk_document records linked to a parent entity.
+ */
+function _resolveDocNavProp(entries: INavPropEntry[], referencedEntity: string): string {
+  const match = entries.find((e) => e.referencedEntity === referencedEntity);
+  if (match) {
+    console.info(`[WorkAssignmentService] Resolved doc nav-prop: ${match.navPropName} for ${referencedEntity}`);
+    return match.navPropName;
+  }
+  console.warn(`[WorkAssignmentService] No nav-prop found on sprk_document for ${referencedEntity}`);
+  return referencedEntity;
+}
+
 // ---------------------------------------------------------------------------
 // WorkAssignmentService class
 // ---------------------------------------------------------------------------
@@ -224,53 +238,70 @@ export class WorkAssignmentService {
     if (mapping.matterTypeField) lookupFields.push(mapping.matterTypeField);
     if (mapping.practiceAreaField) lookupFields.push(mapping.practiceAreaField);
 
+    const result: Partial<ICreateWorkAssignmentFormState> = {};
+
+    // Fetch basic scalar fields first (name, description, priority)
     try {
-      const query = `?$select=${selectFields.join(',')}`;
-      const record = await this._webApi.retrieveRecord(mapping.entity, recordId, query);
+      const basicFields = [mapping.nameField];
+      if (mapping.descField) basicFields.push(mapping.descField);
+      if (mapping.priorityField) basicFields.push(mapping.priorityField);
 
-      const result: Partial<ICreateWorkAssignmentFormState> = {};
+      const basicQuery = `?$select=${basicFields.join(',')}`;
+      console.info(`[WorkAssignmentService] readRecordForPrefill basic: ${mapping.entity}(${recordId})${basicQuery}`);
+      const record = await this._webApi.retrieveRecord(mapping.entity, recordId, basicQuery);
 
-      // Name
       const nameVal = record[mapping.nameField] as string | undefined;
       if (nameVal) result.name = nameVal;
 
-      // Description
       if (mapping.descField) {
         const descVal = record[mapping.descField] as string | undefined;
         if (descVal) result.description = descVal;
       }
 
-      // Matter Type (lookup — value is GUID, formatted value is display name)
-      if (mapping.matterTypeField) {
-        const mtId = record[mapping.matterTypeField] as string | undefined;
-        if (mtId) {
-          result.matterTypeId = mtId;
-          const formattedKey = `${mapping.matterTypeField}@OData.Community.Display.V1.FormattedValue`;
-          result.matterTypeName = (record[formattedKey] as string) ?? '';
-        }
-      }
-
-      // Practice Area (lookup)
-      if (mapping.practiceAreaField) {
-        const paId = record[mapping.practiceAreaField] as string | undefined;
-        if (paId) {
-          result.practiceAreaId = paId;
-          const formattedKey = `${mapping.practiceAreaField}@OData.Community.Display.V1.FormattedValue`;
-          result.practiceAreaName = (record[formattedKey] as string) ?? '';
-        }
-      }
-
-      // Priority (option set)
       if (mapping.priorityField) {
         const prioVal = record[mapping.priorityField] as number | undefined;
         if (prioVal) result.priority = prioVal;
       }
-
-      return result;
     } catch (err) {
-      console.warn(`[WorkAssignmentService] readRecordForPrefill(${recordType}, ${recordId}) failed:`, err);
-      return {};
+      console.warn(`[WorkAssignmentService] readRecordForPrefill basic fields failed for ${recordType}(${recordId}):`, err);
+      return result;
     }
+
+    // Fetch each lookup field individually (if one column doesn't exist, the other still works)
+    if (mapping.matterTypeField) {
+      try {
+        const mtQuery = `?$select=${mapping.matterTypeField}`;
+        console.info(`[WorkAssignmentService] readRecordForPrefill matterType: ${mapping.entity}(${recordId})${mtQuery}`);
+        const mtRecord = await this._webApi.retrieveRecord(mapping.entity, recordId, mtQuery);
+        const mtId = mtRecord[mapping.matterTypeField] as string | undefined;
+        if (mtId) {
+          result.matterTypeId = mtId;
+          const formattedKey = `${mapping.matterTypeField}@OData.Community.Display.V1.FormattedValue`;
+          result.matterTypeName = (mtRecord[formattedKey] as string) ?? '';
+        }
+      } catch (err) {
+        console.warn(`[WorkAssignmentService] readRecordForPrefill matterType failed for ${recordType}(${recordId}):`, err);
+      }
+    }
+
+    if (mapping.practiceAreaField) {
+      try {
+        const paQuery = `?$select=${mapping.practiceAreaField}`;
+        console.info(`[WorkAssignmentService] readRecordForPrefill practiceArea: ${mapping.entity}(${recordId})${paQuery}`);
+        const paRecord = await this._webApi.retrieveRecord(mapping.entity, recordId, paQuery);
+        const paId = paRecord[mapping.practiceAreaField] as string | undefined;
+        if (paId) {
+          result.practiceAreaId = paId;
+          const formattedKey = `${mapping.practiceAreaField}@OData.Community.Display.V1.FormattedValue`;
+          result.practiceAreaName = (paRecord[formattedKey] as string) ?? '';
+        }
+      } catch (err) {
+        console.warn(`[WorkAssignmentService] readRecordForPrefill practiceArea failed for ${recordType}(${recordId}):`, err);
+      }
+    }
+
+    console.info(`[WorkAssignmentService] readRecordForPrefill result for ${recordType}:`, JSON.stringify(result));
+    return result;
   }
 
   // ── Contacts filtered by Organization (Follow-on: Assign Work) ──────────
@@ -338,6 +369,11 @@ export class WorkAssignmentService {
     }
     if (form.responseDueDate) {
       entity['sprk_responseduedate'] = form.responseDueDate;
+    }
+
+    // Store the SPE container ID on the work assignment record (enables Documents tab)
+    if (this._containerId) {
+      entity['sprk_containerid'] = this._containerId;
     }
 
     // Helper: bind a lookup if the nav-prop exists on the entity
@@ -422,13 +458,15 @@ export class WorkAssignmentService {
           'Files can be added from the work assignment record.'
         );
       } else if (uploadResult.uploadedFiles.length > 0) {
-        // Create document records in SPE (no Dataverse linking — documents
-        // do not need to be associated to the work assignment record)
+        // Discover nav-prop for sprk_document → sprk_workassignment lookup
         try {
+          const docNavProps = await _discoverNavProps('sprk_document');
+          const waNavProp = _resolveDocNavProp(docNavProps, 'sprk_workassignment');
+
           const createResult = await this._entityService.createDocumentRecords(
             'sprk_workassignments',
             workAssignmentId,
-            '', // No nav-prop — skip Dataverse linking
+            waNavProp,
             uploadResult.uploadedFiles,
             {
               containerId: this._containerId,
@@ -531,47 +569,13 @@ export class WorkAssignmentService {
     body: string,
     cc?: string
   ): Promise<{ success: boolean; warning?: string }> {
-    try {
-      const bffBaseUrl = getBffBaseUrl();
-      const ccAddresses = cc ? cc.split(/[;,]/).map((a: string) => a.trim()).filter(Boolean) : [];
-      const response = await authenticatedFetch(
-        `${bffBaseUrl}/api/communications/send`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            to: to.split(/[;,]/).map((a: string) => a.trim()).filter(Boolean),
-            cc: ccAddresses.length > 0 ? ccAddresses : undefined,
-            subject,
-            body,
-            bodyFormat: 'Text',
-            associations: [
-              {
-                entityType: 'sprk_workassignment',
-                entityId: workAssignmentId,
-                entityName: workAssignmentName,
-              },
-            ],
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error');
-        console.warn('[WorkAssignmentService] Email send failed:', response.status, errorText);
-        return {
-          success: false,
-          warning: `Could not send email (${response.status}). Please send manually.`,
-        };
-      }
-
-      return { success: true };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      return {
-        success: false,
-        warning: `Could not send email (${message}). Please send manually.`,
-      };
-    }
+    return this._entityService.sendEmail({
+      to,
+      cc,
+      subject,
+      body,
+      bodyFormat: 'Text',
+      associations: [{ entityType: 'sprk_workassignment', entityId: workAssignmentId, entityName: workAssignmentName }],
+    });
   }
 }
