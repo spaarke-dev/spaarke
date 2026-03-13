@@ -86,7 +86,7 @@ jobs:
       - name: Test with coverage
         run: |
           dotnet test -c ${{ matrix.configuration }} --no-build --logger trx --results-directory ./TestResults `
-            --collect:"XPlat Code Coverage" --settings coverlet.runsettings
+            --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings
 
       - name: Upload test results
         uses: actions/upload-artifact@v6
