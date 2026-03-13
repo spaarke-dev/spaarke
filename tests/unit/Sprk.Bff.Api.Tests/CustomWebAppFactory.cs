@@ -1,8 +1,12 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Tests.Mocks;
@@ -40,11 +44,15 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
                 // Graph options (required by GraphOptions validation)
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
+                ["Graph:ClientSecret"] = "test-client-secret",
+                ["Graph:UseManagedIdentity"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
 
                 // Dataverse options (required by DataverseOptions validation)
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
+                ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ClientId"] = "test-client-id",
+                ["Dataverse:ClientSecret"] = "test-client-secret",
                 ["Dataverse:TenantId"] = "test-tenant-id",
 
                 // ServiceBus options (required by ServiceBusOptions validation)
@@ -60,7 +68,34 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
 
                 // AI Search options (required for IRagService)
                 ["DocumentIntelligence:AiSearchEndpoint"] = "https://test.search.windows.net",
-                ["DocumentIntelligence:AiSearchKey"] = "test-search-key"
+                ["DocumentIntelligence:AiSearchKey"] = "test-search-key",
+
+                // Office rate limiting (disabled for tests)
+                ["OfficeRateLimit:Enabled"] = "false",
+
+                // Redis options (disabled for tests)
+                ["Redis:Enabled"] = "false",
+
+                // ModelSelector options
+                ["ModelSelector:DefaultModel"] = "gpt-4o",
+
+                // AzureOpenAI options (required by AiModule for IChatClient registration)
+                ["AzureOpenAI:Endpoint"] = "https://test.openai.azure.com/",
+                ["AzureOpenAI:ChatModelName"] = "gpt-4o",
+
+                // Record Matching (required by AttachmentClassificationJobHandler)
+                ["DocumentIntelligence:RecordMatchingEnabled"] = "true",
+
+                // AiSearchResilience options (ValidateDataAnnotations)
+                ["AiSearchResilience:MaxRetryAttempts"] = "3",
+                ["AiSearchResilience:CircuitBreakerFailureThreshold"] = "5",
+                ["AiSearchResilience:CircuitBreakerDuration"] = "00:00:30",
+
+                // GraphResilience options
+                ["GraphResilience:MaxRetryAttempts"] = "3",
+                ["GraphResilience:RetryDelay"] = "00:00:01",
+                ["GraphResilience:CircuitBreakerFailureThreshold"] = "5",
+                ["GraphResilience:CircuitBreakerDuration"] = "00:00:30"
             };
             config.AddInMemoryCollection(dict!);
         });
@@ -70,6 +105,11 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        // Use Testing environment (consistent with other test fixtures)
+        // This disables ValidateScopes which catches pre-existing singleton→scoped
+        // DI lifetime issues in the production codebase (not introduced by this PR)
+        builder.UseEnvironment("Testing");
+
         // Configuration is set in CreateHost/ConfigureHostConfiguration
         // This method handles DI overrides for tests
         builder.ConfigureServices(services =>
@@ -83,6 +123,16 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
 
                 // OBO functionality now handled by SpeFileStore - no mock needed
             }
+        });
+
+        // Use ConfigureTestServices to replace services AFTER the app's services are registered
+        builder.ConfigureTestServices(services =>
+        {
+            // Mock IDataverseService to avoid real Dataverse connection in tests
+            var dataverseServiceMock = new Mock<IDataverseService>();
+            dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
+            services.RemoveAll<IDataverseService>();
+            services.AddSingleton(dataverseServiceMock.Object);
         });
     }
 }
