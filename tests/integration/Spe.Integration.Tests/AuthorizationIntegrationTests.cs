@@ -3,15 +3,23 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text;
+using Azure.Search.Documents.Indexes;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.Tokens;
+using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat;
 using Xunit;
 
 namespace Spe.Integration.Tests;
@@ -308,6 +316,75 @@ public class AuthorizationTestFixture : WebApplicationFactory<Program>
 
             // Remove hosted services to prevent background work during tests
             services.RemoveAll<IHostedService>();
+
+            // ---------------------------------------------------------------
+            // Stub AI services that are conditionally registered (Analysis:Enabled=true)
+            // but referenced by unconditionally-mapped endpoints.
+            // Without these stubs, Minimal API parameter inference fails at startup.
+            // ---------------------------------------------------------------
+            services.AddSingleton(_ => new Mock<IRagService>(MockBehavior.Loose).Object);
+            services.AddSingleton(_ => new Mock<SearchIndexClient>() { CallBase = false }.Object);
+            services.AddScoped(_ => new Mock<IScopeResolverService>(MockBehavior.Loose).Object);
+            services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.BuilderScopeImporter>();
+            services.AddScoped(_ => new Mock<IFileIndexingService>(MockBehavior.Loose).Object);
+            services.AddSingleton(_ => new Mock<IKnowledgeDeploymentService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IAnalysisOrchestrationService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IAppOnlyAnalysisService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IPlaybookService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<INodeService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IAiPlaybookBuilderService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<Sprk.Bff.Api.Services.Ai.Builder.IBuilderAgentService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IPlaybookOrchestrationService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IPlaybookSharingService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IScopeManagementService>(MockBehavior.Loose).Object);
+            services.AddSingleton(_ => new Mock<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService>(MockBehavior.Loose).Object);
+            services.AddSingleton(_ => new Mock<IModelSelector>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IIntentClassificationService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IEntityResolutionService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IClarificationService>(MockBehavior.Loose).Object);
+            services.RemoveAll<IOpenAiClient>();
+            services.AddSingleton(_ => new Mock<IOpenAiClient>(MockBehavior.Loose).Object);
+            services.RemoveAll<ITextExtractor>();
+            services.AddSingleton(_ => new Mock<ITextExtractor>(MockBehavior.Loose).Object);
+            services.AddSingleton<Sprk.Bff.Api.Services.Ai.TextExtractorService>();
+            services.RemoveAll<IDataverseService>();
+            services.AddSingleton(_ => new Mock<IDataverseService>(MockBehavior.Loose).Object);
+
+            // Chat service stubs (ChatEndpoints are always mapped)
+            services.AddScoped(_ => new Mock<IChatDataverseRepository>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IChatContextProvider>(MockBehavior.Loose).Object);
+            services.AddSingleton(_ => new Mock<IChatClient>(MockBehavior.Loose).Object);
+            services.AddSingleton(sp =>
+            {
+                var chatClient = sp.GetRequiredService<IChatClient>();
+                var logger = NullLogger<SprkChatAgentFactory>.Instance;
+                return new SprkChatAgentFactory(chatClient, sp, logger);
+            });
+            services.AddScoped(sp =>
+            {
+                var cache = sp.GetRequiredService<IDistributedCache>();
+                var repo = sp.GetRequiredService<IChatDataverseRepository>();
+                var logger = NullLogger<ChatSessionManager>.Instance;
+                return new ChatSessionManager(cache, repo, logger);
+            });
+            services.AddScoped(sp =>
+            {
+                var sessionManager = sp.GetRequiredService<ChatSessionManager>();
+                var repo = sp.GetRequiredService<IChatDataverseRepository>();
+                var logger = NullLogger<ChatHistoryManager>.Instance;
+                return new ChatHistoryManager(sessionManager, repo, logger);
+            });
+            services.AddSingleton<ILogger<SprkChatAgent>>(NullLogger<SprkChatAgent>.Instance);
+
+            // ServiceBus mock
+            services.RemoveAll<Azure.Messaging.ServiceBus.ServiceBusClient>();
+            var mockSbSender = new Mock<Azure.Messaging.ServiceBus.ServiceBusSender>(MockBehavior.Loose);
+            mockSbSender.Setup(s => s.SendMessageAsync(
+                It.IsAny<Azure.Messaging.ServiceBus.ServiceBusMessage>(),
+                It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            var mockSbClient = new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>(MockBehavior.Loose);
+            mockSbClient.Setup(c => c.CreateSender(It.IsAny<string>())).Returns(mockSbSender.Object);
+            services.AddSingleton(mockSbClient.Object);
         });
 
         builder.UseEnvironment("Testing");

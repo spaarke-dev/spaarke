@@ -1792,27 +1792,21 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
     app.MapHandlerEndpoints(); // Handler Discovery API (ai-scope-resolution-enhancements project)
 }
 
-// AI Platform endpoints — depend on services from AiModule (registered when Analysis + DocIntel enabled)
-// Gated to prevent endpoint parameter inference failures when AI services are not registered.
-if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
-    app.Configuration.GetValue<bool>("Analysis:Enabled", true))
-{
-    // RAG endpoints for knowledge base operations (R3)
-    app.MapRagEndpoints();
+// RAG endpoints for knowledge base operations (R3)
+app.MapRagEndpoints();
 
-    // Knowledge base management endpoints (AIPL-015 — Workstream A: Retrieval Foundation)
-    app.MapKnowledgeBaseEndpoints();
+// Knowledge base management endpoints (AIPL-015 — Workstream A: Retrieval Foundation)
+app.MapKnowledgeBaseEndpoints();
 
-    // SprkChat session and SSE streaming endpoints (AIPL-054 — Workstream C: SprkChat)
-    app.MapChatEndpoints();
+// SprkChat session and SSE streaming endpoints (AIPL-054 — Workstream C: SprkChat)
+app.MapChatEndpoints();
 
-    // Semantic Search endpoints for hybrid search (R1)
-    app.MapSemanticSearchEndpoints();
-    app.MapRecordSearchEndpoints();
+// Semantic Search endpoints for hybrid search (R1)
+app.MapSemanticSearchEndpoints();
+app.MapRecordSearchEndpoints();
 
-    // Visualization endpoints for document relationship discovery
-    app.MapVisualizationEndpoints();
-}
+// Visualization endpoints for document relationship discovery
+app.MapVisualizationEndpoints();
 
 // Resilience monitoring endpoints (circuit breaker status)
 app.MapResilienceEndpoints();
