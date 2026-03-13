@@ -20,7 +20,7 @@ public record PreFillResponse(
     string? AssignedOutsideCounselName,
     double Confidence,
     string[] PreFilledFields,
-    string? _debugRawAiResponse = null)
+    string? DebugRawAiResponse = null)
 {
     /// <summary>
     /// Returns an empty PreFillResponse indicating no fields were extracted (e.g., AI timeout).
@@ -36,7 +36,7 @@ public record PreFillResponse(
             AssignedOutsideCounselName: null,
             Confidence: 0,
             PreFilledFields: [],
-            _debugRawAiResponse: debugInfo);
+            DebugRawAiResponse: debugInfo);
 }
 
 /// <summary>

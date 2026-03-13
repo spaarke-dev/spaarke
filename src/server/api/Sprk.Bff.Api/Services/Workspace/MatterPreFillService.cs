@@ -436,7 +436,7 @@ public class MatterPreFillService
 
         var result = BuildPreFillResponse(parsed, overallConfidence, requestId);
         // Attach raw AI response for debugging
-        return result with { _debugRawAiResponse = $"OK: {(json.Length > 500 ? json[..500] : json)}" };
+        return result with { DebugRawAiResponse = $"OK: {(json.Length > 500 ? json[..500] : json)}" };
     }
 
     /// <summary>
