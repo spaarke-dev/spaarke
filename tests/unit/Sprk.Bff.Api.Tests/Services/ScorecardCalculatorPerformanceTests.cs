@@ -72,13 +72,31 @@ public class ScorecardCalculatorPerformanceTests
     }
 
     /// <summary>
-    /// Sets up the mock to return the given assessments for a specific performance area.
+    /// Sets up the mock to return the given assessments for a specific performance area
+    /// via BatchQueryKpiAssessmentsAsync (PPI-024: batch query).
     /// </summary>
     private void SetupAreaAssessments(Guid matterId, int performanceArea, KpiAssessmentRecord[] assessments)
     {
+        // Store area data for batch setup
+        _areaData[performanceArea] = assessments;
+        SetupBatchMock(matterId);
+    }
+
+    private readonly Dictionary<int, KpiAssessmentRecord[]> _areaData = new();
+
+    private void SetupBatchMock(Guid matterId)
+    {
+        var result = new Dictionary<int, KpiAssessmentRecord[]>
+        {
+            [Guidelines] = _areaData.GetValueOrDefault(Guidelines, Array.Empty<KpiAssessmentRecord>()),
+            [Budget] = _areaData.GetValueOrDefault(Budget, Array.Empty<KpiAssessmentRecord>()),
+            [Outcomes] = _areaData.GetValueOrDefault(Outcomes, Array.Empty<KpiAssessmentRecord>()),
+        };
+
         _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), performanceArea, It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(assessments);
+            .Setup(s => s.BatchQueryKpiAssessmentsAsync(
+                matterId, It.IsAny<string>(), It.IsAny<int[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(result);
     }
 
     /// <summary>
@@ -185,65 +203,66 @@ public class ScorecardCalculatorPerformanceTests
 
     #endregion
 
-    #region NFR-01: Parallel Queries Faster Than Sequential
+    #region NFR-01: Batch Query Performance
 
     [Fact]
-    public async Task Performance_ParallelQueries_FasterThanSequential()
+    public async Task Performance_BatchQuery_SingleRoundTrip()
     {
-        // Arrange - simulate latency in queries to make parallel vs sequential measurable
+        // Arrange - simulate latency in batch query
         var matterId = Guid.NewGuid();
         var assessments = GenerateAssessments(50);
-        var queryDelay = TimeSpan.FromMilliseconds(50); // 50ms simulated latency per query
+        var queryDelay = TimeSpan.FromMilliseconds(50); // 50ms simulated latency
 
-        // Setup mocks with simulated delay to make parallelism observable
+        // Setup batch mock with simulated delay — single round trip for all 3 areas
+        var batchResult = new Dictionary<int, KpiAssessmentRecord[]>
+        {
+            [Guidelines] = assessments,
+            [Budget] = assessments,
+            [Outcomes] = assessments,
+        };
+
         _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.BatchQueryKpiAssessmentsAsync(
+                matterId, It.IsAny<string>(), It.IsAny<int[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .Returns(async () =>
             {
                 await Task.Delay(queryDelay);
-                return assessments;
-            });
-        _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Budget, It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .Returns(async () =>
-            {
-                await Task.Delay(queryDelay);
-                return assessments;
-            });
-        _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Outcomes, It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .Returns(async () =>
-            {
-                await Task.Delay(queryDelay);
-                return assessments;
+                return batchResult;
             });
 
         // Warm up
         await _service.RecalculateGradesAsync(matterId);
 
-        // Act - time the parallel execution
+        // Act - time the batch execution
         var stopwatch = Stopwatch.StartNew();
         var result = await _service.RecalculateGradesAsync(matterId);
         stopwatch.Stop();
 
-        var parallelTime = stopwatch.Elapsed;
+        var batchTime = stopwatch.Elapsed;
 
-        // Assert - if queries run in parallel (Task.WhenAll), total time should be
-        // roughly 1x delay (~50ms), not 3x delay (~150ms for sequential).
-        // Use 2x as threshold to account for scheduling overhead.
-        var sequentialThreshold = queryDelay.TotalMilliseconds * 3;
-        parallelTime.TotalMilliseconds.Should().BeLessThan(sequentialThreshold,
-            "parallel queries via Task.WhenAll should complete faster than sequential execution " +
-            $"(expected < {sequentialThreshold}ms sequential threshold, got {parallelTime.TotalMilliseconds:F1}ms)");
+        // Assert - batch sends 1 request instead of 3, so total time should be
+        // roughly 1x delay (~50ms). Use 2x as threshold for scheduling overhead.
+        var singleQueryThreshold = queryDelay.TotalMilliseconds * 2;
+        batchTime.TotalMilliseconds.Should().BeLessThan(singleQueryThreshold,
+            "batch query sends one request for all areas, not three sequential requests " +
+            $"(expected < {singleQueryThreshold}ms, got {batchTime.TotalMilliseconds:F1}ms)");
 
         // Assert - still within overall NFR-01 threshold
-        parallelTime.TotalMilliseconds.Should().BeLessThan(MaxAllowedMilliseconds,
-            "NFR-01: parallel recalculation must still complete within 500ms");
+        batchTime.TotalMilliseconds.Should().BeLessThan(MaxAllowedMilliseconds,
+            "NFR-01: batch recalculation must still complete within 500ms");
 
         // Assert - result is valid
         result.GuidelineCurrent.Should().NotBeNull();
         result.BudgetCurrent.Should().NotBeNull();
         result.OutcomeCurrent.Should().NotBeNull();
+
+        // Assert - batch method was called exactly once (PPI-024: single round trip)
+        _dataverseServiceMock.Verify(
+            s => s.BatchQueryKpiAssessmentsAsync(
+                matterId, It.IsAny<string>(),
+                It.Is<int[]>(a => a.Contains(Guidelines) && a.Contains(Budget) && a.Contains(Outcomes)),
+                It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
     }
 
     #endregion

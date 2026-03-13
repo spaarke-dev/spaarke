@@ -12,9 +12,12 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Office;
@@ -456,8 +459,65 @@ public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
 /// </summary>
 public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
 {
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        builder.ConfigureHostConfiguration(config =>
+        {
+            var dict = new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:ServiceBus"] = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=test",
+                ["Cors:AllowedOrigins:0"] = "https://localhost:5173",
+                ["UAMI_CLIENT_ID"] = "test-client-id",
+                ["TENANT_ID"] = "test-tenant-id",
+                ["API_APP_ID"] = "test-app-id",
+                ["API_CLIENT_SECRET"] = "test-secret",
+                ["AzureAd:Instance"] = "https://login.microsoftonline.com/",
+                ["AzureAd:TenantId"] = "test-tenant-id",
+                ["AzureAd:ClientId"] = "test-app-id",
+                ["AzureAd:Audience"] = "api://test-app-id",
+                ["Graph:TenantId"] = "test-tenant-id",
+                ["Graph:ClientId"] = "test-client-id",
+                ["Graph:ClientSecret"] = "test-client-secret",
+                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
+                ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
+                ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
+                ["Dataverse:ClientId"] = "test-client-id",
+                ["Dataverse:ClientSecret"] = "test-client-secret",
+                ["Dataverse:TenantId"] = "test-tenant-id",
+                ["ServiceBus:ConnectionString"] = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=test",
+                ["ServiceBus:QueueName"] = "sdap-jobs",
+                ["DocumentIntelligence:Enabled"] = "true",
+                ["DocumentIntelligence:OpenAiEndpoint"] = "https://test.openai.azure.com/",
+                ["DocumentIntelligence:OpenAiKey"] = "test-key",
+                ["DocumentIntelligence:OpenAiDeployment"] = "gpt-4o",
+                ["Analysis:Enabled"] = "true",
+                ["DocumentIntelligence:AiSearchEndpoint"] = "https://test.search.windows.net",
+                ["DocumentIntelligence:AiSearchKey"] = "test-search-key",
+                ["OfficeRateLimit:Enabled"] = "false",
+                ["Redis:Enabled"] = "false",
+                ["ModelSelector:DefaultModel"] = "gpt-4o",
+                ["AzureOpenAI:Endpoint"] = "https://test.openai.azure.com/",
+                ["AzureOpenAI:ChatModelName"] = "gpt-4o",
+                ["DocumentIntelligence:RecordMatchingEnabled"] = "true",
+                ["AiSearchResilience:MaxRetryAttempts"] = "3",
+                ["AiSearchResilience:CircuitBreakerFailureThreshold"] = "5",
+                ["AiSearchResilience:CircuitBreakerDuration"] = "00:00:30",
+                ["GraphResilience:MaxRetryAttempts"] = "3",
+                ["GraphResilience:RetryDelay"] = "00:00:01",
+                ["GraphResilience:CircuitBreakerFailureThreshold"] = "5",
+                ["GraphResilience:CircuitBreakerDuration"] = "00:00:30",
+            };
+            config.AddInMemoryCollection(dict!);
+        });
+
+        return base.CreateHost(builder);
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        builder.UseEnvironment("Testing");
+
         builder.ConfigureTestServices(services =>
         {
             // Add test authentication
@@ -470,65 +530,17 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
             // Configure rate limiting for tests
             services.Configure<OfficeRateLimitOptions>(options =>
             {
-                options.Enabled = false; // Disable rate limiting for tests
+                options.Enabled = false;
             });
 
             // Register Office rate limit service
             services.AddSingleton<IOfficeRateLimitService, OfficeRateLimitService>();
-        });
 
-        builder.ConfigureAppConfiguration((context, config) =>
-        {
-            var testConfig = new Dictionary<string, string?>
-            {
-                // ServiceBus connection string for early validation
-                ["ConnectionStrings:ServiceBus"] = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=test",
-
-                // CORS
-                ["Cors:AllowedOrigins:0"] = "https://localhost:5173",
-
-                // Azure AD / UAMI
-                ["UAMI_CLIENT_ID"] = "test-client-id",
-                ["TENANT_ID"] = "test-tenant-id",
-                ["API_APP_ID"] = "test-app-id",
-                ["API_CLIENT_SECRET"] = "test-secret",
-
-                // AzureAd section
-                ["AzureAd:Instance"] = "https://login.microsoftonline.com/",
-                ["AzureAd:TenantId"] = "test-tenant-id",
-                ["AzureAd:ClientId"] = "test-app-id",
-                ["AzureAd:Audience"] = "api://test-app-id",
-
-                // Graph options
-                ["Graph:TenantId"] = "test-tenant-id",
-                ["Graph:ClientId"] = "test-client-id",
-                ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
-
-                // Dataverse options
-                ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
-                ["Dataverse:ClientId"] = "test-client-id",
-                ["Dataverse:TenantId"] = "test-tenant-id",
-
-                // ServiceBus options
-                ["ServiceBus:ConnectionString"] = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=test",
-                ["ServiceBus:QueueName"] = "sdap-jobs",
-
-                // DocumentIntelligence options
-                ["DocumentIntelligence:Enabled"] = "true",
-                ["DocumentIntelligence:OpenAiEndpoint"] = "https://test.openai.azure.com/",
-                ["DocumentIntelligence:OpenAiKey"] = "test-key",
-                ["DocumentIntelligence:OpenAiDeployment"] = "gpt-4o",
-                ["Analysis:Enabled"] = "true",
-
-                // AI Search options
-                ["DocumentIntelligence:AiSearchEndpoint"] = "https://test.search.windows.net",
-                ["DocumentIntelligence:AiSearchKey"] = "test-search-key",
-
-                // Office rate limiting
-                ["OfficeRateLimit:Enabled"] = "false"
-            };
-
-            config.AddInMemoryCollection(testConfig!);
+            // Mock IDataverseService to avoid real Dataverse connection
+            var dataverseServiceMock = new Mock<IDataverseService>();
+            dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
+            services.RemoveAll<IDataverseService>();
+            services.AddSingleton(dataverseServiceMock.Object);
         });
     }
 }
