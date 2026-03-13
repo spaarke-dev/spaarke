@@ -481,6 +481,7 @@ Output:
 | `adr-aware` | Step 5 loads ADRs using this always-apply skill |
 | `push-to-github` | Use after completing work to commit/push |
 | `merge-to-master` | Step 2 runs audit check — warns if other branches have unmerged work on master |
+| `worktree-sync` | Step 2 can delegate to `worktree-sync` (Update Only mode) for guaranteed sync with master |
 | `project-pipeline` | Use if project doesn't exist yet |
 | `repo-cleanup` | Use when all tasks complete |
 

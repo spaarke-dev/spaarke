@@ -696,6 +696,7 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | "design playbook", "create playbook", "new AI playbook", "playbook architecture" | `jps-playbook-design` | Load `.claude/skills/jps-playbook-design/SKILL.md` and follow procedure |
 | "refresh scope index", "update scope catalog", "sync scopes" | `jps-scope-refresh` | Load `.claude/skills/jps-scope-refresh/SKILL.md` and follow procedure |
 | "validate JPS", "check JPS", "JPS validation", "verify JPS schema" | `jps-validate` | Load `.claude/skills/jps-validate/SKILL.md` and follow procedure |
+| "sync worktree", "worktree sync", "full sync", "sync branch with master", "update worktree from master", "make sure we have everything" | `worktree-sync` | Load `.claude/skills/worktree-sync/SKILL.md` and follow procedure |
 
 ### Auto-Detection Rules
 
@@ -717,6 +718,7 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | Resuming work on existing project (has tasks/, CLAUDE.md) | Run `project-continue` to sync and load context |
 | Starting new project from master | Run `merge-to-master` in audit mode to check for stranded branches |
 | Completing final task in a project | Prompt user to run `merge-to-master` to merge branch into master |
+| Working in a worktree and user says "sync", "update", or "make sure we have everything" | Run `worktree-sync` to guarantee full synchronization |
 
 ### Always-Apply Skills
 
@@ -759,6 +761,7 @@ Use these commands to explicitly invoke skills:
 | `/jps-playbook-design` | Design and deploy a complete AI playbook end-to-end |
 | `/jps-scope-refresh` | Refresh scope-model-index.json from Dataverse state |
 | `/jps-validate` | Validate JPS JSON against schema and render test |
+| `/worktree-sync` | Guarantee worktree is fully synchronized — committed, pushed, merged to master, updated from master |
 
 ---
 

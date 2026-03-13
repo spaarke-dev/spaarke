@@ -491,6 +491,7 @@ When user requests "merge to master" or "merge and sync":
 - `spaarke-conventions` - Naming and coding standards
 - `ci-cd` - Monitor CI pipeline status and troubleshoot failures
 - `merge-to-master` - Merge branch into master after push (pushing ≠ merging)
+- `worktree-sync` - Full bidirectional worktree sync (commit → push → merge → update from master)
 
 ---
 

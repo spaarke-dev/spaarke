@@ -62,6 +62,7 @@
 | [worktree-setup](worktree-setup/SKILL.md) | Create and manage git worktrees for parallel development | No | `/worktree-setup`, "create worktree", "new project worktree" |
 | [dev-cleanup](dev-cleanup/SKILL.md) | Clean up dev environment caches (Azure CLI, NuGet, npm, Git) | No | `/dev-cleanup`, "clean up dev", "fix auth issues", "clear caches" |
 | [merge-to-master](merge-to-master/SKILL.md) | Merge completed branch work into master with safety checks | No | `/merge-to-master`, "merge to master", "check unmerged branches", "reconcile branches" |
+| [worktree-sync](worktree-sync/SKILL.md) | Guarantee worktree is fully synchronized — committed, pushed, merged, updated | No | `/worktree-sync`, "sync worktree", "full sync", "update worktree from master" |
 | [jps-action-create](jps-action-create/SKILL.md) | Create a new JPS definition for an Analysis Action | No | "create JPS action", "new JPS definition", "new playbook action" |
 | [jps-playbook-audit](jps-playbook-audit/SKILL.md) | Audit existing playbooks against current scope catalog and standards | No | "audit playbooks", "review playbooks", "check playbook compliance" |
 | [jps-playbook-design](jps-playbook-design/SKILL.md) | End-to-end AI playbook: design → scope/model selection → deploy to Dataverse → verify | No | "design playbook", "create playbook", "new AI playbook" |
@@ -122,6 +123,7 @@
 - **context-handoff** - Save working state before compaction or session end for recovery
 - **dev-cleanup** - Clean up local dev environment caches (Azure CLI, NuGet, npm, Git credentials)
 - **merge-to-master** - Merge completed branch work into master with safety checks and build verification
+- **worktree-sync** - Guarantee worktree is fully synchronized — committed, pushed, merged to master, updated from master
 
 ## Skill Flow
 
@@ -378,7 +380,9 @@ alwaysApply: false  # Only true for universal skills like conventions
 │   └── SKILL.md
 ├── context-handoff/            ← State preservation before compaction
 │   └── SKILL.md
-└── merge-to-master/            ← Merge branch work into master
+├── merge-to-master/            ← Merge branch work into master
+│   └── SKILL.md
+└── worktree-sync/              ← Bidirectional worktree synchronization
     └── SKILL.md
 ```
 

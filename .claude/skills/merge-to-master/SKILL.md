@@ -252,7 +252,7 @@ Master is now at: {commit-hash} {commit-message}
 
 ### Step 6: Post-Merge Sync (Worktrees)
 
-**If worktrees exist**, sync them with the updated master:
+**If worktrees exist**, sync them with the updated master using `worktree-sync`:
 
 ```
 CHECK for worktrees:
@@ -260,7 +260,11 @@ CHECK for worktrees:
 
 FOR EACH worktree on a branch that was just merged:
   REPORT: "Worktree at {path} is on branch {branch} which was merged to master"
-  SUGGEST: "Consider rebasing or starting fresh from updated master"
+  SUGGEST: "Run `/worktree-sync` in the worktree to update from master"
+
+RECOMMENDED: Use `worktree-sync` (Update Only mode) in each active worktree
+  to guarantee they have the latest master commits.
+  See: .claude/skills/worktree-sync/SKILL.md
 ```
 
 ---
@@ -335,6 +339,7 @@ CHECK 4: Build compiles
 - `pull-from-github` - Pulls latest from origin (complementary — different direction)
 - `conflict-check` - Detects file overlap between PRs (useful pre-merge)
 - `repo-cleanup` - Repository hygiene after merge (branch cleanup)
+- `worktree-sync` - Bidirectional worktree sync (replaces manual rebase after merge)
 
 ---
 
